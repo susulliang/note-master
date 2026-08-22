@@ -1,15 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { scopedStorage } from '@lark-apaas/client-toolkit-lite';
 
+/**
+ * LocalStorage-backed `useScopedState` — a drop-in replacement that no longer depends
+ * on `@lark-apaas/client-toolkit-lite/scopedStorage`.
+ *
+ * The toolkit version was a thin wrapper over localStorage; reimplementing it here
+ * eliminates the 735 kB Feishu runtime the toolkit package transitively bundled.
+ */
 export function useScopedState<T>(key: string, initialValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
-      const stored = scopedStorage.getItem(key);
-      if (stored !== null) {
+      const stored = window.localStorage?.getItem(key);
+      if (stored !== null && stored !== undefined) {
         return JSON.parse(stored) as T;
       }
     } catch {
-      // ignore parse errors
+      // ignore parse errors or SSR/localStorage-not-available
     }
     return initialValue;
   });
@@ -26,9 +32,9 @@ export function useScopedState<T>(key: string, initialValue: T): [T, (value: T |
       }
       timeoutRef.current = window.setTimeout(() => {
         try {
-          scopedStorage.setItem(key, JSON.stringify(resolved));
+          window.localStorage?.setItem(key, JSON.stringify(resolved));
         } catch {
-          // ignore storage errors
+          // ignore quota / disabled storage errors
         }
       }, 200);
 

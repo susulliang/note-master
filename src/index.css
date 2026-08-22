@@ -1,6 +1,70 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
-@import "@lark-apaas/client-toolkit-lite/styles.css";
 @import "tw-animate-css";
 @import "./tailwind-theme.css";
 @import "./typography.css";
+
+/* ------------------------------------------------------------------ */
+/*  Inlined minimal subset of @lark-apaas/client-toolkit-lite/styles  */
+/*  (keeps the shadcn/ui defaults the project was scaffolded with)     */
+/*  — removed the actual package import to drop the 735 kB toolkit.js  */
+/*  chunk and to stop miaoda plugins from rewriting fonts URLs.        */
+/* ------------------------------------------------------------------ */
+
+/* Layer ordering (must be declared before any @layer rules) */
+@layer theme, base, antd, components, utilities;
+
+/* Theme-layer overrides & body defaults */
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: var(--ring);
+    @supports (color: color-mix(in lab, red, red)) {
+      outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+    }
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  .container {
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* Lark font helpers for quote chars + emoji fallback (cheap, no network req) */
+@font-face {
+  font-family: LarkChineseQuote;
+  font-weight: 300;
+  src: local("PingFangSC-Light");
+  unicode-range: U+2018, U+2019, U+201A, U+201C, U+201D, U+201E;
+}
+@font-face {
+  font-family: LarkChineseQuote;
+  font-weight: 400;
+  src: local("PingFangSC-Regular");
+  unicode-range: U+2018, U+2019, U+201A, U+201C, U+201D, U+201E;
+}
+@font-face {
+  font-family: LarkChineseQuote;
+  font-weight: 500;
+  src: local("PingFangSC-Medium");
+  unicode-range: U+2018, U+2019, U+201A, U+201C, U+201D, U+201E;
+}
+@font-face {
+  font-family: LarkChineseQuote;
+  font-weight: 600;
+  src: local("PingFangSC-Semibold");
+  unicode-range: U+2018, U+2019, U+201A, U+201C, U+201D, U+201E;
+}
+@font-face {
+  font-family: LarkEmojiFont;
+  src: local("Apple Color Emoji"), local("Noto Color Emoji");
+  unicode-range: U+1F21A, U+1F250, U+1F237, U+26A0;
+}
+@font-face {
+  font-family: LarkHackSafariFont;
+  src: local("Helvetica Neue");
+  unicode-range: U+0000;
+}
