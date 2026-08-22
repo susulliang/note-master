@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
   MessageSquareText,
@@ -26,6 +26,7 @@ import {
   DEFAULT_NODE_POSITIONS,
   NODE_IDS,
   MAX_HISTORY_ENTRIES,
+  RESOLUTION_QUICK_TEXTS,
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import type { NodeType } from '@/components/FlowNode';
@@ -40,6 +41,8 @@ interface NodeConfig {
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
   icon?: LucideIcon;
+  quickTexts?: string[];
+  customQuickTexts?: string[];
 }
 
 const NODES: NodeConfig[] = [
@@ -159,7 +162,7 @@ const NODES: NodeConfig[] = [
     label: 'Resolution Summary',
     inputType: 'textarea',
     accent: 'default',
-    width: 200,
+    width: 240,
     icon: CheckCircle2,
   },
   {
@@ -210,6 +213,10 @@ export default function TicketNotesPage() {
   const [theme, setTheme] = useScopedState<'dark' | 'light'>('ecovacs_ticket_theme', 'dark');
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
     'ecovacs_ticket_notes_history',
+    []
+  );
+  const [customQuickTexts, setCustomQuickTexts] = useScopedState<string[]>(
+    'ecovacs_ticket_resolution_quicktexts',
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -274,6 +281,45 @@ export default function TicketNotesPage() {
       }
     },
     [formData, handleFieldChange]
+  );
+
+  // Resolution quick texts: defaults + user-added (persisted)
+  const allQuickTexts = useMemo(
+    () => [...RESOLUTION_QUICK_TEXTS, ...customQuickTexts],
+    [customQuickTexts]
+  );
+
+  const handleAddQuickText = useCallback(
+    (text: string) => {
+      const t = text.trim();
+      if (!t) return;
+      if (RESOLUTION_QUICK_TEXTS.includes(t) || customQuickTexts.includes(t)) {
+        toast.info(`"${t}" already exists.`);
+        return;
+      }
+      setCustomQuickTexts((prev) => [...prev, t]);
+      toast.success(`Quick text "${t}" added.`);
+    },
+    [customQuickTexts, setCustomQuickTexts]
+  );
+
+  const handleRemoveQuickText = useCallback(
+    (text: string) => {
+      setCustomQuickTexts((prev) => prev.filter((t) => t !== text));
+      toast.success(`Quick text "${text}" removed.`);
+    },
+    [setCustomQuickTexts]
+  );
+
+  // Attach quick texts to the Resolution Summary node config
+  const nodes = useMemo(
+    () =>
+      NODES.map((n) =>
+        n.id === NODE_IDS.RESOLUTION_SUMMARY
+          ? { ...n, quickTexts: allQuickTexts, customQuickTexts }
+          : n
+      ),
+    [allQuickTexts, customQuickTexts]
   );
 
   const generateNoteText = useCallback((): string => {
@@ -344,7 +390,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         {/* Main canvas area */}
         <main className="flex-1 min-w-0 relative">
           <FlowchartCanvas
-            nodes={NODES}
+            nodes={nodes}
             positions={positions}
             formData={formData}
             onFieldChange={handleFieldChange}
@@ -353,6 +399,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onNodeBlur={handleNodeBlur}
             onPositionChange={handlePositionChange}
             onHangUp={handleHangUp}
+            onAddQuickText={handleAddQuickText}
+            onRemoveQuickText={handleRemoveQuickText}
           />
         </main>
 

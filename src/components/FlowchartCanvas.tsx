@@ -14,6 +14,8 @@ interface NodeConfig {
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
   icon?: LucideIcon;
+  quickTexts?: string[];
+  customQuickTexts?: string[];
 }
 
 interface FlowchartCanvasProps {
@@ -26,6 +28,8 @@ interface FlowchartCanvasProps {
   onNodeBlur: () => void;
   onPositionChange: (id: string, pos: { x: number; y: number }) => void;
   onHangUp: () => void;
+  onAddQuickText?: (text: string) => void;
+  onRemoveQuickText?: (text: string) => void;
 }
 
 // Approximate node dimensions for connection point calculation
@@ -47,7 +51,13 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
-      return base + 76; // label + 2-row textarea
+      let h = base + 76; // label + 2-row textarea
+      if (node.quickTexts) {
+        // Quick insert chips wrap ~2 per row at 240px node width (+1 for add button)
+        const rows = Math.ceil((node.quickTexts.length + 1) / 2);
+        h += 30 + rows * 28; // divider + label + chip rows
+      }
+      return h;
     }
     return base + 56; // label + single-line input
   }
@@ -68,6 +78,8 @@ export default function FlowchartCanvas({
   onNodeBlur,
   onPositionChange,
   onHangUp,
+  onAddQuickText,
+  onRemoveQuickText,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{
@@ -78,7 +90,7 @@ export default function FlowchartCanvas({
 
   // Calculate canvas size based on node positions
   const canvasWidth = 680;
-  const canvasHeight = 1360;
+  const canvasHeight = 1420;
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -235,6 +247,10 @@ export default function FlowchartCanvas({
             inputType={node.inputType}
             width={node.width}
             icon={node.icon}
+            quickTexts={node.quickTexts}
+            customQuickTexts={node.customQuickTexts}
+            onAddQuickText={onAddQuickText}
+            onRemoveQuickText={onRemoveQuickText}
           />
         ))}
       </div>

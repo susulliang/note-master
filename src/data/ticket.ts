@@ -70,6 +70,15 @@ export const ISSUE_TYPES = [
   'Other',
 ];
 
+export const RESOLUTION_QUICK_TEXTS = [
+  'Email for POP',
+  'Email Follow Up',
+  'Reset Machine',
+  'Warranty Replacement',
+  'Courtesy Replacement',
+  'Checked Network',
+];
+
 export const QUICK_PHRASES: Record<string, string[]> = {
   Greetings: [
     "Hello, thanks for calling Ecovacs.",
@@ -147,10 +156,11 @@ export const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = 
   // Additional info row (email + shipping + resolution, side by side)
   [NODE_IDS.EMAIL_ADDRESS]: { x: 20, y: 974 },
   [NODE_IDS.SHIPPING_ADDRESS]: { x: 240, y: 974 },
-  [NODE_IDS.RESOLUTION_SUMMARY]: { x: 460, y: 974 },
-  [NODE_IDS.ADDITIONAL_NOTES]: { x: 220, y: 1100 },
+  // Resolution node is wider/taller (quick insert chips below the textarea)
+  [NODE_IDS.RESOLUTION_SUMMARY]: { x: 440, y: 974 },
+  [NODE_IDS.ADDITIONAL_NOTES]: { x: 200, y: 1152 },
   // Hang up
-  [NODE_IDS.HANG_UP]: { x: 200, y: 1226 },
+  [NODE_IDS.HANG_UP]: { x: 200, y: 1280 },
 };
 
 // Connection definitions: from -> to[]

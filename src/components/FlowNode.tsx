@@ -37,6 +37,12 @@ export interface FlowNodeProps {
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
   icon?: LucideIcon;
+  /** Quick insert chips rendered below the field (e.g. Resolution Summary) */
+  quickTexts?: string[];
+  /** Subset of quickTexts that were user-added (rendered with a remove button) */
+  customQuickTexts?: string[];
+  onAddQuickText?: (text: string) => void;
+  onRemoveQuickText?: (text: string) => void;
 }
 
 const accentBorders: Record<string, string> = {
@@ -186,13 +192,59 @@ function FlowNodeComponent({
   inputType = 'text',
   width = 240,
   icon: Icon,
+  quickTexts,
+  customQuickTexts,
+  onAddQuickText,
+  onRemoveQuickText,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [showAddQuickText, setShowAddQuickText] = useState(false);
+  const [newQuickText, setNewQuickText] = useState('');
 
   const handleFocus = useCallback(() => {
     onFocus(id);
   }, [id, onFocus]);
+
+  /**
+   * Insert a quick text chip into the field value.
+   * When the field already has text, the chip is appended after a "->"
+   * separator (e.g. "Email for POP -> Reset Machine").
+   */
+  const handleInsertQuickText = useCallback(
+    (quickText: string) => {
+      const current = typeof value === 'string' ? value.trimEnd() : '';
+      let next: string;
+      if (!current) {
+        next = quickText;
+      } else if (current.endsWith('->')) {
+        // Avoid doubling the separator if the text already ends with one
+        next = `${current} ${quickText}`;
+      } else {
+        next = `${current} -> ${quickText}`;
+      }
+      onChange(next);
+      // Refocus the textarea and place the caret at the end for continued typing
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+    },
+    [value, onChange]
+  );
+
+  const handleAddQuickTextSubmit = useCallback(() => {
+    const t = newQuickText.trim();
+    if (t) {
+      onAddQuickText?.(t);
+    }
+    setNewQuickText('');
+    setShowAddQuickText(false);
+  }, [newQuickText, onAddQuickText]);
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
@@ -313,6 +365,7 @@ function FlowNodeComponent({
         )}
         {inputType === 'textarea' ? (
           <Textarea
+            ref={textareaRef}
             value={strValue}
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
@@ -331,6 +384,75 @@ function FlowNodeComponent({
             className="h-8 bg-background/50 text-xs"
             placeholder="Type here..."
           />
+        )}
+        {quickTexts && (
+          <div className="mt-2 border-t border-border/30 pt-2">
+            <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Quick insert
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {quickTexts.map((qt) => {
+                const isCustom = customQuickTexts?.includes(qt);
+                return (
+                  <span key={qt} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => handleInsertQuickText(qt)}
+                      title={`Insert: ${qt}`}
+                      className="h-6 min-w-0 max-w-full truncate rounded border border-border/60 bg-background/40 px-1.5 text-[9px] text-muted-foreground transition-colors hover:border-primary/60 hover:bg-primary/10 hover:text-primary"
+                    >
+                      {qt}
+                    </button>
+                    {isCustom && onRemoveQuickText && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveQuickText(qt)}
+                        aria-label={`Remove quick text: ${qt}`}
+                        title={`Remove: ${qt}`}
+                        className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-background bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                      >
+                        <X className="size-2" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+              {onAddQuickText && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddQuickText((v) => !v);
+                    if (!showAddQuickText) {
+                      setNewQuickText('');
+                    }
+                  }}
+                  aria-label="Add quick text"
+                  title="Add quick text"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-dashed border-border/70 text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
+                >
+                  <Plus className="size-2.5" />
+                </button>
+              )}
+            </div>
+            {showAddQuickText && onAddQuickText && (
+              <Input
+                value={newQuickText}
+                onChange={(e) => setNewQuickText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddQuickTextSubmit();
+                  } else if (e.key === 'Escape') {
+                    setShowAddQuickText(false);
+                    setNewQuickText('');
+                  }
+                }}
+                placeholder="New quick text + Enter"
+                autoFocus
+                className="mt-1.5 h-6 bg-background/50 text-[10px]"
+              />
+            )}
+          </div>
         )}
       </div>
     );
