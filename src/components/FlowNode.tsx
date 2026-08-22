@@ -69,6 +69,13 @@ interface ComboboxFieldProps {
   icon?: LucideIcon;
 }
 
+/**
+ * Cap on rendered dropdown rows. Option sets like the issue-type list hold
+ * ~800 entries; filtering is cheap but rendering all rows at once is not,
+ * so only the first COMBOBOX_MAX_RENDERED matches are mounted.
+ */
+const COMBOBOX_MAX_RENDERED = 100;
+
 function ComboboxField({
   label,
   value,
@@ -79,12 +86,46 @@ function ComboboxField({
   icon: Icon,
 }: ComboboxFieldProps) {
   const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
-  const filteredOptions = useMemo(() => {
+  // Group options by "Category::" prefix when present (e.g. issue types);
+  // un-prefixed option sets (e.g. Deebot models) fall back to one flat group.
+  const groups = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const opt of options) {
+      const sep = opt.indexOf('::');
+      const key = sep > 0 ? opt.slice(0, sep) : '';
+      const list = map.get(key);
+      if (list) list.push(opt);
+      else map.set(key, [opt]);
+    }
+    return Array.from(map.entries());
+  }, [options]);
+
+  const filteredGroups = useMemo(() => {
     const query = value.trim().toLowerCase();
-    if (!query) return options;
-    return options.filter((opt) => opt.toLowerCase().includes(query));
-  }, [options, value]);
+    if (!query) return groups;
+    return groups
+      .map(
+        ([cat, items]) =>
+          [cat, items.filter((o) => o.toLowerCase().includes(query))] as [string, string[]]
+      )
+      .filter(([, items]) => items.length > 0);
+  }, [groups, value]);
+
+  const totalFiltered = filteredGroups.reduce((n, [, items]) => n + items.length, 0);
+  const truncated = totalFiltered > COMBOBOX_MAX_RENDERED;
+
+  // Slice groups against the render budget (groups later in the list are cut first)
+  let budget = COMBOBOX_MAX_RENDERED;
+  const visibleGroups = filteredGroups
+    .map(([cat, items]): [string, string[]] | null => {
+      if (budget <= 0) return null;
+      const shown = items.slice(0, budget);
+      budget -= shown.length;
+      return [cat, shown];
+    })
+    .filter((g): g is [string, string[]] => g !== null && g[1].length > 0);
 
   const isCustomValue = value.trim().length > 0 && !options.includes(value);
 
@@ -96,12 +137,21 @@ function ComboboxField({
           {label}
         </div>
       )}
-      <div className="relative flex items-center">
+      <div ref={wrapperRef} className="relative flex items-center">
         <Input
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={onFocus}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            onFocus();
+            setOpen(true);
+          }}
           onBlur={onBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setOpen(false);
+          }}
           placeholder="Type or select..."
           className="h-8 bg-background/50 pr-8 text-sm"
         />
@@ -126,40 +176,65 @@ function ComboboxField({
             </button>
           </PopoverTrigger>
           <PopoverContent
-            align="end"
+            align="start"
             sideOffset={4}
-            className="min-w-[200px] max-w-[260px] p-0"
+            className="w-[300px] p-0"
+            onInteractOutside={(e) => {
+              // Keep the dropdown open while the agent works in the input
+              if (wrapperRef.current?.contains(e.target as Node)) {
+                e.preventDefault();
+              }
+            }}
+            onFocusOutside={(e) => {
+              if (wrapperRef.current?.contains(e.target as Node)) {
+                e.preventDefault();
+              }
+            }}
           >
             <Command shouldFilter={false}>
-              <CommandList>
-                {filteredOptions.length === 0 ? (
+              <CommandList className="max-h-[280px]">
+                {filteredGroups.length === 0 ? (
                   <CommandEmpty>
                     {value.trim()
-                      ? `Press Enter to keep "${value.trim()}"`
+                      ? 'No match — your text will be kept as a custom value'
                       : 'No options'}
                   </CommandEmpty>
                 ) : (
-                  <CommandGroup>
-                    {filteredOptions.map((opt) => (
-                      <CommandItem
-                        key={opt}
-                        value={opt}
-                        onSelect={() => {
-                          onChange(opt);
-                          setOpen(false);
-                        }}
-                        className="gap-2 text-xs"
-                      >
-                        <Check
-                          className={cn(
-                            'size-3.5',
-                            value === opt ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        {opt}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
+                  visibleGroups.map(([cat, items]) => (
+                    <CommandGroup
+                      key={cat || 'all'}
+                      heading={cat || undefined}
+                    >
+                      {items.map((opt) => {
+                        const sep = opt.indexOf('::');
+                        const display = sep > 0 ? opt.slice(sep + 2) : opt;
+                        return (
+                          <CommandItem
+                            key={opt}
+                            value={opt}
+                            onSelect={() => {
+                              onChange(opt);
+                              setOpen(false);
+                            }}
+                            className="gap-2 text-xs"
+                          >
+                            <Check
+                              className={cn(
+                                'size-3.5 shrink-0',
+                                value === opt ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <span className="truncate">{display}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  ))
+                )}
+                {truncated && (
+                  <div className="px-2 py-1.5 text-center text-[10px] text-muted-foreground">
+                    {totalFiltered - COMBOBOX_MAX_RENDERED} more — keep typing to narrow down
+                  </div>
                 )}
               </CommandList>
             </Command>
