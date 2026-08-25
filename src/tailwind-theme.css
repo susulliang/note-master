@@ -234,6 +234,20 @@
 
 /* Midnight = :root defaults above (deepest dark) */
 
+/* ------------------------------------------------------------------ */
+/*  UI scale ("old people mode") — zoom the whole app 1.25x.           */
+/*  Percent heights on html/body keep the full-viewport app layout     */
+/*  correct under zoom (h-screen would overflow).                      */
+/* ------------------------------------------------------------------ */
+html,
+body {
+  height: 100%;
+}
+
+body[data-ui-scale="large"] {
+  zoom: 1.25; /* keep in sync with LARGE_UI_ZOOM in src/lib/themes.ts */
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

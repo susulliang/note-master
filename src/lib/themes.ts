@@ -42,3 +42,13 @@ export function nextTheme(id: ThemeId): ThemeId {
   const idx = THEMES.findIndex((t) => t.id === id);
   return THEMES[(idx + 1) % THEMES.length].id;
 }
+
+/**
+ * UI scale ("old people mode") — a 1.25x zoom of the whole app: every font
+ * jumps ~2 Tailwind sizes (e.g. text-sm 14px renders ~17.5px ≈ text-lg) and
+ * all boxes/inputs scale correspondingly. Keep in sync with the
+ * `body[data-ui-scale="large"]` zoom value in tailwind-theme.css.
+ */
+export type UiScale = 'normal' | 'large';
+
+export const LARGE_UI_ZOOM = 1.25;

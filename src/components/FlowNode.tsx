@@ -391,7 +391,7 @@ function FlowNodeComponent({
         type="button"
         onClick={() => handleInsertQuickText(qt)}
         title={`Insert: ${qt}`}
-        className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
+        className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] font-semibold text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
       >
         {qt}
       </button>

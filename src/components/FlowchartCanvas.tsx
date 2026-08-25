@@ -194,6 +194,8 @@ export default function FlowchartCanvas({
     startX: number;
     startY: number;
     startPos: { x: number; y: number };
+    /** Effective zoom (old-people mode) — mouse deltas are visual px */
+    zoom: number;
   } | null>(null);
 
   // Track the scroll container's width so the default layout adapts to the canvas size
@@ -262,12 +264,16 @@ export default function FlowchartCanvas({
     (id: string, e: ReactMouseEvent) => {
       const pos = effectivePositions[id];
       if (!pos) return;
-      // Delta-based drag: robust regardless of canvas scroll position
+      // Delta-based drag: robust regardless of canvas scroll position.
+      // gBCR (visual px) / offsetWidth (layout px) = effective body zoom.
+      const el = canvasRef.current;
+      const zoom = el ? el.getBoundingClientRect().width / el.offsetWidth || 1 : 1;
       setDragging({
         id,
         startX: e.clientX,
         startY: e.clientY,
         startPos: pos,
+        zoom,
       });
     },
     [effectivePositions]
@@ -277,9 +283,10 @@ export default function FlowchartCanvas({
     if (!dragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      // No upper clamp on x/y — the canvas expands as nodes are dragged
-      const newX = Math.max(0, dragging.startPos.x + (e.clientX - dragging.startX));
-      const newY = Math.max(0, dragging.startPos.y + (e.clientY - dragging.startY));
+      // No upper clamp on x/y — the canvas expands as nodes are dragged.
+      // Mouse deltas are in visual px; divide by zoom to get layout px.
+      const newX = Math.max(0, dragging.startPos.x + (e.clientX - dragging.startX) / dragging.zoom);
+      const newY = Math.max(0, dragging.startPos.y + (e.clientY - dragging.startY) / dragging.zoom);
       onPositionChange(dragging.id, { x: newX, y: newY });
     };
 

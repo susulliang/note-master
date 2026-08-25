@@ -19,7 +19,7 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import { useScopedState } from '@/hooks/use-scoped-state';
-import { normalizeTheme, nextTheme, getThemeMeta, type ThemeId } from '@/lib/themes';
+import { normalizeTheme, nextTheme, getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import {
   DEEBOT_MODELS,
   ISSUE_TYPES,
@@ -235,6 +235,8 @@ export default function TicketNotesPage() {
   const [rawTheme, setTheme] = useScopedState<ThemeId>('ecovacs_ticket_theme', 'midnight');
   // Normalize legacy 'dark'/'light' values from older sessions
   const theme = normalizeTheme(rawTheme);
+  // UI scale ("old people mode"): 1.25x zoom of the entire app
+  const [uiScale, setUiScale] = useScopedState<UiScale>('ecovacs_ticket_ui_scale', 'normal');
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
     'ecovacs_ticket_notes_history',
     []
@@ -260,6 +262,11 @@ export default function TicketNotesPage() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Apply UI scale to <body> (zoom handled in CSS)
+  useEffect(() => {
+    document.body.setAttribute('data-ui-scale', uiScale);
+  }, [uiScale]);
 
   // Customers usually state their concern first — focus the Detailed Issue
   // Description node when the page opens
@@ -301,6 +308,10 @@ export default function TicketNotesPage() {
   const handleCycleTheme = useCallback(() => {
     setTheme(nextTheme(theme));
   }, [theme, setTheme]);
+
+  const handleToggleUiScale = useCallback(() => {
+    setUiScale((prev) => (prev === 'large' ? 'normal' : 'large'));
+  }, [setUiScale]);
 
   const handleToggleHistory = useCallback(() => {
     setShowHistory((prev) => !prev);
@@ -458,7 +469,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   }, [setHistory]);
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-background font-sans text-foreground">
+    // h-full (not h-screen) so the viewport-filling layout stays correct
+    // when the old-people-mode zoom is active on <body>
+    <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       {/* Ambient color orbs — give the glass surfaces something to refract */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
         <div className="glass-orb glass-orb-1" />
@@ -478,6 +491,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             history={history}
             onDeleteHistory={handleDeleteHistory}
             onClearHistory={handleClearHistory}
+            uiScale={uiScale}
+            onToggleUiScale={handleToggleUiScale}
           />
           <FlowchartCanvas
             nodes={nodes}
