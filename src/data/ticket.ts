@@ -999,9 +999,14 @@ export const RESOLUTION_QUICK_TEXTS = [
   'Email for POP',
   'Email Follow Up',
   'Reset Machine',
+  'Restart Machine',
   'Warranty Replacement',
   'Courtesy Replacement',
   'Checked Network',
+  'Clean debris',
+  'Clean sensors',
+  'Clean valves',
+  'Clean airways',
 ];
 
 export const PURCHASE_QUICK_TEXTS = [

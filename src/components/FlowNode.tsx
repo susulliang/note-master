@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { GripVertical, Plus, X, ChevronDown, Check, PhoneOff } from 'lucide-react';
+import { Plus, X, ChevronDown, Check, PhoneOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -154,9 +154,9 @@ function ComboboxField({
   const isCustomValue = value.trim().length > 0 && !options.includes(value);
 
   return (
-    <div className="px-3 py-2">
+    <div className="px-2.5 py-1.5">
       {label && (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {Icon && <Icon className="size-3.5 text-accent/70" />}
           {label}
         </div>
@@ -359,7 +359,16 @@ function FlowNodeComponent({
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
-      // Only start drag from header/grip area
+      // Whole box is draggable, except when grabbing an interactive control
+      // (text fields, chips, buttons) inside it
+      const target = e.target as HTMLElement;
+      if (
+        target.closest(
+          'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
+        )
+      ) {
+        return;
+      }
       onDragStart(id, e);
     },
     [id, onDragStart]
@@ -403,7 +412,7 @@ function FlowNodeComponent({
   const renderContent = () => {
     if (type === 'start' || type === 'agent') {
       return (
-        <div className="px-3 py-2">
+        <div className="px-2.5 py-1.5">
           {label && (
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {label}
@@ -416,7 +425,7 @@ function FlowNodeComponent({
 
     if (type === 'hangup') {
       return (
-        <div className="px-3 py-3">
+        <div className="px-2.5 py-2">
           <button
             type="button"
             onClick={() => onChange('hangup')}
@@ -447,9 +456,9 @@ function FlowNodeComponent({
     if (type === 'dynamic-list') {
       const steps = Array.isArray(value) ? value : [];
       return (
-        <div className="px-3 py-2">
+        <div className="px-2.5 py-1.5">
           {label && (
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {label}
             </div>
           )}
@@ -503,9 +512,9 @@ function FlowNodeComponent({
     // input type
     const strValue = typeof value === 'string' ? value : '';
     return (
-      <div className="px-3 py-2">
+      <div className="px-2.5 py-1.5">
         {label && (
-          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {Icon && <Icon className="size-3.5 text-accent/70" />}
             {label}
           </div>
@@ -536,7 +545,7 @@ function FlowNodeComponent({
           /* Grouped quick inserts — collapsed preview row, hover expands a
              smooth overlay panel that covers neighbouring nodes */
           <div
-            className="relative mt-2 border-t border-border/30 pt-2"
+            className="relative mt-1.5 border-t border-border/30 pt-1.5"
             onMouseEnter={() => setQuickPanelOpen(true)}
             onMouseLeave={() => setQuickPanelOpen(false)}
           >
@@ -635,7 +644,7 @@ function FlowNodeComponent({
           </div>
         ) : quickTexts ? (
           /* Flat quick inserts (e.g. Resolution Summary, Purchase info) */
-          <div className="mt-2 border-t border-border/30 pt-2">
+          <div className="mt-1.5 border-t border-border/30 pt-1.5">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Quick insert
             </div>
@@ -689,8 +698,6 @@ function FlowNodeComponent({
     );
   };
 
-  const isDraggable = type !== 'start' && type !== 'hangup';
-
   return (
     <div
       ref={nodeRef}
@@ -700,7 +707,8 @@ function FlowNodeComponent({
         width,
       }}
       className={cn(
-        'absolute rounded-xl border bg-card/45 backdrop-blur-2xl transition-all duration-200',
+        'absolute cursor-grab select-none rounded-xl border bg-card/45 backdrop-blur-2xl transition-all duration-200 active:cursor-grabbing',
+        '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         isActive ? accentGlows[accent] : accentBorders[accent],
         isHovered && !isActive && 'border-foreground/25',
         isActive && 'animate-pulse-slow',
@@ -709,23 +717,8 @@ function FlowNodeComponent({
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onMouseDown={handleMouseDown}
     >
-      {/* Drag handle - top area */}
-      {isDraggable && (
-        <div
-          onMouseDown={handleMouseDown}
-          className="flex h-4 cursor-grab items-center justify-center rounded-t-lg border-b border-border/30 text-muted-foreground/40 active:cursor-grabbing hover:text-muted-foreground"
-        >
-          <GripVertical className="size-3" />
-        </div>
-      )}
-      {/* Non-draggable nodes still get a subtle top bar for visual consistency */}
-      {!isDraggable && type !== 'hangup' && (
-        <div className="flex h-3 items-center justify-center rounded-t-lg border-b border-border/20">
-          <ChevronDown className="size-2.5 text-muted-foreground/30" />
-        </div>
-      )}
-
       {renderContent()}
     </div>
   );

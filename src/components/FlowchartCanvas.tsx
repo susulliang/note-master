@@ -39,18 +39,17 @@ interface FlowchartCanvasProps {
   onLayoutReset?: () => void;
 }
 
-// Layout constants (px)
-const CANVAS_MARGIN = 24;
-const ROW_GAP = 56;
+// Layout constants (px) — compact spacing
+const CANVAS_MARGIN = 16;
+const ROW_GAP = 32;
 /** Gap between wrapped lines inside one semantic row */
-const LINE_GAP = 40;
-const MIN_COL_GAP = 24;
-const MAX_COL_GAP = 48;
+const LINE_GAP = 20;
+const MIN_COL_GAP = 16;
+const MAX_COL_GAP = 28;
 const FALLBACK_CONTAINER_WIDTH = 900;
 
 // Approximate node dimensions for connection point + layout calculations
-const NODE_HEADER_HEIGHT = 16; // compact drag handle
-const NODE_VERTICAL_PADDING = 8;
+const NODE_VERTICAL_PADDING = 6; // py-1.5 x2
 
 /**
  * Simulate flex-wrap for the quick-insert chips to estimate how many rows
@@ -72,26 +71,26 @@ function estimateChipRows(texts: string[], contentWidth: number): number {
 }
 
 function estimateNodeHeight(node: NodeConfig, value: string | string[]): number {
-  const base = NODE_HEADER_HEIGHT + NODE_VERTICAL_PADDING * 2;
+  const base = NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
   // Grouped quick inserts collapse to a single preview row — the full list
   // lives in a hover overlay that doesn't affect node layout
   const quickTextBlock = node.quickTextGroups
-    ? 78
+    ? 64
     : node.quickTexts
-      ? 30 + estimateChipRows([...node.quickTexts, '+'], width - 24) * 32
+      ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
       : 0;
 
   if (node.type === 'start' || node.type === 'agent') {
     // up to ~3 lines of text
-    return base + 64;
+    return base + 56;
   }
   if (node.type === 'select') {
-    return base + 60; // label + combobox input + padding
+    return base + 56; // label + combobox input + padding
   }
   if (node.type === 'hangup') {
-    return base + 84; // py-3 x2 + min-h-12 button + slack
+    return base + 76; // py-2 x2 + min-h-12 button + slack
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
@@ -192,8 +191,9 @@ export default function FlowchartCanvas({
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
   const [dragging, setDragging] = useState<{
     id: string;
-    offsetX: number;
-    offsetY: number;
+    startX: number;
+    startY: number;
+    startPos: { x: number; y: number };
   } | null>(null);
 
   // Track the scroll container's width so the default layout adapts to the canvas size
@@ -262,10 +262,12 @@ export default function FlowchartCanvas({
     (id: string, e: ReactMouseEvent) => {
       const pos = effectivePositions[id];
       if (!pos) return;
+      // Delta-based drag: robust regardless of canvas scroll position
       setDragging({
         id,
-        offsetX: e.clientX - pos.x,
-        offsetY: e.clientY - pos.y,
+        startX: e.clientX,
+        startY: e.clientY,
+        startPos: pos,
       });
     },
     [effectivePositions]
@@ -276,8 +278,8 @@ export default function FlowchartCanvas({
 
     const handleMouseMove = (e: MouseEvent) => {
       // No upper clamp on x/y — the canvas expands as nodes are dragged
-      const newX = Math.max(0, e.clientX - dragging.offsetX);
-      const newY = Math.max(0, e.clientY - dragging.offsetY);
+      const newX = Math.max(0, dragging.startPos.x + (e.clientX - dragging.startX));
+      const newY = Math.max(0, dragging.startPos.y + (e.clientY - dragging.startY));
       onPositionChange(dragging.id, { x: newX, y: newY });
     };
 
