@@ -26,10 +26,17 @@ export default function OutputModal({
   const [copied, setCopied] = useState(false);
   const [editableText, setEditableText] = useState(noteText);
 
-  // Re-sync local editable text whenever the modal opens or noteText changes
+  // Re-sync local editable text whenever the modal opens or noteText changes;
+  // auto-copy the freshly generated note so it's ready to paste right away
   useEffect(() => {
     if (open) {
       setEditableText(noteText);
+      navigator.clipboard
+        .writeText(noteText)
+        .then(() => toast.success('Ticket note auto-copied to clipboard!'))
+        .catch(() => {
+          // Clipboard unavailable (permissions/focus) — manual Copy stays available
+        });
     }
   }, [open, noteText]);
 

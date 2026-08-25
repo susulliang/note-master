@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
-  MessageSquareText,
   User,
   Phone,
   Mail,
@@ -20,6 +19,7 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import { useScopedState } from '@/hooks/use-scoped-state';
+import { normalizeTheme, nextTheme, getThemeMeta, type ThemeId } from '@/lib/themes';
 import {
   DEEBOT_MODELS,
   ISSUE_TYPES,
@@ -55,14 +55,6 @@ const NODES: NodeConfig[] = [
     type: 'start',
     text: "👋 Hello, thanks for calling Ecovacs. My name is ____ , how can I help you today?",
     accent: 'green',
-  },
-  {
-    id: NODE_IDS.FIRST_COMPLAINT,
-    type: 'input',
-    label: "Customer's First Complaint",
-    inputType: 'textarea',
-    accent: 'default',
-    icon: MessageSquareText,
   },
   {
     id: NODE_IDS.CUSTOMER_NAME,
@@ -117,9 +109,9 @@ const NODES: NodeConfig[] = [
     id: NODE_IDS.PURCHASE_INFO,
     type: 'input',
     label: 'Purchase Channel and Date',
-    inputType: 'text',
+    inputType: 'textarea',
     accent: 'default',
-    width: 200,
+    width: 220,
     icon: ShoppingBag,
   },
   {
@@ -180,13 +172,12 @@ const NODES: NodeConfig[] = [
     id: NODE_IDS.HANG_UP,
     type: 'hangup',
     accent: 'red',
-    width: 240,
+    width: 280,
   },
 ];
 
 const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.START]: '',
-  [NODE_IDS.FIRST_COMPLAINT]: '',
   [NODE_IDS.CUSTOMER_NAME]: '',
   [NODE_IDS.CONTACT_NUMBER]: '',
   [NODE_IDS.TRANSITION]: '',
@@ -237,7 +228,9 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_node_position_overrides',
     {}
   );
-  const [theme, setTheme] = useScopedState<'dark' | 'light'>('ecovacs_ticket_theme', 'dark');
+  const [rawTheme, setTheme] = useScopedState<ThemeId>('ecovacs_ticket_theme', 'midnight');
+  // Normalize legacy 'dark'/'light' values from older sessions
+  const theme = normalizeTheme(rawTheme);
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
     'ecovacs_ticket_notes_history',
     []
@@ -261,13 +254,14 @@ export default function TicketNotesPage() {
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'light') {
-      root.setAttribute('data-theme', 'light');
-    } else {
-      root.setAttribute('data-theme', 'dark');
-    }
+    document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Customers usually state their concern first — focus the Detailed Issue
+  // Description node when the page opens
+  useEffect(() => {
+    setActiveNodeId(NODE_IDS.DETAILED_ISSUE);
+  }, []);
 
   const handleFieldChange = useCallback(
     (id: string, value: string | string[]) => {
@@ -294,9 +288,9 @@ export default function TicketNotesPage() {
     [setPositions]
   );
 
-  const handleToggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  }, [setTheme]);
+  const handleCycleTheme = useCallback(() => {
+    setTheme(nextTheme(theme));
+  }, [theme, setTheme]);
 
   const handleToggleHistory = useCallback(() => {
     setShowHistory((prev) => !prev);
@@ -452,7 +446,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         <main className="relative flex-1 min-w-0">
           <FloatingControls
             theme={theme}
-            onToggleTheme={handleToggleTheme}
+            onCycleTheme={handleCycleTheme}
             onReset={handleReset}
             historyOpen={showHistory}
             onToggleHistory={handleToggleHistory}
@@ -470,6 +464,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onNodeBlur={handleNodeBlur}
             onPositionChange={handlePositionChange}
             onHangUp={handleHangUp}
+            autoFocusId={NODE_IDS.DETAILED_ISSUE}
           />
         </main>
       </div>
@@ -483,7 +478,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
       <Toaster
         position="bottom-right"
-        theme={theme}
+        theme={getThemeMeta(theme).toaster}
         toastOptions={{
           classNames: {
             toast:

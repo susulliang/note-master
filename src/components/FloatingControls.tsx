@@ -1,4 +1,4 @@
-import { RotateCcw, Sun, Moon, History } from 'lucide-react';
+import { RotateCcw, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -12,12 +12,13 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import HistoryPanel from '@/components/HistoryPanel';
+import { getThemeMeta, type ThemeId } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
 
 interface FloatingControlsProps {
-  theme: 'dark' | 'light';
-  onToggleTheme: () => void;
+  theme: ThemeId;
+  onCycleTheme: () => void;
   onReset: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
@@ -27,13 +28,13 @@ interface FloatingControlsProps {
 }
 
 /**
- * Glass pill with the global actions (History + Reset + theme toggle) that
+ * Glass pill with the global actions (History + Reset + theme cycle) that
  * floats over the top-right corner of the canvas. Toggling History opens a
  * floating history panel beneath the pill.
  */
 export default function FloatingControls({
   theme,
-  onToggleTheme,
+  onCycleTheme,
   onReset,
   historyOpen,
   onToggleHistory,
@@ -41,6 +42,9 @@ export default function FloatingControls({
   onDeleteHistory,
   onClearHistory,
 }: FloatingControlsProps) {
+  const themeMeta = getThemeMeta(theme);
+  const ThemeIcon = themeMeta.icon;
+
   return (
     <>
       {/* Click-outside catcher for the history panel */}
@@ -106,13 +110,13 @@ export default function FloatingControls({
 
           <Button
             variant="ghost"
-            size="icon"
-            onClick={onToggleTheme}
-            className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-            aria-label="Toggle theme"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            onClick={onCycleTheme}
+            className="h-8 gap-1.5 rounded-full px-2.5 text-muted-foreground hover:text-foreground"
+            aria-label={`Switch theme (current: ${themeMeta.label})`}
+            title={`Theme: ${themeMeta.label} — click to cycle`}
           >
-            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            <ThemeIcon className="size-4" />
+            <span className="text-xs font-medium">{themeMeta.label}</span>
           </Button>
         </div>
 

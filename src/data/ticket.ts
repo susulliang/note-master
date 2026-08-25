@@ -1027,7 +1027,6 @@ export const DETAILED_ISSUE_QUICK_TEXTS = [
 
 export const NODE_IDS = {
   START: 'start',
-  FIRST_COMPLAINT: 'firstComplaint',
   CUSTOMER_NAME: 'customerName',
   CONTACT_NUMBER: 'contactNumber',
   TRANSITION: 'transition',
@@ -1062,11 +1061,8 @@ export const MAX_HISTORY_ENTRIES = 50;
  * textareas never cause rows to overlap.
  */
 export const NODE_LAYOUT_ROWS: string[][] = [
-  [NODE_IDS.START],
-  [NODE_IDS.FIRST_COMPLAINT],
-  [NODE_IDS.CUSTOMER_NAME],
-  [NODE_IDS.CONTACT_NUMBER],
-  [NODE_IDS.TRANSITION],
+  // Opening row sits horizontally to save vertical space
+  [NODE_IDS.START, NODE_IDS.CUSTOMER_NAME, NODE_IDS.CONTACT_NUMBER, NODE_IDS.TRANSITION],
   [NODE_IDS.DEEBOT_MODEL, NODE_IDS.SKU_NUMBER, NODE_IDS.SERIAL_NUMBER],
   [NODE_IDS.ISSUE_TYPE, NODE_IDS.DETAILED_ISSUE, NODE_IDS.PURCHASE_INFO],
   [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS, NODE_IDS.RESOLUTION_SUMMARY],
@@ -1076,8 +1072,7 @@ export const NODE_LAYOUT_ROWS: string[][] = [
 
 // Connection definitions: from -> to[]
 export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
-  { from: NODE_IDS.START, to: NODE_IDS.FIRST_COMPLAINT },
-  { from: NODE_IDS.FIRST_COMPLAINT, to: NODE_IDS.CUSTOMER_NAME },
+  { from: NODE_IDS.START, to: NODE_IDS.CUSTOMER_NAME },
   { from: NODE_IDS.CUSTOMER_NAME, to: NODE_IDS.CONTACT_NUMBER },
   { from: NODE_IDS.CONTACT_NUMBER, to: NODE_IDS.TRANSITION },
   { from: NODE_IDS.TRANSITION, to: NODE_IDS.DEEBOT_MODEL },

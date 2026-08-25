@@ -95,8 +95,13 @@
   --scrollbar-thumb-hover: hsl(215 10% 38%);
 }
 
-/* Light theme overrides */
-:root[data-theme="light"] {
+/* ------------------------------------------------------------------ */
+/*  Theme scale — 5 steps from bright to dark, suitable for any work   */
+/*  time of day. :root (no override) is the deepest step: Midnight.    */
+/* ------------------------------------------------------------------ */
+
+/* Daylight — bright neutral white (morning / full-sun hours) */
+:root[data-theme="daylight"] {
   color-scheme: light;
   --background: hsl(0 0% 98%);
   --foreground: hsl(220 9% 16%);
@@ -104,7 +109,7 @@
   --card-foreground: hsl(220 9% 16%);
   --popover: hsl(0 0% 100%);
   --popover-foreground: hsl(220 9% 16%);
-  --primary: hsl(137 55% 36%);
+  --primary: hsl(137 55% 32%);
   --primary-foreground: hsl(0 0% 100%);
   --secondary: hsl(212 92% 48%);
   --secondary-foreground: hsl(0 0% 100%);
@@ -122,24 +127,112 @@
   --warning-foreground: hsl(33 100% 96%);
   --border: hsl(220 13% 91%);
   --input: hsl(220 14% 96%);
-  --ring: hsl(137 55% 36%);
-  --chart-1: hsl(137 55% 36%);
-  --chart-2: hsl(167 55% 36%);
-  --chart-3: hsl(197 55% 36%);
-  --chart-4: hsl(227 55% 36%);
-  --chart-5: hsl(257 55% 36%);
-  --sidebar: hsl(220 14% 96%);
-  --sidebar-foreground: hsl(220 14% 14%);
-  --sidebar-primary: hsl(221 83% 53%);
-  --sidebar-primary-foreground: hsl(220 14% 98%);
-  --sidebar-accent: hsl(222 100% 94%);
-  --sidebar-accent-foreground: hsl(221 83% 53%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(221 83% 53%);
+  --ring: hsl(137 55% 32%);
   --scrollbar-track: hsl(220 14% 96%);
   --scrollbar-thumb: hsl(220 13% 85%);
   --scrollbar-thumb-hover: hsl(220 10% 70%);
 }
+
+/* Morning — warm cream (early hours) */
+:root[data-theme="morning"] {
+  color-scheme: light;
+  --background: hsl(42 45% 94%);
+  --foreground: hsl(30 12% 16%);
+  --card: hsl(42 40% 98%);
+  --card-foreground: hsl(30 12% 16%);
+  --popover: hsl(42 40% 98%);
+  --popover-foreground: hsl(30 12% 16%);
+  --primary: hsl(137 52% 30%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 80% 44%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(42 30% 90%);
+  --muted-foreground: hsl(30 8% 40%);
+  --accent: hsl(212 80% 44%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 46%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 48%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 36%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(40 20% 82%);
+  --input: hsl(42 30% 90%);
+  --ring: hsl(137 52% 30%);
+  --scrollbar-track: hsl(42 30% 90%);
+  --scrollbar-thumb: hsl(40 16% 76%);
+  --scrollbar-thumb-hover: hsl(40 12% 64%);
+}
+
+/* Afternoon — soft overcast gray (late day, reduced glare) */
+:root[data-theme="afternoon"] {
+  color-scheme: light;
+  --background: hsl(215 12% 86%);
+  --foreground: hsl(215 12% 18%);
+  --card: hsl(215 12% 92%);
+  --card-foreground: hsl(215 12% 18%);
+  --popover: hsl(215 12% 92%);
+  --popover-foreground: hsl(215 12% 18%);
+  --primary: hsl(137 50% 30%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 80% 44%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(215 10% 80%);
+  --muted-foreground: hsl(215 9% 38%);
+  --accent: hsl(212 80% 44%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 46%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 48%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 36%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(215 10% 74%);
+  --input: hsl(215 10% 80%);
+  --ring: hsl(137 50% 30%);
+  --scrollbar-track: hsl(215 10% 80%);
+  --scrollbar-thumb: hsl(215 10% 68%);
+  --scrollbar-thumb-hover: hsl(215 10% 58%);
+}
+
+/* Evening — dim dark (dusk) */
+:root[data-theme="evening"] {
+  color-scheme: dark;
+  --background: hsl(220 14% 15%);
+  --foreground: hsl(215 12% 78%);
+  --card: hsl(220 13% 19%);
+  --card-foreground: hsl(215 12% 78%);
+  --popover: hsl(220 13% 19%);
+  --popover-foreground: hsl(215 12% 78%);
+  --primary: hsl(137 50% 40%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 60%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(220 13% 19%);
+  --muted-foreground: hsl(215 9% 62%);
+  --accent: hsl(212 85% 60%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 58%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 75% 58%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 45%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 52%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(215 10% 30%);
+  --input: hsl(220 13% 19%);
+  --ring: hsl(137 50% 40%);
+  --scrollbar-track: hsl(220 13% 19%);
+  --scrollbar-thumb: hsl(215 10% 32%);
+  --scrollbar-thumb-hover: hsl(215 10% 42%);
+}
+
+/* Midnight = :root defaults above (deepest dark) */
 
 @theme inline {
   --color-background: var(--background);
@@ -280,15 +373,37 @@
     animation: orb-drift-3 44s ease-in-out infinite alternate;
   }
 
-  /* Softer orbs for the light theme */
-  :root[data-theme="light"] .glass-orb-1 {
+  /* Softer orbs for the light themes */
+  :root[data-theme="daylight"] .glass-orb-1 {
     background: radial-gradient(circle, hsl(137 70% 72% / 0.55), transparent 65%);
   }
-  :root[data-theme="light"] .glass-orb-2 {
+  :root[data-theme="daylight"] .glass-orb-2 {
     background: radial-gradient(circle, hsl(212 95% 78% / 0.5), transparent 65%);
   }
-  :root[data-theme="light"] .glass-orb-3 {
+  :root[data-theme="daylight"] .glass-orb-3 {
     background: radial-gradient(circle, hsl(167 70% 75% / 0.45), transparent 65%);
+  }
+
+  /* Morning: warm sunrise tones */
+  :root[data-theme="morning"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(45 90% 74% / 0.55), transparent 65%);
+  }
+  :root[data-theme="morning"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(210 85% 80% / 0.45), transparent 65%);
+  }
+  :root[data-theme="morning"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(90 55% 75% / 0.4), transparent 65%);
+  }
+
+  /* Afternoon: muted overcast tones */
+  :root[data-theme="afternoon"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(210 35% 82% / 0.5), transparent 65%);
+  }
+  :root[data-theme="afternoon"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(215 30% 85% / 0.45), transparent 65%);
+  }
+  :root[data-theme="afternoon"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(200 25% 80% / 0.4), transparent 65%);
   }
 
   @media (prefers-reduced-motion: reduce) {

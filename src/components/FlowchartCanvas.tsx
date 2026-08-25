@@ -13,6 +13,7 @@ interface NodeConfig {
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
   textareaRows?: number;
+  autoFocus?: boolean;
   icon?: LucideIcon;
   quickTexts?: string[];
   customQuickTexts?: string[];
@@ -31,6 +32,8 @@ interface FlowchartCanvasProps {
   onNodeBlur: () => void;
   onPositionChange: (id: string, pos: { x: number; y: number }) => void;
   onHangUp: () => void;
+  /** Node whose input receives focus on page load */
+  autoFocusId?: string;
 }
 
 // Layout constants (px)
@@ -79,7 +82,7 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
     return base + 60; // label + combobox input + padding
   }
   if (node.type === 'hangup') {
-    return base + 60;
+    return base + 84; // py-3 x2 + min-h-12 button + slack
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
@@ -99,8 +102,9 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
 
 /**
  * Compute the default (non-dragged) node layout for a given canvas width.
- * Rows are spaced by their tallest node so nothing overlaps; multi-node rows
- * spread evenly when there is room and stack vertically on narrow canvases.
+ * Rows are spaced by their tallest node so nothing overlaps. Each multi-node
+ * row is decided independently: it spreads side by side when it fits the
+ * canvas and stacks vertically otherwise.
  */
 function computeDefaultLayout(
   nodes: NodeConfig[],
@@ -109,15 +113,6 @@ function computeDefaultLayout(
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
 
-  // Widest multi-node row decides whether side-by-side layout fits
-  const widestRow = Math.max(
-    ...NODE_LAYOUT_ROWS.map((row) =>
-      row.reduce((sum, id) => sum + (nodeById.get(id)?.width ?? 240), 0) +
-        Math.max(0, row.length - 1) * MIN_COL_GAP
-    )
-  );
-  const sideBySide = canvasWidth >= widestRow + CANVAS_MARGIN * 2;
-
   let y = CANVAS_MARGIN;
   for (const row of NODE_LAYOUT_ROWS) {
     const rowNodes = row
@@ -125,9 +120,13 @@ function computeDefaultLayout(
       .filter((n): n is NodeConfig => Boolean(n));
     if (rowNodes.length === 0) continue;
 
-    if (rowNodes.length === 1 || sideBySide) {
-      const sumWidth = rowNodes.reduce((s, n) => s + (n.width ?? 240), 0);
-      const gaps = rowNodes.length - 1;
+    const sumWidth = rowNodes.reduce((s, n) => s + (n.width ?? 240), 0);
+    const gaps = rowNodes.length - 1;
+    const rowFits =
+      rowNodes.length === 1 ||
+      canvasWidth >= sumWidth + gaps * MIN_COL_GAP + CANVAS_MARGIN * 2;
+
+    if (rowFits) {
       let colGap = MIN_COL_GAP;
       if (gaps > 0) {
         colGap = Math.min(
@@ -144,7 +143,7 @@ function computeDefaultLayout(
       const rowHeight = Math.max(...rowNodes.map((n) => estimateNodeHeight(n, '')));
       y += rowHeight + ROW_GAP;
     } else {
-      // Narrow canvas: stack this row's nodes vertically
+      // Too narrow for this row: stack its nodes vertically
       for (const n of rowNodes) {
         positions[n.id] = {
           x: Math.max(CANVAS_MARGIN, (canvasWidth - (n.width ?? 240)) / 2),
@@ -168,6 +167,7 @@ export default function FlowchartCanvas({
   onNodeBlur,
   onPositionChange,
   onHangUp,
+  autoFocusId,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -377,6 +377,7 @@ export default function FlowchartCanvas({
             inputType={node.inputType}
             width={node.width}
             textareaRows={node.textareaRows}
+            autoFocus={node.id === autoFocusId}
             icon={node.icon}
             quickTexts={node.quickTexts}
             customQuickTexts={node.customQuickTexts}

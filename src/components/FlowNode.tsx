@@ -1,5 +1,5 @@
-import { memo, useRef, useState, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { GripVertical, Plus, X, ChevronDown, Check } from 'lucide-react';
+import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import { GripVertical, Plus, X, ChevronDown, Check, PhoneOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -38,6 +38,8 @@ export interface FlowNodeProps {
   width?: number;
   /** Visible textarea rows (defaults to 2) */
   textareaRows?: number;
+  /** Focus this node's input once on mount (initial page focus target) */
+  autoFocus?: boolean;
   icon?: LucideIcon;
   /** Quick insert chips rendered below the field (e.g. Resolution Summary) */
   quickTexts?: string[];
@@ -275,6 +277,7 @@ function FlowNodeComponent({
   inputType = 'text',
   width = 240,
   textareaRows = 2,
+  autoFocus = false,
   icon: Icon,
   quickTexts,
   customQuickTexts,
@@ -338,6 +341,16 @@ function FlowNodeComponent({
     [id, onDragStart]
   );
 
+  // Initial focus target: focus this node's input once, after layout settles
+  useEffect(() => {
+    if (!autoFocus) return;
+    const raf = requestAnimationFrame(() => {
+      const el = nodeRef.current?.querySelector('textarea, input') as HTMLElement | null;
+      el?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [autoFocus]);
+
   const renderContent = () => {
     if (type === 'start' || type === 'agent') {
       return (
@@ -354,15 +367,15 @@ function FlowNodeComponent({
 
     if (type === 'hangup') {
       return (
-        <div className="px-3 py-2.5 text-center">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="w-full gap-1.5 text-sm font-semibold"
+        <div className="px-3 py-3">
+          <button
+            type="button"
             onClick={() => onChange('hangup')}
+            className="group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-destructive/50 bg-gradient-to-b from-destructive to-destructive/85 px-3 text-sm font-semibold text-destructive-foreground shadow-[0_6px_20px_rgba(248,81,73,0.35)] transition-all duration-200 hover:border-destructive hover:brightness-110 hover:shadow-[0_8px_28px_rgba(248,81,73,0.5)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            📞 Hang Up &amp; Generate Note
-          </Button>
+            <PhoneOff className="size-4 shrink-0 transition-transform duration-200 group-hover:rotate-12" />
+            Hang Up &amp; Generate Note
+          </button>
         </div>
       );
     }
