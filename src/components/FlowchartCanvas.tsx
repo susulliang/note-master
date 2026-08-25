@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType } from './FlowNode';
-import { NODE_CONNECTIONS } from '@/data/ticket';
+import { NODE_CONNECTIONS, DEFAULT_NODE_POSITIONS } from '@/data/ticket';
 import { cn } from '@/lib/utils';
 
 interface NodeConfig {
@@ -16,6 +16,8 @@ interface NodeConfig {
   icon?: LucideIcon;
   quickTexts?: string[];
   customQuickTexts?: string[];
+  onAddQuickText?: (text: string) => void;
+  onRemoveQuickText?: (text: string) => void;
 }
 
 interface FlowchartCanvasProps {
@@ -28,8 +30,6 @@ interface FlowchartCanvasProps {
   onNodeBlur: () => void;
   onPositionChange: (id: string, pos: { x: number; y: number }) => void;
   onHangUp: () => void;
-  onAddQuickText?: (text: string) => void;
-  onRemoveQuickText?: (text: string) => void;
 }
 
 // Approximate node dimensions for connection point calculation
@@ -39,27 +39,30 @@ const NODE_VERTICAL_PADDING = 8;
 function estimateNodeHeight(node: NodeConfig, value: string | string[]): number {
   const base = NODE_HEADER_HEIGHT + NODE_VERTICAL_PADDING * 2;
 
+  // Quick insert chips wrap ~2 per row at a 200-240px node width
+  // (+1 accounts for the add-chip button)
+  const quickTextRows = node.quickTexts
+    ? Math.ceil((node.quickTexts.length + 1) / 2)
+    : 0;
+  const quickTextBlock = node.quickTexts ? 30 + quickTextRows * 32 : 0;
+
   if (node.type === 'start' || node.type === 'agent') {
     // ~2 lines of text
-    return base + 40;
+    return base + 44;
   }
   if (node.type === 'select') {
-    return base + 56; // label + combobox input + padding
+    return base + 60; // label + combobox input + padding
   }
   if (node.type === 'hangup') {
-    return base + 56;
+    return base + 60;
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
-      let h = base + 76; // label + 2-row textarea
-      if (node.quickTexts) {
-        // Quick insert chips wrap ~2 per row at 240px node width (+1 for add button)
-        const rows = Math.ceil((node.quickTexts.length + 1) / 2);
-        h += 30 + rows * 28; // divider + label + chip rows
-      }
-      return h;
+      // label + 2-row textarea + quick insert block
+      return base + 84 + quickTextBlock;
     }
-    return base + 56; // label + single-line input
+    // label + single-line input (+ quick insert block when present)
+    return base + 60 + quickTextBlock;
   }
   if (node.type === 'dynamic-list') {
     const steps = Array.isArray(value) ? value.length : 4;
@@ -78,8 +81,6 @@ export default function FlowchartCanvas({
   onNodeBlur,
   onPositionChange,
   onHangUp,
-  onAddQuickText,
-  onRemoveQuickText,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{
@@ -90,7 +91,7 @@ export default function FlowchartCanvas({
 
   // Calculate canvas size based on node positions
   const canvasWidth = 680;
-  const canvasHeight = 1420;
+  const canvasHeight = 1600;
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -240,7 +241,7 @@ export default function FlowchartCanvas({
             onFocus={onNodeFocus}
             onBlur={onNodeBlur}
             isActive={activeNodeId === node.id}
-            position={positions[node.id] ?? { x: 100, y: 100 }}
+            position={positions[node.id] ?? DEFAULT_NODE_POSITIONS[node.id] ?? { x: 100, y: 100 }}
             onDragStart={handleDragStart}
             options={node.options}
             accent={node.accent}
@@ -249,8 +250,8 @@ export default function FlowchartCanvas({
             icon={node.icon}
             quickTexts={node.quickTexts}
             customQuickTexts={node.customQuickTexts}
-            onAddQuickText={onAddQuickText}
-            onRemoveQuickText={onRemoveQuickText}
+            onAddQuickText={node.onAddQuickText}
+            onRemoveQuickText={node.onRemoveQuickText}
           />
         ))}
       </div>

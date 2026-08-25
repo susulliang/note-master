@@ -138,8 +138,8 @@ function ComboboxField({
   return (
     <div className="px-3 py-2">
       {label && (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {Icon && <Icon className="size-3 text-accent/70" />}
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {Icon && <Icon className="size-3.5 text-accent/70" />}
           {label}
         </div>
       )}
@@ -159,7 +159,7 @@ function ComboboxField({
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder="Type or select..."
-          className="h-8 border-foreground/15 bg-foreground/5 pr-8 text-sm backdrop-blur-sm"
+          className="h-9 border-foreground/15 bg-foreground/5 pr-8 text-sm backdrop-blur-sm"
         />
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -222,7 +222,7 @@ function ComboboxField({
                               onChange(opt);
                               setOpen(false);
                             }}
-                            className="gap-2 text-xs"
+                            className="gap-2 text-sm"
                           >
                             <Check
                               className={cn(
@@ -238,7 +238,7 @@ function ComboboxField({
                   ))
                 )}
                 {truncated && (
-                  <div className="px-2 py-1.5 text-center text-[10px] text-muted-foreground">
+                  <div className="px-2 py-1.5 text-center text-[11px] text-muted-foreground">
                     {totalFiltered - COMBOBOX_MAX_RENDERED} more — keep typing to narrow down
                   </div>
                 )}
@@ -248,7 +248,7 @@ function ComboboxField({
         </Popover>
       </div>
       {isCustomValue && (
-        <div className="mt-1 text-[9px] uppercase tracking-wider text-accent/80">
+        <div className="mt-1 text-[10px] uppercase tracking-wider text-accent/80">
           Custom value
         </div>
       )}
@@ -340,11 +340,11 @@ function FlowNodeComponent({
       return (
         <div className="px-3 py-2">
           {label && (
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {label}
             </div>
           )}
-          <p className="text-xs leading-snug text-foreground">{text}</p>
+          <p className="text-sm leading-snug text-foreground">{text}</p>
         </div>
       );
     }
@@ -355,7 +355,7 @@ function FlowNodeComponent({
           <Button
             variant="destructive"
             size="sm"
-            className="w-full gap-1.5 text-xs font-semibold"
+            className="w-full gap-1.5 text-sm font-semibold"
             onClick={() => onChange('hangup')}
           >
             📞 Hang Up &amp; Generate Note
@@ -383,14 +383,14 @@ function FlowNodeComponent({
       return (
         <div className="px-3 py-2">
           {label && (
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {label}
             </div>
           )}
           <div className="space-y-1.5">
             {steps.map((step, idx) => (
               <div key={idx} className="flex items-center gap-1.5">
-                <span className="w-4 shrink-0 text-[10px] text-muted-foreground">
+                <span className="w-4 shrink-0 text-[11px] text-muted-foreground">
                   {idx + 1}.
                 </span>
                 <Input
@@ -402,7 +402,7 @@ function FlowNodeComponent({
                   }}
                   onFocus={handleFocus}
                   onBlur={onBlur}
-                  className="h-7 border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
+                  className="h-8 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
                 />
                 <Button
                   type="button"
@@ -423,7 +423,7 @@ function FlowNodeComponent({
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              className="w-full gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => onChange([...steps, ''])}
             >
               <Plus className="size-3" />
@@ -439,8 +439,8 @@ function FlowNodeComponent({
     return (
       <div className="px-3 py-2">
         {label && (
-          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {Icon && <Icon className="size-3 text-accent/70" />}
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {Icon && <Icon className="size-3.5 text-accent/70" />}
             {label}
           </div>
         )}
@@ -452,7 +452,7 @@ function FlowNodeComponent({
             onFocus={handleFocus}
             onBlur={onBlur}
             rows={2}
-            className="resize-none border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
+            className="resize-none border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
             placeholder="Type here..."
           />
         ) : (
@@ -462,13 +462,13 @@ function FlowNodeComponent({
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
             onBlur={onBlur}
-            className="h-8 border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
+            className="h-9 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
             placeholder="Type here..."
           />
         )}
         {quickTexts && (
           <div className="mt-2 border-t border-border/30 pt-2">
-            <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Quick insert
             </div>
             <div className="flex flex-wrap gap-1">
@@ -480,7 +480,7 @@ function FlowNodeComponent({
                       type="button"
                       onClick={() => handleInsertQuickText(qt)}
                       title={`Insert: ${qt}`}
-                      className="h-6 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-1.5 text-[9px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
+                      className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
                     >
                       {qt}
                     </button>
@@ -509,9 +509,9 @@ function FlowNodeComponent({
                   }}
                   aria-label="Add quick text"
                   title="Add quick text"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-dashed border-foreground/20 text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-dashed border-foreground/20 text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
                 >
-                  <Plus className="size-2.5" />
+                  <Plus className="size-3" />
                 </button>
               )}
             </div>
@@ -530,7 +530,7 @@ function FlowNodeComponent({
                 }}
                 placeholder="New quick text + Enter"
                 autoFocus
-                className="mt-1.5 h-6 border-foreground/15 bg-foreground/5 text-[10px] backdrop-blur-sm"
+                className="mt-1.5 h-7 border-foreground/15 bg-foreground/5 text-[11px] backdrop-blur-sm"
               />
             )}
           </div>

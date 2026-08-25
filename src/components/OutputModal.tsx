@@ -59,23 +59,23 @@ export default function OutputModal({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl border-foreground/15 bg-card/70 shadow-2xl backdrop-blur-3xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
+          <DialogTitle className="flex items-center gap-2 text-xl">
             <span className="text-primary">📋</span>
             Ticket Note Generated
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Pencil className="size-3" />
+          <DialogDescription className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Pencil className="size-3.5" />
             Edit the note below before copying, then paste it into your ticket system.
           </DialogDescription>
         </DialogHeader>
 
         {/* Editable glass note panel */}
-        <div className="relative rounded-lg border border-foreground/10 bg-foreground/5 p-3 text-[12px] leading-relaxed text-foreground backdrop-blur-md">
+        <div className="relative rounded-lg border border-foreground/10 bg-foreground/5 p-3 text-sm leading-relaxed text-foreground backdrop-blur-md">
           <Button
             variant="secondary"
             size="sm"
             onClick={handleCopy}
-            className="!absolute right-2 top-2 z-10 gap-1.5 text-xs"
+            className="!absolute right-2 top-2 z-10 gap-1.5 text-sm"
           >
             {copied ? (
               <>
@@ -93,7 +93,7 @@ export default function OutputModal({
             value={editableText}
             onChange={(e) => setEditableText(e.target.value)}
             spellCheck={false}
-            className="max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words bg-transparent pr-20 text-[12px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
+            className="max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words bg-transparent pr-20 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
 
@@ -106,7 +106,7 @@ export default function OutputModal({
             variant="ghost"
             size="sm"
             onClick={() => setEditableText(noteText)}
-            className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            className="gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
             Reset to original
           </Button>

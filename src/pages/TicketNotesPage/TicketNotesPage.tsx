@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
   MessageSquareText,
@@ -13,11 +13,11 @@ import {
   FileText,
   CheckCircle2,
   StickyNote,
+  ShoppingBag,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
-import QuickReferenceSidebar from '@/components/QuickReferenceSidebar';
 import OutputModal from '@/components/OutputModal';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -27,6 +27,7 @@ import {
   NODE_IDS,
   MAX_HISTORY_ENTRIES,
   RESOLUTION_QUICK_TEXTS,
+  PURCHASE_QUICK_TEXTS,
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import type { NodeType } from '@/components/FlowNode';
@@ -43,6 +44,8 @@ interface NodeConfig {
   icon?: LucideIcon;
   quickTexts?: string[];
   customQuickTexts?: string[];
+  onAddQuickText?: (text: string) => void;
+  onRemoveQuickText?: (text: string) => void;
 }
 
 const NODES: NodeConfig[] = [
@@ -122,6 +125,15 @@ const NODES: NodeConfig[] = [
     icon: Hash,
   },
   {
+    id: NODE_IDS.PURCHASE_INFO,
+    type: 'input',
+    label: 'Purchase Channel and Date',
+    inputType: 'text',
+    accent: 'default',
+    width: 200,
+    icon: ShoppingBag,
+  },
+  {
     id: NODE_IDS.ISSUE_TYPE,
     type: 'select',
     label: 'Issue Type',
@@ -194,6 +206,7 @@ const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.SERIAL_NUMBER]: '',
   [NODE_IDS.ISSUE_TYPE]: '',
   [NODE_IDS.DETAILED_ISSUE]: '',
+  [NODE_IDS.PURCHASE_INFO]: '',
   [NODE_IDS.EMAIL_ADDRESS]: '',
   [NODE_IDS.SHIPPING_ADDRESS]: '',
   [NODE_IDS.RESOLUTION_SUMMARY]: '',
@@ -215,14 +228,18 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_notes_history',
     []
   );
-  const [customQuickTexts, setCustomQuickTexts] = useScopedState<string[]>(
+  const [customResolutionQuickTexts, setCustomResolutionQuickTexts] = useScopedState<string[]>(
     'ecovacs_ticket_resolution_quicktexts',
+    []
+  );
+  const [customPurchaseQuickTexts, setCustomPurchaseQuickTexts] = useScopedState<string[]>(
+    'ecovacs_ticket_purchase_quicktexts',
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [showOutput, setShowOutput] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
-  const focusedInputRef = useRef<{ nodeId: string; field?: string } | null>(null);
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -243,11 +260,10 @@ export default function TicketNotesPage() {
 
   const handleNodeFocus = useCallback((id: string) => {
     setActiveNodeId(id);
-    focusedInputRef.current = { nodeId: id };
   }, []);
 
   const handleNodeBlur = useCallback(() => {
-    // Small delay to allow quick phrase insertion
+    // Small delay to allow chip clicks to land before deactivating the node
     setTimeout(() => {
       setActiveNodeId(null);
     }, 150);
@@ -264,62 +280,97 @@ export default function TicketNotesPage() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, [setTheme]);
 
+  const handleToggleHistory = useCallback(() => {
+    setShowHistory((prev) => !prev);
+  }, []);
+
   const handleReset = useCallback(() => {
     setFormData(INITIAL_FORM_DATA);
     setPositions(DEFAULT_NODE_POSITIONS);
     setActiveNodeId(null);
   }, [setFormData, setPositions]);
 
-  const handleInsertPhrase = useCallback(
-    (phrase: string) => {
-      const activeId = focusedInputRef.current?.nodeId;
-      if (!activeId) return;
-
-      const currentValue = formData[activeId];
-      if (typeof currentValue === 'string') {
-        handleFieldChange(activeId, currentValue + (currentValue ? ' ' : '') + phrase);
-      }
-    },
-    [formData, handleFieldChange]
+  // Quick texts per node: defaults + user-added (persisted separately per field)
+  const resolutionQuickTexts = useMemo(
+    () => [...RESOLUTION_QUICK_TEXTS, ...customResolutionQuickTexts],
+    [customResolutionQuickTexts]
   );
-
-  // Resolution quick texts: defaults + user-added (persisted)
-  const allQuickTexts = useMemo(
-    () => [...RESOLUTION_QUICK_TEXTS, ...customQuickTexts],
-    [customQuickTexts]
+  const purchaseQuickTexts = useMemo(
+    () => [...PURCHASE_QUICK_TEXTS, ...customPurchaseQuickTexts],
+    [customPurchaseQuickTexts]
   );
 
   const handleAddQuickText = useCallback(
-    (text: string) => {
+    (target: 'resolution' | 'purchase', text: string) => {
       const t = text.trim();
       if (!t) return;
-      if (RESOLUTION_QUICK_TEXTS.includes(t) || customQuickTexts.includes(t)) {
+      const defaults = target === 'resolution' ? RESOLUTION_QUICK_TEXTS : PURCHASE_QUICK_TEXTS;
+      const customs =
+        target === 'resolution' ? customResolutionQuickTexts : customPurchaseQuickTexts;
+      if (defaults.includes(t) || customs.includes(t)) {
         toast.info(`"${t}" already exists.`);
         return;
       }
-      setCustomQuickTexts((prev) => [...prev, t]);
+      if (target === 'resolution') {
+        setCustomResolutionQuickTexts((prev) => [...prev, t]);
+      } else {
+        setCustomPurchaseQuickTexts((prev) => [...prev, t]);
+      }
       toast.success(`Quick text "${t}" added.`);
     },
-    [customQuickTexts, setCustomQuickTexts]
+    [
+      customResolutionQuickTexts,
+      customPurchaseQuickTexts,
+      setCustomResolutionQuickTexts,
+      setCustomPurchaseQuickTexts,
+    ]
   );
 
   const handleRemoveQuickText = useCallback(
-    (text: string) => {
-      setCustomQuickTexts((prev) => prev.filter((t) => t !== text));
+    (target: 'resolution' | 'purchase', text: string) => {
+      if (target === 'resolution') {
+        setCustomResolutionQuickTexts((prev) => prev.filter((t) => t !== text));
+      } else {
+        setCustomPurchaseQuickTexts((prev) => prev.filter((t) => t !== text));
+      }
       toast.success(`Quick text "${text}" removed.`);
     },
-    [setCustomQuickTexts]
+    [setCustomResolutionQuickTexts, setCustomPurchaseQuickTexts]
   );
 
-  // Attach quick texts to the Resolution Summary node config
+  // Attach quick texts + per-node handlers to the Resolution Summary and
+  // Purchase Channel and Date node configs
   const nodes = useMemo(
     () =>
-      NODES.map((n) =>
-        n.id === NODE_IDS.RESOLUTION_SUMMARY
-          ? { ...n, quickTexts: allQuickTexts, customQuickTexts }
-          : n
-      ),
-    [allQuickTexts, customQuickTexts]
+      NODES.map((n) => {
+        if (n.id === NODE_IDS.RESOLUTION_SUMMARY) {
+          return {
+            ...n,
+            quickTexts: resolutionQuickTexts,
+            customQuickTexts: customResolutionQuickTexts,
+            onAddQuickText: (t: string) => handleAddQuickText('resolution', t),
+            onRemoveQuickText: (t: string) => handleRemoveQuickText('resolution', t),
+          };
+        }
+        if (n.id === NODE_IDS.PURCHASE_INFO) {
+          return {
+            ...n,
+            quickTexts: purchaseQuickTexts,
+            customQuickTexts: customPurchaseQuickTexts,
+            onAddQuickText: (t: string) => handleAddQuickText('purchase', t),
+            onRemoveQuickText: (t: string) => handleRemoveQuickText('purchase', t),
+          };
+        }
+        return n;
+      }),
+    [
+      resolutionQuickTexts,
+      purchaseQuickTexts,
+      customResolutionQuickTexts,
+      customPurchaseQuickTexts,
+      handleAddQuickText,
+      handleRemoveQuickText,
+    ]
   );
 
   const generateNoteText = useCallback((): string => {
@@ -328,7 +379,7 @@ export default function TicketNotesPage() {
       return typeof v === 'string' ? v : '';
     };
 
-    return `**Notes** 
+    return `**Notes**
 
 Customer Name: ${getStr(NODE_IDS.CUSTOMER_NAME) || 'N/A'}
 Contact number: ${getStr(NODE_IDS.CONTACT_NUMBER) || 'N/A'}
@@ -337,6 +388,7 @@ Current shipping address: ${getStr(NODE_IDS.SHIPPING_ADDRESS) || 'N/A'}
 Serial Number: ${getStr(NODE_IDS.SERIAL_NUMBER) || 'N/A'}
 Deebot Model: ${getStr(NODE_IDS.DEEBOT_MODEL) || 'N/A'}
 SKU: ${getStr(NODE_IDS.SKU_NUMBER) || 'N/A'}
+Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
 
@@ -394,7 +446,16 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       <div className="flex h-full w-full">
         {/* Main canvas area */}
         <main className="relative flex-1 min-w-0">
-          <FloatingControls theme={theme} onToggleTheme={handleToggleTheme} onReset={handleReset} />
+          <FloatingControls
+            theme={theme}
+            onToggleTheme={handleToggleTheme}
+            onReset={handleReset}
+            historyOpen={showHistory}
+            onToggleHistory={handleToggleHistory}
+            history={history}
+            onDeleteHistory={handleDeleteHistory}
+            onClearHistory={handleClearHistory}
+          />
           <FlowchartCanvas
             nodes={nodes}
             positions={positions}
@@ -405,18 +466,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onNodeBlur={handleNodeBlur}
             onPositionChange={handlePositionChange}
             onHangUp={handleHangUp}
-            onAddQuickText={handleAddQuickText}
-            onRemoveQuickText={handleRemoveQuickText}
           />
         </main>
-
-        {/* Right sidebar */}
-        <QuickReferenceSidebar
-          onInsertPhrase={handleInsertPhrase}
-          history={history}
-          onDeleteHistory={handleDeleteHistory}
-          onClearHistory={handleClearHistory}
-        />
       </div>
 
       <OutputModal
@@ -432,7 +483,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         toastOptions={{
           classNames: {
             toast:
-              'font-sans text-xs !border-foreground/10 !bg-card/70 !text-foreground !shadow-2xl backdrop-blur-2xl',
+              'font-sans text-sm !border-foreground/10 !bg-card/70 !text-foreground !shadow-2xl backdrop-blur-2xl',
           },
         }}
       />

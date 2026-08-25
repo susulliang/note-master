@@ -1,4 +1,4 @@
-// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, QUICK_PHRASES, DEFAULT_NODE_POSITIONS, NODE_IDS, NODE_CONNECTIONS
+// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, RESOLUTION_QUICK_TEXTS, PURCHASE_QUICK_TEXTS, DEFAULT_NODE_POSITIONS, NODE_IDS, NODE_CONNECTIONS
 
 export const DEEBOT_MODELS = [
   // Current generation
@@ -1004,31 +1004,16 @@ export const RESOLUTION_QUICK_TEXTS = [
   'Checked Network',
 ];
 
-export const QUICK_PHRASES: Record<string, string[]> = {
-  Greetings: [
-    "Hello, thanks for calling Ecovacs.",
-    "How can I assist you today?",
-    "Thank you for your patience.",
-  ],
-  Verification: [
-    "Can I please have your name?",
-    "And the best number to reach you at?",
-    "Could you confirm your email address?",
-    "What's your current shipping address?",
-  ],
-  Troubleshooting: [
-    "Let's try to figure this out together.",
-    "Have you tried restarting the device?",
-    "Please check if the sensors are clean.",
-    "Let's verify the brush assembly.",
-  ],
-  Closing: [
-    "Is there anything else I can help with?",
-    "Thank you for calling Ecovacs, have a great day!",
-    "We'll follow up with you shortly.",
-    "Your ticket has been created successfully.",
-  ],
-};
+export const PURCHASE_QUICK_TEXTS = [
+  'Amazon',
+  'Ecovacs',
+  'US',
+  'CA',
+  'Other Retailers',
+  'within 1 year',
+  '1-2 years ago',
+  '> 2 years ago',
+];
 
 export const NODE_IDS = {
   START: 'start',
@@ -1043,6 +1028,7 @@ export const NODE_IDS = {
   SERIAL_NUMBER: 'serialNumber',
   ISSUE_TYPE: 'issueType',
   DETAILED_ISSUE: 'detailedIssue',
+  PURCHASE_INFO: 'purchaseInfo',
   EMAIL_ADDRESS: 'emailAddress',
   SHIPPING_ADDRESS: 'shippingAddress',
   RESOLUTION_SUMMARY: 'resolutionSummary',
@@ -1075,17 +1061,18 @@ export const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = 
   [NODE_IDS.DEEBOT_MODEL]: { x: 20, y: 738 },
   [NODE_IDS.SKU_NUMBER]: { x: 240, y: 738 },
   [NODE_IDS.SERIAL_NUMBER]: { x: 460, y: 738 },
-  // Issue identification
+  // Issue identification + purchase channel/date
   [NODE_IDS.ISSUE_TYPE]: { x: 20, y: 848 },
   [NODE_IDS.DETAILED_ISSUE]: { x: 220, y: 848 },
+  [NODE_IDS.PURCHASE_INFO]: { x: 460, y: 848 },
   // Additional info row (email + shipping + resolution, side by side)
-  [NODE_IDS.EMAIL_ADDRESS]: { x: 20, y: 974 },
-  [NODE_IDS.SHIPPING_ADDRESS]: { x: 240, y: 974 },
+  [NODE_IDS.EMAIL_ADDRESS]: { x: 20, y: 1170 },
+  [NODE_IDS.SHIPPING_ADDRESS]: { x: 240, y: 1170 },
   // Resolution node is wider/taller (quick insert chips below the textarea)
-  [NODE_IDS.RESOLUTION_SUMMARY]: { x: 440, y: 974 },
-  [NODE_IDS.ADDITIONAL_NOTES]: { x: 200, y: 1152 },
+  [NODE_IDS.RESOLUTION_SUMMARY]: { x: 440, y: 1170 },
+  [NODE_IDS.ADDITIONAL_NOTES]: { x: 200, y: 1345 },
   // Hang up
-  [NODE_IDS.HANG_UP]: { x: 200, y: 1280 },
+  [NODE_IDS.HANG_UP]: { x: 200, y: 1475 },
 };
 
 // Connection definitions: from -> to[]
@@ -1102,6 +1089,8 @@ export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
   { from: NODE_IDS.DEEBOT_MODEL, to: NODE_IDS.ISSUE_TYPE },
   { from: NODE_IDS.SKU_NUMBER, to: NODE_IDS.DETAILED_ISSUE },
   { from: NODE_IDS.SERIAL_NUMBER, to: NODE_IDS.DETAILED_ISSUE },
+  { from: NODE_IDS.SERIAL_NUMBER, to: NODE_IDS.PURCHASE_INFO },
+  { from: NODE_IDS.PURCHASE_INFO, to: NODE_IDS.RESOLUTION_SUMMARY },
   { from: NODE_IDS.ISSUE_TYPE, to: NODE_IDS.RESOLUTION_SUMMARY },
   { from: NODE_IDS.DETAILED_ISSUE, to: NODE_IDS.RESOLUTION_SUMMARY },
   { from: NODE_IDS.DETAILED_ISSUE, to: NODE_IDS.EMAIL_ADDRESS },
