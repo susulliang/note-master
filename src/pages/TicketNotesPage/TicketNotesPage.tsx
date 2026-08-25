@@ -227,6 +227,7 @@ export default function TicketNotesPage() {
   );
   // Node positions are stored as per-node drag overrides — nodes without an
   // override follow the responsive default layout computed from canvas size.
+  // Resizing the window clears the overrides so the grid re-aligns.
   const [positions, setPositions] = useScopedState<Record<string, { x: number; y: number }>>(
     'ecovacs_ticket_node_position_overrides',
     {}
@@ -290,6 +291,12 @@ export default function TicketNotesPage() {
     },
     [setPositions]
   );
+
+  // Window resize: drop drag overrides so the responsive default layout
+  // re-aligns every node cleanly at the new canvas size
+  const handleLayoutReset = useCallback(() => {
+    setPositions({});
+  }, [setPositions]);
 
   const handleCycleTheme = useCallback(() => {
     setTheme(nextTheme(theme));
@@ -483,6 +490,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onPositionChange={handlePositionChange}
             onHangUp={handleHangUp}
             autoFocusId={NODE_IDS.DETAILED_ISSUE}
+            onLayoutReset={handleLayoutReset}
           />
         </main>
       </div>

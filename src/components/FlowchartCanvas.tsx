@@ -35,11 +35,15 @@ interface FlowchartCanvasProps {
   onHangUp: () => void;
   /** Node whose input receives focus on page load */
   autoFocusId?: string;
+  /** Called on a genuine canvas resize so drag overrides are cleared and the grid re-aligns */
+  onLayoutReset?: () => void;
 }
 
 // Layout constants (px)
 const CANVAS_MARGIN = 24;
 const ROW_GAP = 56;
+/** Gap between wrapped lines inside one semantic row */
+const LINE_GAP = 40;
 const MIN_COL_GAP = 24;
 const MAX_COL_GAP = 48;
 const FALLBACK_CONTAINER_WIDTH = 900;
@@ -107,9 +111,10 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
 
 /**
  * Compute the default (non-dragged) node layout for a given canvas width.
- * Rows are spaced by their tallest node so nothing overlaps. Each multi-node
- * row is decided independently: it spreads side by side when it fits the
- * canvas and stacks vertically otherwise.
+ * Layout clarity wins over connection-line aesthetics: each semantic row's
+ * nodes are greedily packed into lines that fit the available width (like
+ * flex-wrap), lines are centered with even column gaps, and every line is
+ * spaced by its tallest node so nothing ever overlaps.
  */
 function computeDefaultLayout(
   nodes: NodeConfig[],
@@ -117,6 +122,7 @@ function computeDefaultLayout(
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
+  const availWidth = canvasWidth - CANVAS_MARGIN * 2;
 
   let y = CANVAS_MARGIN;
   for (const row of NODE_LAYOUT_ROWS) {
@@ -125,39 +131,46 @@ function computeDefaultLayout(
       .filter((n): n is NodeConfig => Boolean(n));
     if (rowNodes.length === 0) continue;
 
-    const sumWidth = rowNodes.reduce((s, n) => s + (n.width ?? 240), 0);
-    const gaps = rowNodes.length - 1;
-    const rowFits =
-      rowNodes.length === 1 ||
-      canvasWidth >= sumWidth + gaps * MIN_COL_GAP + CANVAS_MARGIN * 2;
+    // Greedy packing: fill each line with as many nodes as fit
+    const lines: NodeConfig[][] = [];
+    let line: NodeConfig[] = [];
+    let lineWidth = 0;
+    for (const n of rowNodes) {
+      const w = n.width ?? 240;
+      const gap = line.length === 0 ? 0 : MIN_COL_GAP;
+      if (line.length > 0 && lineWidth + gap + w > availWidth) {
+        lines.push(line);
+        line = [n];
+        lineWidth = w;
+      } else {
+        line.push(n);
+        lineWidth += gap + w;
+      }
+    }
+    if (line.length > 0) lines.push(line);
 
-    if (rowFits) {
+    for (const lineNodes of lines) {
+      const sumWidth = lineNodes.reduce((s, n) => s + (n.width ?? 240), 0);
+      const gaps = lineNodes.length - 1;
       let colGap = MIN_COL_GAP;
       if (gaps > 0) {
         colGap = Math.min(
           MAX_COL_GAP,
-          Math.max(MIN_COL_GAP, (canvasWidth - CANVAS_MARGIN * 2 - sumWidth) / gaps)
+          Math.max(MIN_COL_GAP, (availWidth - sumWidth) / gaps)
         );
       }
       const totalWidth = sumWidth + colGap * gaps;
       let x = Math.max(CANVAS_MARGIN, (canvasWidth - totalWidth) / 2);
-      for (const n of rowNodes) {
+      let lineHeight = 0;
+      for (const n of lineNodes) {
         positions[n.id] = { x, y };
         x += (n.width ?? 240) + colGap;
+        lineHeight = Math.max(lineHeight, estimateNodeHeight(n, ''));
       }
-      const rowHeight = Math.max(...rowNodes.map((n) => estimateNodeHeight(n, '')));
-      y += rowHeight + ROW_GAP;
-    } else {
-      // Too narrow for this row: stack its nodes vertically
-      for (const n of rowNodes) {
-        positions[n.id] = {
-          x: Math.max(CANVAS_MARGIN, (canvasWidth - (n.width ?? 240)) / 2),
-          y,
-        };
-        y += estimateNodeHeight(n, '') + MIN_COL_GAP;
-      }
-      y += ROW_GAP - MIN_COL_GAP;
+      y += lineHeight + LINE_GAP;
     }
+    // Extra breathing room between semantic rows
+    y += ROW_GAP - LINE_GAP;
   }
   return positions;
 }
@@ -173,6 +186,7 @@ export default function FlowchartCanvas({
   onPositionChange,
   onHangUp,
   autoFocusId,
+  onLayoutReset,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -192,6 +206,24 @@ export default function FlowchartCanvas({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // On a genuine window resize (after the initial measurement), discard drag
+  // overrides so every node glides back to the responsive default layout —
+  // stale dragged coordinates from a previous window size never linger
+  const prevWidthRef = useRef<number | null>(null);
+  const hasOverrides = Object.keys(positions).length > 0;
+  useEffect(() => {
+    if (prevWidthRef.current === null) {
+      // First measurement after mount — not a resize
+      prevWidthRef.current = containerWidth;
+      return;
+    }
+    if (prevWidthRef.current === containerWidth) return;
+    prevWidthRef.current = containerWidth;
+    if (!dragging && hasOverrides) {
+      onLayoutReset?.();
+    }
+  }, [containerWidth, dragging, hasOverrides, onLayoutReset]);
 
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
