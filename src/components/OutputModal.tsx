@@ -57,20 +57,20 @@ export default function OutputModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl border-border/60 bg-card/80 backdrop-blur-2xl shadow-2xl">
+      <DialogContent className="max-w-2xl border-foreground/15 bg-card/70 shadow-2xl backdrop-blur-3xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-mono text-lg">
+          <DialogTitle className="flex items-center gap-2 text-lg">
             <span className="text-primary">📋</span>
             Ticket Note Generated
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+          <DialogDescription className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Pencil className="size-3" />
             Edit the note below before copying, then paste it into your ticket system.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Editable code-style note */}
-        <div className="relative rounded-lg border border-border/50 bg-background/60 p-3 font-mono text-[12px] leading-relaxed text-foreground">
+        {/* Editable glass note panel */}
+        <div className="relative rounded-lg border border-foreground/10 bg-foreground/5 p-3 text-[12px] leading-relaxed text-foreground backdrop-blur-md">
           <Button
             variant="secondary"
             size="sm"
@@ -93,7 +93,7 @@ export default function OutputModal({
             value={editableText}
             onChange={(e) => setEditableText(e.target.value)}
             spellCheck={false}
-            className="max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words bg-transparent pr-20 font-mono text-[12px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
+            className="max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words bg-transparent pr-20 text-[12px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
 

@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./tailwind-theme.css";
@@ -30,6 +29,17 @@
   .container {
     margin-left: auto;
     margin-right: auto;
+  }
+
+  /* Global textfield font — Bahnschrift (Windows DIN-style variable font).
+     UI text uses Elms Sans (see --font-sans in tailwind-theme.css). */
+  input,
+  textarea,
+  select {
+    font-family:
+      'Bahnschrift', 'Elms Sans', 'Segoe UI', system-ui, -apple-system,
+      sans-serif;
+    font-variant-ligatures: none;
   }
 }
 

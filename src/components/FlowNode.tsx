@@ -45,18 +45,24 @@ export interface FlowNodeProps {
   onRemoveQuickText?: (text: string) => void;
 }
 
+// Shared glass shadow: specular top edge + soft drop shadow (+ optional accent glow)
+const glassShadow = (glow?: string) =>
+  `shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_32px_rgba(0,0,0,0.35)${
+    glow ? `,${glow}` : ''
+  }]`;
+
 const accentBorders: Record<string, string> = {
-  green: 'border-primary/60 shadow-[0_0_20px_rgba(35_134_54_0.15)]',
-  blue: 'border-info/60 shadow-[0_0_20px_rgba(88_166_255_0.15)]',
-  red: 'border-destructive/60 shadow-[0_0_20px_rgba(248_81_73_0.15)]',
-  default: 'border-border/60',
+  green: `border-primary/50 ${glassShadow('0_0_24px_rgba(35_134_54,0.18)')}`,
+  blue: `border-info/50 ${glassShadow('0_0_24px_rgba(88_166_255,0.18)')}`,
+  red: `border-destructive/50 ${glassShadow('0_0_24px_rgba(248_81_73,0.18)')}`,
+  default: `border-foreground/15 ${glassShadow()}`,
 };
 
 const accentGlows: Record<string, string> = {
-  green: 'shadow-[0_0_30px_rgba(35_134_54_0.4)] border-primary',
-  blue: 'shadow-[0_0_30px_rgba(88_166_255_0.4)] border-info',
-  red: 'shadow-[0_0_30px_rgba(248_81_73_0.4)] border-destructive',
-  default: 'shadow-[0_0_20px_rgba(255_255_255_0.1)] border-foreground/30',
+  green: `border-primary ${glassShadow('0_0_36px_rgba(35_134_54,0.45)')}`,
+  blue: `border-info ${glassShadow('0_0_36px_rgba(88_166_255,0.45)')}`,
+  red: `border-destructive ${glassShadow('0_0_36px_rgba(248_81_73,0.45)')}`,
+  default: `border-foreground/35 ${glassShadow('0_0_28px_rgba(255,255,255,0.14)')}`,
 };
 
 interface ComboboxFieldProps {
@@ -153,7 +159,7 @@ function ComboboxField({
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder="Type or select..."
-          className="h-8 bg-background/50 pr-8 text-sm"
+          className="h-8 border-foreground/15 bg-foreground/5 pr-8 text-sm backdrop-blur-sm"
         />
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -178,7 +184,7 @@ function ComboboxField({
           <PopoverContent
             align="start"
             sideOffset={4}
-            className="w-[300px] p-0"
+            className="w-[300px] border-foreground/10 bg-card/75 p-0 shadow-2xl backdrop-blur-2xl"
             onInteractOutside={(e) => {
               // Keep the dropdown open while the agent works in the input
               if (wrapperRef.current?.contains(e.target as Node)) {
@@ -384,7 +390,7 @@ function FlowNodeComponent({
           <div className="space-y-1.5">
             {steps.map((step, idx) => (
               <div key={idx} className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono text-muted-foreground w-4 shrink-0">
+                <span className="w-4 shrink-0 text-[10px] text-muted-foreground">
                   {idx + 1}.
                 </span>
                 <Input
@@ -396,7 +402,7 @@ function FlowNodeComponent({
                   }}
                   onFocus={handleFocus}
                   onBlur={onBlur}
-                  className="h-7 bg-background/50 text-xs"
+                  className="h-7 border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
                 />
                 <Button
                   type="button"
@@ -446,7 +452,7 @@ function FlowNodeComponent({
             onFocus={handleFocus}
             onBlur={onBlur}
             rows={2}
-            className="resize-none bg-background/50 text-xs"
+            className="resize-none border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
             placeholder="Type here..."
           />
         ) : (
@@ -456,7 +462,7 @@ function FlowNodeComponent({
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
             onBlur={onBlur}
-            className="h-8 bg-background/50 text-xs"
+            className="h-8 border-foreground/15 bg-foreground/5 text-xs backdrop-blur-sm"
             placeholder="Type here..."
           />
         )}
@@ -474,7 +480,7 @@ function FlowNodeComponent({
                       type="button"
                       onClick={() => handleInsertQuickText(qt)}
                       title={`Insert: ${qt}`}
-                      className="h-6 min-w-0 max-w-full truncate rounded border border-border/60 bg-background/40 px-1.5 text-[9px] text-muted-foreground transition-colors hover:border-primary/60 hover:bg-primary/10 hover:text-primary"
+                      className="h-6 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-1.5 text-[9px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
                     >
                       {qt}
                     </button>
@@ -503,7 +509,7 @@ function FlowNodeComponent({
                   }}
                   aria-label="Add quick text"
                   title="Add quick text"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-dashed border-border/70 text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-dashed border-foreground/20 text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
                 >
                   <Plus className="size-2.5" />
                 </button>
@@ -524,7 +530,7 @@ function FlowNodeComponent({
                 }}
                 placeholder="New quick text + Enter"
                 autoFocus
-                className="mt-1.5 h-6 bg-background/50 text-[10px]"
+                className="mt-1.5 h-6 border-foreground/15 bg-foreground/5 text-[10px] backdrop-blur-sm"
               />
             )}
           </div>
@@ -544,9 +550,9 @@ function FlowNodeComponent({
         width,
       }}
       className={cn(
-        'absolute rounded-lg border backdrop-blur-xl bg-card/70 transition-all duration-200',
+        'absolute rounded-xl border bg-card/45 backdrop-blur-2xl transition-all duration-200',
         isActive ? accentGlows[accent] : accentBorders[accent],
-        isHovered && !isActive && 'border-foreground/20',
+        isHovered && !isActive && 'border-foreground/25',
         isActive && 'animate-pulse-slow'
       )}
       onMouseEnter={() => setIsHovered(true)}

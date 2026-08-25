@@ -52,7 +52,7 @@ export default function QuickReferenceSidebar({
 
   if (isCollapsed) {
     return (
-      <div className="flex h-full w-12 flex-col items-center border-l border-border/40 bg-card/50 backdrop-blur-xl py-4">
+      <div className="flex h-full w-12 flex-col items-center border-l border-foreground/10 bg-card/40 py-4 backdrop-blur-2xl">
         <Button
           variant="ghost"
           size="icon"
@@ -70,9 +70,9 @@ export default function QuickReferenceSidebar({
   }
 
   return (
-    <aside className="flex h-full w-72 flex-col border-l border-border/40 bg-card/30 backdrop-blur-xl">
+    <aside className="flex h-full w-72 flex-col border-l border-foreground/10 bg-card/30 backdrop-blur-2xl">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <MessageSquarePlus className="size-4 text-primary" />
           <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
@@ -93,7 +93,7 @@ export default function QuickReferenceSidebar({
       {/* Tabs content */}
       <Tabs defaultValue="phrases" className="flex flex-1 min-h-0 flex-col gap-0">
         <div className="px-2 pt-2">
-          <TabsList className="grid w-full grid-cols-2 h-8">
+          <TabsList className="grid h-8 w-full grid-cols-2 bg-foreground/5">
             <TabsTrigger value="phrases" className="text-[11px] gap-1.5">
               <MessageSquarePlus className="size-3.5" />
               Phrases
@@ -141,7 +141,7 @@ export default function QuickReferenceSidebar({
                         <button
                           key={idx}
                           onClick={() => onInsertPhrase(phrase)}
-                          className="w-full rounded-md border border-border/30 bg-background/40 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
+                          className="w-full rounded-md border border-foreground/10 bg-foreground/5 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground backdrop-blur-sm transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-foreground"
                         >
                           {phrase}
                         </button>
@@ -152,7 +152,7 @@ export default function QuickReferenceSidebar({
               ))}
             </div>
           </ScrollArea>
-          <div className="border-t border-border/40 px-4 py-2">
+          <div className="border-t border-foreground/10 px-4 py-2">
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               Click any phrase to insert it into the focused input.
             </p>
@@ -179,10 +179,10 @@ export default function QuickReferenceSidebar({
                       <div
                         key={entry.id}
                         className={cn(
-                          'rounded-md border bg-background/40 transition-all',
+                          'rounded-md border bg-foreground/5 backdrop-blur-sm transition-all',
                           isExpanded
-                            ? 'border-primary/40 bg-primary/5'
-                            : 'border-border/30 hover:border-border/60'
+                            ? 'border-primary/40 bg-primary/10'
+                            : 'border-foreground/10 hover:border-foreground/25'
                         )}
                       >
                         <button
@@ -204,8 +204,8 @@ export default function QuickReferenceSidebar({
                           </span>
                         </button>
                         {isExpanded && (
-                          <div className="border-t border-border/30 px-3 py-2">
-                            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-muted-foreground custom-scrollbar">
+                          <div className="border-t border-foreground/10 px-3 py-2">
+                            <pre className="custom-scrollbar max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-muted-foreground">
                               {entry.noteText}
                             </pre>
                             <div className="mt-2 flex items-center gap-1">
@@ -238,7 +238,7 @@ export default function QuickReferenceSidebar({
                   })}
                 </div>
               </ScrollArea>
-              <div className="border-t border-border/40 px-3 py-2">
+              <div className="border-t border-foreground/10 px-3 py-2">
                 <Button
                   variant="ghost"
                   size="sm"

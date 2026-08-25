@@ -184,11 +184,11 @@ export default function FlowchartCanvas({
           key={idx}
           d={path}
           fill="none"
-          stroke={isActive ? 'hsl(var(--primary))' : 'hsl(var(--border))'}
+          stroke={isActive ? 'var(--primary)' : 'var(--border)'}
           strokeWidth={isActive ? 2 : 1.5}
           strokeDasharray={isActive ? 'none' : '4 4'}
           className="transition-all duration-300"
-          opacity={isActive ? 0.9 : 0.5}
+          opacity={isActive ? 0.9 : 0.55}
         />
       );
     });
@@ -197,7 +197,7 @@ export default function FlowchartCanvas({
   return (
     <div
       ref={canvasRef}
-      className="relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,hsl(var(--border)/0.3)_1px,transparent_0)] [background-size:24px_24px]"
+      className="custom-scrollbar relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
     >
       <div
         className="relative"

@@ -15,7 +15,7 @@ import {
   StickyNote,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import TopBar from '@/components/TopBar';
+import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import QuickReferenceSidebar from '@/components/QuickReferenceSidebar';
 import OutputModal from '@/components/OutputModal';
@@ -383,12 +383,18 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   }, [setHistory]);
 
   return (
-    <div className="flex h-screen w-full flex-col bg-background font-mono text-foreground">
-      <TopBar theme={theme} onToggleTheme={handleToggleTheme} onReset={handleReset} />
+    <div className="relative h-screen w-full overflow-hidden bg-background font-sans text-foreground">
+      {/* Ambient color orbs — give the glass surfaces something to refract */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
+        <div className="glass-orb glass-orb-1" />
+        <div className="glass-orb glass-orb-2" />
+        <div className="glass-orb glass-orb-3" />
+      </div>
 
-      <div className="flex flex-1 min-h-0 w-full">
+      <div className="flex h-full w-full">
         {/* Main canvas area */}
-        <main className="flex-1 min-w-0 relative">
+        <main className="relative flex-1 min-w-0">
+          <FloatingControls theme={theme} onToggleTheme={handleToggleTheme} onReset={handleReset} />
           <FlowchartCanvas
             nodes={nodes}
             positions={positions}
@@ -423,10 +429,10 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       <Toaster
         position="bottom-right"
         theme={theme}
-        className="font-mono"
         toastOptions={{
           classNames: {
-            toast: 'font-mono text-xs',
+            toast:
+              'font-sans text-xs !border-foreground/10 !bg-card/70 !text-foreground !shadow-2xl backdrop-blur-2xl',
           },
         }}
       />
