@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import FlowNode, { type NodeType } from './FlowNode';
+import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 
 interface NodeConfig {
@@ -16,6 +16,7 @@ interface NodeConfig {
   autoFocus?: boolean;
   icon?: LucideIcon;
   quickTexts?: string[];
+  quickTextGroups?: QuickTextGroup[];
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
@@ -70,9 +71,13 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   const base = NODE_HEADER_HEIGHT + NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
-  const quickTextBlock = node.quickTexts
-    ? 30 + estimateChipRows([...node.quickTexts, '+'], width - 24) * 32
-    : 0;
+  // Grouped quick inserts collapse to a single preview row — the full list
+  // lives in a hover overlay that doesn't affect node layout
+  const quickTextBlock = node.quickTextGroups
+    ? 78
+    : node.quickTexts
+      ? 30 + estimateChipRows([...node.quickTexts, '+'], width - 24) * 32
+      : 0;
 
   if (node.type === 'start' || node.type === 'agent') {
     // up to ~3 lines of text
@@ -380,6 +385,7 @@ export default function FlowchartCanvas({
             autoFocus={node.id === autoFocusId}
             icon={node.icon}
             quickTexts={node.quickTexts}
+            quickTextGroups={node.quickTextGroups}
             customQuickTexts={node.customQuickTexts}
             onAddQuickText={node.onAddQuickText}
             onRemoveQuickText={node.onRemoveQuickText}

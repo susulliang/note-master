@@ -20,6 +20,11 @@ import {
 
 export type NodeType = 'start' | 'agent' | 'input' | 'select' | 'dynamic-list' | 'hangup';
 
+export interface QuickTextGroup {
+  label: string;
+  items: string[];
+}
+
 export interface FlowNodeProps {
   id: string;
   type: NodeType;
@@ -43,6 +48,12 @@ export interface FlowNodeProps {
   icon?: LucideIcon;
   /** Quick insert chips rendered below the field (e.g. Resolution Summary) */
   quickTexts?: string[];
+  /**
+   * Grouped quick insert chips. Takes precedence over quickTexts: the panel
+   * collapses to a preview row and expands into a hover overlay panel with a
+   * smooth animation, covering neighbouring nodes (no layout reflow).
+   */
+  quickTextGroups?: QuickTextGroup[];
   /** Subset of quickTexts that were user-added (rendered with a remove button) */
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
@@ -77,6 +88,8 @@ interface ComboboxFieldProps {
   onFocus: () => void;
   onBlur: () => void;
   icon?: LucideIcon;
+  /** Node width — the dropdown matches the input width (min 300px) */
+  width?: number;
 }
 
 /**
@@ -94,6 +107,7 @@ function ComboboxField({
   onFocus,
   onBlur,
   icon: Icon,
+  width,
 }: ComboboxFieldProps) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -188,7 +202,8 @@ function ComboboxField({
           <PopoverContent
             align="start"
             sideOffset={4}
-            className="w-[300px] border-foreground/10 bg-card/75 p-0 shadow-2xl backdrop-blur-2xl"
+            style={{ width: Math.max(300, width ?? 300) }}
+            className="border-foreground/10 bg-card/75 p-0 shadow-2xl backdrop-blur-2xl"
             onInteractOutside={(e) => {
               // Keep the dropdown open while the agent works in the input
               if (wrapperRef.current?.contains(e.target as Node)) {
@@ -280,6 +295,7 @@ function FlowNodeComponent({
   autoFocus = false,
   icon: Icon,
   quickTexts,
+  quickTextGroups,
   customQuickTexts,
   onAddQuickText,
   onRemoveQuickText,
@@ -289,6 +305,14 @@ function FlowNodeComponent({
   const [isHovered, setIsHovered] = useState(false);
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
+  const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+
+  // Grouped panel: total chip count + collapsed preview (first group's chips)
+  const groupedTotal = quickTextGroups
+    ? quickTextGroups.reduce((n, g) => n + g.items.length, 0) + (customQuickTexts?.length ?? 0)
+    : 0;
+  const previewItems = quickTextGroups?.[0]?.items.slice(0, 5) ?? [];
+  const hiddenCount = Math.max(0, groupedTotal - previewItems.length);
 
   const handleFocus = useCallback(() => {
     onFocus(id);
@@ -351,6 +375,31 @@ function FlowNodeComponent({
     return () => cancelAnimationFrame(raf);
   }, [autoFocus]);
 
+  /** Shared quick-insert chip (optionally with a hover remove badge) */
+  const renderQuickChip = (qt: string, onRemove?: () => void) => (
+    <span key={qt} className="group relative">
+      <button
+        type="button"
+        onClick={() => handleInsertQuickText(qt)}
+        title={`Insert: ${qt}`}
+        className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
+      >
+        {qt}
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove quick text: ${qt}`}
+          title={`Remove: ${qt}`}
+          className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-background bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          <X className="size-2" />
+        </button>
+      )}
+    </span>
+  );
+
   const renderContent = () => {
     if (type === 'start' || type === 'agent') {
       return (
@@ -390,6 +439,7 @@ function FlowNodeComponent({
           onFocus={handleFocus}
           onBlur={onBlur}
           icon={Icon}
+          width={width}
         />
       );
     }
@@ -482,38 +532,122 @@ function FlowNodeComponent({
             placeholder="Type here..."
           />
         )}
-        {quickTexts && (
+        {quickTextGroups ? (
+          /* Grouped quick inserts — collapsed preview row, hover expands a
+             smooth overlay panel that covers neighbouring nodes */
+          <div
+            className="relative mt-2 border-t border-border/30 pt-2"
+            onMouseEnter={() => setQuickPanelOpen(true)}
+            onMouseLeave={() => setQuickPanelOpen(false)}
+          >
+            <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Quick insert
+              <span className="rounded-full bg-foreground/10 px-1.5 text-[9px] font-semibold text-muted-foreground">
+                {groupedTotal}
+              </span>
+              <span className="ml-auto flex items-center gap-0.5 text-[9px] normal-case tracking-normal text-muted-foreground/70">
+                hover to expand
+                <ChevronDown
+                  className={cn(
+                    'size-3 transition-transform duration-300',
+                    quickPanelOpen && 'rotate-180'
+                  )}
+                />
+              </span>
+            </div>
+            {/* Collapsed preview */}
+            <div className="flex flex-wrap gap-1">
+              {previewItems.map((qt) => renderQuickChip(qt))}
+              {hiddenCount > 0 && (
+                <span className="flex h-7 items-center rounded-md border border-dashed border-foreground/20 px-2 text-[11px] text-muted-foreground/80">
+                  +{hiddenCount} more
+                </span>
+              )}
+            </div>
+            {/* Expanding overlay */}
+            <div
+              className={cn(
+                'absolute left-0 right-0 top-full z-40 mt-1 origin-top transition-all duration-300 ease-out',
+                quickPanelOpen
+                  ? 'pointer-events-auto max-h-[320px] translate-y-0 opacity-100'
+                  : 'pointer-events-none max-h-0 -translate-y-2 overflow-hidden opacity-0'
+              )}
+            >
+              <div className="custom-scrollbar max-h-[320px] overflow-y-auto rounded-lg border border-foreground/15 bg-card/90 p-2 shadow-2xl backdrop-blur-2xl">
+                {customQuickTexts && customQuickTexts.length > 0 && (
+                  <div className="mb-2 last:mb-0">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Custom
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {customQuickTexts.map((qt) =>
+                        renderQuickChip(qt, () => onRemoveQuickText?.(qt))
+                      )}
+                    </div>
+                  </div>
+                )}
+                {quickTextGroups.map((g) => (
+                  <div key={g.label} className="mb-2 last:mb-0">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {g.label}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {g.items.map((qt) => renderQuickChip(qt))}
+                    </div>
+                  </div>
+                ))}
+                {onAddQuickText && (
+                  <div className="mt-1 border-t border-border/30 pt-1.5">
+                    {showAddQuickText ? (
+                      <Input
+                        value={newQuickText}
+                        onChange={(e) => setNewQuickText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddQuickTextSubmit();
+                          } else if (e.key === 'Escape') {
+                            setShowAddQuickText(false);
+                            setNewQuickText('');
+                          }
+                        }}
+                        placeholder="New quick text + Enter"
+                        autoFocus
+                        className="h-7 border-foreground/15 bg-foreground/5 text-[11px] backdrop-blur-sm"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewQuickText('');
+                          setShowAddQuickText(true);
+                        }}
+                        className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-foreground/20 text-[11px] text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+                      >
+                        <Plus className="size-3" />
+                        Add quick text
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : quickTexts ? (
+          /* Flat quick inserts (e.g. Resolution Summary, Purchase info) */
           <div className="mt-2 border-t border-border/30 pt-2">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Quick insert
             </div>
             <div className="flex flex-wrap gap-1">
-              {quickTexts.map((qt) => {
-                const isCustom = customQuickTexts?.includes(qt);
-                return (
-                  <span key={qt} className="group relative">
-                    <button
-                      type="button"
-                      onClick={() => handleInsertQuickText(qt)}
-                      title={`Insert: ${qt}`}
-                      className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
-                    >
-                      {qt}
-                    </button>
-                    {isCustom && onRemoveQuickText && (
-                      <button
-                        type="button"
-                        onClick={() => onRemoveQuickText(qt)}
-                        aria-label={`Remove quick text: ${qt}`}
-                        title={`Remove: ${qt}`}
-                        className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-background bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                      >
-                        <X className="size-2" />
-                      </button>
-                    )}
-                  </span>
-                );
-              })}
+              {quickTexts.map((qt) =>
+                renderQuickChip(
+                  qt,
+                  customQuickTexts?.includes(qt) && onRemoveQuickText
+                    ? () => onRemoveQuickText(qt)
+                    : undefined
+                )
+              )}
               {onAddQuickText && (
                 <button
                   type="button"
@@ -550,7 +684,7 @@ function FlowNodeComponent({
               />
             )}
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -569,7 +703,9 @@ function FlowNodeComponent({
         'absolute rounded-xl border bg-card/45 backdrop-blur-2xl transition-all duration-200',
         isActive ? accentGlows[accent] : accentBorders[accent],
         isHovered && !isActive && 'border-foreground/25',
-        isActive && 'animate-pulse-slow'
+        isActive && 'animate-pulse-slow',
+        // Expanded quick-insert overlay sits above neighbouring nodes
+        quickPanelOpen && 'z-30'
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}

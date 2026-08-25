@@ -28,9 +28,11 @@ import {
   RESOLUTION_QUICK_TEXTS,
   PURCHASE_QUICK_TEXTS,
   DETAILED_ISSUE_QUICK_TEXTS,
+  FAILURE_TOP_ISSUES,
+  HOWTO_TOP_ISSUES,
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
-import type { NodeType } from '@/components/FlowNode';
+import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
 
 interface NodeConfig {
   id: string;
@@ -44,6 +46,7 @@ interface NodeConfig {
   textareaRows?: number;
   icon?: LucideIcon;
   quickTexts?: string[];
+  quickTextGroups?: QuickTextGroup[];
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
@@ -120,7 +123,7 @@ const NODES: NodeConfig[] = [
     label: 'Issue Type',
     options: ISSUE_TYPES,
     accent: 'default',
-    width: 200,
+    width: 400,
     icon: TriangleAlert,
   },
   {
@@ -139,7 +142,7 @@ const NODES: NodeConfig[] = [
     label: 'Email Address',
     inputType: 'email',
     accent: 'default',
-    width: 200,
+    width: 400,
     icon: Mail,
   },
   {
@@ -342,8 +345,10 @@ export default function TicketNotesPage() {
     [setCustomResolutionQuickTexts, setCustomPurchaseQuickTexts, setCustomIssueQuickTexts]
   );
 
-  // Attach quick texts + per-node handlers to the nodes that support them
-  // (Resolution Summary, Purchase Channel and Date, Detailed Issue Description)
+  // Attach quick texts + per-node handlers to the nodes that support them.
+  // Resolution Summary and Purchase info use flat chip lists; Detailed Issue
+  // Description uses grouped chips (top-30 lists) rendered in a hover-expand
+  // overlay panel.
   const nodes = useMemo(
     () =>
       NODES.map((n) => {
@@ -354,12 +359,25 @@ export default function TicketNotesPage() {
           purchase: customPurchaseQuickTexts,
           issue: customIssueQuickTexts,
         });
-        return {
+        const base = {
           ...n,
-          quickTexts: [...QUICK_TEXT_DEFAULTS[target], ...customs],
           customQuickTexts: customs,
           onAddQuickText: (t: string) => handleAddQuickText(target, t),
           onRemoveQuickText: (t: string) => handleRemoveQuickText(target, t),
+        };
+        if (target === 'issue') {
+          return {
+            ...base,
+            quickTextGroups: [
+              { label: 'General', items: DETAILED_ISSUE_QUICK_TEXTS },
+              { label: 'Failure · Top 30', items: FAILURE_TOP_ISSUES },
+              { label: 'How to use · Top 30', items: HOWTO_TOP_ISSUES },
+            ],
+          };
+        }
+        return {
+          ...base,
+          quickTexts: [...QUICK_TEXT_DEFAULTS[target], ...customs],
         };
       }),
     [

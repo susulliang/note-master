@@ -1,4 +1,4 @@
-// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, RESOLUTION_QUICK_TEXTS, PURCHASE_QUICK_TEXTS, DETAILED_ISSUE_QUICK_TEXTS, NODE_LAYOUT_ROWS, NODE_IDS, NODE_CONNECTIONS
+// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, RESOLUTION_QUICK_TEXTS, PURCHASE_QUICK_TEXTS, DETAILED_ISSUE_QUICK_TEXTS, FAILURE_TOP_ISSUES, HOWTO_TOP_ISSUES, NODE_LAYOUT_ROWS, NODE_IDS, NODE_CONNECTIONS
 
 export const DEEBOT_MODELS = [
   // Current generation
@@ -1023,6 +1023,81 @@ export const DETAILED_ISSUE_QUICK_TEXTS = [
   'Erratic Routes/Path',
   'Connection Problem/Offline',
   'Order Inquiry/Trade-in',
+];
+
+/**
+ * Top 30 most common "Failure" issues by record count, sourced from the
+ * exported issue-type report (issue type -2026-08-25-18-59-26.xlsx,
+ * cases opened after 2026-06-01, excluding DTC).
+ */
+export const FAILURE_TOP_ISSUES = [
+  'Unable to charge/fully charge',
+  'Network setup failed',
+  'Drive wheel alarm/Stuck with foreign object',
+  'Robot making abnormal sound/noise',
+  'DToF/LDS/Navigation module malfunction',
+  'Unable to return to station',
+  'Cleaning sink is malfunction or full alarm',
+  'Auto-empty malfunction',
+  'Missed cleaning in areas',
+  'Waste water cannot be recycled',
+  'Main brush entangled / Main brush malfunction',
+  'Bumper stuck',
+  'Robot spins in circles or moves backward',
+  'Winbot water tank not spraying water',
+  'Anti-drop sensors are faulty',
+  'Automatic shutdown',
+  'Map learning failed',
+  'Deebot water tank not dispensing / Water seeping slowly',
+  'Device offline after network setup',
+  'Not working after powered on/Deebot light blinking but can not work',
+  'Unable to charge after returning to station',
+  'Clean/Dirty water tank malfunction',
+  'Unable to power on the robot',
+  'Error code',
+  'Lost map',
+  'Station self-cleaning no water come out',
+  'Mopping pad absorbs water slowly / Mopping pad not wet',
+  'Abnormal installation or wear of mopping plates',
+  'Short operating time',
+  'Dust bag alarm',
+];
+
+/**
+ * Top 30 most common "How to use" issues by record count, from the same
+ * exported report.
+ */
+export const HOWTO_TOP_ISSUES = [
+  'App connection',
+  'New machines',
+  'Set/Forgot PIN',
+  'Map creation',
+  'Map management',
+  'App Login',
+  'Cleaning solution',
+  'Scheduling',
+  'Charging instruction',
+  'OK-YIKO Assistant',
+  'Cleaning mode switch',
+  'Docking Station functions',
+  'Auto empty station',
+  'Parts maintenance',
+  'Firmware upgrade',
+  '[Area] [Custom] Functions',
+  'Use on carpets',
+  'Robot Sharing',
+  'Frequent re-washing',
+  'Wi-Fi management',
+  'Network switching',
+  'Side brush installation/removal/cleaning',
+  'Video manager',
+  'App Upgrade',
+  'Winbot spray',
+  'Driving wheel cleaning',
+  'Dust bin installation/removal/cleaning',
+  'Button instructions',
+  'Remote Control',
+  'Cleaning path blocked',
 ];
 
 export const NODE_IDS = {
