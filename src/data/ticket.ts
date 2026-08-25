@@ -1,4 +1,4 @@
-// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, RESOLUTION_QUICK_TEXTS, PURCHASE_QUICK_TEXTS, DEFAULT_NODE_POSITIONS, NODE_IDS, NODE_CONNECTIONS
+// EXPORTS: DEEBOT_MODELS, ISSUE_TYPES, RESOLUTION_QUICK_TEXTS, PURCHASE_QUICK_TEXTS, DETAILED_ISSUE_QUICK_TEXTS, NODE_LAYOUT_ROWS, NODE_IDS, NODE_CONNECTIONS
 
 export const DEEBOT_MODELS = [
   // Current generation
@@ -1015,12 +1015,20 @@ export const PURCHASE_QUICK_TEXTS = [
   '> 2 years ago',
 ];
 
+export const DETAILED_ISSUE_QUICK_TEXTS = [
+  'Battery Degraded',
+  'Cannot return to base',
+  'Wheel Stuck',
+  'Navigation Module Malfunction',
+  'Erratic Routes/Path',
+  'Connection Problem/Offline',
+  'Order Inquiry/Trade-in',
+];
+
 export const NODE_IDS = {
   START: 'start',
   FIRST_COMPLAINT: 'firstComplaint',
-  ASK_NAME: 'askName',
   CUSTOMER_NAME: 'customerName',
-  ASK_NUMBER: 'askNumber',
   CONTACT_NUMBER: 'contactNumber',
   TRANSITION: 'transition',
   DEEBOT_MODEL: 'deebotModel',
@@ -1046,42 +1054,31 @@ export interface NoteHistoryEntry {
 
 export const MAX_HISTORY_ENTRIES = 50;
 
-// Default node positions - compact vertical flow with horizontal branching
-// Coordinates are in px, relative to canvas top-left
-// Canvas: 680 wide. Center column x=220 (width 240). Side columns x=20 / x=460 (width 200).
-export const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = {
-  [NODE_IDS.START]: { x: 220, y: 20 },
-  [NODE_IDS.FIRST_COMPLAINT]: { x: 220, y: 110 },
-  [NODE_IDS.ASK_NAME]: { x: 220, y: 236 },
-  [NODE_IDS.CUSTOMER_NAME]: { x: 220, y: 330 },
-  [NODE_IDS.ASK_NUMBER]: { x: 220, y: 440 },
-  [NODE_IDS.CONTACT_NUMBER]: { x: 220, y: 534 },
-  [NODE_IDS.TRANSITION]: { x: 220, y: 644 },
-  // Model identification row - 3 side by side
-  [NODE_IDS.DEEBOT_MODEL]: { x: 20, y: 738 },
-  [NODE_IDS.SKU_NUMBER]: { x: 240, y: 738 },
-  [NODE_IDS.SERIAL_NUMBER]: { x: 460, y: 738 },
-  // Issue identification + purchase channel/date
-  [NODE_IDS.ISSUE_TYPE]: { x: 20, y: 848 },
-  [NODE_IDS.DETAILED_ISSUE]: { x: 220, y: 848 },
-  [NODE_IDS.PURCHASE_INFO]: { x: 460, y: 848 },
-  // Additional info row (email + shipping + resolution, side by side)
-  [NODE_IDS.EMAIL_ADDRESS]: { x: 20, y: 1170 },
-  [NODE_IDS.SHIPPING_ADDRESS]: { x: 240, y: 1170 },
-  // Resolution node is wider/taller (quick insert chips below the textarea)
-  [NODE_IDS.RESOLUTION_SUMMARY]: { x: 440, y: 1170 },
-  [NODE_IDS.ADDITIONAL_NOTES]: { x: 200, y: 1345 },
-  // Hang up
-  [NODE_IDS.HANG_UP]: { x: 200, y: 1475 },
-};
+/**
+ * Flow structure as layout rows (top → bottom). Rows with multiple nodes are
+ * laid out side by side when the canvas is wide enough and stacked vertically
+ * on narrow canvases. Vertical spacing between rows is derived from each
+ * node's estimated rendered height, so quick-insert chip blocks and taller
+ * textareas never cause rows to overlap.
+ */
+export const NODE_LAYOUT_ROWS: string[][] = [
+  [NODE_IDS.START],
+  [NODE_IDS.FIRST_COMPLAINT],
+  [NODE_IDS.CUSTOMER_NAME],
+  [NODE_IDS.CONTACT_NUMBER],
+  [NODE_IDS.TRANSITION],
+  [NODE_IDS.DEEBOT_MODEL, NODE_IDS.SKU_NUMBER, NODE_IDS.SERIAL_NUMBER],
+  [NODE_IDS.ISSUE_TYPE, NODE_IDS.DETAILED_ISSUE, NODE_IDS.PURCHASE_INFO],
+  [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS, NODE_IDS.RESOLUTION_SUMMARY],
+  [NODE_IDS.ADDITIONAL_NOTES],
+  [NODE_IDS.HANG_UP],
+];
 
 // Connection definitions: from -> to[]
 export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
   { from: NODE_IDS.START, to: NODE_IDS.FIRST_COMPLAINT },
-  { from: NODE_IDS.FIRST_COMPLAINT, to: NODE_IDS.ASK_NAME },
-  { from: NODE_IDS.ASK_NAME, to: NODE_IDS.CUSTOMER_NAME },
-  { from: NODE_IDS.CUSTOMER_NAME, to: NODE_IDS.ASK_NUMBER },
-  { from: NODE_IDS.ASK_NUMBER, to: NODE_IDS.CONTACT_NUMBER },
+  { from: NODE_IDS.FIRST_COMPLAINT, to: NODE_IDS.CUSTOMER_NAME },
+  { from: NODE_IDS.CUSTOMER_NAME, to: NODE_IDS.CONTACT_NUMBER },
   { from: NODE_IDS.CONTACT_NUMBER, to: NODE_IDS.TRANSITION },
   { from: NODE_IDS.TRANSITION, to: NODE_IDS.DEEBOT_MODEL },
   { from: NODE_IDS.TRANSITION, to: NODE_IDS.SKU_NUMBER },

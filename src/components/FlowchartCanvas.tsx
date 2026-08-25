@@ -1,8 +1,7 @@
-import { useRef, useState, useCallback, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType } from './FlowNode';
-import { NODE_CONNECTIONS, DEFAULT_NODE_POSITIONS } from '@/data/ticket';
-import { cn } from '@/lib/utils';
+import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 
 interface NodeConfig {
   id: string;
@@ -13,6 +12,7 @@ interface NodeConfig {
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
+  textareaRows?: number;
   icon?: LucideIcon;
   quickTexts?: string[];
   customQuickTexts?: string[];
@@ -22,6 +22,7 @@ interface NodeConfig {
 
 interface FlowchartCanvasProps {
   nodes: NodeConfig[];
+  /** Per-node position overrides (nodes the user dragged); missing ids use the responsive default layout */
   positions: Record<string, { x: number; y: number }>;
   formData: Record<string, string | string[]>;
   onFieldChange: (id: string, value: string | string[]) => void;
@@ -32,23 +33,47 @@ interface FlowchartCanvasProps {
   onHangUp: () => void;
 }
 
-// Approximate node dimensions for connection point calculation
+// Layout constants (px)
+const CANVAS_MARGIN = 24;
+const ROW_GAP = 56;
+const MIN_COL_GAP = 24;
+const MAX_COL_GAP = 48;
+const FALLBACK_CONTAINER_WIDTH = 900;
+
+// Approximate node dimensions for connection point + layout calculations
 const NODE_HEADER_HEIGHT = 16; // compact drag handle
 const NODE_VERTICAL_PADDING = 8;
 
+/**
+ * Simulate flex-wrap for the quick-insert chips to estimate how many rows
+ * they occupy inside a node (roughly 6px per char at 11px + chip padding).
+ */
+function estimateChipRows(texts: string[], contentWidth: number): number {
+  let rows = 1;
+  let line = 0;
+  for (const t of texts) {
+    const w = t.length * 6 + 20;
+    if (line > 0 && line + w > contentWidth) {
+      rows += 1;
+      line = w;
+    } else {
+      line += w + 4; // gap-1 between chips
+    }
+  }
+  return rows;
+}
+
 function estimateNodeHeight(node: NodeConfig, value: string | string[]): number {
   const base = NODE_HEADER_HEIGHT + NODE_VERTICAL_PADDING * 2;
+  const width = node.width ?? 240;
 
-  // Quick insert chips wrap ~2 per row at a 200-240px node width
-  // (+1 accounts for the add-chip button)
-  const quickTextRows = node.quickTexts
-    ? Math.ceil((node.quickTexts.length + 1) / 2)
+  const quickTextBlock = node.quickTexts
+    ? 30 + estimateChipRows([...node.quickTexts, '+'], width - 24) * 32
     : 0;
-  const quickTextBlock = node.quickTexts ? 30 + quickTextRows * 32 : 0;
 
   if (node.type === 'start' || node.type === 'agent') {
-    // ~2 lines of text
-    return base + 44;
+    // up to ~3 lines of text
+    return base + 64;
   }
   if (node.type === 'select') {
     return base + 60; // label + combobox input + padding
@@ -58,8 +83,9 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
-      // label + 2-row textarea + quick insert block
-      return base + 84 + quickTextBlock;
+      // label + textarea rows + quick insert block
+      const rows = node.textareaRows ?? 2;
+      return base + 44 + rows * 20 + quickTextBlock;
     }
     // label + single-line input (+ quick insert block when present)
     return base + 60 + quickTextBlock;
@@ -69,6 +95,67 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
     return base + 24 + steps * 32 + 32; // label + steps + add button
   }
   return base + 40;
+}
+
+/**
+ * Compute the default (non-dragged) node layout for a given canvas width.
+ * Rows are spaced by their tallest node so nothing overlaps; multi-node rows
+ * spread evenly when there is room and stack vertically on narrow canvases.
+ */
+function computeDefaultLayout(
+  nodes: NodeConfig[],
+  canvasWidth: number
+): Record<string, { x: number; y: number }> {
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const positions: Record<string, { x: number; y: number }> = {};
+
+  // Widest multi-node row decides whether side-by-side layout fits
+  const widestRow = Math.max(
+    ...NODE_LAYOUT_ROWS.map((row) =>
+      row.reduce((sum, id) => sum + (nodeById.get(id)?.width ?? 240), 0) +
+        Math.max(0, row.length - 1) * MIN_COL_GAP
+    )
+  );
+  const sideBySide = canvasWidth >= widestRow + CANVAS_MARGIN * 2;
+
+  let y = CANVAS_MARGIN;
+  for (const row of NODE_LAYOUT_ROWS) {
+    const rowNodes = row
+      .map((id) => nodeById.get(id))
+      .filter((n): n is NodeConfig => Boolean(n));
+    if (rowNodes.length === 0) continue;
+
+    if (rowNodes.length === 1 || sideBySide) {
+      const sumWidth = rowNodes.reduce((s, n) => s + (n.width ?? 240), 0);
+      const gaps = rowNodes.length - 1;
+      let colGap = MIN_COL_GAP;
+      if (gaps > 0) {
+        colGap = Math.min(
+          MAX_COL_GAP,
+          Math.max(MIN_COL_GAP, (canvasWidth - CANVAS_MARGIN * 2 - sumWidth) / gaps)
+        );
+      }
+      const totalWidth = sumWidth + colGap * gaps;
+      let x = Math.max(CANVAS_MARGIN, (canvasWidth - totalWidth) / 2);
+      for (const n of rowNodes) {
+        positions[n.id] = { x, y };
+        x += (n.width ?? 240) + colGap;
+      }
+      const rowHeight = Math.max(...rowNodes.map((n) => estimateNodeHeight(n, '')));
+      y += rowHeight + ROW_GAP;
+    } else {
+      // Narrow canvas: stack this row's nodes vertically
+      for (const n of rowNodes) {
+        positions[n.id] = {
+          x: Math.max(CANVAS_MARGIN, (canvasWidth - (n.width ?? 240)) / 2),
+          y,
+        };
+        y += estimateNodeHeight(n, '') + MIN_COL_GAP;
+      }
+      y += ROW_GAP - MIN_COL_GAP;
+    }
+  }
+  return positions;
 }
 
 export default function FlowchartCanvas({
@@ -83,19 +170,60 @@ export default function FlowchartCanvas({
   onHangUp,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
   const [dragging, setDragging] = useState<{
     id: string;
     offsetX: number;
     offsetY: number;
   } | null>(null);
 
-  // Calculate canvas size based on node positions
-  const canvasWidth = 680;
-  const canvasHeight = 1600;
+  // Track the scroll container's width so the default layout adapts to the canvas size
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Responsive default layout; stored positions (user drags) take precedence
+  const defaultLayout = useMemo(
+    () => computeDefaultLayout(nodes, containerWidth),
+    [nodes, containerWidth]
+  );
+
+  const effectivePositions = useMemo(() => {
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const n of nodes) {
+      out[n.id] = positions[n.id] ?? defaultLayout[n.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
+    }
+    return out;
+  }, [nodes, positions, defaultLayout]);
+
+  // Canvas extent grows to fit dragged nodes — no right/bottom drag limit
+  const canvasWidth = useMemo(() => {
+    let w = containerWidth;
+    for (const n of nodes) {
+      const p = effectivePositions[n.id];
+      if (p) w = Math.max(w, p.x + (n.width ?? 240) + 80);
+    }
+    return w;
+  }, [nodes, effectivePositions, containerWidth]);
+
+  const canvasHeight = useMemo(() => {
+    let h = 400;
+    for (const n of nodes) {
+      const p = effectivePositions[n.id];
+      if (p) h = Math.max(h, p.y + estimateNodeHeight(n, formData[n.id] ?? '') + 80);
+    }
+    return h;
+  }, [nodes, effectivePositions, formData]);
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
-      const pos = positions[id];
+      const pos = effectivePositions[id];
       if (!pos) return;
       setDragging({
         id,
@@ -103,15 +231,16 @@ export default function FlowchartCanvas({
         offsetY: e.clientY - pos.y,
       });
     },
-    [positions]
+    [effectivePositions]
   );
 
   useEffect(() => {
     if (!dragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newX = Math.max(0, Math.min(canvasWidth - 200, e.clientX - dragging.offsetX));
-      const newY = Math.max(0, Math.min(canvasHeight - 80, e.clientY - dragging.offsetY));
+      // No upper clamp on x/y — the canvas expands as nodes are dragged
+      const newX = Math.max(0, e.clientX - dragging.offsetX);
+      const newY = Math.max(0, e.clientY - dragging.offsetY);
       onPositionChange(dragging.id, { x: newX, y: newY });
     };
 
@@ -131,7 +260,7 @@ export default function FlowchartCanvas({
   // Scroll active node into view
   useEffect(() => {
     if (!activeNodeId || !canvasRef.current) return;
-    const pos = positions[activeNodeId];
+    const pos = effectivePositions[activeNodeId];
     if (!pos) return;
 
     const activeNode = nodes.find((n) => n.id === activeNodeId);
@@ -150,13 +279,13 @@ export default function FlowchartCanvas({
     } else if (nodeBottom > viewBottom - 60) {
       canvas.scrollTo({ top: nodeBottom - canvas.clientHeight + 60, behavior: 'smooth' });
     }
-  }, [activeNodeId, positions, nodes, formData]);
+  }, [activeNodeId, effectivePositions, nodes, formData]);
 
   // Generate SVG connection paths
   const renderConnections = () => {
     return NODE_CONNECTIONS.map((conn, idx) => {
-      const fromPos = positions[conn.from];
-      const toPos = positions[conn.to];
+      const fromPos = effectivePositions[conn.from];
+      const toPos = effectivePositions[conn.to];
       const fromNode = nodes.find((n) => n.id === conn.from);
       const toNode = nodes.find((n) => n.id === conn.to);
       if (!fromPos || !toPos || !fromNode || !toNode) return null;
@@ -241,12 +370,13 @@ export default function FlowchartCanvas({
             onFocus={onNodeFocus}
             onBlur={onNodeBlur}
             isActive={activeNodeId === node.id}
-            position={positions[node.id] ?? DEFAULT_NODE_POSITIONS[node.id] ?? { x: 100, y: 100 }}
+            position={effectivePositions[node.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN }}
             onDragStart={handleDragStart}
             options={node.options}
             accent={node.accent}
             inputType={node.inputType}
             width={node.width}
+            textareaRows={node.textareaRows}
             icon={node.icon}
             quickTexts={node.quickTexts}
             customQuickTexts={node.customQuickTexts}

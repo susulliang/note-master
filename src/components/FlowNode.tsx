@@ -36,6 +36,8 @@ export interface FlowNodeProps {
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
+  /** Visible textarea rows (defaults to 2) */
+  textareaRows?: number;
   icon?: LucideIcon;
   /** Quick insert chips rendered below the field (e.g. Resolution Summary) */
   quickTexts?: string[];
@@ -272,6 +274,7 @@ function FlowNodeComponent({
   accent = 'default',
   inputType = 'text',
   width = 240,
+  textareaRows = 2,
   icon: Icon,
   quickTexts,
   customQuickTexts,
@@ -451,7 +454,7 @@ function FlowNodeComponent({
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
             onBlur={onBlur}
-            rows={2}
+            rows={textareaRows}
             className="resize-none border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
             placeholder="Type here..."
           />

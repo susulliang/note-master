@@ -23,11 +23,11 @@ import { useScopedState } from '@/hooks/use-scoped-state';
 import {
   DEEBOT_MODELS,
   ISSUE_TYPES,
-  DEFAULT_NODE_POSITIONS,
   NODE_IDS,
   MAX_HISTORY_ENTRIES,
   RESOLUTION_QUICK_TEXTS,
   PURCHASE_QUICK_TEXTS,
+  DETAILED_ISSUE_QUICK_TEXTS,
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import type { NodeType } from '@/components/FlowNode';
@@ -41,6 +41,7 @@ interface NodeConfig {
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
+  textareaRows?: number;
   icon?: LucideIcon;
   quickTexts?: string[];
   customQuickTexts?: string[];
@@ -52,7 +53,7 @@ const NODES: NodeConfig[] = [
   {
     id: NODE_IDS.START,
     type: 'start',
-    text: "👋 Hello, thanks for calling Ecovacs. My name is Dezzy, how can I help you today?",
+    text: "👋 Hello, thanks for calling Ecovacs. My name is ____ , how can I help you today?",
     accent: 'green',
   },
   {
@@ -64,24 +65,12 @@ const NODES: NodeConfig[] = [
     icon: MessageSquareText,
   },
   {
-    id: NODE_IDS.ASK_NAME,
-    type: 'agent',
-    text: "📋 Before we get into that, can I please have your name?",
-    accent: 'blue',
-  },
-  {
     id: NODE_IDS.CUSTOMER_NAME,
     type: 'input',
     label: 'Customer Name',
     inputType: 'text',
     accent: 'default',
     icon: User,
-  },
-  {
-    id: NODE_IDS.ASK_NUMBER,
-    type: 'agent',
-    text: "📞 And the best number to reach you at?",
-    accent: 'blue',
   },
   {
     id: NODE_IDS.CONTACT_NUMBER,
@@ -148,6 +137,8 @@ const NODES: NodeConfig[] = [
     label: 'Detailed Issue Description',
     inputType: 'textarea',
     accent: 'default',
+    width: 320,
+    textareaRows: 4,
     icon: FileText,
   },
   {
@@ -196,9 +187,7 @@ const NODES: NodeConfig[] = [
 const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.START]: '',
   [NODE_IDS.FIRST_COMPLAINT]: '',
-  [NODE_IDS.ASK_NAME]: '',
   [NODE_IDS.CUSTOMER_NAME]: '',
-  [NODE_IDS.ASK_NUMBER]: '',
   [NODE_IDS.CONTACT_NUMBER]: '',
   [NODE_IDS.TRANSITION]: '',
   [NODE_IDS.DEEBOT_MODEL]: '',
@@ -214,14 +203,39 @@ const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.HANG_UP]: '',
 };
 
+// Quick-insert quick texts: built-in defaults per field, plus user-added custom
+// texts persisted separately per field in localStorage.
+type QuickTextTarget = 'resolution' | 'purchase' | 'issue';
+
+const QUICK_TEXT_DEFAULTS: Record<QuickTextTarget, string[]> = {
+  resolution: RESOLUTION_QUICK_TEXTS,
+  purchase: PURCHASE_QUICK_TEXTS,
+  issue: DETAILED_ISSUE_QUICK_TEXTS,
+};
+
+const QUICK_TEXT_NODE_TARGETS: Record<string, QuickTextTarget> = {
+  [NODE_IDS.RESOLUTION_SUMMARY]: 'resolution',
+  [NODE_IDS.PURCHASE_INFO]: 'purchase',
+  [NODE_IDS.DETAILED_ISSUE]: 'issue',
+};
+
+function getCustomQuickTexts(
+  target: QuickTextTarget,
+  all: Record<QuickTextTarget, string[]>
+): string[] {
+  return all[target];
+}
+
 export default function TicketNotesPage() {
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
     INITIAL_FORM_DATA
   );
+  // Node positions are stored as per-node drag overrides — nodes without an
+  // override follow the responsive default layout computed from canvas size.
   const [positions, setPositions] = useScopedState<Record<string, { x: number; y: number }>>(
-    'ecovacs_ticket_node_positions',
-    DEFAULT_NODE_POSITIONS
+    'ecovacs_ticket_node_position_overrides',
+    {}
   );
   const [theme, setTheme] = useScopedState<'dark' | 'light'>('ecovacs_ticket_theme', 'dark');
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
@@ -234,6 +248,10 @@ export default function TicketNotesPage() {
   );
   const [customPurchaseQuickTexts, setCustomPurchaseQuickTexts] = useScopedState<string[]>(
     'ecovacs_ticket_purchase_quicktexts',
+    []
+  );
+  const [customIssueQuickTexts, setCustomIssueQuickTexts] = useScopedState<string[]>(
+    'ecovacs_ticket_issue_quicktexts',
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -286,88 +304,74 @@ export default function TicketNotesPage() {
 
   const handleReset = useCallback(() => {
     setFormData(INITIAL_FORM_DATA);
-    setPositions(DEFAULT_NODE_POSITIONS);
+    // Clear drag overrides so all nodes return to the responsive default layout
+    setPositions({});
     setActiveNodeId(null);
   }, [setFormData, setPositions]);
 
-  // Quick texts per node: defaults + user-added (persisted separately per field)
-  const resolutionQuickTexts = useMemo(
-    () => [...RESOLUTION_QUICK_TEXTS, ...customResolutionQuickTexts],
-    [customResolutionQuickTexts]
-  );
-  const purchaseQuickTexts = useMemo(
-    () => [...PURCHASE_QUICK_TEXTS, ...customPurchaseQuickTexts],
-    [customPurchaseQuickTexts]
-  );
-
   const handleAddQuickText = useCallback(
-    (target: 'resolution' | 'purchase', text: string) => {
+    (target: QuickTextTarget, text: string) => {
       const t = text.trim();
       if (!t) return;
-      const defaults = target === 'resolution' ? RESOLUTION_QUICK_TEXTS : PURCHASE_QUICK_TEXTS;
-      const customs =
-        target === 'resolution' ? customResolutionQuickTexts : customPurchaseQuickTexts;
-      if (defaults.includes(t) || customs.includes(t)) {
+      const customs = getCustomQuickTexts(target, {
+        resolution: customResolutionQuickTexts,
+        purchase: customPurchaseQuickTexts,
+        issue: customIssueQuickTexts,
+      });
+      if (QUICK_TEXT_DEFAULTS[target].includes(t) || customs.includes(t)) {
         toast.info(`"${t}" already exists.`);
         return;
       }
-      if (target === 'resolution') {
-        setCustomResolutionQuickTexts((prev) => [...prev, t]);
-      } else {
-        setCustomPurchaseQuickTexts((prev) => [...prev, t]);
-      }
+      if (target === 'resolution') setCustomResolutionQuickTexts((prev) => [...prev, t]);
+      else if (target === 'purchase') setCustomPurchaseQuickTexts((prev) => [...prev, t]);
+      else setCustomIssueQuickTexts((prev) => [...prev, t]);
       toast.success(`Quick text "${t}" added.`);
     },
     [
       customResolutionQuickTexts,
       customPurchaseQuickTexts,
+      customIssueQuickTexts,
       setCustomResolutionQuickTexts,
       setCustomPurchaseQuickTexts,
+      setCustomIssueQuickTexts,
     ]
   );
 
   const handleRemoveQuickText = useCallback(
-    (target: 'resolution' | 'purchase', text: string) => {
-      if (target === 'resolution') {
-        setCustomResolutionQuickTexts((prev) => prev.filter((t) => t !== text));
-      } else {
-        setCustomPurchaseQuickTexts((prev) => prev.filter((t) => t !== text));
-      }
+    (target: QuickTextTarget, text: string) => {
+      const remove = (prev: string[]) => prev.filter((t) => t !== text);
+      if (target === 'resolution') setCustomResolutionQuickTexts(remove);
+      else if (target === 'purchase') setCustomPurchaseQuickTexts(remove);
+      else setCustomIssueQuickTexts(remove);
       toast.success(`Quick text "${text}" removed.`);
     },
-    [setCustomResolutionQuickTexts, setCustomPurchaseQuickTexts]
+    [setCustomResolutionQuickTexts, setCustomPurchaseQuickTexts, setCustomIssueQuickTexts]
   );
 
-  // Attach quick texts + per-node handlers to the Resolution Summary and
-  // Purchase Channel and Date node configs
+  // Attach quick texts + per-node handlers to the nodes that support them
+  // (Resolution Summary, Purchase Channel and Date, Detailed Issue Description)
   const nodes = useMemo(
     () =>
       NODES.map((n) => {
-        if (n.id === NODE_IDS.RESOLUTION_SUMMARY) {
-          return {
-            ...n,
-            quickTexts: resolutionQuickTexts,
-            customQuickTexts: customResolutionQuickTexts,
-            onAddQuickText: (t: string) => handleAddQuickText('resolution', t),
-            onRemoveQuickText: (t: string) => handleRemoveQuickText('resolution', t),
-          };
-        }
-        if (n.id === NODE_IDS.PURCHASE_INFO) {
-          return {
-            ...n,
-            quickTexts: purchaseQuickTexts,
-            customQuickTexts: customPurchaseQuickTexts,
-            onAddQuickText: (t: string) => handleAddQuickText('purchase', t),
-            onRemoveQuickText: (t: string) => handleRemoveQuickText('purchase', t),
-          };
-        }
-        return n;
+        const target = QUICK_TEXT_NODE_TARGETS[n.id];
+        if (!target) return n;
+        const customs = getCustomQuickTexts(target, {
+          resolution: customResolutionQuickTexts,
+          purchase: customPurchaseQuickTexts,
+          issue: customIssueQuickTexts,
+        });
+        return {
+          ...n,
+          quickTexts: [...QUICK_TEXT_DEFAULTS[target], ...customs],
+          customQuickTexts: customs,
+          onAddQuickText: (t: string) => handleAddQuickText(target, t),
+          onRemoveQuickText: (t: string) => handleRemoveQuickText(target, t),
+        };
       }),
     [
-      resolutionQuickTexts,
-      purchaseQuickTexts,
       customResolutionQuickTexts,
       customPurchaseQuickTexts,
+      customIssueQuickTexts,
       handleAddQuickText,
       handleRemoveQuickText,
     ]
