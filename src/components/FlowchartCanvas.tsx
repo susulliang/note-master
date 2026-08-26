@@ -2,6 +2,7 @@ import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as R
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
+import type { AmrTemplate } from '@/lib/amr-templates';
 
 interface NodeConfig {
   id: string;
@@ -20,6 +21,8 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
+  templateMatches?: AmrTemplate[];
+  onOpenTemplate?: (template: AmrTemplate) => void;
 }
 
 interface FlowchartCanvasProps {
@@ -74,13 +77,20 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   const base = NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
+  // Matching AMR template chips (label + wrapped rows)
+  const templateBlock =
+    node.templateMatches && node.templateMatches.length > 0 && node.onOpenTemplate
+      ? 24 + estimateChipRows(node.templateMatches.map((t) => t.name), width - 20) * 28
+      : 0;
+
   // Grouped quick inserts collapse to a single preview row — the full list
   // lives in a hover overlay that doesn't affect node layout
-  const quickTextBlock = node.quickTextGroups
-    ? 64
-    : node.quickTexts
-      ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
-      : 0;
+  const quickTextBlock =
+    (node.quickTextGroups
+      ? 64
+      : node.quickTexts
+        ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
+        : 0) + templateBlock;
 
   if (node.type === 'start' || node.type === 'agent') {
     // up to ~3 lines of text
@@ -441,6 +451,8 @@ export default function FlowchartCanvas({
             customQuickTexts={node.customQuickTexts}
             onAddQuickText={node.onAddQuickText}
             onRemoveQuickText={node.onRemoveQuickText}
+            templateMatches={node.templateMatches}
+            onOpenTemplate={node.onOpenTemplate}
           />
         ))}
       </div>

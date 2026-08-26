@@ -17,6 +17,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import type { AmrTemplate } from '@/lib/amr-templates';
 
 export type NodeType = 'start' | 'agent' | 'input' | 'select' | 'dynamic-list' | 'hangup';
 
@@ -58,6 +59,9 @@ export interface FlowNodeProps {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
+  /** Fuzzy-matched AMR templates for the typed issue text */
+  templateMatches?: AmrTemplate[];
+  onOpenTemplate?: (template: AmrTemplate) => void;
 }
 
 // Shared glass shadow: specular top edge + soft drop shadow (+ optional accent glow)
@@ -299,6 +303,8 @@ function FlowNodeComponent({
   customQuickTexts,
   onAddQuickText,
   onRemoveQuickText,
+  templateMatches,
+  onOpenTemplate,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -540,6 +546,26 @@ function FlowNodeComponent({
             className="h-9 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
             placeholder="Type here..."
           />
+        )}
+        {templateMatches && templateMatches.length > 0 && onOpenTemplate && (
+          <div className="mt-1.5 border-t border-border/30 pt-1.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Matching AMR templates
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {templateMatches.map((tpl) => (
+                <button
+                  key={tpl.file}
+                  type="button"
+                  onClick={() => onOpenTemplate(tpl)}
+                  title={`Open template: ${tpl.name}`}
+                  className="h-7 min-w-0 max-w-full truncate rounded-md border border-accent/40 bg-accent/10 px-2 text-[11px] font-semibold text-accent backdrop-blur-sm transition-colors hover:border-accent hover:bg-accent/25 hover:text-accent-foreground"
+                >
+                  {tpl.name}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {quickTextGroups ? (
           /* Grouped quick inserts — collapsed preview row, hover expands a

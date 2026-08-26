@@ -18,6 +18,8 @@ import type { LucideIcon } from 'lucide-react';
 import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
+import TemplatePanel from '@/components/TemplatePanel';
+import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
   normalizeTheme,
@@ -40,6 +42,7 @@ import {
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
+import type { AmrTemplate } from '@/lib/amr-templates';
 
 interface NodeConfig {
   id: string;
@@ -57,6 +60,8 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
+  templateMatches?: AmrTemplate[];
+  onOpenTemplate?: (template: AmrTemplate) => void;
 }
 
 const NODES: NodeConfig[] = [
@@ -276,6 +281,9 @@ export default function TicketNotesPage() {
   const [showOutput, setShowOutput] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
+  // AMR template search + viewer
+  const [templateMatches, setTemplateMatches] = useState<AmrTemplate[]>([]);
+  const [openTemplate, setOpenTemplate] = useState<AmrTemplate | null>(null);
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -292,6 +300,49 @@ export default function TicketNotesPage() {
   useEffect(() => {
     setActiveNodeId(NODE_IDS.DETAILED_ISSUE);
   }, []);
+
+  // Debounced fuzzy search of AMR template names against the issue text
+  useEffect(() => {
+    const issueText =
+      typeof formData[NODE_IDS.DETAILED_ISSUE] === 'string'
+        ? (formData[NODE_IDS.DETAILED_ISSUE] as string)
+        : '';
+    const timer = window.setTimeout(() => {
+      setTemplateMatches(searchTemplates(issueText));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [formData]);
+
+  const handleOpenTemplate = useCallback((tpl: AmrTemplate) => {
+    setOpenTemplate(tpl);
+  }, []);
+
+  const handleCloseTemplate = useCallback(() => {
+    setOpenTemplate(null);
+  }, []);
+
+  // Append a clicked template line to the Resolution Summary, exactly like
+  // a quick-insert chip ("->" separator between entries)
+  const handleInsertTemplateLine = useCallback(
+    (line: string) => {
+      setFormData((prev) => {
+        const current =
+          typeof prev[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
+            ? (prev[NODE_IDS.RESOLUTION_SUMMARY] as string).trimEnd()
+            : '';
+        let next: string;
+        if (!current) {
+          next = line;
+        } else if (current.endsWith('->')) {
+          next = `${current} ${line}`;
+        } else {
+          next = `${current} -> ${line}`;
+        }
+        return { ...prev, [NODE_IDS.RESOLUTION_SUMMARY]: next };
+      });
+    },
+    [setFormData]
+  );
 
   const handleFieldChange = useCallback(
     (id: string, value: string | string[]) => {
@@ -410,6 +461,8 @@ export default function TicketNotesPage() {
               { label: 'Failure · Top 30', items: FAILURE_TOP_ISSUES },
               { label: 'How to use · Top 30', items: HOWTO_TOP_ISSUES },
             ],
+            templateMatches,
+            onOpenTemplate: handleOpenTemplate,
           };
         }
         return {
@@ -421,8 +474,10 @@ export default function TicketNotesPage() {
       customResolutionQuickTexts,
       customPurchaseQuickTexts,
       customIssueQuickTexts,
+      templateMatches,
       handleAddQuickText,
       handleRemoveQuickText,
+      handleOpenTemplate,
     ]
   );
 
@@ -534,6 +589,12 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         onOpenChange={setShowOutput}
         noteText={noteText}
         onSaveToHistory={handleOutputClose}
+      />
+
+      <TemplatePanel
+        template={openTemplate}
+        onClose={handleCloseTemplate}
+        onInsertLine={handleInsertTemplateLine}
       />
 
       <Toaster
