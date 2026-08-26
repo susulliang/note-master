@@ -71,24 +71,21 @@ export interface FlowNodeProps {
   onOpenTemplate?: (template: AmrTemplate) => void;
 }
 
-// Shared glass shadow: specular top edge + soft drop shadow (+ optional accent glow)
-const glassShadow = (glow?: string) =>
-  `shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_32px_rgba(0,0,0,0.35)${
-    glow ? `,${glow}` : ''
-  }]`;
-
+// iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
+// accentBorders = resting glass with a faint tinted edge; accentGlows = active
+// glass that lights up and protrudes further towards the user.
 const accentBorders: Record<string, string> = {
-  green: `border-primary/50 ${glassShadow('0_0_24px_rgba(35_134_54,0.18)')}`,
-  blue: `border-info/50 ${glassShadow('0_0_24px_rgba(88_166_255,0.18)')}`,
-  red: `border-destructive/50 ${glassShadow('0_0_24px_rgba(248_81_73,0.18)')}`,
-  default: `border-foreground/15 ${glassShadow()}`,
+  green: 'glass-panel glass-accent-green',
+  blue: 'glass-panel glass-accent-blue',
+  red: 'glass-panel glass-accent-red',
+  default: 'glass-panel',
 };
 
 const accentGlows: Record<string, string> = {
-  green: `border-primary ${glassShadow('0_0_36px_rgba(35_134_54,0.45)')}`,
-  blue: `border-info ${glassShadow('0_0_36px_rgba(88_166_255,0.45)')}`,
-  red: `border-destructive ${glassShadow('0_0_36px_rgba(248_81_73,0.45)')}`,
-  default: `border-foreground/35 ${glassShadow('0_0_28px_rgba(255,255,255,0.14)')}`,
+  green: 'glass-panel glass-accent-green glass-active',
+  blue: 'glass-panel glass-accent-blue glass-active',
+  red: 'glass-panel glass-accent-red glass-active',
+  default: 'glass-panel glass-active',
 };
 
 interface ComboboxFieldProps {
@@ -188,7 +185,7 @@ function ComboboxField({
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder="Type or select..."
-          className="h-9 border-foreground/15 bg-foreground/5 pr-8 text-sm backdrop-blur-sm"
+          className="h-9 pr-8 text-sm"
         />
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -214,7 +211,7 @@ function ComboboxField({
             align="start"
             sideOffset={4}
             style={{ width: Math.max(300, width ?? 300) }}
-            className="border-foreground/10 bg-card/75 p-0 shadow-2xl backdrop-blur-2xl"
+            className="glass-panel rounded-xl p-0"
             onInteractOutside={(e) => {
               // Keep the dropdown open while the agent works in the input
               if (wrapperRef.current?.contains(e.target as Node)) {
@@ -315,7 +312,6 @@ function FlowNodeComponent({
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isHovered, setIsHovered] = useState(false);
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
@@ -404,7 +400,7 @@ function FlowNodeComponent({
         type="button"
         onClick={() => handleInsertQuickText(qt)}
         title={`Insert: ${qt}`}
-        className="h-7 min-w-0 max-w-full truncate rounded-md border border-foreground/15 bg-foreground/5 px-2 text-[11px] font-semibold text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-primary/15 hover:text-primary"
+        className="glass-chip h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold"
       >
         {qt}
       </button>
@@ -442,7 +438,7 @@ function FlowNodeComponent({
           <button
             type="button"
             onClick={() => onChange('hangup')}
-            className="group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-destructive/50 bg-gradient-to-b from-destructive to-destructive/85 px-3 text-sm font-semibold text-destructive-foreground shadow-[0_6px_20px_rgba(248,81,73,0.35)] transition-all duration-200 hover:border-destructive hover:brightness-110 hover:shadow-[0_8px_28px_rgba(248,81,73,0.5)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="glass-btn glass-btn-destructive group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-semibold text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <PhoneOff className="size-4 shrink-0 transition-transform duration-200 group-hover:rotate-12" />
             Hang Up &amp; Generate Note
@@ -472,7 +468,7 @@ function FlowNodeComponent({
                   type="button"
                   onClick={() => onOpenTemplate(tpl)}
                   title={`Open template: ${tpl.name}`}
-                  className="h-7 min-w-0 max-w-full truncate rounded-md border border-accent/40 bg-accent/10 px-2 text-[11px] font-semibold text-accent backdrop-blur-sm transition-colors hover:border-accent hover:bg-accent/25 hover:text-accent-foreground"
+                  className="glass-chip glass-chip-accent h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold"
                 >
                   {tpl.name}
                 </button>
@@ -526,7 +522,7 @@ function FlowNodeComponent({
                   }}
                   onFocus={handleFocus}
                   onBlur={onBlur}
-                  className="h-8 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
+                  className="h-8 text-sm"
                 />
                 <Button
                   type="button"
@@ -576,7 +572,7 @@ function FlowNodeComponent({
             onFocus={handleFocus}
             onBlur={onBlur}
             rows={textareaRows}
-            className="resize-none border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
+            className="resize-none text-sm"
             placeholder="Type here..."
           />
         ) : (
@@ -586,7 +582,7 @@ function FlowNodeComponent({
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
             onBlur={onBlur}
-            className="h-9 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
+            className="h-9 text-sm"
             placeholder="Type here..."
           />
         )}
@@ -631,7 +627,7 @@ function FlowNodeComponent({
                   : 'pointer-events-none max-h-0 -translate-y-2 overflow-hidden opacity-0'
               )}
             >
-              <div className="custom-scrollbar max-h-[320px] overflow-y-auto rounded-lg border border-foreground/15 bg-card/90 p-2 shadow-2xl backdrop-blur-2xl">
+              <div className="glass-panel custom-scrollbar max-h-[320px] overflow-y-auto rounded-lg p-2">
                 {customQuickTexts && customQuickTexts.length > 0 && (
                   <div className="mb-2 last:mb-0">
                     <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -671,7 +667,7 @@ function FlowNodeComponent({
                         }}
                         placeholder="New quick text + Enter"
                         autoFocus
-                        className="h-7 border-foreground/15 bg-foreground/5 text-[11px] backdrop-blur-sm"
+                        className="h-7 text-[11px]"
                       />
                     ) : (
                       <button
@@ -680,7 +676,7 @@ function FlowNodeComponent({
                           setNewQuickText('');
                           setShowAddQuickText(true);
                         }}
-                        className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-foreground/20 text-[11px] text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+                        className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-foreground/20 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
                       >
                         <Plus className="size-3" />
                         Add quick text
@@ -738,7 +734,7 @@ function FlowNodeComponent({
                 }}
                 placeholder="New quick text + Enter"
                 autoFocus
-                className="mt-1.5 h-7 border-foreground/15 bg-foreground/5 text-[11px] backdrop-blur-sm"
+                className="mt-1.5 h-7 text-[11px]"
               />
             )}
           </div>
@@ -756,16 +752,13 @@ function FlowNodeComponent({
         width,
       }}
       className={cn(
-        'absolute cursor-grab select-none rounded-xl border bg-card/45 backdrop-blur-2xl transition-all duration-200 active:cursor-grabbing',
+        'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         isActive ? accentGlows[accent] : accentBorders[accent],
-        isHovered && !isActive && 'border-foreground/25',
         isActive && 'animate-pulse-slow',
         // Expanded quick-insert overlay sits above neighbouring nodes
         quickPanelOpen && 'z-30'
       )}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       onMouseDown={handleMouseDown}
     >
       {renderContent()}

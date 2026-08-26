@@ -226,12 +226,13 @@ export default function FloatingControls({
         <div className={cn('flex flex-col items-center gap-1', !atTop && 'flex-col-reverse')}>
           <div
             className={cn(
-              'flex items-center gap-1 rounded-full border p-1 transition-all duration-500',
+              'glass-panel flex items-center gap-1 rounded-full p-1 transition-all duration-500',
               dimmed
                 ? // Idle: 20% opacity, frost almost gone
-                  'border-foreground/5 bg-card/10 opacity-20 shadow-none backdrop-blur-[2px]'
-                : // Active: full opacity + frosted glass
-                  'border-foreground/10 bg-card/40 opacity-100 shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'
+                  'glass-dim opacity-20'
+                : // Hovering: full frosted glass
+                  'opacity-100',
+              isDragging && 'glass-active'
             )}
           >
             <Button
@@ -267,7 +268,7 @@ export default function FloatingControls({
                   <RotateCcw className="size-4" />
                 </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent className="border-foreground/15 bg-card/70 backdrop-blur-2xl">
+              <AlertDialogContent className="glass-panel rounded-2xl">
                 <AlertDialogHeader>
                   <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
                   <AlertDialogDescription>
@@ -322,11 +323,11 @@ export default function FloatingControls({
             aria-label="Drag toolbar to a corner"
             title="Drag to move"
             className={cn(
-              'flex h-5 w-16 cursor-grab items-center justify-center rounded-full transition-opacity duration-300 active:cursor-grabbing',
+              'glass-chip flex h-5 w-16 cursor-grab items-center justify-center rounded-full transition-opacity duration-300 active:cursor-grabbing',
               handleVisible || isDragging ? 'opacity-100' : 'pointer-events-none opacity-0'
             )}
           >
-            <div className="h-1 w-10 rounded-full bg-foreground/45 shadow-[0_1px_3px_rgba(0,0,0,0.4)] transition-colors hover:bg-foreground/70" />
+            <div className="h-1 w-10 rounded-full bg-foreground/45 shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
           </div>
         </div>
 

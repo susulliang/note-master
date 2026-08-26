@@ -64,7 +64,7 @@ export default function OutputModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl border-foreground/15 bg-card/70 shadow-2xl backdrop-blur-3xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl">
             <span className="text-primary">📋</span>
@@ -76,8 +76,8 @@ export default function OutputModal({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Editable glass note panel */}
-        <div className="relative rounded-lg border border-foreground/10 bg-foreground/5 p-3 text-sm leading-relaxed text-foreground backdrop-blur-md">
+        {/* Editable glass note panel — the textarea itself is the glass field */}
+        <div className="relative rounded-xl p-3">
           <Button
             variant="secondary"
             size="sm"

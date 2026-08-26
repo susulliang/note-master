@@ -48,7 +48,7 @@ export default function TemplatePanel({
 
   return (
     <Dialog open={template !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden border-foreground/15 bg-card/70 shadow-2xl backdrop-blur-3xl">
+      <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
         {template && parsed && (
           <>
             <DialogHeader className="shrink-0">
@@ -79,7 +79,7 @@ export default function TemplatePanel({
                 onChange={(e) => onResolutionChange(e.target.value)}
                 rows={3}
                 spellCheck={false}
-                className="resize-none border-foreground/15 bg-foreground/5 text-xs font-semibold leading-relaxed backdrop-blur-sm"
+                className="resize-none text-xs font-semibold leading-relaxed"
                 placeholder="Added lines will appear here..."
               />
             </div>
@@ -97,7 +97,7 @@ export default function TemplatePanel({
                     type="button"
                     onClick={() => handleInsert(line.text)}
                     title="Add to Resolution Summary"
-                    className="group block w-full rounded-lg border border-foreground/10 bg-foreground/5 px-3 py-2 text-left text-xs font-semibold leading-relaxed text-foreground backdrop-blur-sm transition-all duration-150 hover:border-primary/50 hover:bg-primary/10 hover:shadow-[0_0_16px_rgba(35,134,54,0.15)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="glass-chip group block w-full rounded-lg px-3 py-2 text-left text-xs font-semibold leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span className="mr-2 inline-flex size-5 shrink-0 select-none items-center justify-center rounded bg-foreground/10 text-[10px] font-semibold text-muted-foreground transition-colors group-hover:bg-primary/25 group-hover:text-primary">
                       {idx + 1}

@@ -43,7 +43,7 @@ export default function HistoryPanel({
   };
 
   return (
-    <div className="flex max-h-[calc(100vh-7rem)] w-[360px] flex-col overflow-hidden rounded-xl border border-foreground/15 bg-card/70 shadow-2xl backdrop-blur-2xl">
+    <div className="glass-panel flex max-h-[calc(100vh-7rem)] w-[360px] flex-col overflow-hidden rounded-xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-foreground/10 px-3 py-2.5">
         <div className="flex items-center gap-2">

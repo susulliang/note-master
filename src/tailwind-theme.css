@@ -515,6 +515,183 @@ body[data-ui-scale="small"] {
   .no-default-hover-elevate {}
   .no-default-active-elevate {}
 
+  /* ---------------------------------------------------------------- */
+  /*  iOS-26-style liquid glass — panels that float and protrude      */
+  /*  towards the user: layered specular edges, refraction glare,     */
+  /*  deep multi-layer shadows, barely visible borders.               */
+  /*  Accent/active variants only retune the CSS vars.                */
+  /* ---------------------------------------------------------------- */
+  .glass-panel {
+    --glass-border: color-mix(in oklab, var(--foreground) 9%, transparent);
+    --glass-glow: 0 0 0 transparent;
+    background:
+      /* refraction glare — light catching the top of the lens */
+      linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.14),
+        rgba(255, 255, 255, 0.02) 45%,
+        rgba(255, 255, 255, 0.07)
+      ),
+      color-mix(in oklab, var(--card) 52%, transparent);
+    backdrop-filter: blur(24px) saturate(1.65) brightness(1.05);
+    -webkit-backdrop-filter: blur(24px) saturate(1.65) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      /* thick-glass edge: specular top, light catch bottom, side bevels */
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+      inset 2px 0 6px -2px rgba(255, 255, 255, 0.16),
+      inset -2px 0 6px -2px rgba(0, 0, 0, 0.06),
+      /* floating: contact + key + ambient drop shadows */
+      0 1px 1px rgba(0, 0, 0, 0.1),
+      0 6px 16px rgba(0, 0, 0, 0.16),
+      0 24px 56px rgba(0, 0, 0, 0.24),
+      var(--glass-glow);
+  }
+
+  .glass-accent-green {
+    --glass-border: color-mix(in oklab, var(--primary) 50%, transparent);
+    --glass-glow: 0 0 18px color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+  .glass-accent-blue {
+    --glass-border: color-mix(in oklab, var(--info) 50%, transparent);
+    --glass-glow: 0 0 18px color-mix(in oklab, var(--info) 22%, transparent);
+  }
+  .glass-accent-red {
+    --glass-border: color-mix(in oklab, var(--destructive) 50%, transparent);
+    --glass-glow: 0 0 18px color-mix(in oklab, var(--destructive) 22%, transparent);
+  }
+
+  /* Active/focused node — glass lights up and protrudes further */
+  .glass-active {
+    --glass-glow:
+      0 0 2px color-mix(in oklab, var(--glass-border) 70%, transparent),
+      0 0 36px color-mix(in oklab, var(--glass-border) 35%, transparent);
+    background:
+      linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.18),
+        rgba(255, 255, 255, 0.03) 45%,
+        rgba(255, 255, 255, 0.1)
+      ),
+      color-mix(in oklab, var(--card) 62%, transparent);
+  }
+
+  /* Idle dimming (toolbar): almost no frost, no shadow */
+  .glass-dim {
+    background: color-mix(in oklab, var(--card) 10%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    box-shadow: none;
+    border-color: color-mix(in oklab, var(--foreground) 5%, transparent);
+  }
+
+  /* Recessed glass for text fields */
+  .glass-field {
+    background: color-mix(in oklab, var(--foreground) 5%, transparent);
+    backdrop-filter: blur(10px) saturate(1.35);
+    -webkit-backdrop-filter: blur(10px) saturate(1.35);
+    border: 1px solid color-mix(in oklab, var(--foreground) 11%, transparent);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.16),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.07),
+      0 1px 0 rgba(255, 255, 255, 0.05);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .glass-field:hover {
+    border-color: color-mix(in oklab, var(--ring) 35%, transparent);
+  }
+  .glass-field:focus,
+  .glass-field:focus-visible {
+    outline: none;
+    border-color: color-mix(in oklab, var(--ring) 55%, transparent);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.12),
+      0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent),
+      0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Small glass chips (quick inserts, template matches, handle bar) */
+  .glass-chip {
+    border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
+    color: var(--muted-foreground);
+    backdrop-filter: blur(8px) saturate(1.3);
+    -webkit-backdrop-filter: blur(8px) saturate(1.3);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 1px 3px rgba(0, 0, 0, 0.12);
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .glass-chip:hover {
+    border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+    background: color-mix(in oklab, var(--primary) 16%, transparent);
+    color: var(--primary);
+  }
+  .glass-chip-accent {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+  .glass-chip-accent:hover {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 24%, transparent);
+  }
+
+  /* Glass buttons — tinted lenses that sit above the surface */
+  .glass-btn {
+    --glass-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
+    --glass-border: color-mix(in oklab, var(--foreground) 12%, transparent);
+    --glass-btn-glow: transparent;
+    background: var(--glass-fill);
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.14),
+      0 6px 16px var(--glass-btn-glow);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      filter 0.15s ease;
+  }
+  .glass-btn:hover {
+    filter: brightness(1.08);
+  }
+  .glass-btn:active {
+    transform: scale(0.98);
+    filter: brightness(0.96);
+  }
+  .glass-btn-primary {
+    --glass-fill: linear-gradient(
+      to bottom,
+      color-mix(in oklab, white 20%, var(--primary)),
+      var(--primary)
+    );
+    --glass-border: color-mix(in oklab, white 25%, var(--primary));
+    --glass-btn-glow: color-mix(in oklab, var(--primary) 40%, transparent);
+  }
+  .glass-btn-destructive {
+    --glass-fill: linear-gradient(
+      to bottom,
+      color-mix(in oklab, white 20%, var(--destructive)),
+      var(--destructive)
+    );
+    --glass-border: color-mix(in oklab, white 25%, var(--destructive));
+    --glass-btn-glow: color-mix(in oklab, var(--destructive) 40%, transparent);
+  }
+  .glass-btn-secondary {
+    --glass-fill: color-mix(in oklab, var(--secondary) 18%, transparent);
+    --glass-border: color-mix(in oklab, var(--secondary) 45%, transparent);
+  }
+
 
   /**
    * Toggleable backgrounds go behind the content. Hoverable/active goes on top.

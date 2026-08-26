@@ -639,8 +639,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         theme={getThemeMeta(theme).toaster}
         toastOptions={{
           classNames: {
-            toast:
-              'font-sans text-sm !border-foreground/10 !bg-card/70 !text-foreground !shadow-2xl backdrop-blur-2xl',
+            toast: 'glass-panel font-sans text-sm !text-foreground',
           },
         }}
       />
