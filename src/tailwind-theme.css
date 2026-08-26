@@ -248,6 +248,11 @@ body[data-ui-scale="large"] {
   zoom: 1.25; /* keep in sync with LARGE_UI_ZOOM in src/lib/themes.ts */
 }
 
+/* Narrow screens: one size down so wide UI fits without scrollbars */
+body[data-ui-scale="small"] {
+  zoom: 0.875; /* keep in sync with SMALL_UI_ZOOM in src/lib/themes.ts */
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

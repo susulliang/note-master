@@ -227,38 +227,49 @@ export default function FlowchartCanvas({
     }
   }, [containerWidth, dragging, hasOverrides, onLayoutReset]);
 
+  // Clamp node widths to the available canvas width so the default layout
+  // always fits — the horizontal scrollbar never appears (dragged nodes
+  // still extend the canvas on purpose)
+  const effectiveNodes = useMemo(() => {
+    const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
+    return nodes.map((n) => {
+      const w = n.width ?? 240;
+      return w > avail ? { ...n, width: Math.floor(avail) } : n;
+    });
+  }, [nodes, containerWidth]);
+
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(nodes, containerWidth),
-    [nodes, containerWidth]
+    () => computeDefaultLayout(effectiveNodes, containerWidth),
+    [effectiveNodes, containerWidth]
   );
 
   const effectivePositions = useMemo(() => {
     const out: Record<string, { x: number; y: number }> = {};
-    for (const n of nodes) {
+    for (const n of effectiveNodes) {
       out[n.id] = positions[n.id] ?? defaultLayout[n.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
     }
     return out;
-  }, [nodes, positions, defaultLayout]);
+  }, [effectiveNodes, positions, defaultLayout]);
 
   // Canvas extent grows to fit dragged nodes — no right/bottom drag limit
   const canvasWidth = useMemo(() => {
     let w = containerWidth;
-    for (const n of nodes) {
+    for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
       if (p) w = Math.max(w, p.x + (n.width ?? 240) + 80);
     }
     return w;
-  }, [nodes, effectivePositions, containerWidth]);
+  }, [effectiveNodes, effectivePositions, containerWidth]);
 
   const canvasHeight = useMemo(() => {
     let h = 400;
-    for (const n of nodes) {
+    for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
       if (p) h = Math.max(h, p.y + estimateNodeHeight(n, formData[n.id] ?? '') + 80);
     }
     return h;
-  }, [nodes, effectivePositions, formData]);
+  }, [effectiveNodes, effectivePositions, formData]);
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -309,7 +320,7 @@ export default function FlowchartCanvas({
     const pos = effectivePositions[activeNodeId];
     if (!pos) return;
 
-    const activeNode = nodes.find((n) => n.id === activeNodeId);
+    const activeNode = effectiveNodes.find((n) => n.id === activeNodeId);
     const nodeHeight = activeNode
       ? estimateNodeHeight(activeNode, formData[activeNodeId] ?? '')
       : 80;
@@ -325,15 +336,15 @@ export default function FlowchartCanvas({
     } else if (nodeBottom > viewBottom - 60) {
       canvas.scrollTo({ top: nodeBottom - canvas.clientHeight + 60, behavior: 'smooth' });
     }
-  }, [activeNodeId, effectivePositions, nodes, formData]);
+  }, [activeNodeId, effectivePositions, effectiveNodes, formData]);
 
   // Generate SVG connection paths
   const renderConnections = () => {
     return NODE_CONNECTIONS.map((conn, idx) => {
       const fromPos = effectivePositions[conn.from];
       const toPos = effectivePositions[conn.to];
-      const fromNode = nodes.find((n) => n.id === conn.from);
-      const toNode = nodes.find((n) => n.id === conn.to);
+      const fromNode = effectiveNodes.find((n) => n.id === conn.from);
+      const toNode = effectiveNodes.find((n) => n.id === conn.to);
       if (!fromPos || !toPos || !fromNode || !toNode) return null;
 
       const fromHeight = estimateNodeHeight(fromNode, formData[conn.from] ?? '');
@@ -398,7 +409,7 @@ export default function FlowchartCanvas({
         </svg>
 
         {/* Nodes layer */}
-        {nodes.map((node) => (
+        {effectiveNodes.map((node) => (
           <FlowNode
             key={node.id}
             id={node.id}

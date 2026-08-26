@@ -44,11 +44,16 @@ export function nextTheme(id: ThemeId): ThemeId {
 }
 
 /**
- * UI scale ("old people mode") — a 1.25x zoom of the whole app: every font
- * jumps ~2 Tailwind sizes (e.g. text-sm 14px renders ~17.5px ≈ text-lg) and
- * all boxes/inputs scale correspondingly. Keep in sync with the
- * `body[data-ui-scale="large"]` zoom value in tailwind-theme.css.
+ * UI scale — "large" is old-people mode (1.25x zoom: every font ~2 Tailwind
+ * sizes up, all boxes/inputs scale with it); "small" auto-applies on narrow
+ * screens (0.875x, one size down) so wide UI never triggers scrollbars.
+ * Keep in sync with the `body[data-ui-scale=...]` zoom values in
+ * tailwind-theme.css.
  */
-export type UiScale = 'normal' | 'large';
+export type UiScale = 'small' | 'normal' | 'large';
 
 export const LARGE_UI_ZOOM = 1.25;
+export const SMALL_UI_ZOOM = 0.875;
+
+/** Below this viewport width the small scale applies automatically */
+export const NARROW_SCREEN_WIDTH = 768;

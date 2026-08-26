@@ -54,7 +54,7 @@ const DIM_DELAY = 8000;
  * - An iPhone-style handle bar below/above the pill is the drag grip: it
  *   shows on hover, auto-hides 3s after the mouse leaves, and dragging it
  *   snaps the toolbar to the nearest screen corner on release.
- * - After 8s idle the pill dims to 10% opacity with almost no frost;
+ * - After 8s idle the pill dims to 20% opacity with almost no frost;
  *   hovering brings it right back.
  */
 export default function FloatingControls({
@@ -228,8 +228,8 @@ export default function FloatingControls({
             className={cn(
               'flex items-center gap-1 rounded-full border p-1 transition-all duration-500',
               dimmed
-                ? // Idle: 10% opacity, frost almost gone
-                  'border-foreground/5 bg-card/10 opacity-10 shadow-none backdrop-blur-[2px]'
+                ? // Idle: 20% opacity, frost almost gone
+                  'border-foreground/5 bg-card/10 opacity-20 shadow-none backdrop-blur-[2px]'
                 : // Active: full opacity + frosted glass
                   'border-foreground/10 bg-card/40 opacity-100 shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'
             )}

@@ -19,7 +19,14 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import { useScopedState } from '@/hooks/use-scoped-state';
-import { normalizeTheme, nextTheme, getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
+import {
+  normalizeTheme,
+  nextTheme,
+  getThemeMeta,
+  NARROW_SCREEN_WIDTH,
+  type ThemeId,
+  type UiScale,
+} from '@/lib/themes';
 import {
   DEEBOT_MODELS,
   ISSUE_TYPES,
@@ -237,6 +244,18 @@ export default function TicketNotesPage() {
   const theme = normalizeTheme(rawTheme);
   // UI scale ("old people mode"): 1.25x zoom of the entire app
   const [uiScale, setUiScale] = useScopedState<UiScale>('ecovacs_ticket_ui_scale', 'normal');
+  // Narrow screens auto-apply the small scale (one size down) unless the
+  // user explicitly turned large mode on
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window === 'undefined' ? NARROW_SCREEN_WIDTH + 1 : window.innerWidth
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const effectiveScale: UiScale =
+    uiScale === 'large' ? 'large' : windowWidth < NARROW_SCREEN_WIDTH ? 'small' : 'normal';
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
     'ecovacs_ticket_notes_history',
     []
@@ -265,8 +284,8 @@ export default function TicketNotesPage() {
 
   // Apply UI scale to <body> (zoom handled in CSS)
   useEffect(() => {
-    document.body.setAttribute('data-ui-scale', uiScale);
-  }, [uiScale]);
+    document.body.setAttribute('data-ui-scale', effectiveScale);
+  }, [effectiveScale]);
 
   // Customers usually state their concern first — focus the Detailed Issue
   // Description node when the page opens
