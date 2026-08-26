@@ -19,7 +19,14 @@ import {
 } from '@/components/ui/command';
 import type { AmrTemplate } from '@/lib/amr-templates';
 
-export type NodeType = 'start' | 'agent' | 'input' | 'select' | 'dynamic-list' | 'hangup';
+export type NodeType =
+  | 'start'
+  | 'agent'
+  | 'input'
+  | 'select'
+  | 'dynamic-list'
+  | 'hangup'
+  | 'templates';
 
 export interface QuickTextGroup {
   label: string;
@@ -444,6 +451,42 @@ function FlowNodeComponent({
       );
     }
 
+    if (type === 'templates') {
+      const matches = templateMatches ?? [];
+      return (
+        <div className="px-2.5 py-1.5">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {Icon && <Icon className="size-3.5 text-accent/70" />}
+            {label}
+            {matches.length > 0 && (
+              <span className="rounded-full bg-accent/15 px-1.5 text-[9px] font-semibold text-accent">
+                {matches.length}
+              </span>
+            )}
+          </div>
+          {matches.length > 0 && onOpenTemplate ? (
+            <div className="flex flex-wrap gap-1">
+              {matches.map((tpl) => (
+                <button
+                  key={tpl.file}
+                  type="button"
+                  onClick={() => onOpenTemplate(tpl)}
+                  title={`Open template: ${tpl.name}`}
+                  className="h-7 min-w-0 max-w-full truncate rounded-md border border-accent/40 bg-accent/10 px-2 text-[11px] font-semibold text-accent backdrop-blur-sm transition-colors hover:border-accent hover:bg-accent/25 hover:text-accent-foreground"
+                >
+                  {tpl.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground/80">
+              No matches yet — type in the Detailed Issue Description to find AMR templates.
+            </p>
+          )}
+        </div>
+      );
+    }
+
     if (type === 'select') {
       return (
         <ComboboxField
@@ -546,26 +589,6 @@ function FlowNodeComponent({
             className="h-9 border-foreground/15 bg-foreground/5 text-sm backdrop-blur-sm"
             placeholder="Type here..."
           />
-        )}
-        {templateMatches && templateMatches.length > 0 && onOpenTemplate && (
-          <div className="mt-1.5 border-t border-border/30 pt-1.5">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Matching AMR templates
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {templateMatches.map((tpl) => (
-                <button
-                  key={tpl.file}
-                  type="button"
-                  onClick={() => onOpenTemplate(tpl)}
-                  title={`Open template: ${tpl.name}`}
-                  className="h-7 min-w-0 max-w-full truncate rounded-md border border-accent/40 bg-accent/10 px-2 text-[11px] font-semibold text-accent backdrop-blur-sm transition-colors hover:border-accent hover:bg-accent/25 hover:text-accent-foreground"
-                >
-                  {tpl.name}
-                </button>
-              ))}
-            </div>
-          </div>
         )}
         {quickTextGroups ? (
           /* Grouped quick inserts — collapsed preview row, hover expands a

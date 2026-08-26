@@ -77,24 +77,23 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   const base = NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
-  // Matching AMR template chips (label + wrapped rows)
-  const templateBlock =
-    node.templateMatches && node.templateMatches.length > 0 && node.onOpenTemplate
-      ? 24 + estimateChipRows(node.templateMatches.map((t) => t.name), width - 20) * 28
-      : 0;
-
   // Grouped quick inserts collapse to a single preview row — the full list
   // lives in a hover overlay that doesn't affect node layout
-  const quickTextBlock =
-    (node.quickTextGroups
-      ? 64
-      : node.quickTexts
-        ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
-        : 0) + templateBlock;
+  const quickTextBlock = node.quickTextGroups
+    ? 64
+    : node.quickTexts
+      ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
+      : 0;
 
   if (node.type === 'start' || node.type === 'agent') {
     // up to ~3 lines of text
     return base + 56;
+  }
+  if (node.type === 'templates') {
+    // label + wrapped match chip rows (or the empty-state hint line)
+    const matches = node.templateMatches ?? [];
+    const chipRows = matches.length > 0 ? estimateChipRows(matches.map((t) => t.name), width - 20) : 1;
+    return base + 24 + chipRows * 28;
   }
   if (node.type === 'select') {
     return base + 56; // label + combobox input + padding

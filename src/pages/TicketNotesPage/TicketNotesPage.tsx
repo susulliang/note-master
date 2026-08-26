@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   StickyNote,
   ShoppingBag,
+  FileSearch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import FloatingControls from '@/components/FloatingControls';
@@ -128,6 +129,14 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 220,
     icon: ShoppingBag,
+  },
+  {
+    id: NODE_IDS.TEMPLATE_MATCHES,
+    type: 'templates',
+    label: 'Matching AMR Templates',
+    accent: 'default',
+    width: 480,
+    icon: FileSearch,
   },
   {
     id: NODE_IDS.ISSUE_TYPE,
@@ -301,14 +310,23 @@ export default function TicketNotesPage() {
     setActiveNodeId(NODE_IDS.DETAILED_ISSUE);
   }, []);
 
-  // Debounced fuzzy search of AMR template names against the issue text
+  // Debounced fuzzy search of AMR template names. The selected issue type
+  // and Deebot model are prefixed onto the typed issue text so model- and
+  // category-specific templates surface more reliably.
   useEffect(() => {
-    const issueText =
-      typeof formData[NODE_IDS.DETAILED_ISSUE] === 'string'
-        ? (formData[NODE_IDS.DETAILED_ISSUE] as string)
-        : '';
+    const getStr = (key: string) => {
+      const v = formData[key];
+      return typeof v === 'string' ? v : '';
+    };
+    const query = [
+      getStr(NODE_IDS.ISSUE_TYPE),
+      getStr(NODE_IDS.DEEBOT_MODEL),
+      getStr(NODE_IDS.DETAILED_ISSUE),
+    ]
+      .filter(Boolean)
+      .join(' ');
     const timer = window.setTimeout(() => {
-      setTemplateMatches(searchTemplates(issueText));
+      setTemplateMatches(searchTemplates(query));
     }, 300);
     return () => window.clearTimeout(timer);
   }, [formData]);
@@ -340,6 +358,14 @@ export default function TicketNotesPage() {
         }
         return { ...prev, [NODE_IDS.RESOLUTION_SUMMARY]: next };
       });
+    },
+    [setFormData]
+  );
+
+  // Direct edits to the Resolution Summary from the template panel
+  const handleResolutionChange = useCallback(
+    (text: string) => {
+      setFormData((prev) => ({ ...prev, [NODE_IDS.RESOLUTION_SUMMARY]: text }));
     },
     [setFormData]
   );
@@ -436,10 +462,17 @@ export default function TicketNotesPage() {
   // Attach quick texts + per-node handlers to the nodes that support them.
   // Resolution Summary and Purchase info use flat chip lists; Detailed Issue
   // Description uses grouped chips (top-30 lists) rendered in a hover-expand
-  // overlay panel.
+  // overlay panel. AMR template matches render in their own grid box.
   const nodes = useMemo(
     () =>
       NODES.map((n) => {
+        if (n.id === NODE_IDS.TEMPLATE_MATCHES) {
+          return {
+            ...n,
+            templateMatches,
+            onOpenTemplate: handleOpenTemplate,
+          };
+        }
         const target = QUICK_TEXT_NODE_TARGETS[n.id];
         if (!target) return n;
         const customs = getCustomQuickTexts(target, {
@@ -461,8 +494,6 @@ export default function TicketNotesPage() {
               { label: 'Failure · Top 30', items: FAILURE_TOP_ISSUES },
               { label: 'How to use · Top 30', items: HOWTO_TOP_ISSUES },
             ],
-            templateMatches,
-            onOpenTemplate: handleOpenTemplate,
           };
         }
         return {
@@ -595,6 +626,12 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         template={openTemplate}
         onClose={handleCloseTemplate}
         onInsertLine={handleInsertTemplateLine}
+        resolutionText={
+          typeof formData[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
+            ? (formData[NODE_IDS.RESOLUTION_SUMMARY] as string)
+            : ''
+        }
+        onResolutionChange={handleResolutionChange}
       />
 
       <Toaster
