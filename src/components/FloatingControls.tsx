@@ -34,18 +34,28 @@ interface FloatingControlsProps {
 /** Screen corner the toolbar is docked to */
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
+/** Snug 8px insets — the pill sits right at the screen corner */
 const CORNER_CLASSES: Record<Corner, string> = {
-  tl: 'left-4 top-4',
-  tr: 'right-4 top-4',
-  bl: 'left-4 bottom-4',
-  br: 'right-4 bottom-4',
+  tl: 'left-2 top-2',
+  tr: 'right-2 top-2',
+  bl: 'left-2 bottom-2',
+  br: 'right-2 bottom-2',
 };
 
+/** Handle bar auto-hides this long after the mouse leaves (ms) */
+const HANDLE_HIDE_DELAY = 3000;
+/** Toolbar dims to 10% opacity + minimal frost after this long idle (ms) */
+const DIM_DELAY = 8000;
+
 /**
- * Glass pill with the global actions (History + Reset + theme cycle + large
- * text) that floats over the canvas. The pill is draggable — grab it anywhere
- * except its buttons and it snaps to the nearest screen corner on release.
- * Toggling History opens a floating panel beside the pill.
+ * Glass pill with the global actions (History + Reset + large text + theme
+ * cycle) pinned to a screen corner.
+ *
+ * - An iPhone-style handle bar below/above the pill is the drag grip: it
+ *   shows on hover, auto-hides 3s after the mouse leaves, and dragging it
+ *   snaps the toolbar to the nearest screen corner on release.
+ * - After 8s idle the pill dims to 10% opacity with almost no frost;
+ *   hovering brings it right back.
  */
 export default function FloatingControls({
   theme,
@@ -65,8 +75,12 @@ export default function FloatingControls({
   // Docked corner (persisted) + transient free position while dragging
   const [corner, setCorner] = useScopedState<Corner>('ecovacs_ticket_toolbar_corner', 'tr');
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  // Handle-bar visibility (hover to show, 3s auto-hide) + idle dimming
+  const [handleVisible, setHandleVisible] = useState(false);
+  const [dimmed, setDimmed] = useState(false);
+
+  const containerRef = useRef<HTMLDivElement>(null);
   const dragPosRef = useRef<{ x: number; y: number } | null>(null);
-  const pillRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     grabOffsetX: number;
     grabOffsetY: number;
@@ -74,18 +88,55 @@ export default function FloatingControls({
     height: number;
     zoom: number;
   } | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const dimTimerRef = useRef<number | null>(null);
 
-  const handlePillMouseDown = useCallback(
+  const isDragging = dragPos !== null;
+
+  const clearTimers = useCallback(() => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    if (dimTimerRef.current !== null) {
+      window.clearTimeout(dimTimerRef.current);
+      dimTimerRef.current = null;
+    }
+  }, []);
+
+  // Start the idle-dim countdown on mount
+  useEffect(() => {
+    dimTimerRef.current = window.setTimeout(() => setDimmed(true), DIM_DELAY);
+    return () => clearTimers();
+  }, [clearTimers]);
+
+  const handleMouseEnter = useCallback(() => {
+    clearTimers();
+    setDimmed(false);
+    setHandleVisible(true);
+  }, [clearTimers]);
+
+  const handleMouseLeave = useCallback(() => {
+    // While dragging, the cursor may briefly leave the container — stay live
+    if (isDragging) return;
+    clearTimers();
+    hideTimerRef.current = window.setTimeout(() => setHandleVisible(false), HANDLE_HIDE_DELAY);
+    dimTimerRef.current = window.setTimeout(() => setDimmed(true), DIM_DELAY);
+  }, [clearTimers, isDragging]);
+
+  const handleDragStart = useCallback(
     (e: ReactMouseEvent) => {
-      // Buttons keep their normal click behavior
-      if ((e.target as HTMLElement).closest('button')) return;
-      const pill = pillRef.current;
-      if (!pill) return;
+      const container = containerRef.current;
+      if (!container) return;
       e.preventDefault();
-      const rect = pill.getBoundingClientRect();
-      // gBCR is in visual px, offsetWidth in layout px — the ratio is the
-      // effective zoom (old-people mode), used to compensate drag deltas
-      const zoom = rect.width / pill.offsetWidth || 1;
+      clearTimers();
+      setDimmed(false);
+      setHandleVisible(true);
+      // Measure the whole container (pill + handle + panel) so grabbing the
+      // handle never jumps the pill — gBCR is visual px, offsetWidth layout
+      // px, their ratio is the effective body zoom (large-text mode)
+      const rect = container.getBoundingClientRect();
+      const zoom = rect.width / container.offsetWidth || 1;
       dragRef.current = {
         grabOffsetX: e.clientX - rect.left,
         grabOffsetY: e.clientY - rect.top,
@@ -96,10 +147,8 @@ export default function FloatingControls({
       dragPosRef.current = { x: rect.left, y: rect.top };
       setDragPos({ x: rect.left, y: rect.top });
     },
-    []
+    [clearTimers]
   );
-
-  const isDragging = dragPos !== null;
 
   useEffect(() => {
     if (!isDragging) return;
@@ -107,7 +156,7 @@ export default function FloatingControls({
     const handleMouseMove = (e: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      // Visual (viewport) coordinates, clamped so the pill stays on screen
+      // Visual (viewport) coordinates, clamped so the toolbar stays on screen
       const x = Math.min(
         Math.max(8, e.clientX - d.grabOffsetX),
         Math.max(8, window.innerWidth - d.width - 8)
@@ -120,20 +169,17 @@ export default function FloatingControls({
       setDragPos({ x, y });
     };
 
-    const handleMouseUp = () => {
-      // Snap to the nearest corner by pill center
-      const pos = dragPosRef.current;
-      const d = dragRef.current;
-      if (pos && d) {
-        const cx = pos.x + d.width / 2;
-        const cy = pos.y + d.height / 2;
-        const v = cy < window.innerHeight / 2 ? 't' : 'b';
-        const h = cx < window.innerWidth / 2 ? 'l' : 'r';
-        setCorner(`${v}${h}` as Corner);
-      }
+    const handleMouseUp = (e: MouseEvent) => {
+      // Snap to the corner nearest the drop point (cursor position)
+      const v = e.clientY < window.innerHeight / 2 ? 't' : 'b';
+      const h = e.clientX < window.innerWidth / 2 ? 'l' : 'r';
+      setCorner(`${v}${h}` as Corner);
       dragPosRef.current = null;
       dragRef.current = null;
       setDragPos(null);
+      // Fresh interaction: restart the auto-hide / dim countdowns
+      hideTimerRef.current = window.setTimeout(() => setHandleVisible(false), HANDLE_HIDE_DELAY);
+      dimTimerRef.current = window.setTimeout(() => setDimmed(true), DIM_DELAY);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -155,8 +201,11 @@ export default function FloatingControls({
       )}
 
       <div
+        ref={containerRef}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         className={cn(
-          'absolute z-50 flex gap-2',
+          'fixed z-50 flex gap-2',
           atTop ? 'flex-col' : 'flex-col-reverse',
           atRight ? 'items-end' : 'items-start',
           !isDragging && CORNER_CLASSES[corner]
@@ -173,95 +222,112 @@ export default function FloatingControls({
             : undefined
         }
       >
-        <div
-          ref={pillRef}
-          onMouseDown={handlePillMouseDown}
-          className={cn(
-            'flex cursor-grab items-center gap-1 rounded-full border border-foreground/10 bg-card/40 p-1 shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl active:cursor-grabbing',
-            '[&_button]:cursor-pointer [&_button]:select-none',
-            isDragging && 'shadow-[0_16px_48px_rgba(0,0,0,0.5)]'
-          )}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleHistory}
+        {/* Pill + attached drag handle (handle faces the screen edge) */}
+        <div className={cn('flex flex-col items-center gap-1', !atTop && 'flex-col-reverse')}>
+          <div
             className={cn(
-              'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
-              historyOpen && 'bg-foreground/10 text-foreground'
+              'flex items-center gap-1 rounded-full border p-1 transition-all duration-500',
+              dimmed
+                ? // Idle: 10% opacity, frost almost gone
+                  'border-foreground/5 bg-card/10 opacity-10 shadow-none backdrop-blur-[2px]'
+                : // Active: full opacity + frosted glass
+                  'border-foreground/10 bg-card/40 opacity-100 shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'
             )}
-            aria-label="Toggle history"
-            title="History"
           >
-            <History className="size-4" />
-            {history.length > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-                {history.length > 99 ? '99+' : history.length}
-              </span>
-            )}
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleHistory}
+              className={cn(
+                'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
+                historyOpen && 'bg-foreground/10 text-foreground'
+              )}
+              aria-label="Toggle history"
+              title="History"
+            >
+              <History className="size-4" />
+              {history.length > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                  {history.length > 99 ? '99+' : history.length}
+                </span>
+              )}
+            </Button>
 
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+            <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label="Reset form"
-                title="Reset"
-              >
-                <RotateCcw className="size-4" />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="border-foreground/15 bg-card/70 backdrop-blur-2xl">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will clear all ticket data and reset node positions. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={onReset}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Reset form"
+                  title="Reset"
                 >
-                  Reset
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  <RotateCcw className="size-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="border-foreground/15 bg-card/70 backdrop-blur-2xl">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will clear all ticket data and reset node positions. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={onReset}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Reset
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+            <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleUiScale}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleUiScale}
+              className={cn(
+                'size-8 rounded-full text-muted-foreground hover:text-foreground',
+                uiScale === 'large' && 'bg-primary/15 text-primary'
+              )}
+              aria-label="Toggle larger text"
+              title={uiScale === 'large' ? 'Larger text: on — click to turn off' : 'Larger text: off — click to turn on'}
+            >
+              <Type className="size-4" />
+            </Button>
+
+            <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+
+            <Button
+              variant="ghost"
+              onClick={onCycleTheme}
+              className="h-8 gap-1.5 rounded-full px-2.5 text-muted-foreground hover:text-foreground"
+              aria-label={`Switch theme (current: ${themeMeta.label})`}
+              title={`Theme: ${themeMeta.label} — click to cycle`}
+            >
+              <ThemeIcon className="size-4" />
+              <span className="text-xs font-medium">{themeMeta.label}</span>
+            </Button>
+          </div>
+
+          {/* iPhone-style drag handle: hover to show, auto-hides after 3s */}
+          <div
+            onMouseDown={handleDragStart}
+            aria-label="Drag toolbar to a corner"
+            title="Drag to move"
             className={cn(
-              'size-8 rounded-full text-muted-foreground hover:text-foreground',
-              uiScale === 'large' && 'bg-primary/15 text-primary'
+              'flex h-5 w-16 cursor-grab items-center justify-center rounded-full transition-opacity duration-300 active:cursor-grabbing',
+              handleVisible || isDragging ? 'opacity-100' : 'pointer-events-none opacity-0'
             )}
-            aria-label="Toggle larger text"
-            title={uiScale === 'large' ? 'Larger text: on — click to turn off' : 'Larger text: off — click to turn on'}
           >
-            <Type className="size-4" />
-          </Button>
-
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
-
-          <Button
-            variant="ghost"
-            onClick={onCycleTheme}
-            className="h-8 gap-1.5 rounded-full px-2.5 text-muted-foreground hover:text-foreground"
-            aria-label={`Switch theme (current: ${themeMeta.label})`}
-            title={`Theme: ${themeMeta.label} — click to cycle`}
-          >
-            <ThemeIcon className="size-4" />
-            <span className="text-xs font-medium">{themeMeta.label}</span>
-          </Button>
+            <div className="h-1 w-10 rounded-full bg-foreground/45 shadow-[0_1px_3px_rgba(0,0,0,0.4)] transition-colors hover:bg-foreground/70" />
+          </div>
         </div>
 
         {historyOpen && (
