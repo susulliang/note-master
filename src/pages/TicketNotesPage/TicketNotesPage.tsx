@@ -43,7 +43,7 @@ import {
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
-import type { AmrTemplate } from '@/lib/amr-templates';
+import type { TemplateEntry } from '@/lib/amr-templates';
 
 interface NodeConfig {
   id: string;
@@ -61,8 +61,8 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  templateMatches?: AmrTemplate[];
-  onOpenTemplate?: (template: AmrTemplate) => void;
+  templateMatches?: TemplateEntry[];
+  onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
 const NODES: NodeConfig[] = [
@@ -133,7 +133,7 @@ const NODES: NodeConfig[] = [
   {
     id: NODE_IDS.TEMPLATE_MATCHES,
     type: 'templates',
-    label: 'Matching AMR Templates',
+    label: 'Matching Templates',
     accent: 'default',
     width: 480,
     icon: FileSearch,
@@ -291,8 +291,8 @@ export default function TicketNotesPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
   // AMR template search + viewer
-  const [templateMatches, setTemplateMatches] = useState<AmrTemplate[]>([]);
-  const [openTemplate, setOpenTemplate] = useState<AmrTemplate | null>(null);
+  const [templateMatches, setTemplateMatches] = useState<TemplateEntry[]>([]);
+  const [openTemplate, setOpenTemplate] = useState<TemplateEntry | null>(null);
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -331,7 +331,7 @@ export default function TicketNotesPage() {
     return () => window.clearTimeout(timer);
   }, [formData]);
 
-  const handleOpenTemplate = useCallback((tpl: AmrTemplate) => {
+  const handleOpenTemplate = useCallback((tpl: TemplateEntry) => {
     setOpenTemplate(tpl);
   }, []);
 

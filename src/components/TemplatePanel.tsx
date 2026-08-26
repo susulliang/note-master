@@ -8,11 +8,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { parseTemplate, type AmrTemplate } from '@/lib/amr-templates';
+import { parseTemplate, type TemplateEntry } from '@/lib/amr-templates';
 import { toast } from 'sonner';
 
 interface TemplatePanelProps {
-  template: AmrTemplate | null;
+  template: TemplateEntry | null;
   onClose: () => void;
   /** Appends the clicked line to the Resolution Summary (like quick inserts) */
   onInsertLine: (line: string) => void;
@@ -37,7 +37,7 @@ export default function TemplatePanel({
   onResolutionChange,
 }: TemplatePanelProps) {
   const parsed = useMemo(
-    () => (template ? parseTemplate(template.html) : null),
+    () => (template ? parseTemplate(template) : null),
     [template]
   );
 
@@ -58,7 +58,10 @@ export default function TemplatePanel({
               </DialogTitle>
               <DialogDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground">
                 <span className="uppercase tracking-wider">
-                  AMR Template #{template.id}
+                  {template.kind === 'tbs' ? 'TBS Steps' : 'AMR Template'} #{template.id}
+                </span>
+                <span className="rounded-full bg-foreground/10 px-1.5 text-[9px] text-muted-foreground">
+                  {template.category}
                 </span>
                 {parsed.meta.map((m) => (
                   <span key={m} className="truncate">

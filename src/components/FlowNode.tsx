@@ -17,7 +17,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { AmrTemplate } from '@/lib/amr-templates';
+import type { TemplateEntry } from '@/lib/amr-templates';
 
 export type NodeType =
   | 'start'
@@ -66,9 +66,9 @@ export interface FlowNodeProps {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  /** Fuzzy-matched AMR templates for the typed issue text */
-  templateMatches?: AmrTemplate[];
-  onOpenTemplate?: (template: AmrTemplate) => void;
+  /** Fuzzy-matched templates (AMR emails + macro TBS steps) for the typed issue text */
+  templateMatches?: TemplateEntry[];
+  onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -464,19 +464,32 @@ function FlowNodeComponent({
             <div className="flex flex-wrap gap-1">
               {matches.map((tpl) => (
                 <button
-                  key={tpl.file}
+                  key={`${tpl.kind}-${tpl.file}`}
                   type="button"
                   onClick={() => onOpenTemplate(tpl)}
-                  title={`Open template: ${tpl.name}`}
-                  className="glass-chip glass-chip-accent h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold"
+                  title={`Open ${tpl.kind === 'tbs' ? 'TBS steps' : 'AMR template'}: ${tpl.name}`}
+                  className={cn(
+                    'glass-chip h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold',
+                    tpl.kind === 'amr' && 'glass-chip-accent'
+                  )}
                 >
+                  <span
+                    className={cn(
+                      'mr-1 rounded px-1 text-[8px] font-bold uppercase tracking-wider',
+                      tpl.kind === 'amr'
+                        ? 'bg-accent/20 text-accent'
+                        : 'bg-primary/20 text-primary'
+                    )}
+                  >
+                    {tpl.kind === 'amr' ? 'AMR' : 'TBS'}
+                  </span>
                   {tpl.name}
                 </button>
               ))}
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground/80">
-              No matches yet — type in the Detailed Issue Description to find AMR templates.
+              No matches yet — type in the Detailed Issue Description to find AMR email templates and TBS steps.
             </p>
           )}
         </div>

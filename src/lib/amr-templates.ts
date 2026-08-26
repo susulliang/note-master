@@ -1,26 +1,37 @@
 /**
- * AMR email / TBS templates bundled from /AMR_Templates at build time.
+ * Support templates bundled at build time:
+ * - AMR email/TBS templates from /AMR_Templates (HTML)
+ * - Macro TBS steps from /Macro/split (Markdown)
  * Filenames are the search index ("026_Driving_Wheel_Stuck.html" →
- * "driving wheel stuck"); HTML content is parsed on demand for the
- * viewer panel.
+ * "driving wheel stuck"); content is parsed on demand for the viewer panel.
  */
 
-export interface AmrTemplate {
+export interface TemplateEntry {
   /** Numeric prefix from the filename, e.g. "026" */
   id: string;
   /** Full filename, e.g. "026_Driving_Wheel_Stuck.html" */
   file: string;
-  /** Human name derived from the filename, e.g. "Driving Wheel Stuck" */
+  /** Display name (filename-derived, or the markdown heading) */
   name: string;
   /** Pre-tokenized (stemmed) name for fuzzy matching */
   tokens: string[];
   /** Stemmed name joined with spaces, for phrase matching */
   nameStem: string;
-  /** Raw HTML content */
-  html: string;
+  /** Raw content: HTML for AMR templates, Markdown for macro TBS steps */
+  raw: string;
+  /** Where the template came from */
+  kind: 'amr' | 'tbs';
+  /** Grouping label, e.g. "AMR Email" / "TBS · General" */
+  category: string;
 }
 
 const rawModules = import.meta.glob('/AMR_Templates/*.html', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+const macroModules = import.meta.glob('/Macro/split/**/*.md', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -57,25 +68,48 @@ function stem(token: string): string {
   return s;
 }
 
-export const AMR_TEMPLATES: AmrTemplate[] = Object.entries(rawModules)
-  .map(([path, html]) => {
+function fileNameToName(file: string): string {
+  return file
+    .replace(/\.(html|md)$/i, '')
+    .replace(/^\d+_/, '')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
+/** All searchable templates: AMR emails + macro TBS steps */
+export const ALL_TEMPLATES: TemplateEntry[] = [
+  ...Object.entries(rawModules).map(([path, raw]) => {
     const file = path.split('/').pop() ?? path;
-    const id = file.slice(0, 3);
-    const name = file
-      .replace(/\.html$/i, '')
-      .replace(/^\d+_/, '')
-      .replace(/_/g, ' ')
-      .trim();
+    const name = fileNameToName(file);
     return {
       file,
-      id,
+      id: file.slice(0, 3),
       name,
       tokens: tokenize(name).map(stem),
       nameStem: tokenize(name).map(stem).join(' '),
-      html,
+      raw,
+      kind: 'amr' as const,
+      category: 'AMR Email',
     };
-  })
-  .sort((a, b) => a.id.localeCompare(b.id));
+  }),
+  ...Object.entries(macroModules)
+    .filter(([path]) => !/INDEX/i.test(path))
+    .map(([path, raw]) => {
+      const file = path.split('/').pop() ?? path;
+      const name = fileNameToName(file);
+      const isGeneral = path.includes('/general/');
+      return {
+        file,
+        id: file.slice(0, 3),
+        name,
+        tokens: tokenize(name).map(stem),
+        nameStem: tokenize(name).map(stem).join(' '),
+        raw,
+        kind: 'tbs' as const,
+        category: isGeneral ? 'TBS · General' : 'TBS',
+      };
+    }),
+].sort((a, b) => Number(a.id) - Number(b.id) || a.name.localeCompare(b.name));
 
 // ---------------------------------------------------------------------
 //  Scoring: IDF-weighted fuzzy matching
@@ -83,7 +117,7 @@ export const AMR_TEMPLATES: AmrTemplate[] = Object.entries(rawModules)
 
 /** Document frequency of each (stemmed) token across template names */
 const DF = new Map<string, number>();
-for (const t of AMR_TEMPLATES) {
+for (const t of ALL_TEMPLATES) {
   for (const tok of new Set(t.tokens)) {
     DF.set(tok, (DF.get(tok) ?? 0) + 1);
   }
@@ -92,7 +126,7 @@ for (const t of AMR_TEMPLATES) {
 /** Rare tokens (e.g. "winbot", "dustbag") rank higher than common ones ("water") */
 function idf(token: string): number {
   const df = DF.get(token) ?? 0;
-  return Math.max(0.4, Math.log10(AMR_TEMPLATES.length / (df + 1)));
+  return Math.max(0.4, Math.log10(ALL_TEMPLATES.length / (df + 1)));
 }
 
 /** Subsequence check for lenient fuzzy matching */
@@ -118,8 +152,8 @@ function tokenPairScore(qt: string, nt: string): number {
 }
 
 /**
- * Fuzzy-search template names against the query text (typically the issue
- * type + model + detailed issue description).
+ * Fuzzy-search template names (AMR emails + macro TBS steps) against the
+ * query text (typically the issue type + model + detailed issue description).
  *
  * - Each query token is matched to its best keyword per template; tokens
  *   that match nothing simply contribute zero — not all words need to match.
@@ -131,7 +165,7 @@ function tokenPairScore(qt: string, nt: string): number {
  * - Weak matches are pruned relative to the best hit, keeping the list
  *   accurate rather than exhaustive.
  */
-export function searchTemplates(query: string, limit = 8): AmrTemplate[] {
+export function searchTemplates(query: string, limit = 8): TemplateEntry[] {
   const rawTokens = tokenize(query);
   const queryTokens = [
     ...new Set(rawTokens.filter((t) => t.length >= 3 && !STOPWORDS.has(t)).map(stem)),
@@ -149,7 +183,7 @@ export function searchTemplates(query: string, limit = 8): AmrTemplate[] {
     }
   }
 
-  const scored = AMR_TEMPLATES.map((t) => {
+  const scored = ALL_TEMPLATES.map((t) => {
     let score = 0;
     for (const qt of queryTokens) {
       let best = 0;
@@ -198,12 +232,71 @@ function extractTitle(doc: Document): string {
   );
 }
 
+/** Strip markdown formatting and mojibake/non-ASCII artifacts from a TBS line */
+function cleanMarkdownLine(s: string): string {
+  return s
+    // Unescape escaped punctuation (the source files escape . ( ) [ ] _ - etc.)
+    .replace(/\\([._\-()[\]~`>#*])/g, '$1')
+    // Drop embedded images entirely (internal authcode URLs won't render)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    // Links → their text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    // Bold / italic / code markers
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    // Non-ASCII (CJK notes + encoding mojibake) — the steps are English
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
- * Parse a template's HTML body into metadata (before the first <hr>:
- * Folder / Template ID / Description) and clickable content lines
- * (paragraphs, list items, <br>-separated div/p segments after the <hr>).
+ * Parse a macro TBS markdown file into a title (first heading) and
+ * clickable step lines. Standalone image lines and video file references
+ * are dropped; numbered/bulleted items and paragraphs become lines.
  */
-export function parseTemplate(html: string): ParsedTemplate {
+function parseMarkdown(md: string, fallbackName: string): ParsedTemplate {
+  const lines: TemplateLine[] = [];
+  let title = '';
+
+  for (const rawLine of md.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // Standalone image or video reference — not useful as an insertable line
+    if (/^!\[[^\]]*\]\([^)]*\)$/.test(line)) continue;
+    if (/^\[.*\.(mp4|mov|avi|mkv)\]$/i.test(line)) continue;
+
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      if (!title) {
+        title = cleanMarkdownLine(heading[1]).replace(/[:\s]+$/, '');
+      }
+      continue;
+    }
+    // Strip a leading list marker (1. / - / *)
+    const listItem = line.replace(/^(\d+[.)]|[-*+])\s+/, '');
+    const text = cleanMarkdownLine(listItem);
+    if (text) lines.push({ text });
+  }
+
+  return { title: title || fallbackName, meta: [], lines };
+}
+
+/**
+ * Parse a template entry into a title + clickable content lines.
+ * AMR entries parse their HTML body (metadata before the first <hr>);
+ * macro TBS entries parse their markdown steps.
+ */
+export function parseTemplate(entry: TemplateEntry): ParsedTemplate {
+  if (entry.kind === 'tbs') {
+    return parseMarkdown(entry.raw, entry.name);
+  }
+  return parseAmrHtml(entry.raw);
+}
+
+/** Parse an AMR template's HTML body (see parseTemplate) */
+function parseAmrHtml(html: string): ParsedTemplate {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   doc.querySelectorAll('script, style').forEach((el) => el.remove());
 

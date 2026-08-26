@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as R
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
-import type { AmrTemplate } from '@/lib/amr-templates';
+import type { TemplateEntry } from '@/lib/amr-templates';
 
 interface NodeConfig {
   id: string;
@@ -21,8 +21,8 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  templateMatches?: AmrTemplate[];
-  onOpenTemplate?: (template: AmrTemplate) => void;
+  templateMatches?: TemplateEntry[];
+  onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
 interface FlowchartCanvasProps {
