@@ -71,6 +71,8 @@ export interface FlowNodeProps {
   onOpenTemplate?: (template: TemplateEntry) => void;
   /** Stacking order within the nodes layer (chips-bearing boxes sit higher) */
   zIndex?: number;
+  /** Reports the node's actual rendered height so the layout adjusts dynamically */
+  onHeightChange?: (id: string, height: number) => void;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -312,12 +314,16 @@ function FlowNodeComponent({
   templateMatches,
   onOpenTemplate,
   zIndex,
+  onHeightChange,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+  // Hang-up drag/click disambiguation
+  const pendingDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  const suppressClickRef = useRef(false);
 
   // Grouped panel: total chip count + collapsed preview (first group's chips)
   const groupedTotal = quickTextGroups
@@ -374,17 +380,52 @@ function FlowNodeComponent({
       // Whole box is draggable, except when grabbing an interactive control
       // (text fields, chips, buttons) inside it
       const target = e.target as HTMLElement;
-      if (
-        target.closest(
-          'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
-        )
-      ) {
+      const interactive = target.closest(
+        'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
+      );
+      if (interactive && type !== 'hangup') {
+        return;
+      }
+      if (type === 'hangup') {
+        // The hang-up node's whole body is one button: start a pending drag
+        // that only engages after ~4px of movement — a plain click still
+        // triggers the hang-up action, while a drag moves the node
+        pendingDragRef.current = { startX: e.clientX, startY: e.clientY };
+        const onMove = (ev: MouseEvent) => {
+          const p = pendingDragRef.current;
+          if (!p) return;
+          if (Math.hypot(ev.clientX - p.startX, ev.clientY - p.startY) > 4) {
+            cleanup();
+            suppressClickRef.current = true;
+            onDragStart(id, e);
+          }
+        };
+        const onUp = () => cleanup();
+        const cleanup = () => {
+          pendingDragRef.current = null;
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
         return;
       }
       onDragStart(id, e);
     },
-    [id, onDragStart]
+    [id, onDragStart, type]
   );
+
+  // Report the node's real rendered height so the canvas layout adjusts
+  // dynamically (collapsed quick-inserts → compact row; expanded → taller)
+  useEffect(() => {
+    const el = nodeRef.current;
+    if (!el || !onHeightChange) return;
+    const report = () => onHeightChange(id, el.offsetHeight);
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id, onHeightChange]);
 
   // Initial focus target: focus this node's input once, after layout settles
   useEffect(() => {
@@ -440,7 +481,14 @@ function FlowNodeComponent({
         <div className="px-2.5 py-2">
           <button
             type="button"
-            onClick={() => onChange('hangup')}
+            onClick={() => {
+              // Swallow the click that follows a drag (mouseup on the button)
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
+              onChange('hangup');
+            }}
             className="glass-btn glass-btn-destructive group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-semibold text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <PhoneOff className="size-4 shrink-0 transition-transform duration-200 group-hover:rotate-12" />

@@ -77,12 +77,10 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   const base = NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
-  // Grouped quick inserts: preview row at rest; the in-flow expansion grows
-  // the node while hovered — budget the full chip block so expanded content
-  // still fits the row spacing
-  const groupedChipCount = node.quickTextGroups?.reduce((n, g) => n + g.items.length, 0) ?? 0;
+  // Grouped quick inserts collapse to a single preview row; the real
+  // (expanded) height is measured via ResizeObserver at runtime
   const quickTextBlock = node.quickTextGroups
-    ? 24 + estimateChipRows(Array(groupedChipCount).fill('avg'), width - 20) * 32
+    ? 24 + 32
     : node.quickTexts
       ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
       : 0;
@@ -124,11 +122,14 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
  * Layout clarity wins over connection-line aesthetics: each semantic row's
  * nodes are greedily packed into lines that fit the available width (like
  * flex-wrap), lines are centered with even column gaps, and every line is
- * spaced by its tallest node so nothing ever overlaps.
+ * spaced by its tallest node so nothing ever overlaps. `heightOf` supplies
+ * measured (real) node heights so the layout adjusts dynamically as nodes
+ * expand or their content grows.
  */
 function computeDefaultLayout(
   nodes: NodeConfig[],
-  canvasWidth: number
+  canvasWidth: number,
+  heightOf: (n: NodeConfig) => number
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
@@ -175,7 +176,7 @@ function computeDefaultLayout(
       for (const n of lineNodes) {
         positions[n.id] = { x, y };
         x += (n.width ?? 240) + colGap;
-        lineHeight = Math.max(lineHeight, estimateNodeHeight(n, ''));
+        lineHeight = Math.max(lineHeight, heightOf(n));
       }
       y += lineHeight + LINE_GAP;
     }
@@ -200,6 +201,13 @@ export default function FlowchartCanvas({
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
+  // Real rendered node heights reported by FlowNode ResizeObservers — the
+  // layout uses these (falling back to estimates) so space adjusts
+  // dynamically when nodes expand/collapse or content grows
+  const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
+  const handleNodeHeightChange = useCallback((id: string, height: number) => {
+    setMeasuredHeights((prev) => (prev[id] === height ? prev : { ...prev, [id]: height }));
+  }, []);
   const [dragging, setDragging] = useState<{
     id: string;
     startX: number;
@@ -249,10 +257,16 @@ export default function FlowchartCanvas({
     });
   }, [nodes, containerWidth]);
 
+  // Measured height with estimate fallback
+  const heightOf = useCallback(
+    (n: NodeConfig) => measuredHeights[n.id] ?? estimateNodeHeight(n, formData[n.id] ?? ''),
+    [measuredHeights, formData]
+  );
+
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(effectiveNodes, containerWidth),
-    [effectiveNodes, containerWidth]
+    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf),
+    [effectiveNodes, containerWidth, heightOf]
   );
 
   const effectivePositions = useMemo(() => {
@@ -277,10 +291,10 @@ export default function FlowchartCanvas({
     let h = 400;
     for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
-      if (p) h = Math.max(h, p.y + estimateNodeHeight(n, formData[n.id] ?? '') + 80);
+      if (p) h = Math.max(h, p.y + heightOf(n) + 80);
     }
     return h;
-  }, [effectiveNodes, effectivePositions, formData]);
+  }, [effectiveNodes, effectivePositions, heightOf]);
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -332,9 +346,7 @@ export default function FlowchartCanvas({
     if (!pos) return;
 
     const activeNode = effectiveNodes.find((n) => n.id === activeNodeId);
-    const nodeHeight = activeNode
-      ? estimateNodeHeight(activeNode, formData[activeNodeId] ?? '')
-      : 80;
+    const nodeHeight = activeNode ? heightOf(activeNode) : 80;
 
     const canvas = canvasRef.current;
     const nodeTop = pos.y;
@@ -347,7 +359,7 @@ export default function FlowchartCanvas({
     } else if (nodeBottom > viewBottom - 60) {
       canvas.scrollTo({ top: nodeBottom - canvas.clientHeight + 60, behavior: 'smooth' });
     }
-  }, [activeNodeId, effectivePositions, effectiveNodes, formData]);
+  }, [activeNodeId, effectivePositions, effectiveNodes, heightOf]);
 
   // Generate SVG connection paths
   const renderConnections = () => {
@@ -358,8 +370,8 @@ export default function FlowchartCanvas({
       const toNode = effectiveNodes.find((n) => n.id === conn.to);
       if (!fromPos || !toPos || !fromNode || !toNode) return null;
 
-      const fromHeight = estimateNodeHeight(fromNode, formData[conn.from] ?? '');
-      const toHeight = estimateNodeHeight(toNode, formData[conn.to] ?? '');
+      const fromHeight = heightOf(fromNode);
+      const toHeight = heightOf(toNode);
       const fromWidth = fromNode.width ?? 280;
       const toWidth = toNode.width ?? 280;
 
@@ -439,10 +451,17 @@ export default function FlowchartCanvas({
             onBlur={onNodeBlur}
             isActive={activeNodeId === node.id}
             position={effectivePositions[node.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN }}
-            // Chips-bearing boxes sit above neighbours so their taller
-            // content never gets painted over by later rows
-            zIndex={node.type === 'templates' || node.quickTexts ? 10 : undefined}
+            // Chips-bearing boxes sit above neighbours; the node being
+            // dragged floats above everything
+            zIndex={
+              dragging?.id === node.id
+                ? 50
+                : node.type === 'templates' || node.quickTexts
+                  ? 10
+                  : undefined
+            }
             onDragStart={handleDragStart}
+            onHeightChange={handleNodeHeightChange}
             options={node.options}
             accent={node.accent}
             inputType={node.inputType}
