@@ -129,6 +129,97 @@ function idf(token: string): number {
   return Math.max(0.4, Math.log10(ALL_TEMPLATES.length / (df + 1)));
 }
 
+/**
+ * Synonym groups derived from the AMR / TBS template-title vocabulary.
+ * Words in the same group count as matches during scoring — e.g. the
+ * agent types "cleaning sink" and matches "Mop Washing Tray" (clean ↔
+ * wash, sink ↔ tray), "tangle" matches "entanglement". Each group is
+ * stemmed at build time into a symmetric lookup.
+ */
+const SYNONYM_GROUPS: string[][] = [
+  // Mop / tray / sink
+  ['sink', 'tray', 'basin'],
+  ['mop', 'mopping', 'pad', 'cloth', 'plate', 'wiping', 'wipe', 'wiper'],
+  ['clean', 'cleaning', 'wash', 'washing', 'cleaned', 'rinse'],
+  ['tangle', 'tangled', 'entangle', 'entangled', 'entanglement', 'knot', 'twist', 'wrap'],
+  // Power / charging
+  ['charge', 'charging', 'recharge', 'recharging', 'charger', 'juice'],
+  ['battery', 'batteries', 'power', 'drain', 'runtime'],
+  ['dock', 'docking', 'station', 'base', 'charger'],
+  // Connectivity
+  ['network', 'wifi', 'internet', 'router', 'hotspot', 'connect', 'connection', 'connecting', 'bluetooth', 'pairing', 'pair'],
+  ['offline', 'disconnect', 'disconnected', 'unreachable'],
+  // Navigation / movement
+  ['map', 'mapping', 'mapp'],
+  ['route', 'path', 'routing', 'messy', 'erratic', 'chaotic', 'random', 'pattern'],
+  ['circle', 'circles', 'spin', 'spinning', 'spinn', 'rotate', 'rotating', 'rotat'],
+  ['backward', 'reverse', 'backing', 'back'],
+  ['navigation', 'navigating', 'sensor', 'lds', 'dtof', 'lidar', 'camera', 'aivi', 'gyroscope'],
+  ['stuck', 'jam', 'jammed', 'blocked', 'block', 'trapped', 'obstruction'],
+  ['wheel', 'drive', 'driving', 'driv'],
+  ['climb', 'climbing', 'slope', 'threshold', 'ramp', 'stairs'],
+  ['zone', 'zones', 'area', 'areas', 'room', 'rooms', 'region', 'divide', 'dividing', 'divid', 'boundary', 'boundarie', 'boundaries', 'wall', 'walls', 'designated', 'timezone'],
+  ['obstacle', 'avoid', 'avoidance', 'object', 'detect', 'detection', 'recognize', 'recognition', 'recognizing'],
+  ['video', 'live', 'view', 'footage', 'recording', 'videomanager'],
+  // Faults / alarms
+  ['error', 'fault', 'failure', 'fail', 'malfunction', 'malfunctioning', 'alarm', 'warning', 'code', 'broken', 'defect'],
+  ['bumper', 'bump', 'collision', 'crash', 'hit'],
+  ['drop', 'drops', 'fall', 'falling', 'dropping'],
+  ['stop', 'stops', 'stopping', 'shutdown', 'shuts', 'interrupted', 'pause', 'intermittent', 'suddenly'],
+  // Water / wetness
+  ['spill', 'overflow', 'overflowing', 'seep', 'seepage', 'leak', 'leaking', 'leak', 'drip', 'dripping', 'droplet', 'droplets', 'damp', 'wet', 'moisture'],
+  ['recycle', 'recycling', 'recycled', 'drain', 'drainage', 'wastewater'],
+  ['waste', 'dirty', 'sewage', 'unclean'],
+  ['tank', 'reservoir'],
+  ['spray', 'sprayer', 'spraying', 'squirt', 'nozzle'],
+  ['foam', 'bubble', 'bubbles', 'suds'],
+  ['streak', 'streaks', 'mark', 'marks', 'stain', 'stains', 'smear', 'smudge'],
+  // Sound / smell / heat
+  ['noise', 'sound', 'humming', 'humm', 'hum', 'buzz', 'rattle', 'rattling', 'squeak', 'squeaking', 'loud'],
+  ['smell', 'odor', 'stink', 'stinky', 'scent', 'burning', 'burnt'],
+  ['hot', 'heat', 'warm', 'temperature', 'overheat', 'overheating'],
+  // Consumables / parts
+  ['dustbin', 'bin', 'dustbox', 'dustbag', 'bag', 'container'],
+  ['debris', 'dust', 'dirt', 'litter', 'garbage'],
+  ['brush', 'bristles'],
+  ['filter', 'hepa'],
+  ['solution', 'detergent', 'fluid', 'soap', 'cleaner'],
+  ['edge', 'edges', 'corner', 'corners', 'baseboard', 'skirting', 'perimeter', 'side'],
+  ['missed', 'missing', 'incomplete', 'skip', 'skipped', 'spot', 'spots', 'partial', 'unfinished'],
+  ['lift', 'lifting', 'raise', 'raising', 'extension', 'extend', 'extending', 'retract'],
+  // Software / account
+  ['upgrade', 'update', 'firmware', 'flash', 'flashing', 'upgrading'],
+  ['reset', 'reboot', 'restart', 'rebooting', 'restarting'],
+  ['account', 'login', 'logout', 'signin', 'registration', 'register', 'verify', 'verification'],
+  ['app', 'application', 'mobile'],
+  ['schedule', 'scheduled', 'scheduling', 'timer', 'automation'],
+  ['pin', 'password', 'lock', 'unlock'],
+  // GOAT / mowing
+  ['blade', 'trimmer', 'trimming', 'cut', 'cutting', 'mow', 'mowing', 'mower', 'lawn', 'grass'],
+  ['satellite', 'gps', 'rtk', 'signal', 'positioning', 'location', 'coverage'],
+  // Support flows
+  ['escalation', 'escalate', 'support', 'tech', 'technical'],
+  ['replacement', 'warranty', 'exchange', 'guarantee'],
+  ['return', 'refund', 'rma', 'exchange', 'returning'],
+  ['tracking', 'shipment', 'shipping', 'delivery', 'package', 'logistics', 'courier', 'carrier'],
+  ['order', 'purchase', 'amazon', 'walmart', 'ebay', 'webstore', 'buy', 'bought', 'invoice'],
+  ['gift', 'present'],
+  ['light', 'led', 'indicator', 'blinking', 'blinks', 'flickering'],
+  ['winter', 'cold', 'freezing', 'frost'],
+];
+
+/** Stemmed symmetric synonym lookup: word → set of same-group stems */
+const SYNONYMS = new Map<string, Set<string>>();
+for (const group of SYNONYM_GROUPS) {
+  const stems = [...new Set(group.map(stem))];
+  for (const s of stems) {
+    if (!SYNONYMS.has(s)) SYNONYMS.set(s, new Set());
+    for (const other of stems) {
+      if (other !== s) SYNONYMS.get(s)!.add(other);
+    }
+  }
+}
+
 /** Subsequence check for lenient fuzzy matching */
 function isSubsequence(needle: string, hay: string): boolean {
   let i = 0;
@@ -141,10 +232,13 @@ function isSubsequence(needle: string, hay: string): boolean {
 
 /**
  * Match strength between a query token and a template-name token.
- * exact (after stemming) > prefix > substring > subsequence.
+ * exact (after stemming) > synonym (same group) > prefix > substring >
+ * subsequence.
  */
 function tokenPairScore(qt: string, nt: string): number {
   if (qt === nt) return 3;
+  // Synonym match: both stems sit in the same synonym group
+  if (SYNONYMS.get(qt)?.has(nt)) return 2.4;
   if (qt.length >= 4 && nt.length >= 4 && (nt.startsWith(qt) || qt.startsWith(nt))) return 2.2;
   if (qt.length >= 4 && nt.length >= 4 && (nt.includes(qt) || qt.includes(nt))) return 1.6;
   if (qt.length >= 5 && isSubsequence(qt, nt)) return 0.8;
@@ -160,6 +254,9 @@ function tokenPairScore(qt: string, nt: string): number {
  * - Matches are weighted by IDF: rare keywords count more, common words
  *   ("water", "charging") count less, so results reflect the *distinctive*
  *   words in the query.
+ * - Synonyms count too: query and template tokens in the same synonym
+ *   group score just below exact matches ("sink" ↔ "tray", "tangle" ↔
+ *   "entanglement", "cleaning sink" ↔ "Mop Washing Tray").
  * - Consecutive query word pairs that appear verbatim in a template name
  *   earn a phrase bonus (e.g. "wheel stuck" → Driving Wheel Stuck).
  * - Weak matches are pruned relative to the best hit, keeping the list
