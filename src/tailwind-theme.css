@@ -570,6 +570,14 @@ body[data-ui-scale="small"] {
     border-color: color-mix(in oklab, var(--foreground) 5%, transparent);
   }
 
+  /* Expanded node (hovered quick-insert panel): much frostier, near-opaque
+     so the in-flow expanded content reads clearly over the busy canvas */
+  .glass-expanded {
+    background: color-mix(in oklab, var(--card) 90%, transparent);
+    backdrop-filter: blur(22px) saturate(1.45);
+    -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  }
+
   /* Recessed glass for text fields */
   .glass-field {
     background: color-mix(in oklab, var(--foreground) 5%, transparent);

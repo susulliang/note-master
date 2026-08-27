@@ -600,8 +600,9 @@ function FlowNodeComponent({
           />
         )}
         {quickTextGroups ? (
-          /* Grouped quick inserts — collapsed preview row, hover expands a
-             smooth overlay panel that covers neighbouring nodes */
+          /* Grouped quick inserts — collapsed preview row; hovering expands
+             the node box itself in place (no popup), and the node turns
+             much frostier for readability while expanded */
           <div
             className="relative mt-1.5 border-t border-border/30 pt-1.5"
             onMouseEnter={() => setQuickPanelOpen(true)}
@@ -631,16 +632,9 @@ function FlowNodeComponent({
                 </span>
               )}
             </div>
-            {/* Expanding overlay */}
-            <div
-              className={cn(
-                'absolute left-0 right-0 top-full z-40 mt-1 origin-top transition-all duration-300 ease-out',
-                quickPanelOpen
-                  ? 'pointer-events-auto max-h-[320px] translate-y-0 opacity-100'
-                  : 'pointer-events-none max-h-0 -translate-y-2 overflow-hidden opacity-0'
-              )}
-            >
-              <div className="glass-panel custom-scrollbar max-h-[320px] overflow-y-auto rounded-lg p-2">
+            {/* In-flow expansion — the node itself grows */}
+            {quickPanelOpen && (
+              <div className="custom-scrollbar mt-1.5 max-h-[320px] overflow-y-auto rounded-lg border border-foreground/10 bg-foreground/[0.03] p-2">
                 {customQuickTexts && customQuickTexts.length > 0 && (
                   <div className="mb-2 last:mb-0">
                     <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -689,7 +683,7 @@ function FlowNodeComponent({
                           setNewQuickText('');
                           setShowAddQuickText(true);
                         }}
-                        className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-foreground/20 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+                        className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-foreground/20 text-[11px] text-muted-foreground transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
                       >
                         <Plus className="size-3" />
                         Add quick text
@@ -698,7 +692,7 @@ function FlowNodeComponent({
                   </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
         ) : quickTexts ? (
           /* Flat quick inserts (e.g. Resolution Summary, Purchase info) */
@@ -769,8 +763,9 @@ function FlowNodeComponent({
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         isActive ? accentGlows[accent] : accentBorders[accent],
         isActive && 'animate-pulse-slow',
-        // Expanded quick-insert overlay sits above neighbouring nodes
-        quickPanelOpen && 'z-30'
+        // Expanded (in-flow) quick-inserts: node grows over neighbours and
+        // turns much frostier for readability
+        quickPanelOpen && 'glass-expanded z-30'
       )}
       onMouseDown={handleMouseDown}
     >
