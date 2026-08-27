@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
   User,
@@ -241,6 +241,19 @@ function getCustomQuickTexts(
   return all[target];
 }
 
+/** Fields covered by the Ctrl/Cmd+Z undo stack */
+const UNDO_FIELDS = new Set<string>([NODE_IDS.RESOLUTION_SUMMARY, NODE_IDS.DETAILED_ISSUE]);
+
+interface UndoEntry {
+  field: string;
+  value: string;
+}
+
+/** Typing bursts within this window collapse into one undo step (ms) */
+const UNDO_COALESCE_MS = 600;
+/** Max undo steps retained per session */
+const UNDO_STACK_LIMIT = 100;
+
 export default function TicketNotesPage() {
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
@@ -339,42 +352,94 @@ export default function TicketNotesPage() {
     setOpenTemplate(null);
   }, []);
 
+  // ---------------------------------------------------------------------
+  //  Undo (Ctrl/Cmd+Z) for Resolution Summary + Detailed Issue: covers
+  //  typing (bursts coalesced) and chip/template-line inserts (discrete).
+  // ---------------------------------------------------------------------
+  const undoStack = useRef<UndoEntry[]>([]);
+  const lastUndoPush = useRef(0);
+
+  /** Snapshot the pre-change value; discrete inserts always push, keystrokes coalesce */
+  const pushUndo = useCallback((field: string, value: string, discrete: boolean) => {
+    const now = Date.now();
+    if (!discrete && now - lastUndoPush.current < UNDO_COALESCE_MS) return;
+    const top = undoStack.current[undoStack.current.length - 1];
+    if (top && top.field === field && top.value === value) return;
+    undoStack.current.push({ field, value });
+    if (undoStack.current.length > UNDO_STACK_LIMIT) undoStack.current.shift();
+    lastUndoPush.current = now;
+  }, []);
+
+  const handleFieldChange = useCallback(
+    (id: string, value: string | string[], discrete?: boolean) => {
+      if (UNDO_FIELDS.has(id) && typeof value === 'string') {
+        const prev = formData[id];
+        if (typeof prev === 'string') pushUndo(id, prev, Boolean(discrete));
+      }
+      setFormData((prev) => ({ ...prev, [id]: value }));
+    },
+    [formData, setFormData, pushUndo]
+  );
+
+  // Ctrl/Cmd+Z: undo the last tracked change. Native undo still applies to
+  // other text fields — we only intercept when focus is in a tracked field
+  // or on a non-editable element (e.g. right after clicking a chip)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'z') return;
+      const target = e.target as HTMLElement | null;
+      const editable = target?.closest?.(
+        'input, textarea, [contenteditable="true"]'
+      ) as HTMLElement | null;
+      if (editable && !UNDO_FIELDS.has(editable.dataset.fieldId ?? '')) {
+        return; // other fields keep native undo
+      }
+      e.preventDefault();
+      const entry = undoStack.current.pop();
+      if (!entry) return;
+      setFormData((prev) => ({ ...prev, [entry.field]: entry.value }));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setFormData]);
+
   // Append a clicked template line to the Resolution Summary, exactly like
-  // a quick-insert chip ("->" separator between entries)
+  // a quick-insert chip ("->" separator between entries) — pushed as its
+  // own undo step
   const handleInsertTemplateLine = useCallback(
     (line: string) => {
+      const current =
+        typeof formData[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
+          ? (formData[NODE_IDS.RESOLUTION_SUMMARY] as string)
+          : '';
+      pushUndo(NODE_IDS.RESOLUTION_SUMMARY, current, true);
       setFormData((prev) => {
-        const current =
+        const trimmed =
           typeof prev[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
             ? (prev[NODE_IDS.RESOLUTION_SUMMARY] as string).trimEnd()
             : '';
         let next: string;
-        if (!current) {
+        if (!trimmed) {
           next = line;
-        } else if (current.endsWith('->')) {
-          next = `${current} ${line}`;
+        } else if (trimmed.endsWith('->')) {
+          next = `${trimmed} ${line}`;
         } else {
-          next = `${current} -> ${line}`;
+          next = `${trimmed} -> ${line}`;
         }
         return { ...prev, [NODE_IDS.RESOLUTION_SUMMARY]: next };
       });
     },
-    [setFormData]
+    [formData, setFormData, pushUndo]
   );
 
-  // Direct edits to the Resolution Summary from the template panel
+  // Direct edits to the Resolution Summary from the template panel — typed
+  // edits flow through the undo-coalescing path like canvas typing
   const handleResolutionChange = useCallback(
     (text: string) => {
-      setFormData((prev) => ({ ...prev, [NODE_IDS.RESOLUTION_SUMMARY]: text }));
+      handleFieldChange(NODE_IDS.RESOLUTION_SUMMARY, text);
     },
-    [setFormData]
-  );
-
-  const handleFieldChange = useCallback(
-    (id: string, value: string | string[]) => {
-      setFormData((prev) => ({ ...prev, [id]: value }));
-    },
-    [setFormData]
+    [handleFieldChange]
   );
 
   const handleNodeFocus = useCallback((id: string) => {

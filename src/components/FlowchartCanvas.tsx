@@ -30,7 +30,8 @@ interface FlowchartCanvasProps {
   /** Per-node position overrides (nodes the user dragged); missing ids use the responsive default layout */
   positions: Record<string, { x: number; y: number }>;
   formData: Record<string, string | string[]>;
-  onFieldChange: (id: string, value: string | string[]) => void;
+  /** discrete=true marks programmatic inserts (quick-insert chips) for undo */
+  onFieldChange: (id: string, value: string | string[], discrete?: boolean) => void;
   activeNodeId: string | null;
   onNodeFocus: (id: string) => void;
   onNodeBlur: () => void;
@@ -440,11 +441,11 @@ export default function FlowchartCanvas({
             label={node.label}
             text={node.text}
             value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
-            onChange={(val) => {
+            onChange={(val, discrete) => {
               if (node.type === 'hangup') {
                 onHangUp();
               } else {
-                onFieldChange(node.id, val);
+                onFieldChange(node.id, val, discrete);
               }
             }}
             onFocus={onNodeFocus}

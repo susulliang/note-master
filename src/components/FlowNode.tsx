@@ -39,7 +39,12 @@ export interface FlowNodeProps {
   label?: string;
   text?: string;
   value: string | string[];
-  onChange: (value: string | string[]) => void;
+  /**
+   * Field updates. `discrete` marks a programmatic insert (quick-insert
+   * chip) rather than keystrokes — the undo stack treats it as its own
+   * undo step.
+   */
+  onChange: (value: string | string[], discrete?: boolean) => void;
   onFocus: (id: string) => void;
   onBlur: () => void;
   isActive: boolean;
@@ -353,7 +358,7 @@ function FlowNodeComponent({
       } else {
         next = `${current} -> ${quickText}`;
       }
-      onChange(next);
+      onChange(next, true);
       // Refocus the textarea and place the caret at the end for continued typing
       requestAnimationFrame(() => {
         const el = textareaRef.current;
@@ -632,6 +637,7 @@ function FlowNodeComponent({
         {inputType === 'textarea' ? (
           <Textarea
             ref={textareaRef}
+            data-field-id={id}
             value={strValue}
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
@@ -643,6 +649,7 @@ function FlowNodeComponent({
         ) : (
           <Input
             type={inputType}
+            data-field-id={id}
             value={strValue}
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
