@@ -1,0 +1,8 @@
+﻿# MowerBlade Disc / Blade disc SKU
+
+**Product:** GOAT
+
+## Solution
+O1000LiDAR PRO, O1000RTK: 201-2201-0931
+A2000LiDAR PRO, A3000LiDAR PRO, A2500RTK, A3000LiDAR: 201-2337-1235
+

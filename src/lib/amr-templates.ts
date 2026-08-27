@@ -2,6 +2,8 @@
  * Support templates bundled at build time:
  * - AMR email/TBS templates from /AMR_Templates (HTML)
  * - Macro TBS steps from /Macro/split (Markdown)
+ * - GOAT error codes from /QNA/GOAT_Error_Codes (Markdown)
+ * - Product FAQs from /QNA/FAQ (Markdown)
  * Filenames are the search index ("026_Driving_Wheel_Stuck.html" →
  * "driving wheel stuck"); content is parsed on demand for the viewer panel.
  */
@@ -17,10 +19,10 @@ export interface TemplateEntry {
   tokens: string[];
   /** Stemmed name joined with spaces, for phrase matching */
   nameStem: string;
-  /** Raw content: HTML for AMR templates, Markdown for macro TBS steps */
+  /** Raw content: HTML for AMR templates, Markdown otherwise */
   raw: string;
   /** Where the template came from */
-  kind: 'amr' | 'tbs';
+  kind: 'amr' | 'tbs' | 'err' | 'faq';
   /** Grouping label, e.g. "AMR Email" / "TBS · General" */
   category: string;
 }
@@ -32,6 +34,18 @@ const rawModules = import.meta.glob('/AMR_Templates/*.html', {
 }) as Record<string, string>;
 
 const macroModules = import.meta.glob('/Macro/split/**/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+const goatErrorModules = import.meta.glob('/QNA/GOAT_Error_Codes/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+const faqModules = import.meta.glob('/QNA/FAQ/*.md', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -76,40 +90,62 @@ function fileNameToName(file: string): string {
     .trim();
 }
 
-/** All searchable templates: AMR emails + macro TBS steps */
+/** GOAT error-code filenames carry the code, e.g. "001_504_Positioning_Abnormal" → "504" */
+function extractErrorCode(file: string): string | null {
+  const m = file.match(/(?:^|_)(\d{3,4})(?=_|$)/);
+  return m && m[1].length >= 3 ? m[1] : null;
+}
+
+function makeEntry(
+  path: string,
+  raw: string,
+  kind: TemplateEntry['kind'],
+  category: string,
+  nameOverride?: string
+): TemplateEntry {
+  const file = path.split('/').pop() ?? path;
+  const name = nameOverride ?? fileNameToName(file);
+  const tokens = tokenize(name).map(stem);
+  // Error codes (e.g. "504") are tokenized for exact matching too
+  const code = extractErrorCode(file);
+  if (code) tokens.push(code);
+  return {
+    file,
+    id: file.slice(0, 3),
+    name,
+    tokens,
+    nameStem: tokens.join(' '),
+    raw,
+    kind,
+    category,
+  };
+}
+
+/** All searchable templates: AMR emails, macro TBS steps, error codes, FAQs */
 export const ALL_TEMPLATES: TemplateEntry[] = [
-  ...Object.entries(rawModules).map(([path, raw]) => {
-    const file = path.split('/').pop() ?? path;
-    const name = fileNameToName(file);
-    return {
-      file,
-      id: file.slice(0, 3),
-      name,
-      tokens: tokenize(name).map(stem),
-      nameStem: tokenize(name).map(stem).join(' '),
-      raw,
-      kind: 'amr' as const,
-      category: 'AMR Email',
-    };
-  }),
+  ...Object.entries(rawModules).map(([path, raw]) =>
+    makeEntry(path, raw, 'amr', 'AMR Email')
+  ),
   ...Object.entries(macroModules)
     .filter(([path]) => !/INDEX/i.test(path))
+    .map(([path, raw]) =>
+      makeEntry(path, raw, 'tbs', path.includes('/general/') ? 'TBS · General' : 'TBS')
+    ),
+  ...Object.entries(goatErrorModules)
+    .filter(([path]) => !/INDEX/i.test(path))
     .map(([path, raw]) => {
-      const file = path.split('/').pop() ?? path;
-      const name = fileNameToName(file);
-      const isGeneral = path.includes('/general/');
-      return {
-        file,
-        id: file.slice(0, 3),
-        name,
-        tokens: tokenize(name).map(stem),
-        nameStem: tokenize(name).map(stem).join(' '),
-        raw,
-        kind: 'tbs' as const,
-        category: isGeneral ? 'TBS · General' : 'TBS',
-      };
+      const code = extractErrorCode(path);
+      const entry = makeEntry(path, raw, 'err', 'Error Code');
+      // Display "Error 504 · Positioning Abnormal" when a code is present
+      if (code && !/^ERR/i.test(entry.name)) {
+        entry.name = `Error ${code} · ${entry.name.replace(/^Error\s*\d*\s*/i, '').trim()}`;
+      }
+      return entry;
     }),
-].sort((a, b) => Number(a.id) - Number(b.id) || a.name.localeCompare(b.name));
+  ...Object.entries(faqModules)
+    .filter(([path]) => !/(INDEX|FAQ_\d+)/i.test(path) || /FAQ_by_Product/i.test(path))
+    .map(([path, raw]) => makeEntry(path, raw, 'faq', 'FAQ')),
+].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 
 // ---------------------------------------------------------------------
 //  Scoring: IDF-weighted fuzzy matching
@@ -349,9 +385,10 @@ function cleanMarkdownLine(s: string): string {
 }
 
 /**
- * Parse a macro TBS markdown file into a title (first heading) and
- * clickable step lines. Standalone image lines and video file references
- * are dropped; numbered/bulleted items and paragraphs become lines.
+ * Parse a markdown entry (TBS steps / GOAT error code / FAQ) into a title
+ * (first heading) and clickable step lines. Standalone image lines and
+ * video file references are dropped; numbered/bulleted items and
+ * paragraphs become lines.
  */
 function parseMarkdown(md: string, fallbackName: string): ParsedTemplate {
   const lines: TemplateLine[] = [];
@@ -383,13 +420,13 @@ function parseMarkdown(md: string, fallbackName: string): ParsedTemplate {
 /**
  * Parse a template entry into a title + clickable content lines.
  * AMR entries parse their HTML body (metadata before the first <hr>);
- * macro TBS entries parse their markdown steps.
+ * markdown entries (TBS steps, error codes, FAQs) parse their steps.
  */
 export function parseTemplate(entry: TemplateEntry): ParsedTemplate {
-  if (entry.kind === 'tbs') {
-    return parseMarkdown(entry.raw, entry.name);
+  if (entry.kind === 'amr') {
+    return parseAmrHtml(entry.raw);
   }
-  return parseAmrHtml(entry.raw);
+  return parseMarkdown(entry.raw, entry.name);
 }
 
 /** Parse an AMR template's HTML body (see parseTemplate) */

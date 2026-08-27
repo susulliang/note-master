@@ -58,7 +58,14 @@ export default function TemplatePanel({
               </DialogTitle>
               <DialogDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground">
                 <span className="uppercase tracking-wider">
-                  {template.kind === 'tbs' ? 'TBS Steps' : 'AMR Template'} #{template.id}
+                  {template.kind === 'amr'
+                    ? 'AMR Template'
+                    : template.kind === 'tbs'
+                      ? 'TBS Steps'
+                      : template.kind === 'err'
+                        ? 'Error Code'
+                        : 'FAQ'}{' '}
+                  #{template.id}
                 </span>
                 <span className="rounded-full bg-foreground/10 px-1.5 text-[9px] text-muted-foreground">
                   {template.category}

@@ -518,7 +518,7 @@ function FlowNodeComponent({
                   key={`${tpl.kind}-${tpl.file}`}
                   type="button"
                   onClick={() => onOpenTemplate(tpl)}
-                  title={`Open ${tpl.kind === 'tbs' ? 'TBS steps' : 'AMR template'}: ${tpl.name}`}
+                  title={`Open ${tpl.category}: ${tpl.name}`}
                   className={cn(
                     'glass-chip h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold',
                     tpl.kind === 'amr' && 'glass-chip-accent'
@@ -527,12 +527,13 @@ function FlowNodeComponent({
                   <span
                     className={cn(
                       'mr-1 rounded px-1 text-[8px] font-bold uppercase tracking-wider',
-                      tpl.kind === 'amr'
-                        ? 'bg-accent/20 text-accent'
-                        : 'bg-primary/20 text-primary'
+                      tpl.kind === 'amr' && 'bg-accent/20 text-accent',
+                      tpl.kind === 'tbs' && 'bg-primary/20 text-primary',
+                      tpl.kind === 'err' && 'bg-destructive/25 text-destructive',
+                      tpl.kind === 'faq' && 'bg-warning/25 text-warning'
                     )}
                   >
-                    {tpl.kind === 'amr' ? 'AMR' : 'TBS'}
+                    {tpl.kind === 'amr' ? 'AMR' : tpl.kind === 'tbs' ? 'TBS' : tpl.kind === 'err' ? 'ERR' : 'FAQ'}
                   </span>
                   {tpl.name}
                 </button>
@@ -540,7 +541,7 @@ function FlowNodeComponent({
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground/80">
-              No matches yet — type in the Detailed Issue Description to find AMR email templates and TBS steps.
+              No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, and FAQs.
             </p>
           )}
         </div>
