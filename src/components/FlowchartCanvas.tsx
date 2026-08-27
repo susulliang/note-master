@@ -77,10 +77,12 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   const base = NODE_VERTICAL_PADDING * 2;
   const width = node.width ?? 240;
 
-  // Grouped quick inserts collapse to a single preview row — the full list
-  // lives in a hover overlay that doesn't affect node layout
+  // Grouped quick inserts: preview row at rest; the in-flow expansion grows
+  // the node while hovered — budget the full chip block so expanded content
+  // still fits the row spacing
+  const groupedChipCount = node.quickTextGroups?.reduce((n, g) => n + g.items.length, 0) ?? 0;
   const quickTextBlock = node.quickTextGroups
-    ? 64
+    ? 24 + estimateChipRows(Array(groupedChipCount).fill('avg'), width - 20) * 32
     : node.quickTexts
       ? 24 + estimateChipRows([...node.quickTexts, '+'], width - 20) * 32
       : 0;
@@ -437,6 +439,9 @@ export default function FlowchartCanvas({
             onBlur={onNodeBlur}
             isActive={activeNodeId === node.id}
             position={effectivePositions[node.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN }}
+            // Chips-bearing boxes sit above neighbours so their taller
+            // content never gets painted over by later rows
+            zIndex={node.type === 'templates' || node.quickTexts ? 10 : undefined}
             onDragStart={handleDragStart}
             options={node.options}
             accent={node.accent}

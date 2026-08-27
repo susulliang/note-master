@@ -124,31 +124,13 @@ export default function OutputModal({
           </div>
         )}
 
-        {/* Editable glass note panel — the textarea itself is the glass field */}
+        {/* Editable note — full-width textarea; Copy lives in the footer */}
         <div className="relative rounded-xl p-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCopy}
-            className="!absolute right-2 top-2 z-10 gap-1.5 text-sm"
-          >
-            {copied ? (
-              <>
-                <Check className="size-3.5" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="size-3.5" />
-                Copy
-              </>
-            )}
-          </Button>
           <textarea
             value={editableText}
             onChange={(e) => setEditableText(e.target.value)}
             spellCheck={false}
-            className="max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words bg-transparent pr-20 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
+            className="glass-field max-h-[55vh] min-h-[200px] w-full resize-none whitespace-pre-wrap break-words rounded-lg p-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
 
@@ -166,8 +148,17 @@ export default function OutputModal({
             Reset to original
           </Button>
           <Button onClick={handleCopy} className="gap-1.5">
-            <Copy className="size-4" />
-            Copy to Clipboard
+            {copied ? (
+              <>
+                <Check className="size-4" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="size-4" />
+                Copy to Clipboard
+              </>
+            )}
           </Button>
         </div>
       </DialogContent>

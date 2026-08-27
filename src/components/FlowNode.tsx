@@ -69,6 +69,8 @@ export interface FlowNodeProps {
   /** Fuzzy-matched templates (AMR emails + macro TBS steps) for the typed issue text */
   templateMatches?: TemplateEntry[];
   onOpenTemplate?: (template: TemplateEntry) => void;
+  /** Stacking order within the nodes layer (chips-bearing boxes sit higher) */
+  zIndex?: number;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -309,6 +311,7 @@ function FlowNodeComponent({
   onRemoveQuickText,
   templateMatches,
   onOpenTemplate,
+  zIndex,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -757,6 +760,7 @@ function FlowNodeComponent({
         left: position.x,
         top: position.y,
         width,
+        ...(zIndex !== undefined ? { zIndex } : {}),
       }}
       className={cn(
         'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
