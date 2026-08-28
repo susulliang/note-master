@@ -1,8 +1,8 @@
 /**
  * Local Whisper transcription worker.
  *
- * Loads a quantized English Whisper model (onnx-community/whisper-{base,tiny}.en)
- * through transformers.js and transcribes 16 kHz mono PCM segments entirely
+ * Loads a quantized English Whisper model (Xenova/whisper-{base,tiny}.en)
+ * through transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
  * on-device. Keeping this in a worker matters twice over:
  *
  *   1. WASM inference is CPU-heavy — running it off the main thread keeps

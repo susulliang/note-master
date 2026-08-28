@@ -1,7 +1,7 @@
 /**
  * Local Whisper transcription — shared model registry and worker protocol.
  *
- * Whisper runs fully in the browser via transformers.js (ONNX Runtime Web,
+ * Whisper runs fully in the browser via transformers.js v3 (ONNX Runtime Web,
  * WASM backend): call audio never leaves the machine, there is no API key
  * and no per-minute cost. The trade-off is a one-time model download and
  * CPU inference, so both models are English-only quantized exports:
@@ -9,14 +9,21 @@
  *   base.en — default; higher accuracy, ~70 MB one-time download
  *   tiny.en — lighter and faster fallback, ~30 MB one-time download
  *
+ * Repos are the Xenova exports (not the newer `onnx-community` ones): their
+ * `q8` files are the classic DynamicQuantizeLinear exports that transformers.js
+ * v3 + WASM creates sessions from reliably, whereas the newer repos ship a
+ * transposed-weight QDQ layout that only the v4 runtime understands (loading
+ * them on v3 fails with "TransposeDQWeightsForMatMulNBits Missing required
+ * scale" at session creation).
+ *
  * Model files are fetched from the Hugging Face Hub and cached by the
  * browser (Cache API), so only the first capture of each model downloads.
  */
 
 /** Hugging Face repo per selectable model */
 export const LOCAL_WHISPER_MODELS = {
-  'base.en': 'onnx-community/whisper-base.en',
-  'tiny.en': 'onnx-community/whisper-tiny.en',
+  'base.en': 'Xenova/whisper-base.en',
+  'tiny.en': 'Xenova/whisper-tiny.en',
 } as const;
 
 export type WhisperModelName = keyof typeof LOCAL_WHISPER_MODELS;
@@ -34,13 +41,14 @@ export const WHISPER_MODEL_META: Record<
 export const WHISPER_MODELS = Object.keys(LOCAL_WHISPER_MODELS) as WhisperModelName[];
 
 /**
- * Precision fallback chain, most-quantized first. `q8` is the intended
- * dtype; `fp16`/`fp32` are larger escape hatches for the rare case where
- * a repo's quantized export fails to create a session on the current
- * runtime (see transformers.js issue #1707 for an example of that class
- * of failure).
+ * Precision fallback chain. `q8` (classic DynamicQuantizeLinear quantization)
+ * is the intended dtype — small download and well-supported by the WASM/CPU
+ * execution provider. `fp32` is the much larger escape hatch (~4× download)
+ * for the rare case where a quantized export fails to create a session on
+ * the current runtime. `fp16` is deliberately absent: it targets WebGPU
+ * exports, not CPU/WASM, so it would only ever fail between the two.
  */
-export const DTYPE_CHAIN = ['q8', 'fp16', 'fp32'] as const;
+export const DTYPE_CHAIN = ['q8', 'fp32'] as const;
 
 export type WhisperDtype = (typeof DTYPE_CHAIN)[number];
 
