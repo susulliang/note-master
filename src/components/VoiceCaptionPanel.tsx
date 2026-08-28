@@ -12,13 +12,20 @@ interface VoiceCaptionPanelProps {
   finalTranscript: string;
   interimText: string;
   suggestions: ExtractedField[];
+  /** Latest speech-service error, if any */
+  error: string | null;
+  /** Mic input level 0..1 — flat bars mean no audio reaching the browser */
+  level: number;
 }
+
+/** Bar thresholds for the mic level meter */
+const LEVEL_STEPS = [0.12, 0.3, 0.5, 0.75];
 
 /**
  * Live-caption panel for the voice auto-fill prototype. Shows the streaming
- * transcript (finalized text + live interim words), auto-scrolls as new text
- * arrives, and lists fields extracted from the conversation so the agent can
- * see exactly what was captured.
+ * transcript (finalized text + live interim words), a mic level meter, speech
+ * errors, and fields extracted from the conversation so the agent can see
+ * exactly what was captured — and, when nothing is, why.
  */
 export default function VoiceCaptionPanel({
   isListening,
@@ -27,6 +34,8 @@ export default function VoiceCaptionPanel({
   finalTranscript,
   interimText,
   suggestions,
+  error,
+  level,
 }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -39,11 +48,12 @@ export default function VoiceCaptionPanel({
   }, [finalTranscript, interimText]);
 
   const hasContent = finalTranscript.length > 0 || suggestions.length > 0;
+
+  // Hidden when idle with nothing captured and no error to show
+  if (!isListening && !hasContent && !error) return null;
+
   const label = (fieldId: string) =>
     FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
-
-  // Hidden entirely when idle with nothing captured
-  if (!isListening && !hasContent) return null;
 
   return (
     <div className="fixed bottom-3 left-3 z-40 w-[min(420px,calc(100vw-24px))]">
@@ -89,6 +99,39 @@ export default function VoiceCaptionPanel({
           </Button>
         </div>
 
+        {/* Mic level meter — proves audio is actually reaching the browser */}
+        {isListening && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Mic
+            </span>
+            <div className="flex h-4 items-end gap-[3px]">
+              {LEVEL_STEPS.map((threshold) => (
+                <span
+                  key={threshold}
+                  className={cn(
+                    'w-1 rounded-full transition-colors duration-100',
+                    level >= threshold ? 'bg-red-500' : 'bg-foreground/15'
+                  )}
+                  style={{ height: `${3 + threshold * 12}px` }}
+                />
+              ))}
+            </div>
+            {level < 0.05 && !finalTranscript && !interimText && (
+              <span className="text-[10px] text-muted-foreground/70">
+                no audio detected
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Speech service errors */}
+        {error && (
+          <p className="mt-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-[11px] leading-snug text-destructive">
+            {error}
+          </p>
+        )}
+
         {/* Live caption area */}
         <div
           ref={scrollRef}
@@ -103,7 +146,9 @@ export default function VoiceCaptionPanel({
             )}
             {!finalTranscript && !interimText && (
               <span className="text-muted-foreground/60">
-                {isListening ? 'Listening — start speaking…' : 'No speech captured.'}
+                {isListening
+                  ? 'Listening for your voice — note: browser speech recognition can only hear the microphone, not audio from other tabs.'
+                  : 'No speech captured.'}
               </span>
             )}
           </p>

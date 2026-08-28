@@ -753,6 +753,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         finalTranscript={voice.finalTranscript}
         interimText={voice.interimText}
         suggestions={voice.suggestions}
+        error={voice.error}
+        level={voice.level}
       />
     </div>
   );
