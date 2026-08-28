@@ -186,7 +186,9 @@ const NODES: NodeConfig[] = [
     label: 'Resolution Summary',
     inputType: 'textarea',
     accent: 'default',
-    width: 240,
+    // Doubled width (240 -> 480): the accumulated step list gets long, and
+    // condensed 3-10 word phrases read best on a single line each
+    width: 480,
     // Doubled height: the LLM accumulates every troubleshooting step the
     // agent advises across the whole call, so the list grows long
     textareaRows: 4,
@@ -727,6 +729,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     deebotModel: NODE_IDS.DEEBOT_MODEL,
     skuNumber: NODE_IDS.SKU_NUMBER,
     serialNumber: NODE_IDS.SERIAL_NUMBER,
+    purchaseInfo: NODE_IDS.PURCHASE_INFO,
     issueDescription: NODE_IDS.DETAILED_ISSUE,
     issueType: NODE_IDS.ISSUE_TYPE,
     resolutionSummary: NODE_IDS.RESOLUTION_SUMMARY,

@@ -13,6 +13,7 @@ const PARSEABLE_FIELD_IDS = [
   'deebotModel',
   'skuNumber',
   'serialNumber',
+  'purchaseInfo',
   'issueDescription',
   'issueType',
   'resolutionSummary',

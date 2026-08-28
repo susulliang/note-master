@@ -391,6 +391,14 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
     ],
   },
   {
+    // LLM-only field: "when and where was it acquired" needs context
+    // understanding (channel + date are usually scattered across phrases),
+    // so there are deliberately no regex patterns — the label exists for
+    // the parsed-field chips in the caption panel.
+    fieldId: 'purchaseInfo',
+    label: 'Purchase',
+  },
+  {
     fieldId: 'issueDescription',
     label: 'Issue Description',
     accumulate: true,
