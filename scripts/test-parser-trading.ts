@@ -25,11 +25,17 @@
  *      ASR's rendering of "O1000 LiDAR PRO" — zero vs letter O), issue
  *      clauses from the MID-call complaint description, resolution steps
  *      that include the trade-in guidance, mowing issue type;
- *   2. buildPromptWindow() — on a call this long the tail window no longer
- *      contains the complaint: prior-value carry-forward is what keeps the
- *      issue description on the ticket (measured, not guessed);
- *   3. buildParsePrompt() — prompt size vs context window;
- *   4. matchCanonicalModel() — the O↔0 confusion cases.
+ *   2. buildPromptWindow() — with the expanded sliding window (~10k chars)
+ *      a whole call of this length fits, so even the early complaint is
+ *      sent to the model (that is the fix for "info stopped being added");
+ *      on a LONGER call the window keeps the newest tail and older turns
+ *      slide out (their values ride along via prior-value carry-forward);
+ *   3. buildParsePrompt() — the system prompt is minimal (no model list,
+ *      no issue-type catalog — format hints only) and the prompt stays far
+ *      below the context window;
+ *   4. matchCanonicalModel() — the O↔0 confusion cases;
+ *   5. validateLlmFields() — model names canonicalize when they map onto
+ *      the fleet list and survive as free text when they don't.
  */
 
 import {
@@ -141,9 +147,9 @@ console.log('\n=== 0. Transcript shape ===');
 const totalChars = entries.reduce((n, e) => n + e.text.length, 0);
 console.log(`  ${entries.length} turns · ${totalChars} chars`);
 check(
-  'transcript is longer than the LLM prompt window (window-slide scenario)',
-  totalChars > 3000,
-  `${totalChars} chars vs 3000-char window`
+  'a field-test call of this length now fits ENTIRELY inside the sliding window',
+  totalChars <= 10000,
+  `${totalChars} chars vs 10000-char sliding window`
 );
 
 console.log('\n=== 1. Regex extraction (provisional layer) ===');
@@ -229,18 +235,50 @@ check(
   `got: ${matchCanonicalModel('T30')}`
 );
 
-console.log('\n=== 3. LLM prompt window (long-call behavior) ===');
+console.log('\n=== 3. LLM prompt window (sliding) ===');
 const window = buildPromptWindow(entries);
 console.log(`  window: ${window.entryIndexes.length}/${entries.length} turns · ${window.chars} chars`);
 const windowText = window.text;
 check(
-  'complaint (blinking error) slid OUT of the tail window — prior carry-forward is what keeps it',
-  !/blinking/i.test(windowText),
-  'the complaint is still visible in the window'
+  'the WHOLE field-test call fits in the expanded window — even the early complaint is sent',
+  /blinking/i.test(windowText),
+  'the complaint is missing from the window'
 );
 check(
   'trade-in guidance (late call) IS in the window',
   /trading page|instant discount/i.test(windowText)
+);
+check(
+  'filler-only turns and ASR artifacts never reach the model',
+  !/^\s*(AGENT|CUSTOMER): (Uh-huh|Right|Okay)\.?$/m.test(windowText)
+);
+
+// Long-call scenario: pad the conversation well past the window so the
+// slide behavior is exercised — the newest tail stays, the oldest turns
+// slide out, and the cap holds.
+const longEntries: TranscriptEntry[] = [...entries];
+for (let i = 0; i < 30; i += 1) {
+  longEntries.push({ speaker: 'agent', text: `Follow-up pass ${i}: let me walk you through the voucher options one more time so everything is clear.` });
+}
+const longWindow = buildPromptWindow(longEntries);
+const longText = longWindow.text;
+check(
+  'on a longer call the window caps at the sliding limit',
+  longWindow.chars <= 10000,
+  `${longWindow.chars} chars`
+);
+check(
+  'the newest speech stays in the sliding window',
+  /Follow-up pass 29/.test(longText)
+);
+check(
+  'the oldest turns slide OUT of the window once the call outgrows it',
+  !/AMR tier one support/.test(longText),
+  'the opening turn is still inside the window'
+);
+check(
+  'the tail window keeps contiguous recent speech (late trade-in guidance present)',
+  /voucher options/.test(longText)
 );
 
 const prompt = buildParsePrompt(
@@ -257,6 +295,19 @@ const totalTokens = Math.ceil((sysChars + userChars) / 4);
 console.log(`  system prompt : ${sysChars} chars (~${Math.ceil(sysChars / 4)} tokens)`);
 console.log(`  user prompt   : ${userChars} chars (~${Math.ceil(userChars / 4)} tokens)`);
 console.log(`  TOTAL         : ~${totalTokens} tokens vs Qwen2.5 32768-token context`);
+check(
+  'system prompt is MINIMAL (no model list, no issue-type catalog — the conversation owns the budget)',
+  sysChars < 2200,
+  `${sysChars} chars`
+);
+check(
+  'no fleet model list embedded in the prompt',
+  !prompt.system.includes('GOAT O1200') && !prompt.system.includes('Winbot 950')
+);
+check(
+  'model-name format hints are present instead',
+  /GOAT O1000 RTK/.test(prompt.system)
+);
 check('prompt far below the model context window', totalTokens < 8000);
 
 console.log('\n=== 4. LLM reply validation on this call ===');
@@ -277,6 +328,23 @@ check('resolution survives', (vMap.get('resolutionSummary') ?? '').includes('tra
 check(
   'word-only phone ("number") still rejected',
   !vMap.has('contactNumber')
+);
+
+// The prompt carries no model list, so the validation layer lets the LLM's
+// own naming through when it maps to no fleet entry — a free-text model
+// (flagged for verification) beats a dropped field.
+const freeText = new Map(
+  validateLlmFields({ deebotModel: 'GOAT O1400 LiDAR' }).map((f) => [f.fieldId, f.value])
+);
+check(
+  'a model name that maps to no fleet entry survives as free text (not dropped)',
+  freeText.get('deebotModel') === 'GOAT O1400 LiDAR',
+  `got: ${freeText.get('deebotModel')}`
+);
+const noiseModel = validateLlmFields({ deebotModel: 'x' });
+check(
+  'single-character noise is still dropped',
+  !noiseModel.some((f) => f.fieldId === 'deebotModel')
 );
 
 console.log(`\n${passed}/${passed + failed} checks passed`);

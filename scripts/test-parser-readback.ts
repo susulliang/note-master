@@ -170,7 +170,7 @@ function main(): void {
   );
   check(
     'window well under the transcript cap (no truncation)',
-    window.chars <= 3000,
+    window.chars <= 10000,
     `${window.chars} chars`
   );
 
@@ -186,6 +186,11 @@ function main(): void {
     'prompt far below the model context window (not a context-size failure)',
     estTokens < 4000,
     `${estTokens} tokens`
+  );
+  check(
+    'system prompt is minimal (format hints, no fleet catalog)',
+    system.length < 2200,
+    `${system.length} chars`
   );
 
   console.log('\n=== 4. LLM reply validation ===');

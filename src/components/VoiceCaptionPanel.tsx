@@ -15,6 +15,7 @@ import {
 import {
   LLM_MODEL_META,
   LLM_MODELS,
+  buildPromptWindow,
   type LlmModelName,
 } from '@/lib/llm-parser';
 
@@ -203,16 +204,33 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showLlmDebug, setShowLlmDebug] = useState(false);
 
-  // Which transcript lines the last LLM parse included in its prompt —
-  // the "what the AI sees" debug highlight
+  // The SLIDING window the NEXT parse will send — computed LIVE from the
+  // current transcript, so the amber highlight slides forward in real time
+  // as new lines arrive (the same tail-window slicing the parser applies).
+  // Highlighting the last parse's frozen snapshot instead made the window
+  // look stuck on an early chunk of the call between the throttled parses.
+  const liveWindow = useMemo(
+    () =>
+      parser?.enabled && parser.status === 'ready'
+        ? buildPromptWindow(call.transcript)
+        : null,
+    [parser?.enabled, parser?.status, call.transcript]
+  );
   const llmWindowSet = useMemo(
-    () => new Set(parser?.window?.entryIndexes ?? []),
-    [parser?.window]
+    () => new Set(liveWindow?.entryIndexes ?? []),
+    [liveWindow]
   );
   const llmWindowFirst = useMemo(
     () => (llmWindowSet.size > 0 ? Math.min(...llmWindowSet) : null),
     [llmWindowSet]
   );
+  // Highest line index the LAST parse actually sent — the boundary between
+  // "already read by the AI" and "new, waiting for the next parse" inside
+  // the live window
+  const lastSentMax = useMemo(() => {
+    const idx = parser?.window?.entryIndexes ?? [];
+    return idx.length > 0 ? Math.max(...idx) : null;
+  }, [parser?.window]);
 
   const activeSource: 'mic' | 'call' | null = mic.isListening
     ? 'mic'
@@ -562,12 +580,12 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 {parser.window ? (
                   <>
                     <p className="text-muted-foreground">
-                      prompt window:{' '}
+                      last parse window:{' '}
                       <span className="font-bold text-amber-600 dark:text-amber-400">
                         {parser.window.entryIndexes.length}
                       </span>
                       /{call.transcript.length} lines · {parser.window.chars} chars · ~
-                      {Math.ceil(parser.window.chars / 4)} tokens (system prompt adds ~1.5k
+                      {Math.ceil(parser.window.chars / 4)} tokens (system prompt adds ~0.4k
                       more)
                       {parser.window.entryIndexes.length < call.transcript.length &&
                         ' · dim lines were NOT sent'}
@@ -613,12 +631,14 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
             call.transcript.length > 0 ? (
               <div className="flex flex-col gap-1">
                 {call.transcript.map((entry, i) => {
-                  // Debug highlight: amber = inside the last AI prompt
-                  // window (this is the text the model received), dimmed =
-                  // older than the window (dropped from the prompt; its
-                  // extracted values live on in the form), plain = arrived
-                  // after the last parse (will be sent on the next one)
+                  // Sliding-window highlight: amber = inside the AI window
+                  // (the text the next parse sends), dimmed = slid out of
+                  // the window (older than it — extracted values live on in
+                  // the form). Inside the window, lines at or below the last
+                  // parse's boundary were already read; newer ones are
+                  // queued for the next pass.
                   const inWindow = llmWindowSet.has(i);
+                  const sent = inWindow && lastSentMax !== null && i <= lastSentMax;
                   const beforeWindow =
                     llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
                   const llmWorking = !!parser?.isParsing || !!parser?.isParaphrasing;
@@ -627,18 +647,21 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                       key={i}
                       className={cn(
                         'flex items-start gap-1.5 rounded-r border-l-2 px-1 py-0.5 -mx-1 transition-colors duration-300',
-                        inWindow &&
+                        sent &&
                           'border-l-amber-500 bg-amber-500/[0.13] shadow-[inset_0_0_0_1px_rgba(245,158,11,0.18)]',
+                        inWindow &&
+                          !sent &&
+                          'border-l-amber-400/70 bg-amber-400/[0.06]',
                         inWindow && llmWorking && 'ring-1 ring-amber-400/50 animate-pulse',
                         beforeWindow && 'border-l-transparent opacity-40'
                       )}
                       title={
-                        inWindow
-                          ? 'Sent to the AI parser (included in the last prompt)'
-                          : beforeWindow
-                            ? 'Older than the AI prompt window — not sent to the model (its extracted values are carried forward in the form)'
-                            : llmWindowSet.size > 0
-                              ? 'Arrived after the last AI parse — will be sent on the next one'
+                        sent
+                          ? 'Inside the sliding AI window — sent on the last parse'
+                          : inWindow
+                            ? 'New — inside the sliding AI window, sent on the next parse'
+                            : beforeWindow
+                              ? 'Outside the sliding AI window — not sent (its extracted values are carried forward in the form)'
                               : undefined
                       }
                     >
@@ -683,8 +706,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           )}
         </div>
 
-        {/* Legend for the "what the AI sees" highlight — always visible once
-            a parse has run, so the amber/dimmed lines are self-explanatory */}
+        {/* Legend for the sliding-window highlight — always visible once a
+            parse has run, so the amber/dimmed lines are self-explanatory */}
         {activeSource === 'call' &&
           call.transcript.length > 0 &&
           llmWindowSet.size > 0 && (
@@ -695,13 +718,19 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   <span className="font-bold text-amber-600 dark:text-amber-400">
                     {llmWindowSet.size}
                   </span>
-                  /{call.transcript.length} lines sent to AI
+                  /{call.transcript.length} lines in the sliding AI window
                 </span>
               </span>
+              {lastSentMax !== null &&
+                parser?.window &&
+                parser.window.entryIndexes.length > 0 && (
+                  <span className="opacity-70">
+                    {parser.window.entryIndexes.length} read on the last parse
+                  </span>
+                )}
               {llmWindowFirst !== null && llmWindowFirst > 0 && (
-                <span className="opacity-70">dimmed = dropped from the prompt</span>
+                <span className="opacity-70">dimmed = slid out (values live on in the form)</span>
               )}
-              <span className="opacity-70">values survive in the form</span>
             </div>
           )}
 

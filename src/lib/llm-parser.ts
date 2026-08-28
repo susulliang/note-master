@@ -1,15 +1,20 @@
 /**
  * Ultra-small local LLM — the PRIMARY ticket-field parser.
  *
- * An on-device instruction-following LLM (transformers.js v3, WASM) reads the
- * WHOLE speaker-tagged conversation — agent and customer speech together —
- * and maps it onto the ticket form. Pattern matching (the regex engine in
- * src/lib/field-extraction.ts) is relegated to a provisional stopgap: it may
- * pre-fill format-verifiable identifiers while the model is unavailable, and
- * everything it fills is provisional until the LLM's full-context reading of
- * the situation replaces it. Audio and transcript never leave the machine:
- * there is no API key and no per-request cost, just a one-time model
- * download cached by the browser.
+ * An on-device instruction-following LLM (transformers.js v3, WASM) reads
+ * the speaker-tagged conversation — agent and customer speech together,
+ * through a SLIDING tail window that keeps the newest ~10 minutes of
+ * speech (older turns slide out; their extracted values are carried
+ * forward in the prompt, so nothing already noted is lost) — and maps it
+ * onto the ticket form. The system prompt is deliberately minimal: format
+ * hints instead of catalog dumps (no 247-model list, no issue-type
+ * catalog), so the conversation owns the token budget. Pattern matching
+ * (the regex engine in src/lib/field-extraction.ts) is relegated to a
+ * provisional stopgap: it may pre-fill format-verifiable identifiers while
+ * the model is unavailable, and everything it fills is provisional until
+ * the LLM's full-context reading of the situation replaces it. Audio and
+ * transcript never leave the machine: there is no API key and no
+ * per-request cost, just a one-time model download cached by the browser.
  *
  * Model choices are deliberately tiny so CPU/WASM inference stays tolerable:
  *
@@ -17,13 +22,13 @@
  *                  params, fastest sensible extraction quality)
  *   qwen2.5-0.5b — onnx-community/Qwen2.5-0.5B-Instruct (smarter, heavier)
  *
- * Validation is the critical piece: the LLM may hallucinate. Everything it
- * returns is clamped against the canonical option lists (robot models,
- * issue types) and any field it cannot justify is dropped, so the yellow
- * glow never marks a fabricated value.
+ * Validation is the critical piece: the LLM may hallucinate. Values are
+ * clamped against the canonical option lists where one exists (robot
+ * models, issue types); a model name the fleet list cannot canonicalize
+ * is kept as the LLM wrote it — the yellow glow marks it for the agent
+ * to verify — and any field the reply cannot justify is dropped.
  */
 
-import { DEEBOT_MODELS } from '@/data/ticket';
 import type { TranscriptEntry, ExtractedField } from '@/lib/field-extraction';
 import { matchCanonicalModel, canonicalIssueType, classifyIssueType, stripAsrArtifacts } from '@/lib/field-extraction';
 
@@ -165,33 +170,19 @@ const LLM_FIELD_IDS = [
 
 export type LlmFieldId = (typeof LLM_FIELD_IDS)[number];
 
-/** How many transcript characters to feed the model — small LLMs get lost
- *  in long contexts, and WASM inference cost grows with every token. The cap
- *  is generous because the model needs BOTH sides of the conversation to
- *  understand the situation. */
-const MAX_TRANSCRIPT_CHARS = 3000;
-
-/** Issue-type examples for the prompt (full list is ~800 entries) */
-const ISSUE_TYPE_EXAMPLES = [
-  'Failure::Unable to charge/fully charge',
-  'Failure::Unable to power on the robot',
-  'Failure::Unable to return to station',
-  'Failure::Robot spins in circles or moves backward',
-  'Failure::Fails to escape when stuck',
-  'Failure::Robot making abnormal sound/noise',
-  'Failure::Network setup failed',
-  'Failure::App crashing',
-  'Failure::Lost map',
-  'Failure::Error code',
-  'Product experience::Low suction power',
-  'Product experience::Carpets get wet during mopping',
-  'Missing parts::Side brush missing',
-  'Damaged parts::Damaged power cord',
-  'Return Request::Return and exchange application',
-  'Aftersale-Service inquiry::Warranty Policy',
-  'How to use::App connection',
-  'How to use::Scheduling',
-];
+/**
+ * Sliding-window size: how many transcript characters each parse feeds the
+ * model — the TAIL (newest) of the conversation. On calls longer than the
+ * window, older turns slide out of the prompt and their extracted values
+ * are carried forward instead (see PriorLlmValues).
+ *
+ * ~10000 chars ≈ 10 minutes of speech. The system prompt is deliberately
+ * minimal (~400 tokens: no model list, no issue-type catalog — just format
+ * hints) so the CONVERSATION owns the inference budget, not boilerplate:
+ * the whole prompt stays ≈ 2.5-3k tokens, comfortably inside Qwen2.5's
+ * 32k-token context and the WASM wall-clock budget.
+ */
+const MAX_TRANSCRIPT_CHARS = 10_000;
 
 /**
  * Render the speaker-tagged transcript into "AGENT:" / "CUSTOMER:" lines,
@@ -340,25 +331,15 @@ export function buildParsePrompt(
   const skeleton = Object.fromEntries(order.map((id) => [id, '']));
 
   const system = [
-    'You are the ticket-note writer for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
-    'You read a transcript where AGENT is the support rep and CUSTOMER is the caller.',
-    'The transcript is machine-generated and garbled — read it for INTENT, not literally (e.g. "Acovox" is ECOVACS; "1,000 R2K" is the GOAT O1000 RTK lawn mower; "free of the breeze" means "free of debris").',
-    'First understand the whole situation from BOTH speakers together — what the customer complained about, what the agent diagnosed and advised — then extract the ticket fields.',
-    'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
-    'Keep every value SHORT — condensed note style, never sentences copied verbatim from the transcript.',
-    'Rules:',
-    '1. customerName / contactNumber / emailAddress are the CUSTOMER\'S own details: take them from the customer stating them, or from the agent reading them back to confirm ("so that\'s John, 555-0123"). NEVER use the agent\'s own name as the customer name.',
-    '2. deebotModel (the ROBOT model): copy EXACTLY one name from the allowed list below, or "". The call may be about ANY Ecovacs robot — a DEEBOT vacuum, a GOAT mower, a WINBOT window cleaner or an ULTRAMARINE pool robot — not just vacuums. Take it from the customer\'s own words, the agent\'s question ("is it the X2 OMNI?"), or the customer confirming/correcting the agent\'s guess. Choose the model the call is actually about.',
+    'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
+    'Reply with ONE JSON object only — no markdown, no explanations. Every value in condensed note style, "" when unknown, never invented.',
+    '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
+    '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
-    '4. purchaseInfo: when and where the customer acquired the unit — the purchase channel (retailer or website, e.g. Amazon, Best Buy, Costco, ecovacs.com) and the date or timeframe (e.g. "last March", "about six months ago"), condensed into one short phrase like "Amazon · March 2025" or "Best Buy · ~2 years ago". Take it from the customer\'s own words or the agent reading it back. Use "" when the conversation never mentions where or when it was bought.',
-    '5. issueDescription: ONE concise sentence summarizing the customer\'s PRIMARY complaint — what is wrong with the machine, in the customer\'s terms. The customer describes the problem gradually and the agent confirms/diagnoses it, so REFINE the description as the call goes on: merge newly described symptoms and details into it, and replace it entirely only when the conversation shows it was wrong. When you are given an issue description already on the ticket, start from that and fold in what is new — never drop details it already has.',
-    '6. issueType: the "Category::Item" match for the PRIMARY issue — the single main problem this call is actually about, not a secondary symptom mentioned in passing. Pick from the examples below when one fits, otherwise write a short "Category::Item" of your own.',
-    '7. resolutionSummary: EVERY troubleshooting step the AGENT advised during this call, in order. Condense each step to a short imperative phrase starting with a verb (3-10 words). Join the steps with " -> ". Fix obvious speech-transcription errors from context. Your reply REPLACES the previous extraction, so include ALL steps — the ones you are given as already noted PLUS any new ones.',
-    '8. Use "" for any field the conversation does not clearly state. Never invent values.',
-    'Example of resolutionSummary condensation — AGENT said: "can you make sure the clean water tank is properly seated and the valves themselves are probably tight, so if you take out the clean water tank there should be like a valve there, and then make sure that thing is secure and free of the breeze and then put the water tank back in"',
-    '→ resolutionSummary: "check clean water tank\'s tightness -> make sure valve is free of debris -> put water tank back in" ("free of the breeze" is a transcription error for "free of debris"; verbatim copying is wrong)',
-    'Allowed deebotModel values (all Ecovacs robot models): ' + DEEBOT_MODELS.join(', '),
-    'issueType examples: ' + ISSUE_TYPE_EXAMPLES.join(' | '),
+    '4. purchaseInfo: where + when the customer acquired the unit, one short phrase ("Amazon · March 2025", "Best Buy · ~2 years ago").',
+    '5. issueDescription: ONE concise sentence of the customer\'s PRIMARY complaint in the customer\'s terms. When given a description already on the ticket, refine it — fold in NEW symptoms or details the customer describes or the agent confirms; never drop what it already has.',
+    '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "How to use::App connection").',
+    '7. resolutionSummary: EVERY step the agent advised, in order — each a short imperative verb phrase (3-10 words) joined with " -> ", ASR garble fixed. Your reply REPLACES the previous extraction: include the steps you are given PLUS any new ones.',
     ...(strict
       ? [
           'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it.',
@@ -599,9 +580,14 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
 
     switch (fieldId) {
       case 'deebotModel': {
-        const canonical = matchCanonicalModel(cleaned);
-        if (!canonical) continue; // hallucinated model — reject
-        cleaned = canonical;
+        // Canonicalize onto the fleet list when the model's naming maps
+        // to it ("O1000 RTK" → GOAT O1000 RTK, ASR zero/O confusion
+        // included). When it does NOT map, the prompt deliberately carries
+        // no model list — keep the model's own naming as-is: a free-text
+        // model on the form (flagged for verification) beats an empty
+        // field. Only obvious noise (single characters) is dropped.
+        if (cleaned.length < 2) continue;
+        cleaned = matchCanonicalModel(cleaned) ?? cleaned;
         break;
       }
       case 'contactNumber': {
