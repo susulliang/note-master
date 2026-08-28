@@ -20,6 +20,7 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
+import VoiceTranscription from '@/components/VoiceTranscription';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -638,6 +639,37 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     toast.success('History cleared.');
   }, [setHistory]);
 
+  // ---------------------------------------------------------------------
+  //  Voice transcription (Web Speech API prototype)
+  // ---------------------------------------------------------------------
+  const [voiceListening, setVoiceListening] = useState(false);
+  const toggleVoice = useCallback(() => {
+    setVoiceListening((prev) => !prev);
+  }, []);
+
+  const handleAutoFill = useCallback(
+    (fieldId: string, value: string) => {
+      const nodeIdMap: Record<string, string> = {
+        customerName: NODE_IDS.CUSTOMER_NAME,
+        contactNumber: NODE_IDS.CONTACT_NUMBER,
+        emailAddress: NODE_IDS.EMAIL_ADDRESS,
+        deebotModel: NODE_IDS.DEEBOT_MODEL,
+        skuNumber: NODE_IDS.SKU_NUMBER,
+        serialNumber: NODE_IDS.SERIAL_NUMBER,
+      };
+      const nodeId = nodeIdMap[fieldId];
+      if (!nodeId) return;
+
+      const current = formData[nodeId];
+      if (typeof current === 'string' && current.trim().length > 0) {
+        return;
+      }
+      handleFieldChange(nodeId, value, true);
+      toast.success(`Auto-filled ${fieldId} from voice`);
+    },
+    [formData, handleFieldChange]
+  );
+
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
@@ -707,6 +739,12 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             toast: 'glass-panel font-sans text-sm !text-foreground',
           },
         }}
+      />
+
+      <VoiceTranscription
+        onAutoFill={handleAutoFill}
+        isListening={voiceListening}
+        onToggle={toggleVoice}
       />
     </div>
   );
