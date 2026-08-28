@@ -36,7 +36,9 @@ const REGEX_RELIABLE_FIELD_IDS = new Set([
 export interface CallCaptureLlmParser {
   parse: (
     entries: TranscriptEntry[],
-    missingFieldIds: readonly string[]
+    missingFieldIds: readonly string[],
+    /** Previously extracted values the model must carry forward */
+    prior?: { resolutionSummary?: string }
   ) => Promise<ExtractedField[]>;
   isReady: boolean;
 }
@@ -53,8 +55,9 @@ const RESTART_DELAY_MS = 250;
 const LLM_IDLE_DEBOUNCE_MS = 1_500;
 
 /** Minimum spacing between two LLM parses — WASM generation is slow; asking
- *  more often than this would just stack the worker. */
-const LLM_MIN_INTERVAL_MS = 30_000;
+ *  more often than this would just stack the worker. Short enough that new
+ *  information shows up on the form while the call is still going. */
+const LLM_MIN_INTERVAL_MS = 20_000;
 
 /** Transcript must be at least this long before a parse is worth the
  *  inference cost. */
@@ -306,6 +309,11 @@ export function useCallCapture(
    * together, every parseable field. The model's reading of the situation
    * is what fills the form; as the transcript grows, later passes can
    * improve on earlier answers (the page applies override semantics).
+   *
+   * The previously extracted resolution steps ride along in the prompt:
+   * steps are cumulative, and once they slide out of the transcript window
+   * the model could not re-list them on its own — carrying them forward is
+   * what makes the field KEEP GROWING instead of freezing or shrinking.
    */
   const runLlmParse = useCallback(async (): Promise<void> => {
     const parser = llmParserRef.current;
@@ -317,7 +325,12 @@ export function useCallCapture(
     try {
       // Ask for every field, not just the "missing" ones — understanding
       // the full context is the point
-      const fields = await parser.parse(entriesRef.current, PARSEABLE_FIELD_IDS);
+      const priorSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
+      const fields = await parser.parse(
+        entriesRef.current,
+        PARSEABLE_FIELD_IDS,
+        priorSummary ? { resolutionSummary: priorSummary } : undefined
+      );
       applyLlmFields(fields);
     } catch {
       /* parse failed — provisional regex results stand */
@@ -733,8 +746,15 @@ export function useCallCapture(
     if (parser?.isReady) {
       const textLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
       if (entriesRef.current.length > 0 && textLen >= 40) {
+        // Carry the accumulated resolution steps in — same cumulative rule
+        // as the periodic passes (see runLlmParse)
+        const priorSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
         // Bounded: the parser's own timeout caps a stuck generation
-        const fields = await parser.parse(entriesRef.current, PARSEABLE_FIELD_IDS);
+        const fields = await parser.parse(
+          entriesRef.current,
+          PARSEABLE_FIELD_IDS,
+          priorSummary ? { resolutionSummary: priorSummary } : undefined
+        );
         applyLlmFields(fields);
       }
     }

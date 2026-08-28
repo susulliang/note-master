@@ -198,18 +198,38 @@ export function renderTranscript(entries: TranscriptEntry[]): string {
 }
 
 /**
+ * Values the PREVIOUS parse produced, fed back into the next prompt.
+ *
+ * Resolution steps are cumulative: as the transcript window slides forward,
+ * early steps fall out of the context the model can see — without carrying
+ * them back in, a replace-semantics re-parse would silently DROP them.
+ */
+export interface PriorLlmValues {
+  /** resolutionSummary the previous parse produced — the model must keep
+   *  these steps and append any NEW ones after them */
+  resolutionSummary?: string;
+}
+
+/**
  * Build the (system, user) prompt pair for a parse. The system prompt fixes
  * the output contract; the user prompt carries the full speaker-tagged
- * transcript and the JSON skeleton of the fields to extract.
+ * transcript, any previously extracted steps to carry forward, and the JSON
+ * skeleton of the fields to extract.
  *
  * Callers normally pass every supported field: the LLM is the primary
  * parser and re-reads the whole conversation as it grows, so its
  * full-context understanding of the situation — not just the fields a
  * regex happened to miss — is what fills the form.
+ *
+ * `strict` renders the brevity-hardened variant used for the single retry
+ * after a broken reply (truncated JSON, rambling): the reply must be only
+ * the compact JSON object.
  */
 export function buildParsePrompt(
   entries: TranscriptEntry[],
-  missingFieldIds: readonly string[]
+  missingFieldIds: readonly string[],
+  prior?: PriorLlmValues,
+  strict = false
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -223,26 +243,40 @@ export function buildParsePrompt(
     'You read a transcript where AGENT is the support rep and CUSTOMER is the caller.',
     'First understand the whole situation from BOTH speakers together — what the customer complained about, what the agent diagnosed and advised — then extract the ticket fields.',
     'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
+    'Keep every value SHORT — condensed note style, never sentences copied verbatim from the transcript.',
     'Rules:',
     '1. customerName / contactNumber / emailAddress are the CUSTOMER\'S own details: take them from the customer stating them, or from the agent reading them back to confirm ("so that\'s John, 555-0123"). NEVER use the agent\'s own name as the customer name.',
     '2. deebotModel: copy EXACTLY one name from the allowed list below, or "". Take it from the customer\'s own words, the agent\'s question ("is it the X2 OMNI?"), or the customer confirming/correcting the agent\'s guess. Choose the model the call is actually about.',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. issueDescription: ONE concise sentence summarizing the customer\'s complaint as understood from the whole conversation — what is wrong with the machine, in the customer\'s terms.',
     '5. issueType: the single best "Category::Item" match for that complaint. Pick from the examples below when one fits, otherwise write a short "Category::Item" of your own.',
-    '6. resolutionSummary: the troubleshooting steps the AGENT actually gave, in order, joined with " -> ". Only the actions advised during this call.',
+    '6. resolutionSummary: EVERY troubleshooting step the AGENT advised during this call, in order. Condense each step to a short imperative phrase starting with a verb (3-10 words). Join the steps with " -> ". Fix obvious speech-transcription errors from context. Your reply REPLACES the previous extraction, so include ALL steps — the ones you are given as already noted PLUS any new ones.',
     '7. Use "" for any field the conversation does not clearly state. Never invent values.',
+    'Example of resolutionSummary condensation — AGENT said: "can you make sure the clean water tank is properly seated and the valves themselves are probably tight, so if you take out the clean water tank there should be like a valve there, and then make sure that thing is secure and free of the breeze and then put the water tank back in"',
+    '→ resolutionSummary: "check clean water tank\'s tightness -> make sure valve is free of debris -> put water tank back in" ("free of the breeze" is a transcription error for "free of debris"; verbatim copying is wrong)',
     'Allowed deebotModel values: ' + DEEBOT_MODELS.join(', '),
     'issueType examples: ' + ISSUE_TYPE_EXAMPLES.join(' | '),
+    ...(strict
+      ? [
+          'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it.',
+        ]
+      : []),
   ].join('\n');
 
-  const user = [
-    'Support call transcript:',
-    renderTranscript(entries),
+  const userLines = ['Support call transcript:', renderTranscript(entries)];
+  if (prior?.resolutionSummary) {
+    userLines.push(
+      '',
+      'Steps already on the ticket (keep them unchanged and in order, then append any NEW steps after them):',
+      prior.resolutionSummary
+    );
+  }
+  userLines.push(
     '',
-    `Extract these ticket fields as JSON ("" when unknown): ${JSON.stringify(skeleton)}`,
-  ].join('\n');
+    `Extract these ticket fields as JSON ("" when unknown): ${JSON.stringify(skeleton)}`
+  );
 
-  return { system, user };
+  return { system, user: userLines.join('\n') };
 }
 
 // ---------------------------------------------------------------------------

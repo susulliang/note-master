@@ -11,24 +11,25 @@ import {
   LLM_MODELS,
   type LlmModelName,
   type LlmWorkerEvent,
+  type PriorLlmValues,
 } from '@/lib/llm-parser';
 
 export type LlmParserStatus = 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
 
 interface PendingParse {
-  resolve: (fields: ExtractedField[]) => void;
+  resolve: (text: string) => void;
   timer: number;
 }
 
-/** Hard cap on a single parse (ms) — WASM can be slow, but the agent
+/** Hard cap on a single generation (ms) — WASM can be slow, but the agent
  *  should never wait on a stuck generation. */
 const PARSE_TIMEOUT_MS = 45_000;
 
-/** Generation token cap for extraction — JSON for 9 fields, with the
- *  description/resolution sentences, stays short but needs headroom so a
- *  long reply is never truncated mid-JSON (a truncated object parses as
- *  nothing). */
-const MAX_NEW_TOKENS = 320;
+/** Generation token cap for extraction. Condensed values keep the 9-field
+ *  JSON short, but the cap MUST comfortably exceed the longest legitimate
+ *  reply: a reply truncated mid-JSON parses as nothing, which is exactly
+ *  how a form gets stuck on its first parse while the conversation grows. */
+const MAX_NEW_TOKENS = 448;
 
 /**
  * Ultra-small on-device LLM — the PRIMARY ticket-field parser.
@@ -124,12 +125,9 @@ export function useLlmParser() {
         if (!pending) return;
         pendingParsesRef.current.delete(data.id);
         window.clearTimeout(pending.timer);
-
-        const json = extractJson(data.text);
-        const fields = json ? validateLlmFields(json) : [];
-        if (pendingParsesRef.current.size === 0) setIsParsing(false);
-        setLastParseMs(data.ms);
-        pending.resolve(fields);
+        // Raw generation text — validation/retry lives in parse(), which can
+        // re-prompt; here we only hand the reply back.
+        pending.resolve(data.text);
         break;
       }
 
@@ -138,8 +136,7 @@ export function useLlmParser() {
         if (!pending) return;
         pendingParsesRef.current.delete(data.id);
         window.clearTimeout(pending.timer);
-        if (pendingParsesRef.current.size === 0) setIsParsing(false);
-        pending.resolve([]);
+        pending.resolve('');
         break;
       }
     }
@@ -159,7 +156,7 @@ export function useLlmParser() {
       setError(`LLM parser worker crashed: ${event.message || 'unknown error'}`);
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve([]);
+        pending.resolve('');
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -178,7 +175,7 @@ export function useLlmParser() {
       workerRef.current = null;
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve([]);
+        pending.resolve('');
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -247,11 +244,22 @@ export function useLlmParser() {
    * parser is disabled, not loaded, times out, or the model's output fails
    * validation. Never rejects: a failed parse must not break the capture
    * loop.
+   *
+   * `prior` carries the previous parse's resolution steps back into the
+   * prompt so the cumulative field keeps growing instead of being replaced
+   * by a partial re-read.
+   *
+   * When the model's reply is BROKEN — no balanced JSON object, the usual
+   * signature of a reply truncated mid-generation or the model rambling —
+   * one strict retry is made with brevity pressure. Without it, every parse
+   * after the first would fail silently and the form would freeze on the
+   * first parse's values forever.
    */
   const parse = useCallback(
     async (
       entries: TranscriptEntry[],
-      missingFieldIds: readonly string[]
+      missingFieldIds: readonly string[],
+      prior?: PriorLlmValues
     ): Promise<ExtractedField[]> => {
       if (!enabledRef.current || entries.length === 0 || statusRef.current === 'disabled') {
         return [];
@@ -267,28 +275,52 @@ export function useLlmParser() {
       const worker = workerRef.current;
       if (!worker) return [];
 
-      const { system, user } = buildParsePrompt(entries, missingFieldIds);
-      const id = (nextIdRef.current += 1);
-
-      setIsParsing(true);
-      return new Promise<ExtractedField[]>((resolve) => {
-        const timer = window.setTimeout(() => {
-          const pending = pendingParsesRef.current.get(id);
-          if (!pending) return;
-          pendingParsesRef.current.delete(id);
-          if (pendingParsesRef.current.size === 0) setIsParsing(false);
-          resolve([]);
-        }, PARSE_TIMEOUT_MS);
-
-        pendingParsesRef.current.set(id, { resolve, timer });
-        worker.postMessage({
-          type: 'parse',
-          id,
-          system,
-          user,
-          maxNewTokens: MAX_NEW_TOKENS,
+      /** One generation round-trip → raw reply text ("" on error/timeout) */
+      const generate = (system: string, user: string): Promise<string> =>
+        new Promise<string>((resolve) => {
+          const id = (nextIdRef.current += 1);
+          const timer = window.setTimeout(() => {
+            const pending = pendingParsesRef.current.get(id);
+            if (!pending) return;
+            pendingParsesRef.current.delete(id);
+            resolve('');
+          }, PARSE_TIMEOUT_MS);
+          pendingParsesRef.current.set(id, { resolve, timer });
+          worker.postMessage({
+            type: 'parse',
+            id,
+            system,
+            user,
+            maxNewTokens: MAX_NEW_TOKENS,
+          });
         });
-      });
+
+      /** Validate a raw reply; null ⇔ broken (no balanced JSON object) */
+      const validateReply = (text: string): ExtractedField[] | null => {
+        const json = extractJson(text);
+        return json ? validateLlmFields(json) : null;
+      };
+
+      const started = performance.now();
+      setIsParsing(true);
+      try {
+        const first = buildParsePrompt(entries, missingFieldIds, prior);
+        let fields = validateReply(await generate(first.system, first.user));
+
+        if (fields === null) {
+          // Broken reply → one brevity-hardened retry. (A VALID object that
+          // simply extracted nothing — all fields blank — needs no retry.)
+          const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
+          fields = validateReply(await generate(strict.system, strict.user));
+        }
+
+        return fields ?? [];
+      } finally {
+        setIsParsing(false);
+        // Wall time of the whole parse, retry included — that is what the
+        // agent actually waited for
+        setLastParseMs(Math.round(performance.now() - started));
+      }
     },
     [load]
   );
