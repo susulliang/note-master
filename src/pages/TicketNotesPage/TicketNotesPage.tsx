@@ -22,6 +22,7 @@ import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
+import { useCallCapture } from '@/hooks/use-call-capture';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -671,6 +672,30 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
   const voice = useVoiceTranscription(handleAutoFill);
 
+  // ---------------------------------------------------------------------
+  //  CCP tab-audio capture → /api/transcribe (OpenAI) → auto-fill
+  //  Mutually exclusive with the mic-only mode above.
+  // ---------------------------------------------------------------------
+  const call = useCallCapture(handleAutoFill);
+
+  const handleToggleVoice = useCallback(() => {
+    if (call.isCapturing) call.stop();
+    voice.toggle();
+  }, [call, voice]);
+
+  const handleToggleCall = useCallback(() => {
+    if (voice.isListening) voice.toggle(); // stop mic mode first
+    call.toggle();
+  }, [call, voice]);
+
+  const handleClearMic = useCallback(() => {
+    voice.clear();
+  }, [voice]);
+
+  const handleClearCall = useCallback(() => {
+    call.clear();
+  }, [call]);
+
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
@@ -698,7 +723,10 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onToggleUiScale={handleToggleUiScale}
             voiceSupported={voice.isSupported}
             voiceListening={voice.isListening}
-            onToggleVoice={voice.toggle}
+            onToggleVoice={handleToggleVoice}
+            callSupported={call.isSupported}
+            callCapturing={call.isCapturing}
+            onToggleCall={handleToggleCall}
           />
           <FlowchartCanvas
             nodes={nodes}
@@ -747,14 +775,28 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
       {/* Live captions + extracted-field chips; hidden when idle with no content */}
       <VoiceCaptionPanel
-        isListening={voice.isListening}
-        onToggle={voice.toggle}
-        onClear={voice.clear}
-        finalTranscript={voice.finalTranscript}
-        interimText={voice.interimText}
-        suggestions={voice.suggestions}
-        error={voice.error}
-        level={voice.level}
+        mic={{
+          isListening: voice.isListening,
+          finalTranscript: voice.finalTranscript,
+          interimText: voice.interimText,
+          suggestions: voice.suggestions,
+          error: voice.error,
+          level: voice.level,
+          onToggle: handleToggleVoice,
+          onClear: handleClearMic,
+        }}
+        call={{
+          isCapturing: call.isCapturing,
+          transcript: call.transcript,
+          suggestions: call.suggestions,
+          segmentsSent: call.segmentsSent,
+          isTranscribing: call.isTranscribing,
+          error: call.error,
+          level: call.level,
+          hasMic: call.hasMic,
+          onToggle: handleToggleCall,
+          onClear: handleClearCall,
+        }}
       />
     </div>
   );

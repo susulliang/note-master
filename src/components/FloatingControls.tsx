@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { RotateCcw, History, Type, Mic, MicOff } from 'lucide-react';
+import { RotateCcw, History, Type, Mic, MicOff, MonitorPlay } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -33,6 +33,10 @@ interface FloatingControlsProps {
   voiceSupported: boolean;
   voiceListening: boolean;
   onToggleVoice: () => void;
+  /** CCP tab-audio capture → /api/transcribe auto-fill */
+  callSupported: boolean;
+  callCapturing: boolean;
+  onToggleCall: () => void;
 }
 
 /** Screen corner the toolbar is docked to */
@@ -75,6 +79,9 @@ export default function FloatingControls({
   voiceSupported,
   voiceListening,
   onToggleVoice,
+  callSupported,
+  callCapturing,
+  onToggleCall,
 }: FloatingControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
@@ -321,6 +328,33 @@ export default function FloatingControls({
                   <Mic className="size-4" />
                 )}
                 {voiceListening && (
+                  <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                    <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
+                  </span>
+                )}
+              </Button>
+            )}
+
+            {callSupported && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleCall}
+                className={cn(
+                  'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
+                  callCapturing &&
+                    'bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive'
+                )}
+                aria-label={callCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
+                title={
+                  callCapturing
+                    ? 'Call capture: on — transcribing the CCP tab audio'
+                    : 'Call capture: off — share the CCP tab (tick "Also share tab audio") to transcribe the customer'
+                }
+              >
+                <MonitorPlay className="size-4" />
+                {callCapturing && (
                   <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
                     <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
