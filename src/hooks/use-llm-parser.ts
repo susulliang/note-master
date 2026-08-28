@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedField, TranscriptEntry } from '@/lib/field-extraction';
 import {
   buildParsePrompt,
-  extractJson,
+  extractJsonLoose,
   validateLlmFields,
   readLlmModelPref,
   writeLlmModelPref,
@@ -25,11 +25,17 @@ interface PendingParse {
  *  should never wait on a stuck generation. */
 const PARSE_TIMEOUT_MS = 45_000;
 
-/** Generation token cap for extraction. Condensed values keep the 9-field
- *  JSON short, but the cap MUST comfortably exceed the longest legitimate
- *  reply: a reply truncated mid-JSON parses as nothing, which is exactly
- *  how a form gets stuck on its first parse while the conversation grows. */
-const MAX_NEW_TOKENS = 448;
+/** Generation token cap for extraction. Condensed values keep the JSON
+ *  short, but the cap MUST comfortably exceed the longest legitimate reply:
+ *  a reply truncated mid-JSON parses as nothing, which is exactly how a
+ *  form gets stuck on its first parse while the conversation grows. */
+const MAX_NEW_TOKENS = 512;
+
+/** A transcript at least this long that yields ZERO fields means the model
+ *  failed to understand it (not that the call mentioned nothing) — worth
+ *  one strict retry. Real support calls always produce at least an issue
+ *  description at this length. */
+const SUBSTANTIAL_TRANSCRIPT_CHARS = 300;
 
 /**
  * Ultra-small on-device LLM — the PRIMARY ticket-field parser.
@@ -295,9 +301,12 @@ export function useLlmParser() {
           });
         });
 
-      /** Validate a raw reply; null ⇔ broken (no balanced JSON object) */
+      /** Validate a raw reply: loose JSON extraction (with salvage of
+       *  complete pairs from truncated replies) then field validation.
+       *  null ⇔ nothing usable in the reply at all. */
       const validateReply = (text: string): ExtractedField[] | null => {
-        const json = extractJson(text);
+        if (!text) return null;
+        const json = extractJsonLoose(text);
         return json ? validateLlmFields(json) : null;
       };
 
@@ -307,11 +316,20 @@ export function useLlmParser() {
         const first = buildParsePrompt(entries, missingFieldIds, prior);
         let fields = validateReply(await generate(first.system, first.user));
 
-        if (fields === null) {
-          // Broken reply → one brevity-hardened retry. (A VALID object that
-          // simply extracted nothing — all fields blank — needs no retry.)
+        // Retry when the reply was BROKEN (no balanced JSON object, the
+        // truncation/rambling signature) — or when a substantial
+        // conversation produced ZERO fields: the model failed to understand
+        // the situation, and a second, brevity-hardened pass often reads
+        // what the first one missed. (A short transcript that legitimately
+        // mentions nothing needs no retry.)
+        const chars = entries.reduce((n, e) => n + e.text.length, 0);
+        const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
+        if (modelFailed) {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
-          fields = validateReply(await generate(strict.system, strict.user));
+          const retried = validateReply(await generate(strict.system, strict.user));
+          if (retried !== null && (fields === null || retried.length > 0)) {
+            fields = retried;
+          }
         }
 
         return fields ?? [];

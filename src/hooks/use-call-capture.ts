@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { extractFields, type ExtractedField, type Speaker, type TranscriptEntry } from '@/lib/field-extraction';
+import { extractFields, isAsrArtifact, type ExtractedField, type Speaker, type TranscriptEntry } from '@/lib/field-extraction';
 import type { CallTranscriber } from './use-local-transcriber';
 
 // Re-exported for components that consume capture state (VoiceCaptionPanel).
@@ -246,19 +246,22 @@ export function useCallCapture(
    * it can genuinely verify:
    *
    *  - fields the LLM already claimed are never touched;
-   *  - while the LLM model is RESIDENT, regex only pre-fills
-   *    format-verifiable identifiers (phone / email / serial / SKU);
-   *  - while the model is unavailable (disabled, downloading, failed) it
-   *    covers every field as a plain fallback — a provisional value beats
-   *    an empty one;
+   *  - while the LLM is RESIDENT *and actually producing results*, regex
+   *    only pre-fills format-verifiable identifiers (phone / email /
+   *    serial / SKU);
+   *  - while the model is unavailable (disabled, downloading, failed) —
+   *    or loaded but has never successfully extracted anything from this
+   *    conversation, e.g. a transcript too garbled for it — regex covers
+   *    every field as a plain fallback: a provisional value beats an empty
+   *    one, and the next successful LLM pass still replaces it;
    *  - anything it writes stays provisional: the next LLM pass over the
    *    full conversation replaces it.
    */
   const runRegexExtraction = useCallback(() => {
-    const llmReady = !!llmParserRef.current?.isReady;
+    const llmProducing = !!llmParserRef.current?.isReady && llmConfirmedRef.current.size > 0;
     const fields = extractFields(entriesRef.current).filter((f) => {
       if (llmConfirmedRef.current.has(f.fieldId)) return false;
-      if (llmReady && !REGEX_RELIABLE_FIELD_IDS.has(f.fieldId)) return false;
+      if (llmProducing && !REGEX_RELIABLE_FIELD_IDS.has(f.fieldId)) return false;
       return true;
     });
 
@@ -434,6 +437,10 @@ export function useCallCapture(
         const pcm = await blobToPcm16k(blob);
         const text = (await transcriberRef.current.transcribe(pcm)).trim();
         if (!text) return;
+        // Whisper emits bracketed pseudo-tags ([BLANK_AUDIO], [INAUDIBLE],
+        // …) for non-speech audio — they carry no ticket information and
+        // only confuse both parsers, so the turn is never recorded.
+        if (isAsrArtifact(text)) return;
 
         setError(null);
         entriesRef.current = [...entriesRef.current, { speaker, text }];

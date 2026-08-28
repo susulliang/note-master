@@ -195,6 +195,29 @@ function normalizeModelKey(raw: string): string {
  * "x2 omni" → "X2 OMNI"; exact match first, then shortest prefix match).
  * Exported for the LLM field parser, which must REJECT hallucinated names.
  */
+/**
+ * Whisper emits bracketed pseudo-tags like "[BLANK_AUDIO]", "[INAUDIBLE]"
+ * or "[ Inaudible ]" for non-speech audio (silence, noise, music). They
+ * carry no ticket information but pollute the transcript, the pattern
+ * extraction and especially the LLM prompt — strip them, and drop turns
+ * that become empty.
+ *
+ * Brackets are REQUIRED: bare words like "music" or "noise" occur in real
+ * speech ("it makes a noise while charging") and must survive.
+ */
+const ASR_ARTIFACT_TAG =
+  /\[\s*(?:inaudible|blank[_ ]?audio|silence|noise|music(?:\s+playing)?|applause|laughter|crosstalk|unintelligible|no speech)\s*\]/gi;
+
+/** Remove ASR artifact tags from a transcript turn */
+export function stripAsrArtifacts(text: string): string {
+  return text.replace(ASR_ARTIFACT_TAG, ' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+/** True when a turn is ONLY ASR artifacts (no actual speech in it) */
+export function isAsrArtifact(text: string): boolean {
+  return stripAsrArtifacts(text).length === 0;
+}
+
 export function matchCanonicalModel(raw: string): string | null {
   const key = normalizeModelKey(raw);
   if (!key || key.length < 2) return null;
@@ -370,24 +393,29 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
   {
     fieldId: 'skuNumber',
     label: 'SKU Number',
+    // The capture requires a digit: real SKUs/serials are alphanumeric
+    // identifiers. Without it, "the sku number is fine" backtracks and
+    // captures the word "number" itself.
     customer: [
-      /\bsku\s*(?:number|code)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
+      /\bsku\s*(?:number|code)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
     ],
     agent: [
-      /\b(?:the |your |customer'?s )?sku\s*(?:number|code)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
+      /\b(?:the |your |customer'?s )?sku\s*(?:number|code)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
     ],
   },
   {
     fieldId: 'serialNumber',
     label: 'Serial Number',
+    // Same digit requirement as the SKU patterns — "I have the serial
+    // number and do you want it too?" must match NOTHING, not "number".
     customer: [
-      /\bserial\s*(?:number|no\.?|is)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
-      /\bs\s*\/?\s*n\s*(?:number|no\.?)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
+      /\bserial\s*(?:number|no\.?|is)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
+      /\bs\s*\/?\s*n\s*(?:number|no\.?)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
     ],
     agent: [
-      /\b(?:the |your |customer'?s )?serial\s*(?:number|no\.?|is)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
-      /\b(?:customer'?s?|their|his|her|your) s\s*\/?\s*n\s*(?:number|no\.?)?\s*(?:is|:)?\s*([a-z0-9-]{4,})/i,
-      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?\b([a-z0-9]{6,}[-a-z0-9]*)/i,
+      /\b(?:the |your |customer'?s )?serial\s*(?:number|no\.?|is)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
+      /\b(?:customer'?s?|their|his|her|your) s\s*\/?\s*n\s*(?:number|no\.?)?\s*(?:is|:)?\s*(?=[a-z0-9-]*\d)([a-z0-9-]{4,})/i,
+      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?\b(?=[a-z0-9]*\d)([a-z0-9]{6,}[-a-z0-9]*)/i,
     ],
   },
   {
@@ -408,7 +436,7 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\bi'?m (?:calling|phoning|contacting you|reaching out) because\s+(?:my |the )?([^.!?]{10,300})/gi,
       /\bi'?m having (?:a |an |some )?(?:problem|issue|trouble|difficulties|difficulty)s? with\s+(?:my |the )?([^.!?]{10,300})/gi,
       /\bmy (?:robot|deebot|vacuum|machine|goat|winbot|device|unit)\s+(?:keeps?|is|won'?t|wouldn'?t|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|keeps? on)\s+([^.!?]{5,300})/gi,
-      /\bit\s+(?:keeps?|is|won'?t|wouldn'?t|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|started|quit|stopped)\s+([^.!?]{5,300})/gi,
+      /\bit\s+(?:keeps?|is|was|would|won'?t|wouldn'?t|kept|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|started|quit)\s+([^.!?]{5,300})/gi,
     ],
     agent: [
       /\b(?:issue|problem|concern|trouble|matter) (?:is|was|with the)\s+(?:that\s+|a\s+|the\s+)?([^.!?]{10,300})/gi,

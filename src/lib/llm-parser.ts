@@ -25,7 +25,7 @@
 
 import { DEEBOT_MODELS } from '@/data/ticket';
 import type { TranscriptEntry, ExtractedField } from '@/lib/field-extraction';
-import { matchCanonicalModel, canonicalIssueType, classifyIssueType } from '@/lib/field-extraction';
+import { matchCanonicalModel, canonicalIssueType, classifyIssueType, stripAsrArtifacts } from '@/lib/field-extraction';
 
 // ---------------------------------------------------------------------------
 //  Model registry
@@ -187,7 +187,11 @@ const ISSUE_TYPE_EXAMPLES = [
  * trimmed from the front so the most recent — most relevant — speech stays.
  */
 export function renderTranscript(entries: TranscriptEntry[]): string {
-  const lines = entries.map((e) => `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${e.text}`);
+  // Strip Whisper non-speech artifacts ([BLANK_AUDIO], [INAUDIBLE], …):
+  // they carry no information, waste tokens, and confuse small models.
+  const lines = entries
+    .map((e) => `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${stripAsrArtifacts(e.text)}`)
+    .filter((l) => l.length > 'CUSTOMER: '.length);
   let text = lines.join('\n');
   if (text.length > MAX_TRANSCRIPT_CHARS) {
     text = text.slice(text.length - MAX_TRANSCRIPT_CHARS);
@@ -253,6 +257,7 @@ export function buildParsePrompt(
   const system = [
     'You are the ticket-note writer for Ecovacs robot-vacuum support calls.',
     'You read a transcript where AGENT is the support rep and CUSTOMER is the caller.',
+    'The transcript is machine-generated and garbled — read it for INTENT, not literally (e.g. "Acovox" is ECOVACS; "1,000 R2K" is the GOAT O1000 RTK lawn mower; "free of the breeze" means "free of debris").',
     'First understand the whole situation from BOTH speakers together — what the customer complained about, what the agent diagnosed and advised — then extract the ticket fields.',
     'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
     'Keep every value SHORT — condensed note style, never sentences copied verbatim from the transcript.',
@@ -355,6 +360,37 @@ export function extractJson(raw: string): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * Loose variant used on model replies: the balanced-object scan first, and
+ * when that fails (generation truncated mid-JSON — the classic signature of
+ * a reply that hit the token cap or a model that rambled) salvage the
+ * COMPLETE "key":"value" pairs from the raw text instead of throwing the
+ * whole reply away. A truncated reply then still yields every field that
+ * did complete.
+ *
+ * Keys not in LLM_FIELD_IDS are ignored; the first occurrence of a key
+ * wins (rambling repetition usually repeats the same value).
+ */
+export function extractJsonLoose(raw: string): Record<string, unknown> | null {
+  const strict = extractJson(raw);
+  if (strict) return strict;
+
+  const salvaged: Record<string, unknown> = {};
+  const pair = /"([a-zA-Z]+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = pair.exec(raw))) {
+    const key = m[1];
+    if (!(LLM_FIELD_IDS as readonly string[]).includes(key)) continue;
+    if (key in salvaged) continue;
+    try {
+      salvaged[key] = JSON.parse(`"${m[2]}"`);
+    } catch {
+      /* malformed escape sequence in the value — skip this pair */
+    }
+  }
+  return Object.keys(salvaged).length > 0 ? salvaged : null;
+}
+
 /** Normalize a phone number read out digit-by-digit-ish ("two one two...") */
 function sanitizePhone(value: string): string {
   const digits = value.replace(/[^\d]/g, '');
@@ -407,12 +443,22 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
         cleaned = canonical;
         break;
       }
-      case 'contactNumber':
+      case 'contactNumber': {
+        // A real phone number has ≥7 digits; a hallucinated word like
+        // "number" or "unknown" has none and must be dropped
+        if (cleaned.replace(/\D/g, '').length < 7) continue;
         cleaned = sanitizePhone(cleaned);
         break;
+      }
       case 'emailAddress':
         cleaned = sanitizeEmail(cleaned);
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) continue;
+        break;
+      case 'skuNumber':
+      case 'serialNumber':
+        // Real identifiers contain digits — reject words the model lifted
+        // from the conversation ("number", "serial number as well")
+        if (!/\d/.test(cleaned)) continue;
         break;
       case 'issueType': {
         // Fuzzy-match against the ~800 canonical options; when the LLM
