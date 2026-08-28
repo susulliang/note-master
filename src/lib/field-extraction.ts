@@ -536,7 +536,10 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\bi'?m (?:calling|phoning|contacting you|reaching out) because\s+(?:my |the )?([^.!?]{10,300})/gi,
       /\bi'?m having (?:a |an |some )?(?:problem|issue|trouble|difficulties|difficulty)s? with\s+(?:my |the )?([^.!?]{10,300})/gi,
       /\bmy (?:robot|deebot|vacuum|machine|goat|winbot|device|unit)\s+(?:keeps?|is|won'?t|wouldn'?t|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|keeps? on)\s+([^.!?]{5,300})/gi,
-      /\bit\s+(?:keeps?|is|was|would|won'?t|wouldn'?t|kept|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|started|quit)\s+([^.!?]{5,300})/gi,
+      // Recall-first verb list: "it doesn't pick up", "it makes a grinding
+      // noise", "it gets stuck", "it sounds weird" are all complaint clauses
+      // the narrow verb set used to skip.
+      /\bit\s+(?:keeps?|is|was|would|won'?t|wouldn'?t|kept|doesn'?t|does not|does|can'?t|cannot|isn'?t|stopped|started|quit|gets?|got|makes?|sounds?|seems?|smells?|leaks?|drains?|dies?|stops?|runs?)\s+([^.!?]{5,300})/gi,
       // Part/order REQUESTS — the reason for the call may be a request, not
       // a malfunction: "is there a way that I could get that part
       // ordered?", "I want to buy a replacement dust box". Requires a
@@ -715,12 +718,16 @@ export function extractFields(entries: TranscriptEntry[]): ExtractedField[] {
           pendingQuestion = false;
         }
       }
-      // Dedupe + cap the accumulated clauses
+      // Dedupe + cap the accumulated clauses. The cap is deliberately high
+      // (30): the contract is recall-first — every distinct customer point
+      // becomes a clause and a human deletes irrelevant ones later — so the
+      // provisional layer must not silently drop the second half of a long
+      // call the way it used to.
       const unique: string[] = [];
       const seen = new Set<string>();
       for (const clause of issueClauses) {
         const key = clause.toLowerCase();
-        if (!seen.has(key) && unique.length < 6) {
+        if (!seen.has(key) && unique.length < 30) {
           seen.add(key);
           unique.push(clause);
         }

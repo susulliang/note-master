@@ -107,11 +107,11 @@ check(
   validateParaphraseReply({}).length === 0
 );
 const capped = validateParaphraseReply({
-  issueDescription: 'x'.repeat(999),
+  issueDescription: 'x'.repeat(1999),
 })[0];
 check(
-  'issueDescription capped at 400 chars',
-  !!capped && capped.value.length === 400
+  'issueDescription capped at 1000 chars (recall-first: every clause in, human trims later)',
+  !!capped && capped.value.length === 1000
 );
 const cappedRes = validateParaphraseReply({
   resolutionSummary: 'y'.repeat(999),

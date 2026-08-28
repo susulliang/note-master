@@ -166,8 +166,12 @@ console.log(`  system prompt : ${sysChars} chars (~${Math.ceil(sysChars / 4)} to
 console.log(`  user prompt   : ${userChars} chars (~${Math.ceil(userChars / 4)} tokens)`);
 console.log(`  TOTAL         : ~${totalTokens} tokens vs Qwen2.5 32768-token context`);
 check(
-  'system prompt frames the issue description as "reason for calling — malfunction OR request"',
-  /reason for calling.{0,80}request/i.test(system)
+  'system prompt demands recall over brevity (every customer point as its own clause)',
+  /recall over brevity/i.test(system) && /EVERY distinct point/i.test(system)
+);
+check(
+  'system prompt says a human deletes irrelevant clauses later',
+  /human deletes irrelevant clauses/i.test(system)
 );
 check(
   'system prompt names part/accessory ordering as a valid issue',
@@ -176,6 +180,15 @@ check(
 check(
   'system prompt carries an accessory-purchase issue-type example',
   /Accessory Purchase/.test(system)
+);
+check(
+  'prior-value carry-forward is keep-every-clause (not refine)',
+  (() => {
+    const p = buildParsePrompt(entries, ['issueDescription'], {
+      issueDescription: 'Dust box misplaced; wants to order a replacement',
+    });
+    return /keep EVERY one of them|never drop a clause/i.test(p.user);
+  })()
 );
 check(
   'system prompt stays minimal (the conversation owns the budget)',
@@ -238,6 +251,18 @@ const newMachines = validateLlmFields({ issueType: 'New machines' });
 check(
   'the old "New machines" misfire is now at least a real canonical option (never invented junk)',
   newMachines.length === 0 || /^How to use::New machines$/.test(newMachines[0].value)
+);
+
+// The recall-first contract: a multi-clause description (every customer
+// point as its own clause — longer than the old 400-char cap) must survive
+// validation intact, because a tight cap silently deletes exactly the
+// information this stage exists to catch.
+const longClauses = Array.from({ length: 12 }, (_, i) => `clause number ${i + 1} of the customer's description`).join('; ');
+const longValidated = validateLlmFields({ issueDescription: longClauses });
+check(
+  `a ${longClauses.length}-char multi-clause description survives intact (old cap was 400)`,
+  longValidated.length === 1 && longValidated[0].value === longClauses,
+  `got ${longValidated[0]?.value.length ?? 0} chars`
 );
 
 console.log(`\n${passed + failed} checks · ${passed} passed · ${failed} failed`);

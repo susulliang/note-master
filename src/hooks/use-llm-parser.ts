@@ -36,12 +36,16 @@ const PARSE_TIMEOUT_MS_LARGE_MODEL = 90_000;
 /** Generation token cap for extraction. Condensed values keep the JSON
  *  short, but the cap MUST comfortably exceed the longest legitimate reply:
  *  a reply truncated mid-JSON parses as nothing, which is exactly how a
- *  form gets stuck on its first parse while the conversation grows. */
-const MAX_NEW_TOKENS = 512;
+ *  form gets stuck on its first parse while the conversation grows. The
+ *  issueDescription contract is recall-first — every customer point as
+ *  its own clause, up to ~1000 chars ≈ 250 tokens on top of the other
+ *  nine fields — so the cap sits well above that. */
+const MAX_NEW_TOKENS = 1024;
 
 /** Generation token cap for a paraphrase pass — two condensed strings, so
- *  well under the extraction budget. */
-const MAX_PARAPHRASE_NEW_TOKENS = 384;
+ *  well under the extraction budget (raised alongside the recall-first
+ *  issueDescription cap: every clause in, none omitted). */
+const MAX_PARAPHRASE_NEW_TOKENS = 640;
 
 /** A transcript at least this long that yields ZERO fields means the model
  *  failed to understand it (not that the call mentioned nothing) — worth
