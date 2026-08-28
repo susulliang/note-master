@@ -30,7 +30,7 @@
  */
 
 import type { TranscriptEntry, ExtractedField } from '@/lib/field-extraction';
-import { matchCanonicalModel, canonicalIssueType, classifyIssueType, stripAsrArtifacts } from '@/lib/field-extraction';
+import { matchCanonicalModel, canonicalIssueType, classifyIssueType, stripAsrArtifacts, canonicalPurchaseChannel, formatPurchaseValue } from '@/lib/field-extraction';
 
 // ---------------------------------------------------------------------------
 //  Model registry
@@ -340,7 +340,7 @@ export function buildParsePrompt(
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
-    '4. purchaseInfo: where + when the customer acquired the unit, one short phrase ("Amazon · March 2025", "Best Buy · ~2 years ago").',
+    '4. purchaseInfo: where + when the unit was acquired — store/site first (Amazon, Best Buy, eBay, Target, Walmart, Costco, Home Depot, ecovacs.com / official store, ...), then when ("Amazon · March 2025", "Ecovacs official store · ~1 year ago").',
     '5. issueDescription: recall over brevity — EVERY distinct point the CUSTOMER makes, each condensed into its own short clause (a few words) and joined with "; ": symptoms and their history (when it started, what changed, what they already tried), context (age, purchase, usage), requests (order/replace a part or accessory, a missing or misplaced item, how-to), plus problem details the agent states. NEVER omit a point to stay short — a human deletes irrelevant clauses later. When given a description already on the ticket, keep every clause of it and append the NEW points.',
     '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "Aftersale-Service inquiry::Accessory Purchase", "How to use::App connection").',
     '7. resolutionSummary: EVERY step the agent advised, in order — each a short imperative verb phrase (3-10 words) joined with " -> ", ASR garble fixed. Your reply REPLACES the previous extraction: include the steps you are given PLUS any new ones.',
@@ -609,6 +609,17 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
         cleaned = sanitizeEmail(cleaned);
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) continue;
         break;
+      case 'purchaseInfo': {
+        // Shape the model's purchase answer the same way the regex
+        // backstop does: canonicalize the channel spelling ("bestbuy",
+        // "the ecovacs website") onto the clean retailer name and format
+        // it as "Channel · when". Values naming no known channel ("a
+        // local vacuum shop · 2024") pass through untouched.
+        if (canonicalPurchaseChannel(cleaned)) {
+          cleaned = formatPurchaseValue(cleaned);
+        }
+        break;
+      }
       case 'skuNumber':
       case 'serialNumber':
         // Real identifiers contain digits — reject words the model lifted

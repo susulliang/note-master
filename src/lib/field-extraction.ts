@@ -384,6 +384,113 @@ export function summarizeIssueType(description: string): string | null {
 //  Field patterns (speaker-aware)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+//  Purchase channel canonicalization — spoken/casual channel → clean name
+// ---------------------------------------------------------------------------
+
+/**
+ * Common purchase channels: the retailer as speakers say it (with ASR
+ * spellings — "bestbuy", "wal-mart", "the ecovacs website") mapped onto
+ * the clean name that belongs on the ticket. The purchase box is free
+ * text with quick buttons (Amazon / Ecovacs / US / CA / Other Retailers),
+ * so the canonical name just needs to be readable, not list-exact.
+ *
+ * Official-store phrasings come FIRST: "your website", "directly from
+ * you", "ecovacs.com" must beat the generic retailer entries.
+ */
+const PURCHASE_CHANNELS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
+  {
+    pattern: /\becovacs(?:\.com|'?s)?\b|\bofficial (?:store|site|website)\b|\byour (?:website|store|site|online store)\b|\bfrom you(?:rself| guys| directly)?\b|\bmanufacturer'?s? (?:website|store|site)\b|\bdirect(?:ly)? from (?:the )?(?:manufacturer|company|brand)\b/i,
+    value: 'Ecovacs official store',
+  },
+  { pattern: /\bbest ?buy\b/i, value: 'Best Buy' },
+  { pattern: /\be[ -]?bay\b/i, value: 'eBay' },
+  { pattern: /\bamazon\b/i, value: 'Amazon' },
+  { pattern: /\btarget\b/i, value: 'Target' },
+  { pattern: /\bwal-?mart\b/i, value: 'Walmart' },
+  { pattern: /\bcostco\b/i, value: 'Costco' },
+  { pattern: /\bsam'?s ?club\b/i, value: "Sam's Club" },
+  { pattern: /\bhome ?depot\b/i, value: 'Home Depot' },
+  { pattern: /\blowe'?s\b/i, value: "Lowe's" },
+  { pattern: /\bfred ?meyer\b/i, value: 'Fred Meyer' },
+  { pattern: /\bkohl'?s\b/i, value: "Kohl's" },
+  { pattern: /\bmacy'?s\b/i, value: "Macy's" },
+  { pattern: /\bbj'?s\b/i, value: "BJ's" },
+  { pattern: /\bnewegg\b/i, value: 'Newegg' },
+  { pattern: /\bwayfair\b/i, value: 'Wayfair' },
+  { pattern: /\bbed bath (?:and|&|n) beyond\b/i, value: 'Bed Bath & Beyond' },
+  { pattern: /\bmicro ?center\b/i, value: 'Micro Center' },
+  { pattern: /\baliexpress\b/i, value: 'AliExpress' },
+  { pattern: /\brakuten\b/i, value: 'Rakuten' },
+  { pattern: /\btemu\b/i, value: 'Temu' },
+  { pattern: /\bqvc\b|\bhsn\b/i, value: 'QVC/HSN' },
+  { pattern: /\bwish\b/i, value: 'Wish' },
+];
+
+/** The channel a purchase mention names, or null when it names none */
+export function canonicalPurchaseChannel(raw: string): string | null {
+  for (const entry of PURCHASE_CHANNELS) {
+    if (entry.pattern.test(raw)) return entry.value;
+  }
+  return null;
+}
+
+/**
+ * Time-ish vocabulary for the "when" half of a purchase value. Captures run
+ * to a sentence terminator — but turns are CONCATENATED, so a capture can
+ * bleed into the next turn ("Amazon one year ago My dog chewed the cable").
+ * Keeping only time words turns that back into "one year ago".
+ */
+const WHEN_WORDS = new Set([
+  'about', 'around', 'almost', 'nearly', 'just', 'over', 'under', 'past',
+  'a', 'an', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+  'eight', 'nine', 'ten', 'eleven', 'twelve', 'couple', 'few', 'several',
+  'half', 'and', 'or', 'to', 'last', 'this', 'in', 'the', 'of',
+  'year', 'years', 'yr', 'yrs', 'month', 'months', 'week', 'weeks',
+  'day', 'days', 'ago', 'back', 'spring', 'summer', 'fall', 'autumn',
+  'winter', 'christmas', 'black', 'friday', 'new', 'recently', 'now',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july',
+  'august', 'september', 'october', 'november', 'december',
+]);
+
+/**
+ * Grammatical glue trimmed from the ENDS of the "when" half. Kept separate
+ * from WHEN_WORDS because "about/around/last" carry meaning INSIDE the
+ * phrase ("about two years ago") but are junk at the edges ("one year ago
+ * the" — cross-turn bleed).
+ */
+const WHEN_GLUE = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'and', 'or']);
+
+/**
+ * Shape a captured purchase mention into "Channel · when": canonicalize
+ * the channel spelling, then keep only time-ish words from the remainder.
+ * "bestbuy about two years ago" → "Best Buy · about two years ago";
+ * "the ecovacs website" → "Ecovacs official store". Exported for the
+ * LLM reply validator, which shapes the model's purchase answers the
+ * same way.
+ */
+export function formatPurchaseValue(raw: string): string {
+  const text = cleanValue(raw);
+  const channel = canonicalPurchaseChannel(text);
+  if (!channel) return text;
+
+  let rest = text;
+  for (const entry of PURCHASE_CHANNELS) rest = rest.replace(entry.pattern, ' ');
+  const words = rest
+    .replace(/[^A-Za-z0-9' ]/g, ' ')
+    .split(/\s+/)
+    .filter(
+      (w) =>
+        w.length > 0 &&
+        (WHEN_WORDS.has(w.toLowerCase()) || /^\d{1,4}$/.test(w))
+    )
+    .slice(0, 8);
+  while (words.length > 0 && WHEN_GLUE.has(words[0].toLowerCase())) words.shift();
+  while (words.length > 0 && WHEN_GLUE.has(words[words.length - 1].toLowerCase())) words.pop();
+  const when = words.join(' ');
+  return when ? `${channel} · ${when}` : channel;
+}
+
 /**
  * Speech → form-field extraction patterns. Each entry maps natural phrases
  * to a form field ID, scoped to the speaker who says them:
@@ -511,19 +618,27 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
   },
   {
     // Primarily LLM-parsed ("when and where was it acquired" needs context
-    // understanding), with a provisional fallback for the common explicit
-    // phrasing "you purchased this machine from Amazon one year ago" —
-    // which conveniently carries channel AND date in one clause.
+    // understanding), with a widened regex backstop for the explicit
+    // phrasings: "you purchased this machine from Amazon one year ago",
+    // "I picked it up at Best Buy", "we ordered it through your website",
+    // "I got it off of eBay last March". The `any` channel-led pattern
+    // catches a known retailer after a preposition even with no purchase
+    // verb ("it's the one from Costco"); candidates naming a real channel
+    // beat pronoun junk ("from him"), and every value is shaped into
+    // "Channel · when" (see formatPurchaseValue).
     // NOTE: no `g` flag — a global flag makes String.match() return whole
     // matches only (no capture groups), which is how "purchased this
     // machine from Amazon one year ago" landed in the field verbatim.
     fieldId: 'purchaseInfo',
     label: 'Purchase',
     agent: [
-      /\b(?:purchased|bought|got)(?: this| the| my| your| a| an)?\s*(?:machine|robot|unit|device|deebot|goat|mower|vacuum|it)?\s*(?:from|at|on)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{3,60}?)(?:\.|,|$)/i,
+      /\b(?:purchased|bought|got|ordered|grabbed|acquired)\b[^.!?]{0,25}?\b(?:from|at|on|off of|through|via)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{2,60}?)(?:\.|,|$)/i,
     ],
     customer: [
-      /\b(?:i|we) (?:purchased|bought|got)(?: it| this| the| my| a| an)?\s*(?:machine|robot|unit|device|deebot|goat|mower|vacuum)?\s*(?:from|at|on)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{3,60}?)(?:\.|,|$)/i,
+      /\b(?:i|we) (?:purchased|bought|got|ordered|grabbed|acquired|picked (?:it|this|the|one)? ?up)\b[^.!?]{0,25}?\b(?:from|at|on|off of|through|via)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{2,60}?)(?:\.|,|$)/i,
+    ],
+    any: [
+      /\b(?:from|at|on|off of|through|via)\s+(?:the\s+|my\s+|your\s+)?(amazon|best ?buy|e-?bay|target|walmart|wal-?mart|costco|sam'?s ?club|home ?depot|lowe'?s|fred ?meyer|kohl'?s|macy'?s|newegg|wayfair|bed bath (?:and|&) beyond|micro ?center|aliexpress|rakuten|temu|qvc|hsn|ecovacs(?:\.com|'?s (?:website|store|site))?|official (?:store|site|website)|your (?:website|store|site))\b/i,
     ],
   },
   {
@@ -701,6 +816,45 @@ export function extractFields(entries: TranscriptEntry[]): ExtractedField[] {
 
   for (const entry of FIELD_PATTERNS) {
     if (seenFields.has(entry.fieldId)) continue;
+
+    if (entry.fieldId === 'purchaseInfo') {
+      // Purchase info gets its own scan: run EVERY pattern (speaker pools
+      // plus the channel-led `any` fallback) and prefer a candidate that
+      // names a real purchase channel over pronoun junk ("from him") —
+      // then shape the winner into "Channel · when".
+      const candidates: string[] = [];
+      const pools: Array<{ text: string; patterns: RegExp[] }> = [];
+      if (customerText) pools.push({ text: customerText, patterns: entry.customer ?? [] });
+      if (agentText) pools.push({ text: agentText, patterns: entry.agent ?? [] });
+      if (customerText || agentText) {
+        pools.push({ text: `${customerText} ${agentText}`.trim(), patterns: entry.any ?? [] });
+      }
+      for (const pool of pools) {
+        for (const pattern of pool.patterns) {
+          const match = pool.text.match(pattern);
+          if (match) candidates.push(match[1] ?? match[0]);
+        }
+      }
+      const best =
+        candidates.find((c) => canonicalPurchaseChannel(c)) ?? candidates[0];
+      if (best) {
+        const value = formatPurchaseValue(best);
+        // Without a recognized channel the capture is usually a pronoun or
+        // person ("from him", "from a guy") — keep it only when it's long
+        // enough to be a real place ("a local vacuum shop")
+        const noChannelJunk =
+          /^(?:him|her|them|there|here|somebody|someone|anybody|you|me|us|that|this guy|the guy|a guy|my husband|my wife|my son|my daughter)\b/i;
+        if (
+          value.length > 2 &&
+          (canonicalPurchaseChannel(value) ||
+            (value.length >= 6 && !noChannelJunk.test(value)))
+        ) {
+          seenFields.add(entry.fieldId);
+          results.push({ fieldId: entry.fieldId, value, confidence: 'medium' });
+        }
+      }
+      continue;
+    }
 
     if (entry.fieldId === 'issueDescription') {
       // Customer complaints, plus the customer's answer to the agent's
