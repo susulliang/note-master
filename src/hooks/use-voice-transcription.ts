@@ -6,6 +6,7 @@ import {
   canonicalIssueType,
   classifyIssueType,
   summarizeIssueType,
+  type AutoFillSource,
   type Speaker,
   type TranscriptEntry,
   type ExtractedField,
@@ -71,7 +72,7 @@ const FATAL_ERRORS = new Set([
  * updates never tear down an active recognition session.
  */
 export function useVoiceTranscription(
-  onAutoFill: (fieldId: string, value: string, source: 'regex' | 'llm') => void
+  onAutoFill: (fieldId: string, value: string, source: AutoFillSource) => void
 ) {
   const [isListening, setIsListening] = useState(false);
   const [finalTranscript, setFinalTranscript] = useState('');

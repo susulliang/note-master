@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { TemplateEntry } from '@/lib/amr-templates';
+import type { AutoFillSource } from '@/lib/field-extraction';
 
 interface NodeConfig {
   id: string;
@@ -45,7 +46,7 @@ interface FlowchartCanvasProps {
    * Fields currently holding an auto-parsed value (node id → engine) —
    * rendered with the yellow proofreading glow until the agent edits them.
    */
-  parsedFields?: Record<string, 'regex' | 'llm'>;
+  parsedFields?: Record<string, AutoFillSource>;
 }
 
 // Layout constants (px) — compact spacing

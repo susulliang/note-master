@@ -68,6 +68,8 @@ export interface ParserPanelState {
   progress: number;
   error: string | null;
   isParsing: boolean;
+  /** True while the paraphrase (note-polish) generation is in flight */
+  isParaphrasing?: boolean;
   lastParseMs: number | null;
   /**
    * Debug: what the LAST parse sent to the model — which transcript lines
@@ -508,6 +510,12 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   reading the conversation…
                 </span>
               )}
+              {!parser.isParsing && parser.isParaphrasing && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                  <Sparkles className="size-2.5 animate-pulse" />
+                  polishing notes…
+                </span>
+              )}
               {parser.lastParseMs !== null && !parser.isParsing && (
                 <span
                   className="text-[10px] text-muted-foreground/70"
@@ -606,25 +614,32 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
               <div className="flex flex-col gap-1">
                 {call.transcript.map((entry, i) => {
                   // Debug highlight: amber = inside the last AI prompt
-                  // window, dimmed = older than the window (dropped from
-                  // the prompt; its extracted values live on in the form)
+                  // window (this is the text the model received), dimmed =
+                  // older than the window (dropped from the prompt; its
+                  // extracted values live on in the form), plain = arrived
+                  // after the last parse (will be sent on the next one)
                   const inWindow = llmWindowSet.has(i);
                   const beforeWindow =
                     llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
+                  const llmWorking = !!parser?.isParsing || !!parser?.isParaphrasing;
                   return (
                     <p
                       key={i}
                       className={cn(
-                        'flex items-start gap-1.5 rounded px-1 py-0.5 -mx-1 transition-colors',
-                        inWindow && 'bg-amber-500/10',
-                        beforeWindow && 'opacity-40'
+                        'flex items-start gap-1.5 rounded-r border-l-2 px-1 py-0.5 -mx-1 transition-colors duration-300',
+                        inWindow &&
+                          'border-l-amber-500 bg-amber-500/[0.13] shadow-[inset_0_0_0_1px_rgba(245,158,11,0.18)]',
+                        inWindow && llmWorking && 'ring-1 ring-amber-400/50 animate-pulse',
+                        beforeWindow && 'border-l-transparent opacity-40'
                       )}
                       title={
                         inWindow
-                          ? 'Included in the last AI parse (sent to the model)'
+                          ? 'Sent to the AI parser (included in the last prompt)'
                           : beforeWindow
                             ? 'Older than the AI prompt window — not sent to the model (its extracted values are carried forward in the form)'
-                            : undefined
+                            : llmWindowSet.size > 0
+                              ? 'Arrived after the last AI parse — will be sent on the next one'
+                              : undefined
                       }
                     >
                       <span
@@ -668,6 +683,28 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           )}
         </div>
 
+        {/* Legend for the "what the AI sees" highlight — always visible once
+            a parse has run, so the amber/dimmed lines are self-explanatory */}
+        {activeSource === 'call' &&
+          call.transcript.length > 0 &&
+          llmWindowSet.size > 0 && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] leading-none text-muted-foreground/80">
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-2.5 w-1.5 rounded-sm border-l-2 border-amber-500 bg-amber-500/30" />
+                <span>
+                  <span className="font-bold text-amber-600 dark:text-amber-400">
+                    {llmWindowSet.size}
+                  </span>
+                  /{call.transcript.length} lines sent to AI
+                </span>
+              </span>
+              {llmWindowFirst !== null && llmWindowFirst > 0 && (
+                <span className="opacity-70">dimmed = dropped from the prompt</span>
+              )}
+              <span className="opacity-70">values survive in the form</span>
+            </div>
+          )}
+
         {/* Tiny engine-progress strip — recognition (STT) and parsing (AI)
             status at a glance, right under the transcript they produce */}
         {activeSource === 'call' && (
@@ -692,7 +729,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                     ? null
                     : parser.status === 'loading'
                       ? parser.progress
-                      : parser.isParsing
+                      : parser.isParsing || parser.isParaphrasing
                         ? 'run'
                         : null
                 }
@@ -705,15 +742,17 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                         ? 'model failed to load'
                         : parser.isParsing
                           ? 'parsing conversation…'
-                          : parser.lastParseMs !== null
-                            ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s${
-                                parser.window
-                                  ? ` · ${parser.window.entryIndexes.length} lines read`
-                                  : ''
-                              }`
-                            : parser.status === 'ready'
-                              ? 'standby'
-                              : 'model not loaded'
+                          : parser.isParaphrasing
+                            ? 'polishing notes…'
+                            : parser.lastParseMs !== null
+                              ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s${
+                                  parser.window
+                                    ? ` · ${parser.window.entryIndexes.length} lines read`
+                                    : ''
+                                }`
+                              : parser.status === 'ready'
+                                ? 'standby'
+                                : 'model not loaded'
                 }
                 tone="amber"
                 error={parser.enabled && parser.status === 'error'}

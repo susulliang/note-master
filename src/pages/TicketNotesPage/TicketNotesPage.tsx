@@ -22,6 +22,7 @@ import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
+import type { AutoFillSource } from '@/lib/field-extraction';
 import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { useLlmParser } from '@/hooks/use-llm-parser';
@@ -279,17 +280,21 @@ interface AutoFillMerge {
  *
  *  - REGEX (the relegated engine) only ever fills an EMPTY field — anything
  *    a human or another parser already wrote is untouchable;
+ *  - REGEX-GROW / PARAPHRASE (the evolving machine text) replace the value
+ *    a previous regex or paraphrase pass wrote — that is what keeps the
+ *    accumulating boxes GROWING as the call talks about new information —
+ *    but never touch human-typed or main-LLM text;
  *  - the LLM is authoritative: it replaces a provisional REGEX value and
  *    replaces its OWN previous value (keeping the human-typed base in
  *    front), but APPENDS to text the agent typed by hand, so nothing a
  *    human wrote is ever lost and repeated parses never pile up.
  */
-function mergeAutoFill(
+export function mergeAutoFill(
   curTrimmed: string,
-  priorSource: 'regex' | 'llm' | undefined,
+  priorSource: AutoFillSource | undefined,
   humanBase: string,
   value: string,
-  source: 'regex' | 'llm'
+  source: AutoFillSource
 ): AutoFillMerge {
   if (curTrimmed.length === 0) {
     return { next: value, base: source === 'llm' ? '' : null };
@@ -299,12 +304,24 @@ function mergeAutoFill(
     // filled after this callback was captured)
     return { next: curTrimmed, base: null };
   }
+  if (source === 'regex-grow' || source === 'paraphrase') {
+    // Evolving machine text: replace the regex/paraphrase-authored value.
+    // Human-typed and main-parse text is untouchable.
+    if (
+      priorSource === 'regex' ||
+      priorSource === 'regex-grow' ||
+      priorSource === 'paraphrase'
+    ) {
+      return { next: value, base: null };
+    }
+    return { next: curTrimmed, base: null };
+  }
   if (priorSource === 'llm') {
     // Replace the machine-written portion; the human base stays in front
     return { next: humanBase ? `${humanBase} -> ${value}` : value, base: humanBase };
   }
-  if (priorSource === 'regex') {
-    // LLM supersedes the provisional pattern-matched value
+  if (priorSource === 'regex' || priorSource === 'regex-grow' || priorSource === 'paraphrase') {
+    // LLM supersedes the provisional pattern-matched / paraphrased value
     return { next: value, base: '' };
   }
   // Human-typed text — append, never overwrite
@@ -369,7 +386,7 @@ export default function TicketNotesPage() {
    * drives the yellow proofreading glow and is cleared the moment the
    * agent edits the field by hand.
    */
-  const [parsedFields, setParsedFields] = useState<Record<string, 'regex' | 'llm'>>({});
+  const [parsedFields, setParsedFields] = useState<Record<string, AutoFillSource>>({});
   /**
    * Human-typed portion of each auto-filled field (node id → base). When
    * the LLM appends to text the agent typed by hand, the base is kept in
@@ -743,7 +760,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
    * it is edited by hand; repeated identical parses are silent no-ops.
    */
   const handleAutoFill = useCallback(
-    (fieldId: string, value: string, source: 'regex' | 'llm') => {
+    (fieldId: string, value: string, source: AutoFillSource) => {
       const nodeId = FIELD_TO_NODE[fieldId];
       if (!nodeId) return;
 
@@ -753,6 +770,20 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
       // REGEX (relegated) only ever fills EMPTY fields
       if (source === 'regex' && curTrimmed.length > 0) return;
+      // The evolving machine text (regex-grow / paraphrase) may only
+      // replace text a previous regex/paraphrase pass wrote — anything a
+      // human or the main LLM authored is untouchable
+      if (
+        (source === 'regex-grow' || source === 'paraphrase') &&
+        curTrimmed.length > 0 &&
+        !(
+          priorSource === 'regex' ||
+          priorSource === 'regex-grow' ||
+          priorSource === 'paraphrase'
+        )
+      ) {
+        return;
+      }
 
       // Undo snapshot for the two undo-tracked textareas, before the change
       if (UNDO_FIELDS.has(nodeId) && typeof current === 'string') {
@@ -774,14 +805,24 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       });
 
       if (plan.base !== null) llmBasesRef.current[nodeId] = plan.base;
+      // 'regex-grow' is the same engine as 'regex' (one badge); the
+      // paraphrase polish gets its own marker
+      const storedSource: AutoFillSource = source === 'regex-grow' ? 'regex' : source;
       setParsedFields((prev) =>
-        prev[nodeId] === source ? prev : { ...prev, [nodeId]: source }
+        prev[nodeId] === storedSource ? prev : { ...prev, [nodeId]: storedSource }
       );
       if (plan.next !== curTrimmed) {
-        toast.success(
-          source === 'llm' ? `AI parsed: ${fieldId}` : `Pattern filled: ${fieldId}`,
-          { description: value.length > 80 ? `${value.slice(0, 80)}…` : value }
-        );
+        const label =
+          source === 'llm'
+            ? 'AI parsed'
+            : source === 'paraphrase'
+              ? 'AI polished'
+              : source === 'regex-grow'
+                ? 'Pattern updated'
+                : 'Pattern filled';
+        toast.success(`${label}: ${fieldId}`, {
+          description: value.length > 80 ? `${value.slice(0, 80)}…` : value
+        });
       }
     },
     [formData, setFormData, pushUndo, parsedFields]
@@ -1030,6 +1071,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           progress: llmParser.progress,
           error: llmParser.error,
           isParsing: llmParser.isParsing,
+          isParaphrasing: llmParser.isParaphrasing,
           lastParseMs: llmParser.lastParseMs,
           window: llmParser.lastWindow,
           lastReply: llmParser.lastReply,

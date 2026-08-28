@@ -3,10 +3,12 @@ import {
   ACCUMULATING_FIELD_IDS,
   extractFields,
   isAsrArtifact,
+  type AutoFillSource,
   type ExtractedField,
   type Speaker,
   type TranscriptEntry,
 } from '@/lib/field-extraction';
+import type { ParaphraseInput } from '@/lib/llm-parser';
 import type { CallTranscriber } from './use-local-transcriber';
 
 // Re-exported for components that consume capture state (VoiceCaptionPanel).
@@ -34,6 +36,8 @@ export interface CallCaptureLlmParser {
     /** Previously extracted values the model must carry forward / refine */
     prior?: { resolutionSummary?: string; issueDescription?: string }
   ) => Promise<ExtractedField[]>;
+  /** Condense the verbatim clause lists into concise note style */
+  paraphrase: (input: ParaphraseInput) => Promise<ExtractedField[]>;
   isReady: boolean;
 }
 
@@ -56,6 +60,12 @@ const LLM_MIN_INTERVAL_MS = 20_000;
 /** Transcript must be at least this long before a parse is worth the
  *  inference cost. */
 const LLM_MIN_TRANSCRIPT_CHARS = 120;
+
+/** After the regex engine collects NEW verbatim clauses, wait this long
+ *  before asking the LLM to paraphrase them — more speech (and more
+ *  clauses) usually arrives within seconds, and one polished rewrite of
+ *  the whole list beats several of its prefixes. */
+const PARAPHRASE_DEBOUNCE_MS = 6_000;
 
 /** How long finalize() waits for the final segments to transcribe (ms) */
 const FINALIZE_DRAIN_MS = 6_000;
@@ -150,7 +160,7 @@ interface SegmentBlobs {
  * speakers cleanly separated (the UI nudges the agent about this).
  */
 export function useCallCapture(
-  onAutoFill: (fieldId: string, value: string, source: 'regex' | 'llm') => void,
+  onAutoFill: (fieldId: string, value: string, source: AutoFillSource) => void,
   transcriber: CallTranscriber,
   llmParser?: CallCaptureLlmParser
 ) {
@@ -221,6 +231,18 @@ export function useCallCapture(
   /** Latest stop() — lets stream 'ended' listeners stop capture safely */
   const stopRef = useRef<(() => void) | null>(null);
 
+  /** Verbatim clause lists the regex engine collected since the LAST
+   *  paraphrase pass — waiting to be polished. */
+  const paraphrasePendingRef = useRef<Partial<ParaphraseInput>>({});
+  /** Verbatim clause lists the last COMPLETED paraphrase pass consumed */
+  const paraphrasedFromRef = useRef<Partial<ParaphraseInput>>({});
+  /** Timer for the debounced paraphrase pass */
+  const paraphraseTimerRef = useRef<number | null>(null);
+  /** True while a paraphrase generation is in flight */
+  const paraphraseRunningRef = useRef(false);
+  /** Latest paraphrase pass — lets the arm timer reach it without a cycle */
+  const runParaphraseRef = useRef<() => Promise<void>>(() => undefined);
+
   const isSupported =
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices?.getDisplayMedia &&
@@ -237,6 +259,109 @@ export function useCallCapture(
   // -----------------------------------------------------------------
 
   /**
+   * Arm the debounced paraphrase pass (resetting any armed timer). Uses the
+   * runParaphraseRef indirection so runParaphrase can re-arm itself for
+   * verbatim that arrived mid-flight without a declaration cycle.
+   */
+  const armParaphrase = useCallback(() => {
+    if (paraphraseTimerRef.current !== null) {
+      window.clearTimeout(paraphraseTimerRef.current);
+    }
+    paraphraseTimerRef.current = window.setTimeout(() => {
+      paraphraseTimerRef.current = null;
+      void runParaphraseRef.current();
+    }, PARAPHRASE_DEBOUNCE_MS);
+  }, []);
+
+  /**
+   * Paraphrase pass: hand the VERBATIM clause lists the regex engine
+   * collected to the LLM and push the polished, concise rewrite onto the
+   * form ('paraphrase' source — it replaces the machine-written text it
+   * derives from, never human-typed or main-parse values).
+   *
+   * Runs only for fields the main parse has NOT claimed (llmConfirmed) —
+   * the extraction parse reads the whole conversation and its condensed
+   * output supersedes this stage. When the model is unavailable or its
+   * reply is unusable, the growing verbatim fill is pushed directly
+   * ('regex-grow') so the box still keeps up with the call.
+   */
+  const runParaphrase = useCallback(async (): Promise<void> => {
+    const parser = llmParserRef.current;
+    if (!parser || paraphraseRunningRef.current || llmRunningRef.current) return;
+
+    const input: ParaphraseInput = {};
+    for (const key of ['issueDescription', 'resolutionSummary'] as const) {
+      const verbatim = paraphrasePendingRef.current[key];
+      if (verbatim && !llmConfirmedRef.current.has(key)) input[key] = verbatim;
+    }
+    if (!input.issueDescription && !input.resolutionSummary) {
+      paraphrasePendingRef.current = {};
+      return;
+    }
+
+    paraphraseRunningRef.current = true;
+    try {
+      const fields = await parser.paraphrase(input);
+      const applied: ExtractedField[] = [];
+      for (const field of fields) {
+        // The main parse claimed the field while we were generating — its
+        // full-context reading wins over this polish
+        if (llmConfirmedRef.current.has(field.fieldId)) continue;
+        paraphrasedFromRef.current[
+          field.fieldId as 'issueDescription' | 'resolutionSummary'
+        ] = input[field.fieldId as 'issueDescription' | 'resolutionSummary'];
+        // Rides the same suggestion/prior-carry-forward machinery as main
+        // parse results (buildPriorValues feeds it into the next parse)
+        llmSuggestionsRef.current.set(field.fieldId, field);
+        onAutoFillRef.current(field.fieldId, field.value, 'paraphrase');
+        applied.push(field);
+      }
+
+      // Verbatim the model could not polish → keep the growing raw fill
+      for (const key of ['issueDescription', 'resolutionSummary'] as const) {
+        const verbatim = input[key];
+        if (verbatim && !applied.some((f) => f.fieldId === key)) {
+          onAutoFillRef.current(key, verbatim, 'regex-grow');
+        }
+      }
+
+      if (applied.length > 0) {
+        setSuggestions((prev) => {
+          const map = new Map(prev.map((f) => [f.fieldId, f]));
+          for (const f of applied) map.set(f.fieldId, f);
+          return [...map.values()];
+        });
+      }
+    } catch {
+      // Paraphrase failed — the verbatim fill stands
+      for (const key of ['issueDescription', 'resolutionSummary'] as const) {
+        const verbatim = input[key];
+        if (verbatim && !llmConfirmedRef.current.has(key)) {
+          onAutoFillRef.current(key, verbatim, 'regex-grow');
+        }
+      }
+    } finally {
+      paraphraseRunningRef.current = false;
+      // Consume what this pass handled; newer verbatim that arrived
+      // mid-flight stays pending and re-arms the timer below
+      for (const key of ['issueDescription', 'resolutionSummary'] as const) {
+        if (paraphrasePendingRef.current[key] === input[key]) {
+          delete paraphrasePendingRef.current[key];
+        }
+      }
+      const stillPending =
+        paraphrasePendingRef.current.issueDescription ??
+        paraphrasePendingRef.current.resolutionSummary;
+      if (stillPending) armParaphrase();
+    }
+  }, [armParaphrase]);
+
+  // Keep the timer's indirection pointing at the latest pass
+  useEffect(() => {
+    runParaphraseRef.current = runParaphrase;
+  }, [runParaphrase]);
+
+  /**
    * Provisional pattern-match fill, run after every transcribed segment.
    *
    * The LLM is still the PRIMARY parser — but a partial LLM success must
@@ -251,9 +376,16 @@ export function useCallCapture(
    *    phone number but nothing else), the provisional values are all the
    *    form gets — and a provisional value beats an empty one.
    *
-   * This is what fixes "it parsed the phone number but missed the name,
-   * issue and resolution": the model confirmed ONE field, and the old
-   * global gate then silenced regex for all the others.
+   * Accumulating fields (issue clauses, TBS steps, the issue type derived
+   * from them) KEEP GROWING as the call goes on:
+   *
+   *  - with the model resident, the new verbatim clauses go to the
+   *    paraphrase stage and the polished rewrite replaces the previous
+   *    one — the box never flashes raw vernacular;
+   *  - without the model, the longer verbatim fill replaces the previous
+   *    regex fill directly ('regex-grow').
+   *
+   * Scalar fields (name, phone, serial…) stay first-wins.
    */
   const runRegexExtraction = useCallback(() => {
     const fields = extractFields(entriesRef.current).filter(
@@ -268,6 +400,10 @@ export function useCallCapture(
       return [...map.values()];
     });
 
+    // The paraphrase stage needs a resident model; without one the growing
+    // verbatim fill is pushed straight to the form
+    const canParaphrase = llmParserRef.current?.isReady === true;
+
     for (const field of fields) {
       const pushed = regexFilledRef.current.get(field.fieldId);
       if (pushed === undefined) {
@@ -278,15 +414,24 @@ export function useCallCapture(
         ACCUMULATING_FIELD_IDS.has(field.fieldId) &&
         field.value !== pushed
       ) {
-        // Accumulating field (issue clauses, TBS steps, issue type derived
-        // from them) grew as the call went on — replace the stale, shorter
-        // fill so the form keeps picking up late-conversation details.
-        // Scalar fields (name, phone, serial…) stay first-wins.
+        // The accumulating extraction GREW as the call went on
         regexFilledRef.current.set(field.fieldId, field.value);
-        onAutoFillRef.current(field.fieldId, field.value, 'regex');
+        const paraphrasable =
+          field.fieldId === 'issueDescription' || field.fieldId === 'resolutionSummary';
+        if (paraphrasable && canParaphrase) {
+          // Defer to the polish: the box keeps the last paraphrased note
+          // until the new clauses have been rewritten — no vernacular
+          // flash in the form
+          paraphrasePendingRef.current[
+            field.fieldId as 'issueDescription' | 'resolutionSummary'
+          ] = field.value;
+          armParaphrase();
+        } else {
+          onAutoFillRef.current(field.fieldId, field.value, 'regex-grow');
+        }
       }
     }
-  }, []);
+  }, [armParaphrase]);
 
   /** Merge authoritative LLM results into suggestions + push to the form */
   const applyLlmFields = useCallback((fields: ExtractedField[]) => {
@@ -374,7 +519,13 @@ export function useCallCapture(
    * otherwise re-arm for exactly when the throttle clears.
    */
   const llmTick = useCallback(() => {
-    if (llmRunningRef.current || transcribingRef.current || pendingCountRef.current > 0) return;
+    if (
+      llmRunningRef.current ||
+      paraphraseRunningRef.current ||
+      transcribingRef.current ||
+      pendingCountRef.current > 0
+    )
+      return;
     if (!llmParserRef.current) return;
 
     const textLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
@@ -785,6 +936,22 @@ export function useCallCapture(
           buildPriorValues()
         );
         applyLlmFields(fields);
+
+        // Anything the main parse could NOT fill (broken JSON on a garbled
+        // call) still deserves its polished form: flush a paraphrase of the
+        // verbatim clauses the regex engine collected before the call ends.
+        const pending: ParaphraseInput = {};
+        for (const key of ['issueDescription', 'resolutionSummary'] as const) {
+          const verbatim = paraphrasePendingRef.current[key];
+          if (verbatim && !llmConfirmedRef.current.has(key)) pending[key] = verbatim;
+        }
+        if (pending.issueDescription || pending.resolutionSummary) {
+          if (paraphraseTimerRef.current !== null) {
+            window.clearTimeout(paraphraseTimerRef.current);
+            paraphraseTimerRef.current = null;
+          }
+          await runParaphraseRef.current();
+        }
       }
     }
   }, [applyLlmFields, buildPriorValues]);
@@ -795,6 +962,13 @@ export function useCallCapture(
     llmConfirmedRef.current = new Set();
     llmSuggestionsRef.current = new Map();
     lastLlmRunRef.current = 0;
+    paraphrasePendingRef.current = {};
+    paraphrasedFromRef.current = {};
+    paraphraseRunningRef.current = false;
+    if (paraphraseTimerRef.current !== null) {
+      window.clearTimeout(paraphraseTimerRef.current);
+      paraphraseTimerRef.current = null;
+    }
     if (llmIdleTimerRef.current !== null) {
       window.clearTimeout(llmIdleTimerRef.current);
       llmIdleTimerRef.current = null;
@@ -811,6 +985,7 @@ export function useCallCapture(
       if (segmentTimerRef.current !== null) window.clearTimeout(segmentTimerRef.current);
       if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
       if (llmIdleTimerRef.current !== null) window.clearTimeout(llmIdleTimerRef.current);
+      if (paraphraseTimerRef.current !== null) window.clearTimeout(paraphraseTimerRef.current);
       stopLevelLoop();
       try {
         tabRecorderRef.current?.stop();

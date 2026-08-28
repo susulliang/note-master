@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedField, TranscriptEntry } from '@/lib/field-extraction';
 import {
   buildParsePrompt,
+  buildParaphrasePrompt,
   buildPromptWindow,
   extractJsonLoose,
   validateLlmFields,
+  validateParaphraseReply,
   readLlmModelPref,
   writeLlmModelPref,
   readLlmEnabledPref,
@@ -12,6 +14,7 @@ import {
   LLM_MODELS,
   type LlmModelName,
   type LlmWorkerEvent,
+  type ParaphraseInput,
   type PriorLlmValues,
   type PromptWindow,
 } from '@/lib/llm-parser';
@@ -35,6 +38,10 @@ const PARSE_TIMEOUT_MS_LARGE_MODEL = 90_000;
  *  a reply truncated mid-JSON parses as nothing, which is exactly how a
  *  form gets stuck on its first parse while the conversation grows. */
 const MAX_NEW_TOKENS = 512;
+
+/** Generation token cap for a paraphrase pass — two condensed strings, so
+ *  well under the extraction budget. */
+const MAX_PARAPHRASE_NEW_TOKENS = 384;
 
 /** A transcript at least this long that yields ZERO fields means the model
  *  failed to understand it (not that the call mentioned nothing) — worth
@@ -64,6 +71,7 @@ export function useLlmParser() {
   const [error, setError] = useState<string | null>(null);
   const [enabled, setEnabledState] = useState(readLlmEnabledPref);
   const [isParsing, setIsParsing] = useState(false);
+  const [isParaphrasing, setIsParaphrasing] = useState(false);
   const [lastParseMs, setLastParseMs] = useState<number | null>(null);
   /** What the last parse sent to the model: which entries made the window */
   const [lastWindow, setLastWindow] = useState<PromptWindow | null>(null);
@@ -255,6 +263,47 @@ export function useLlmParser() {
   }, []);
 
   /**
+   * Await model readiness (downloading on demand). false when the parser is
+   * disabled or the model failed to load — callers then fall back to the
+   * provisional regex values.
+   */
+  const ensureReady = useCallback(async (): Promise<boolean> => {
+    if (!enabledRef.current || statusRef.current === 'disabled') return false;
+    if (statusRef.current !== 'ready' || loadPromiseRef.current) {
+      if (loadPromiseRef.current) await loadPromiseRef.current;
+      else await load();
+      if (statusRef.current !== 'ready') return false;
+    }
+    return !!workerRef.current;
+  }, [load]);
+
+  /** One generation round-trip → raw reply text ("" on error/timeout).
+   *  The worker serializes generations internally, so parse and paraphrase
+   *  can never run inference concurrently. */
+  const generateReply = useCallback(
+    (system: string, user: string, maxNewTokens: number): Promise<string> => {
+      const worker = workerRef.current;
+      if (!worker) return Promise.resolve('');
+      return new Promise<string>((resolve) => {
+        const id = (nextIdRef.current += 1);
+        const timeoutMs =
+          modelRef.current === 'qwen2.5-1.5b'
+            ? PARSE_TIMEOUT_MS_LARGE_MODEL
+            : PARSE_TIMEOUT_MS;
+        const timer = window.setTimeout(() => {
+          const pending = pendingParsesRef.current.get(id);
+          if (!pending) return;
+          pendingParsesRef.current.delete(id);
+          resolve('');
+        }, timeoutMs);
+        pendingParsesRef.current.set(id, { resolve, timer });
+        worker.postMessage({ type: 'parse', id, system, user, maxNewTokens });
+      });
+    },
+    []
+  );
+
+  /**
    * Run one extraction. Resolves with validated fields — `[]` when the
    * parser is disabled, not loaded, times out, or the model's output fails
    * validation. Never rejects: a failed parse must not break the capture
@@ -276,43 +325,7 @@ export function useLlmParser() {
       missingFieldIds: readonly string[],
       prior?: PriorLlmValues
     ): Promise<ExtractedField[]> => {
-      if (!enabledRef.current || entries.length === 0 || statusRef.current === 'disabled') {
-        return [];
-      }
-
-      // Model not ready → load on demand (one-time download)
-      if (statusRef.current !== 'ready' || loadPromiseRef.current) {
-        if (loadPromiseRef.current) await loadPromiseRef.current;
-        else await load();
-        if (statusRef.current !== 'ready') return [];
-      }
-
-      const worker = workerRef.current;
-      if (!worker) return [];
-
-      /** One generation round-trip → raw reply text ("" on error/timeout) */
-      const generate = (system: string, user: string): Promise<string> =>
-        new Promise<string>((resolve) => {
-          const id = (nextIdRef.current += 1);
-          const timeoutMs =
-            modelRef.current === 'qwen2.5-1.5b'
-              ? PARSE_TIMEOUT_MS_LARGE_MODEL
-              : PARSE_TIMEOUT_MS;
-          const timer = window.setTimeout(() => {
-            const pending = pendingParsesRef.current.get(id);
-            if (!pending) return;
-            pendingParsesRef.current.delete(id);
-            resolve('');
-          }, timeoutMs);
-          pendingParsesRef.current.set(id, { resolve, timer });
-          worker.postMessage({
-            type: 'parse',
-            id,
-            system,
-            user,
-            maxNewTokens: MAX_NEW_TOKENS,
-          });
-        });
+      if (entries.length === 0 || !(await ensureReady())) return [];
 
       /** Validate a raw reply: loose JSON extraction (with salvage of
        *  complete pairs from truncated replies) then field validation.
@@ -329,7 +342,7 @@ export function useLlmParser() {
       setLastWindow(buildPromptWindow(entries));
       try {
         const first = buildParsePrompt(entries, missingFieldIds, prior);
-        let reply = await generate(first.system, first.user);
+        let reply = await generateReply(first.system, first.user, MAX_NEW_TOKENS);
         let fields = validateReply(reply);
 
         // Retry when the reply was BROKEN (no balanced JSON object, the
@@ -342,7 +355,7 @@ export function useLlmParser() {
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
         if (modelFailed) {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
-          const retriedReply = await generate(strict.system, strict.user);
+          const retriedReply = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
           const retried = validateReply(retriedReply);
           if (retried !== null && (fields === null || retried.length > 0)) {
             fields = retried;
@@ -362,7 +375,33 @@ export function useLlmParser() {
         setLastParseMs(Math.round(performance.now() - started));
       }
     },
-    [load]
+    [ensureReady, generateReply]
+  );
+
+  /**
+   * Paraphrase the VERBATIM clause lists the regex engine collected into
+   * concise note style. A much simpler contract than the extraction parse —
+   * two strings in, two strings out — so it also works when the full parse
+   * struggles, and it keeps the provisional regex fill from reading like a
+   * raw transcript dump. Resolves with the polished fields (possibly a
+   * subset), `[]` when the model is unavailable or its reply held nothing
+   * usable — the verbatim fill then stands. Never rejects.
+   */
+  const paraphrase = useCallback(
+    async (input: ParaphraseInput): Promise<ExtractedField[]> => {
+      if (!(await ensureReady())) return [];
+      setIsParaphrasing(true);
+      try {
+        const { system, user } = buildParaphrasePrompt(input);
+        const reply = await generateReply(system, user, MAX_PARAPHRASE_NEW_TOKENS);
+        if (!reply) return [];
+        const json = extractJsonLoose(reply);
+        return json ? validateParaphraseReply(json) : [];
+      } finally {
+        setIsParaphrasing(false);
+      }
+    },
+    [ensureReady, generateReply]
   );
 
   return {
@@ -372,6 +411,8 @@ export function useLlmParser() {
     error,
     enabled,
     isParsing,
+    /** True while the paraphrasing (note-polish) generation is in flight */
+    isParaphrasing,
     lastParseMs,
     /** Which transcript entries the LAST parse sent to the model — the
      *  caption panel highlights them so parsing behavior is inspectable */
@@ -384,6 +425,8 @@ export function useLlmParser() {
     load,
     switchModel,
     parse,
+    /** Condense verbatim vernacular clauses into concise note style */
+    paraphrase,
     /** Selectable model names for the settings UI */
     models: LLM_MODELS,
   };

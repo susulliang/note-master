@@ -390,6 +390,82 @@ export function buildParsePrompt(
 }
 
 // ---------------------------------------------------------------------------
+//  Paraphrasing stage — vernacular speech → concise note style
+// ---------------------------------------------------------------------------
+
+/**
+ * The two free-text fields the paraphrasing stage polishes. The regex engine
+ * accumulates VERBATIM clauses lifted from live speech (filler words,
+ * back-channel noise, ASR garble included); this stage rewrites them into
+ * the concise professional style a support ticket note expects.
+ */
+export interface ParaphraseInput {
+  /** Verbatim customer-complaint clauses the regex engine collected */
+  issueDescription?: string;
+  /** Verbatim agent TBS steps the regex engine collected */
+  resolutionSummary?: string;
+}
+
+/**
+ * Build the (system, user) prompt pair for a paraphrase pass.
+ *
+ * This is deliberately a MUCH simpler contract than the extraction parse —
+ * two strings in, two strings out — so an ultra-small model that struggles
+ * with the 10-field JSON contract can still polish the vernacular text the
+ * regex engine provisionally filled (and when the extraction parse works,
+ * its condensed output supersedes this stage entirely).
+ */
+export function buildParaphrasePrompt(input: ParaphraseInput): {
+  system: string;
+  user: string;
+} {
+  const system = [
+    'You polish the notes for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
+    'The input is VERBATIM fragments a pattern engine lifted from a machine-transcribed support call: the customer\'s vernacular complaint clauses and the agent\'s troubleshooting advice, with filler words, repetition, back-channel noise and transcription errors.',
+    'Rewrite each fragment list into the concise, professional style of a support-ticket note.',
+    'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
+    'Rules:',
+    '1. issueDescription: ONE concise sentence (max ~25 words) summarizing the customer\'s PRIMARY problem in the customer\'s own terms — merge related clauses into one statement, drop filler, repetition and back-channel noise.',
+    '2. resolutionSummary: EVERY distinct step, recommendation or option the agent gave, in order. Condense each into a short imperative phrase starting with a verb (3-10 words). Join the phrases with " -> ". NEVER drop a step — a missing step is a missing ticket entry.',
+    '3. Fix obvious transcription errors from context (e.g. "econovac" → "ecovacs", "goat leave as 1000" → "GOAT lawn mower", "RTK/RDK" is the positioning module).',
+    '4. Copy "" for a field whose input is empty. NEVER invent facts, steps, prices, dates or values that are not in the input.',
+    'Example — input issueDescription fragments: "it just would, it would go down and back three or four times and stop; have this blinking system of a 1 and then a dash across the top and then a 1 and go around and around and then it would time out"',
+    '→ issueDescription: "Mower stops after a few passes and shows a repeating 1-1 error code, then times out"',
+  ].join('\n');
+
+  const userLines = ['Verbatim transcript fragments to condense:'];
+  userLines.push(`issueDescription fragments: ${JSON.stringify(input.issueDescription ?? '')}`);
+  userLines.push(`resolutionSummary fragments: ${JSON.stringify(input.resolutionSummary ?? '')}`);
+  userLines.push('', 'Reply with the JSON object now.');
+
+  return { system, user: userLines.join('\n') };
+}
+
+/**
+ * Validate a paraphrase reply into ExtractedFields: only the two free-text
+ * keys are honored, values are whitespace-collapsed and capped like every
+ * other LLM value, and blank strings are dropped. Returns [] when the reply
+ * held nothing usable — the verbatim regex fill then stands.
+ */
+export function validateParaphraseReply(raw: Record<string, unknown>): ExtractedField[] {
+  const out: ExtractedField[] = [];
+  const keys: Array<keyof ParaphraseInput> = ['issueDescription', 'resolutionSummary'];
+  for (const key of keys) {
+    const value = raw[key];
+    if (typeof value !== 'string') continue;
+    const cleaned = value.replace(/\s+/g, ' ').trim();
+    if (isBlank(cleaned)) continue;
+    const cap = FIELD_VALUE_CAPS[key] ?? 200;
+    out.push({
+      fieldId: key,
+      value: cleaned.length > cap ? cleaned.slice(0, cap).trimEnd() : cleaned,
+      confidence: 'low',
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 //  Output validation
 // ---------------------------------------------------------------------------
 

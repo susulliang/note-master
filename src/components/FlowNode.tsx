@@ -18,6 +18,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import type { TemplateEntry } from '@/lib/amr-templates';
+import type { AutoFillSource } from '@/lib/field-extraction';
 
 export type NodeType =
   | 'start'
@@ -79,10 +80,12 @@ export interface FlowNodeProps {
   /** Reports the node's actual rendered height so the layout adjusts dynamically */
   onHeightChange?: (id: string, height: number) => void;
   /**
-   * Which engine auto-filled this field ('regex' | 'llm') — renders the
-   * yellow proofreading glow + source badge until the agent edits it.
+   * Which engine auto-filled this field ('regex' | 'regex-grow' | 'paraphrase'
+   * | 'llm') — renders the yellow proofreading glow + source badge until the
+   * agent edits it. ('regex-grow' is stored as 'regex' upstream, but the
+   * display layer accepts the full source union.)
    */
-  parsedSource?: 'regex' | 'llm' | null;
+  parsedSource?: AutoFillSource | null;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -845,10 +848,16 @@ function FlowNodeComponent({
           title={
             parsedSource === 'llm'
               ? 'Filled by the on-device AI parser from the whole conversation — please verify'
-              : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
+              : parsedSource === 'paraphrase'
+                ? 'AI-polished condensation of the transcript — please verify'
+                : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
           }
         >
-          {parsedSource === 'llm' ? 'AI parsed' : 'auto parsed'}
+          {parsedSource === 'llm'
+            ? 'AI parsed'
+            : parsedSource === 'paraphrase'
+              ? 'AI polished'
+              : 'auto parsed'}
         </span>
       )}
       {renderContent()}

@@ -47,6 +47,26 @@ export interface ExtractedField {
 }
 
 /**
+ * Which engine produced an auto-fill, and therefore how the form may merge
+ * it into the field's current text:
+ *
+ *  - 'regex'      — provisional pattern match; only ever fills an EMPTY
+ *                   field, never disturbs anything already written;
+ *  - 'regex-grow' — the ACCUMULATING regex fields (issue clauses, TBS
+ *                   steps) re-extracted longer after more speech arrived;
+ *                   replaces the value a previous regex/paraphrase pass
+ *                   wrote, but never human-typed or LLM-authored text;
+ *  - 'paraphrase' — the LLM polishing stage: the verbatim vernacular
+ *                   clauses the regex engine collected, rewritten into
+ *                   concise note style. Same replace rules as
+ *                   'regex-grow' (it derives from the same text);
+ *  - 'llm'        — the PRIMARY parser's full-context reading of the
+ *                   conversation; authoritative over everything except
+ *                   human-typed text (which it appends to).
+ */
+export type AutoFillSource = 'regex' | 'regex-grow' | 'paraphrase' | 'llm';
+
+/**
  * Which speech a field may be parsed from. The agent works FOR Ecovacs and
  * the customer is calling in, so:
  *
