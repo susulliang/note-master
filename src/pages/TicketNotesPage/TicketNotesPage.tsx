@@ -554,16 +554,6 @@ export default function TicketNotesPage() {
     setShowHistory((prev) => !prev);
   }, []);
 
-  const handleReset = useCallback(() => {
-    setFormData(INITIAL_FORM_DATA);
-    // Clear drag overrides so all nodes return to the responsive default layout
-    setPositions({});
-    setActiveNodeId(null);
-    // Proofreading glows are per-run — a fresh form starts clean
-    setParsedFields({});
-    llmBasesRef.current = {};
-  }, [setFormData, setPositions]);
-
   const handleAddQuickText = useCallback(
     (target: QuickTextTarget, text: string) => {
       const t = text.trim();
@@ -894,6 +884,23 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   const handleClearCall = useCallback(() => {
     call.clear();
   }, [call]);
+
+  // Defined after the capture hooks (voice / call): reset wipes the whole run
+  // — form data, node positions, proofreading glows AND both transcript
+  // sources — so a fresh ticket never shows the previous call's leftovers.
+  const handleReset = useCallback(() => {
+    setFormData(INITIAL_FORM_DATA);
+    // Clear drag overrides so all nodes return to the responsive default layout
+    setPositions({});
+    setActiveNodeId(null);
+    // Proofreading glows are per-run — a fresh form starts clean
+    setParsedFields({});
+    llmBasesRef.current = {};
+    // Transcripts belong to the same run — reset wipes both capture sources
+    // (mic captions + speaker-tagged call transcript) along with the form
+    voice.clear();
+    call.clear();
+  }, [setFormData, setPositions, voice, call]);
 
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct

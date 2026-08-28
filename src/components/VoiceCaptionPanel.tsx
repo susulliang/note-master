@@ -119,6 +119,60 @@ const fieldLabel = (fieldId: string) =>
   FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
 
 /**
+ * One tiny engine-progress row: label, hairline activity bar, status text.
+ *
+ * Sits directly under the transcript so the agent can see at a glance what
+ * the two pipeline engines are doing — STT (Whisper recognition) and AI
+ * (LLM parsing). `bar` drives the strip:
+ *
+ *  - 'run'    → indeterminate slide (engine is working, no % exists for
+ *               WASM inference, it finishes when it finishes)
+ *  - number   → determinate fill percentage (model download)
+ *  - null     → idle: empty track, text carries the state
+ */
+function EngineProgressRow({
+  label,
+  bar,
+  text,
+  tone,
+  error = false,
+}: {
+  label: string;
+  bar: 'run' | number | null;
+  text: string;
+  tone: 'emerald' | 'amber';
+  error?: boolean;
+}) {
+  const toneBar = tone === 'emerald' ? 'bg-emerald-500' : 'bg-amber-500';
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-6 shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/60">
+        {label}
+      </span>
+      <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/10">
+        {bar === 'run' ? (
+          <div className={cn('mini-bar-run h-full rounded-full', toneBar)} />
+        ) : typeof bar === 'number' ? (
+          <div
+            className={cn('h-full rounded-full transition-all duration-300', toneBar)}
+            style={{ width: `${Math.max(3, bar)}%` }}
+          />
+        ) : null}
+      </div>
+      <span
+        className={cn(
+          'max-w-[55%] shrink-0 truncate text-[9px] leading-none',
+          error ? 'text-destructive' : 'text-muted-foreground/80'
+        )}
+        title={text}
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/**
  * Live-caption panel for the voice auto-fill prototype. Supports two
  * capture sources:
  *
@@ -462,10 +516,12 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           </p>
         )}
 
-        {/* Transcript area */}
+        {/* Transcript area — tall enough to hold a good stretch of dialogue
+            (both speakers, several exchanges) so the agent can proofread the
+            captured conversation without scrolling the page instead */}
         <div
           ref={scrollRef}
-          className="custom-scrollbar mt-2 max-h-[132px] overflow-y-auto rounded-lg bg-background/50 p-2"
+          className="custom-scrollbar mt-2 max-h-[264px] overflow-y-auto rounded-lg bg-background/50 p-2"
         >
           {showCallEntries ? (
             call.transcript.length > 0 ? (
@@ -511,6 +567,56 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
             </p>
           )}
         </div>
+
+        {/* Tiny engine-progress strip — recognition (STT) and parsing (AI)
+            status at a glance, right under the transcript they produce */}
+        {activeSource === 'call' && (
+          <div className="mt-1.5 flex flex-col gap-1">
+            <EngineProgressRow
+              label="STT"
+              bar={call.isTranscribing ? 'run' : null}
+              text={
+                call.isTranscribing
+                  ? call.queued > 0
+                    ? `recognizing · ${call.queued} queued`
+                    : 'recognizing…'
+                  : `${call.segmentsSent} segments recognized`
+              }
+              tone="emerald"
+            />
+            {parser && (
+              <EngineProgressRow
+                label="AI"
+                bar={
+                  !parser.enabled
+                    ? null
+                    : parser.status === 'loading'
+                      ? parser.progress
+                      : parser.isParsing
+                        ? 'run'
+                        : null
+                }
+                text={
+                  !parser.enabled
+                    ? 'parser off'
+                    : parser.status === 'loading'
+                      ? `downloading model ${parser.progress}%`
+                      : parser.status === 'error'
+                        ? 'model failed to load'
+                        : parser.isParsing
+                          ? 'parsing conversation…'
+                          : parser.lastParseMs !== null
+                            ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s`
+                            : parser.status === 'ready'
+                              ? 'standby'
+                              : 'model not loaded'
+                }
+                tone="amber"
+                error={parser.enabled && parser.status === 'error'}
+              />
+            )}
+          </div>
+        )}
 
         {/* Extracted fields */}
         {suggestions.length > 0 && (

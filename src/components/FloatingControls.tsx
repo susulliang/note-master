@@ -286,7 +286,8 @@ export default function FloatingControls({
                 <AlertDialogHeader>
                   <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will clear all ticket data and reset node positions. This action cannot be undone.
+                    This will clear all ticket data, captions and transcript, and reset node
+                    positions. This action cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

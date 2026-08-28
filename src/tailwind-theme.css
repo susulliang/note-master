@@ -343,6 +343,23 @@ body[data-ui-scale="small"] {
   }
 
   /* ---------------------------------------------------------------- */
+  /*  Mini progress bars — the tiny engine strips under the transcript */
+  /*  (Whisper recognition + LLM parsing). 'run' is the indeterminate  */
+  /*  mode for work that has no natural percentage: WASM inference    */
+  /*  finishes when it finishes, so a short segment slides across the  */
+  /*  track instead of faking a fill level.                            */
+  /* ---------------------------------------------------------------- */
+  @keyframes mini-bar-run {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(340%); }
+  }
+
+  .mini-bar-run {
+    width: 30%;
+    animation: mini-bar-run 1.1s ease-in-out infinite;
+  }
+
+  /* ---------------------------------------------------------------- */
   /*  Glassmorphism ambience — slow-drifting color orbs that sit      */
   /*  behind every translucent surface so the backdrop blur has       */
   /*  something to refract.                                           */
