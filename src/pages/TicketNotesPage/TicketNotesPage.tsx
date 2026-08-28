@@ -24,6 +24,7 @@ import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
+import { useLlmParser } from '@/hooks/use-llm-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -258,6 +259,54 @@ const UNDO_COALESCE_MS = 600;
 /** Max undo steps retained per session */
 const UNDO_STACK_LIMIT = 100;
 
+/** Result of merging an auto-parsed value into a field's current text */
+interface AutoFillMerge {
+  next: string;
+  /**
+   * Human-authored portion to keep in front of future LLM values.
+   * `null` = leave any stored base untouched (REGEX path).
+   */
+  base: string | null;
+}
+
+/**
+ * Merge an auto-parsed value into the field's current text.
+ *
+ *  - REGEX (the relegated engine) only ever fills an EMPTY field — anything
+ *    a human or another parser already wrote is untouchable;
+ *  - the LLM is authoritative: it replaces a provisional REGEX value and
+ *    replaces its OWN previous value (keeping the human-typed base in
+ *    front), but APPENDS to text the agent typed by hand, so nothing a
+ *    human wrote is ever lost and repeated parses never pile up.
+ */
+function mergeAutoFill(
+  curTrimmed: string,
+  priorSource: 'regex' | 'llm' | undefined,
+  humanBase: string,
+  value: string,
+  source: 'regex' | 'llm'
+): AutoFillMerge {
+  if (curTrimmed.length === 0) {
+    return { next: value, base: source === 'llm' ? '' : null };
+  }
+  if (source === 'regex') {
+    // Never disturbs an existing value (also the race guard: the field was
+    // filled after this callback was captured)
+    return { next: curTrimmed, base: null };
+  }
+  if (priorSource === 'llm') {
+    // Replace the machine-written portion; the human base stays in front
+    return { next: humanBase ? `${humanBase} -> ${value}` : value, base: humanBase };
+  }
+  if (priorSource === 'regex') {
+    // LLM supersedes the provisional pattern-matched value
+    return { next: value, base: '' };
+  }
+  // Human-typed text — append, never overwrite
+  const sep = curTrimmed.endsWith('->') ? ' ' : ' -> ';
+  return { next: `${curTrimmed}${sep}${value}`, base: curTrimmed };
+}
+
 export default function TicketNotesPage() {
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
@@ -310,6 +359,18 @@ export default function TicketNotesPage() {
   // AMR template search + viewer
   const [templateMatches, setTemplateMatches] = useState<TemplateEntry[]>([]);
   const [openTemplate, setOpenTemplate] = useState<TemplateEntry | null>(null);
+  /**
+   * Fields currently holding an auto-parsed value (node id → engine) —
+   * drives the yellow proofreading glow and is cleared the moment the
+   * agent edits the field by hand.
+   */
+  const [parsedFields, setParsedFields] = useState<Record<string, 'regex' | 'llm'>>({});
+  /**
+   * Human-typed portion of each auto-filled field (node id → base). When
+   * the LLM appends to text the agent typed by hand, the base is kept in
+   * front of every later LLM value instead of the appends piling up.
+   */
+  const llmBasesRef = useRef<Record<string, string>>({});
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -380,9 +441,20 @@ export default function TicketNotesPage() {
         const prev = formData[id];
         if (typeof prev === 'string') pushUndo(id, prev, Boolean(discrete));
       }
+      // Any change routed through here is a human edit (typing, chip insert,
+      // combobox pick) — auto-fills bypass this path — so the yellow
+      // proofreading glow comes off the field and any recorded human base
+      // is re-anchored to the freshly edited text.
+      if (parsedFields[id]) {
+        setParsedFields((prev) => {
+          const { [id]: _cleared, ...rest } = prev;
+          return rest;
+        });
+      }
+      delete llmBasesRef.current[id];
       setFormData((prev) => ({ ...prev, [id]: value }));
     },
-    [formData, setFormData, pushUndo]
+    [formData, setFormData, pushUndo, parsedFields]
   );
 
   // Ctrl/Cmd+Z: undo the last tracked change. Native undo still applies to
@@ -487,6 +559,9 @@ export default function TicketNotesPage() {
     // Clear drag overrides so all nodes return to the responsive default layout
     setPositions({});
     setActiveNodeId(null);
+    // Proofreading glows are per-run — a fresh form starts clean
+    setParsedFields({});
+    llmBasesRef.current = {};
   }, [setFormData, setPositions]);
 
   const handleAddQuickText = useCallback(
@@ -581,9 +656,9 @@ export default function TicketNotesPage() {
     ]
   );
 
-  const generateNoteText = useCallback((): string => {
+  const buildNoteText = useCallback((data: Record<string, string | string[]>): string => {
     const getStr = (key: string) => {
-      const v = formData[key];
+      const v = data[key];
       return typeof v === 'string' ? v : '';
     };
 
@@ -601,13 +676,14 @@ Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_IS
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
 
 Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'}`;
-  }, [formData]);
+  }, []);
 
-  const handleHangUp = useCallback(() => {
-    const text = generateNoteText();
-    setNoteText(text);
-    setShowOutput(true);
-  }, [generateNoteText]);
+  /** Always-fresh mirror of the form data — the hang-up flow generates the
+   *  note only AFTER an async drain/finalize, when the closure would be stale */
+  const formDataRef = useRef(formData);
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
 
   // Save the (possibly edited) note to history when the output modal closes
   const handleOutputClose = useCallback(
@@ -645,30 +721,74 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   // ---------------------------------------------------------------------
   //  Voice transcription (Web Speech API prototype)
   //  The hook keeps one stable SpeechRecognition instance; the auto-fill
-  //  callback below only fills empty fields so manual input is preserved.
+  //  callback below receives results from the LLM (primary, authoritative)
+  //  and the regex engine (relegated, provisional) and layers them into
+  //  the form via mergeAutoFill().
   // ---------------------------------------------------------------------
+
+  /** Extracted field id → canvas node id */
+  const FIELD_TO_NODE: Record<string, string> = {
+    customerName: NODE_IDS.CUSTOMER_NAME,
+    contactNumber: NODE_IDS.CONTACT_NUMBER,
+    emailAddress: NODE_IDS.EMAIL_ADDRESS,
+    deebotModel: NODE_IDS.DEEBOT_MODEL,
+    skuNumber: NODE_IDS.SKU_NUMBER,
+    serialNumber: NODE_IDS.SERIAL_NUMBER,
+    issueDescription: NODE_IDS.DETAILED_ISSUE,
+    issueType: NODE_IDS.ISSUE_TYPE,
+    resolutionSummary: NODE_IDS.RESOLUTION_SUMMARY,
+  };
+
+  /**
+   * Layer auto-parse results into the form (see mergeAutoFill for the exact
+   * semantics). The merge runs inside the setState updater as well, so a
+   * value landing mid-keystroke still merges against the freshest text.
+   * Either way the field lights up with the yellow proofreading glow until
+   * it is edited by hand; repeated identical parses are silent no-ops.
+   */
   const handleAutoFill = useCallback(
-    (fieldId: string, value: string) => {
-      const nodeIdMap: Record<string, string> = {
-        customerName: NODE_IDS.CUSTOMER_NAME,
-        contactNumber: NODE_IDS.CONTACT_NUMBER,
-        emailAddress: NODE_IDS.EMAIL_ADDRESS,
-        deebotModel: NODE_IDS.DEEBOT_MODEL,
-        skuNumber: NODE_IDS.SKU_NUMBER,
-        serialNumber: NODE_IDS.SERIAL_NUMBER,
-      };
-      const nodeId = nodeIdMap[fieldId];
+    (fieldId: string, value: string, source: 'regex' | 'llm') => {
+      const nodeId = FIELD_TO_NODE[fieldId];
       if (!nodeId) return;
 
-      // Never overwrite values the agent already typed
       const current = formData[nodeId];
-      if (typeof current === 'string' && current.trim().length > 0) {
-        return;
+      const curTrimmed = typeof current === 'string' ? current.trimEnd() : '';
+      const priorSource = parsedFields[nodeId];
+
+      // REGEX (relegated) only ever fills EMPTY fields
+      if (source === 'regex' && curTrimmed.length > 0) return;
+
+      // Undo snapshot for the two undo-tracked textareas, before the change
+      if (UNDO_FIELDS.has(nodeId) && typeof current === 'string') {
+        pushUndo(nodeId, current, true);
       }
-      handleFieldChange(nodeId, value, true);
-      toast.success(`Voice filled: ${fieldId}`);
+
+      const base = llmBasesRef.current[nodeId] ?? '';
+      const plan = mergeAutoFill(curTrimmed, priorSource, base, value, source);
+
+      setFormData((prev) => {
+        const cur = prev[nodeId];
+        const latest = typeof cur === 'string' ? cur.trimEnd() : '';
+        const merged =
+          latest === curTrimmed
+            ? plan
+            : mergeAutoFill(latest, priorSource, base, value, source);
+        if (merged.next === latest) return prev;
+        return { ...prev, [nodeId]: merged.next };
+      });
+
+      if (plan.base !== null) llmBasesRef.current[nodeId] = plan.base;
+      setParsedFields((prev) =>
+        prev[nodeId] === source ? prev : { ...prev, [nodeId]: source }
+      );
+      if (plan.next !== curTrimmed) {
+        toast.success(
+          source === 'llm' ? `AI parsed: ${fieldId}` : `Pattern filled: ${fieldId}`,
+          { description: value.length > 80 ? `${value.slice(0, 80)}…` : value }
+        );
+      }
     },
-    [formData, handleFieldChange]
+    [formData, setFormData, pushUndo, parsedFields]
   );
 
   const voice = useVoiceTranscription(handleAutoFill);
@@ -681,10 +801,20 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   const localWhisper = useLocalTranscriber();
 
   // ---------------------------------------------------------------------
+  //  Ultra-small on-device LLM — the PRIMARY field parser. It re-reads the
+  //  whole speaker-tagged conversation (agent + customer) whenever the
+  //  transcription queue drains, and its full-context reading of the
+  //  situation overrides anything the regex engine provisionally filled
+  //  (transformers.js in a worker, ~360M params, output validated against
+  //  the canonical option lists).
+  // ---------------------------------------------------------------------
+  const llmParser = useLlmParser();
+
+  // ---------------------------------------------------------------------
   //  CCP tab-audio capture → local Whisper → auto-fill.
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
-  const call = useCallCapture(handleAutoFill, localWhisper);
+  const call = useCallCapture(handleAutoFill, localWhisper, llmParser);
 
   const handleToggleVoice = useCallback(() => {
     if (call.isCapturing) call.stop();
@@ -697,8 +827,13 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       // Warm the model while the user picks the CCP tab in the share dialog
       void localWhisper.load();
     }
+    // Warm the LLM parser too (one-time, cached) so the first full-context
+    // parse is not download-bound while the call is already running
+    if (llmParser.enabled && !llmParser.isReady) {
+      void llmParser.load();
+    }
     call.toggle();
-  }, [call, voice, localWhisper]);
+  }, [call, voice, localWhisper, llmParser]);
 
   const handleSwitchWhisperModel = useCallback(
     (model: Parameters<typeof localWhisper.switchModel>[0]) => {
@@ -706,6 +841,51 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     },
     [localWhisper]
   );
+
+  const handleSwitchLlmModel = useCallback(
+    (model: Parameters<typeof llmParser.switchModel>[0]) => {
+      llmParser.switchModel(model);
+    },
+    [llmParser]
+  );
+
+  const handleToggleLlmEnabled = useCallback(
+    (enabled: boolean) => {
+      llmParser.setEnabled(enabled);
+      if (enabled && !llmParser.isReady) void llmParser.load();
+    },
+    [llmParser]
+  );
+
+  const handleLoadLlm = useCallback(() => {
+    void llmParser.load();
+  }, [llmParser]);
+
+  /**
+   * Hang Up & Generate Note:
+   *
+   *  1. stops the live caption capture (same as the panel's Stop button —
+   *     both the mic mode and the CCP call capture);
+   *  2. waits (bounded) for the final audio segments to transcribe and runs
+   *     one last authoritative LLM pass over the whole conversation, so
+   *     fields parsed from the last seconds of the call make it into the
+   *     note;
+   *  3. generates the note from the then-current form data.
+   */
+  const handleHangUp = useCallback(async () => {
+    if (voice.isListening) voice.stop();
+    if (call.isCapturing) {
+      call.stop();
+      await call.finalize();
+      // Let React commit the final auto-fills before reading the form data
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+    }
+    const text = buildNoteText(formDataRef.current);
+    setNoteText(text);
+    setShowOutput(true);
+  }, [voice, call, buildNoteText]);
 
   const handleClearMic = useCallback(() => {
     voice.clear();
@@ -759,6 +939,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onHangUp={handleHangUp}
             autoFocusId={NODE_IDS.DETAILED_ISSUE}
             onLayoutReset={handleLayoutReset}
+            parsedFields={parsedFields}
           />
         </main>
       </div>
@@ -827,6 +1008,19 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           error: localWhisper.error,
           lastInferenceMs: localWhisper.lastInferenceMs,
           onSwitchModel: handleSwitchWhisperModel,
+        }}
+        parser={{
+          enabled: llmParser.enabled,
+          model: llmParser.model,
+          models: llmParser.models,
+          status: llmParser.status,
+          progress: llmParser.progress,
+          error: llmParser.error,
+          isParsing: llmParser.isParsing,
+          lastParseMs: llmParser.lastParseMs,
+          onToggleEnabled: handleToggleLlmEnabled,
+          onSwitchModel: handleSwitchLlmModel,
+          onLoad: handleLoadLlm,
         }}
       />
     </div>

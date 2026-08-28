@@ -41,6 +41,11 @@ interface FlowchartCanvasProps {
   autoFocusId?: string;
   /** Called on a genuine canvas resize so drag overrides are cleared and the grid re-aligns */
   onLayoutReset?: () => void;
+  /**
+   * Fields currently holding an auto-parsed value (node id → engine) —
+   * rendered with the yellow proofreading glow until the agent edits them.
+   */
+  parsedFields?: Record<string, 'regex' | 'llm'>;
 }
 
 // Layout constants (px) — compact spacing
@@ -199,6 +204,7 @@ export default function FlowchartCanvas({
   onHangUp,
   autoFocusId,
   onLayoutReset,
+  parsedFields,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -477,6 +483,7 @@ export default function FlowchartCanvas({
             onRemoveQuickText={node.onRemoveQuickText}
             templateMatches={node.templateMatches}
             onOpenTemplate={node.onOpenTemplate}
+            parsedSource={parsedFields?.[node.id] ?? null}
           />
         ))}
       </div>

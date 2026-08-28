@@ -561,6 +561,16 @@ body[data-ui-scale="small"] {
     background: color-mix(in oklab, var(--card) 70%, transparent);
   }
 
+  /* Auto-parsed field — warm yellow "proofread me" glow. Applied on top of
+     the resting/active glass skin (source order gives it precedence over
+     accents); the page removes it as soon as the agent edits the field. */
+  .glass-parsed {
+    --glass-border: color-mix(in oklab, #fbbf24 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #fbbf24 55%, transparent),
+      0 0 26px color-mix(in oklab, #fbbf24 30%, transparent);
+  }
+
   /* Idle dimming (toolbar): almost no frost, no shadow */
   .glass-dim {
     background: color-mix(in oklab, var(--card) 10%, transparent);

@@ -78,6 +78,11 @@ export interface FlowNodeProps {
   zIndex?: number;
   /** Reports the node's actual rendered height so the layout adjusts dynamically */
   onHeightChange?: (id: string, height: number) => void;
+  /**
+   * Which engine auto-filled this field ('regex' | 'llm') — renders the
+   * yellow proofreading glow + source badge until the agent edits it.
+   */
+  parsedSource?: 'regex' | 'llm' | null;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -320,6 +325,7 @@ function FlowNodeComponent({
   onOpenTemplate,
   zIndex,
   onHeightChange,
+  parsedSource = null,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -823,12 +829,28 @@ function FlowNodeComponent({
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         isActive ? accentGlows[accent] : accentBorders[accent],
         isActive && 'animate-pulse-slow',
+        // Auto-parsed value awaiting proofreading — yellow glow takes
+        // precedence over the accent skins (later in the stylesheet)
+        parsedSource && 'glass-parsed',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
       )}
       onMouseDown={handleMouseDown}
     >
+      {/* Parsed-field badge — which engine filled it, until it's proofread */}
+      {parsedSource && (
+        <span
+          className="absolute right-2 top-2 z-10 rounded-full border border-amber-400/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-300"
+          title={
+            parsedSource === 'llm'
+              ? 'Filled by the on-device AI parser from the whole conversation — please verify'
+              : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
+          }
+        >
+          {parsedSource === 'llm' ? 'AI parsed' : 'auto parsed'}
+        </span>
+      )}
       {renderContent()}
     </div>
   );

@@ -1,16 +1,22 @@
 import { useEffect, useRef } from 'react';
-import { Cpu, Loader2, Mic, MicOff, MonitorPlay, Trash2 } from 'lucide-react';
+import { BrainCircuit, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
 import type { ExtractedField } from '@/hooks/use-voice-transcription';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
+import type { LlmParserStatus } from '@/hooks/use-llm-parser';
 import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
   type WhisperModelName,
 } from '@/lib/whisper-models';
+import {
+  LLM_MODEL_META,
+  LLM_MODELS,
+  type LlmModelName,
+} from '@/lib/llm-parser';
 
 export interface MicPanelState {
   isListening: boolean;
@@ -53,10 +59,26 @@ export interface EnginePanelState {
   onSwitchModel: (model: WhisperModelName) => void;
 }
 
+/** On-device LLM parser state — the PRIMARY field parser */
+export interface ParserPanelState {
+  enabled: boolean;
+  model: LlmModelName;
+  models: LlmModelName[];
+  status: LlmParserStatus;
+  progress: number;
+  error: string | null;
+  isParsing: boolean;
+  lastParseMs: number | null;
+  onToggleEnabled: (enabled: boolean) => void;
+  onSwitchModel: (model: LlmModelName) => void;
+  onLoad: () => void;
+}
+
 interface VoiceCaptionPanelProps {
   mic: MicPanelState;
   call: CallPanelState;
   engine: EnginePanelState;
+  parser?: ParserPanelState;
 }
 
 /** Bar thresholds for the audio level meters */
@@ -112,7 +134,7 @@ const fieldLabel = (fieldId: string) =>
  * audio levels, transcribe-in-flight spinner, errors, engine status, and
  * extracted field chips.
  */
-export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPanelProps) {
+export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeSource: 'mic' | 'call' | null = mic.isListening
@@ -328,6 +350,107 @@ export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPan
 
             {engine.error && (
               <p className="mt-1 text-[10px] leading-snug text-destructive/90">{engine.error}</p>
+            )}
+          </div>
+        )}
+
+        {/* On-device LLM — the PRIMARY parser: reads the whole conversation
+            (agent + customer) and overrides pattern-matched values */}
+        {activeSource === 'call' && parser && (
+          <div className="mt-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Enable / disable the AI parser */}
+              <button
+                type="button"
+                onClick={() => parser.onToggleEnabled(!parser.enabled)}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors',
+                  parser.enabled
+                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                    : 'bg-foreground/10 text-muted-foreground'
+                )}
+                title={
+                  parser.enabled
+                    ? 'The on-device LLM reads the whole conversation (agent + customer) and fills the ticket — pattern matches are only provisional until then'
+                    : 'Enable the on-device LLM to parse the conversation (pattern matching only, without it)'
+                }
+              >
+                <BrainCircuit className="size-2.5" />
+                {parser.enabled ? 'AI parser on' : 'AI parser off'}
+              </button>
+
+              {/* Model segmented toggle */}
+              {parser.enabled && (
+                <span className="inline-flex overflow-hidden rounded-full border border-border/40">
+                  {parser.models.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => parser.onSwitchModel(name)}
+                      disabled={parser.status === 'loading' && parser.model === name}
+                      className={cn(
+                        'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
+                        parser.model === name
+                          ? 'bg-foreground/10 text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                      title={LLM_MODEL_META[name].note}
+                    >
+                      {LLM_MODEL_META[name].label}
+                    </button>
+                  ))}
+                </span>
+              )}
+
+              {/* Status */}
+              {parser.enabled && parser.status === 'idle' && (
+                <button
+                  type="button"
+                  onClick={parser.onLoad}
+                  className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  title="Download the model now (one-time, cached by the browser)"
+                >
+                  load model
+                </button>
+              )}
+              {parser.enabled && parser.status === 'loading' && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="size-2.5 animate-spin" />
+                  downloading {parser.progress}%
+                </span>
+              )}
+              {parser.enabled && parser.status === 'ready' && (
+                <span className="text-[10px] text-muted-foreground">standby</span>
+              )}
+              {parser.enabled && parser.status === 'error' && (
+                <span className="text-[10px] text-destructive" title={parser.error ?? undefined}>
+                  model failed to load
+                </span>
+              )}
+              {parser.isParsing && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                  <Sparkles className="size-2.5 animate-pulse" />
+                  reading the conversation…
+                </span>
+              )}
+              {parser.lastParseMs !== null && !parser.isParsing && (
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="Duration of the last parse over the whole conversation"
+                >
+                  {(parser.lastParseMs / 1000).toFixed(1)}s/parse
+                </span>
+              )}
+            </div>
+
+            {/* Download progress */}
+            {parser.enabled && parser.status === 'loading' && (
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-all duration-300"
+                  style={{ width: `${Math.max(3, parser.progress)}%` }}
+                />
+              </div>
             )}
           </div>
         )}

@@ -1,121 +1,34 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  extractFields,
+  FIELD_PATTERNS,
+  matchCanonicalModel,
+  canonicalIssueType,
+  classifyIssueType,
+  summarizeIssueType,
+  type Speaker,
+  type TranscriptEntry,
+  type ExtractedField,
+  type FieldPatternEntry,
+} from '@/lib/field-extraction';
 
-export interface ExtractedField {
-  fieldId: string;
-  value: string;
-  confidence: 'high' | 'medium' | 'low';
-}
-
-export interface FieldPatternEntry {
-  fieldId: string;
-  label: string;
-  patterns: RegExp[];
-}
-
-/**
- * Speech → form-field extraction patterns. Each entry maps natural phrases
- * to a form field ID. The first pattern that matches wins; values are cleaned
- * (whitespace collapsed, trailing punctuation stripped).
- */
-export const FIELD_PATTERNS: FieldPatternEntry[] = [
-  {
-    fieldId: 'customerName',
-    label: 'Customer Name',
-    patterns: [
-      /my name is\s+([A-Za-z][A-Za-z\s'-]*?)(?:\.|,| and | calling| regarding|$)/i,
-      /(?:this is|i am|i'm)\s+([A-Z][A-Za-z\s'-]*?)(?:\.|,| and | calling| regarding|$)/,
-      /name[' ]?s?\s+(?:is\s+)?([A-Za-z][A-Za-z\s'-]*?)(?:\.|,| and | calling| regarding|$)/i,
-    ],
-  },
-  {
-    fieldId: 'contactNumber',
-    label: 'Contact Number',
-    patterns: [
-      /(?:my|the)?\s*(?:phone|contact)?\s*number\s*(?:is|at)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /(?:call|reach|text)\s*(?:me\s*)?(?:at|on)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/,
-    ],
-  },
-  {
-    fieldId: 'emailAddress',
-    label: 'Email Address',
-    patterns: [
-      /(?:my\s+)?email\s*(?:is|at)?\s*([a-zA-Z0-9._%+-]+(?: at |@)[a-zA-Z0-9.-]+(?: dot |\.)(?:com|net|org|edu|co|us|io|me))/i,
-      /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/,
-    ],
-  },
-  {
-    fieldId: 'deebotModel',
-    label: 'Product Model',
-    patterns: [
-      /(?:i have|i've got|it'?s|model is|my (?:deebot|goat|winbot) is)\s+(?:a\s+)?(deebot|goat|winbot|ultramarine)?\s*([a-z]?\d{1,2}\s*(?:omni|pro|max|plus|combo|turbo|care|ai|s|se|x|white|black)?[a-z0-9\s+!]*)/i,
-    ],
-  },
-  {
-    fieldId: 'skuNumber',
-    label: 'SKU Number',
-    patterns: [
-      /sku\s*(?:number|is|code)?\s*(?:is)?\s*([a-z0-9-]{4,})/i,
-    ],
-  },
-  {
-    fieldId: 'serialNumber',
-    label: 'Serial Number',
-    patterns: [
-      /serial\s*(?:number|no\.?|is)?\s*(?:is)?\s*([a-z0-9-]{4,})/i,
-      /\bs\s*\/?\s*n\s*(?:is|number)?\s*([a-z0-9-]{4,})/i,
-    ],
-  },
-];
-
-/** Normalize a spoken value: collapse whitespace, strip trailing punctuation */
-function cleanValue(raw: string): string {
-  return raw
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[.,!?;:]+$/, '')
-    .trim();
-}
-
-/** Spoken email addresses: "john at gmail dot com" → john@gmail.com */
-function normalizeSpokenEmail(value: string): string {
-  return value.replace(/\s+at\s+/gi, '@').replace(/\s+dot\s+/gi, '.');
-}
-
-/** Run all extraction patterns over the accumulated transcript */
-export function extractFields(transcript: string): ExtractedField[] {
-  if (!transcript.trim()) return [];
-  const results: ExtractedField[] = [];
-  const seen = new Set<string>();
-
-  for (const entry of FIELD_PATTERNS) {
-    if (seen.has(entry.fieldId)) continue;
-    for (const pattern of entry.patterns) {
-      const match = transcript.match(pattern);
-      if (match) {
-        // Model patterns capture (brand, model) in two groups; others use group 1
-        const raw =
-          entry.fieldId === 'deebotModel' && match[2]
-            ? `${match[1] || ''} ${match[2]}`
-            : match[1] || match[0];
-        let value = cleanValue(raw);
-        if (entry.fieldId === 'emailAddress') {
-          value = cleanValue(normalizeSpokenEmail(value));
-        }
-        if (value.length > 2 && !seen.has(entry.fieldId)) {
-          seen.add(entry.fieldId);
-          const confidence: ExtractedField['confidence'] =
-            entry.fieldId === 'emailAddress' || entry.fieldId === 'contactNumber'
-              ? 'high'
-              : 'medium';
-          results.push({ fieldId: entry.fieldId, value, confidence });
-          break; // first matching pattern wins for this field
-        }
-      }
-    }
-  }
-  return results;
-}
+// The speaker-aware parsing engine lives in '@/lib/field-extraction' so the
+// LLM worker can share it without bundling React. Re-exported here for the
+// hooks/components that imported them from this module.
+export {
+  extractFields,
+  FIELD_PATTERNS,
+  matchCanonicalModel,
+  canonicalIssueType,
+  classifyIssueType,
+  summarizeIssueType,
+};
+export type {
+  Speaker,
+  TranscriptEntry,
+  ExtractedField,
+  FieldPatternEntry,
+};
 
 /** Delay before auto-restarting a ended recognition session (ms). Rapid
  *  stop/start cycles are known to crash Edge's speech service. */
@@ -148,19 +61,17 @@ const FATAL_ERRORS = new Set([
  * IMPORTANT LIMITATION: the Web Speech API only captures the microphone —
  * there is no way to feed it tab/system audio, so audio playing in another
  * tab (e.g. an Amazon Connect CCP call) is never transcribed. Only voices
- * the mic physically hears (the agent speaking, or speaker echo) arrive here.
+ * the mic physically hears (the agent speaking, or speaker echo) arrive here,
+ * so everything this hook transcribes is tagged as AGENT speech — the
+ * customer-side fields (name, number, email) only fill from the agent's
+ * dictation phrasings ("customer's name is…").
  *
  * The SpeechRecognition instance is created exactly once and never
  * recreated — the auto-fill callback is stored in a ref so form-data
  * updates never tear down an active recognition session.
- *
- * A parallel getUserMedia stream feeds a mic level meter, which proves
- * whether audio is actually reaching the browser (permission/device
- * problems show as a flat meter; a moving meter with no transcript points
- * at the speech service instead).
  */
 export function useVoiceTranscription(
-  onAutoFill: (fieldId: string, value: string) => void
+  onAutoFill: (fieldId: string, value: string, source: 'regex' | 'llm') => void
 ) {
   const [isListening, setIsListening] = useState(false);
   const [finalTranscript, setFinalTranscript] = useState('');
@@ -292,7 +203,8 @@ export function useVoiceTranscription(
         transcriptRef.current = `${transcriptRef.current} ${final}`.trim();
         setFinalTranscript(transcriptRef.current);
 
-        const fields = extractFields(transcriptRef.current);
+        // Mic mode hears only the agent — tag everything as agent speech
+        const fields = extractFields([{ speaker: 'agent', text: transcriptRef.current }]);
         setSuggestions(fields);
 
         // Push every newly-extracted field once; the page handler guards
@@ -300,7 +212,7 @@ export function useVoiceTranscription(
         for (const field of fields) {
           if (!autoFilledRef.current.has(field.fieldId)) {
             autoFilledRef.current.add(field.fieldId);
-            onAutoFillRef.current(field.fieldId, field.value);
+            onAutoFillRef.current(field.fieldId, field.value, 'regex');
           }
         }
       }
@@ -413,6 +325,7 @@ export function useVoiceTranscription(
     isSupported,
     isListening,
     toggle,
+    stop,
     clear,
     finalTranscript,
     interimText,

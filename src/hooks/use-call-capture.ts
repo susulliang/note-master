@@ -1,14 +1,44 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { extractFields, type ExtractedField } from './use-voice-transcription';
+import { extractFields, type ExtractedField, type Speaker, type TranscriptEntry } from '@/lib/field-extraction';
 import type { CallTranscriber } from './use-local-transcriber';
 
-/** Who a recorded segment belongs to: the agent's mic vs the customer's tab audio. */
-export type Speaker = 'agent' | 'customer';
+// Re-exported for components that consume capture state (VoiceCaptionPanel).
+export type { Speaker, TranscriptEntry, ExtractedField };
 
-/** One transcribed utterance, tagged with who said it. */
-export interface TranscriptEntry {
-  speaker: Speaker;
-  text: string;
+/** Field ids the parsing pipeline can fill (regex + LLM) */
+const PARSEABLE_FIELD_IDS = [
+  'customerName',
+  'contactNumber',
+  'emailAddress',
+  'deebotModel',
+  'skuNumber',
+  'serialNumber',
+  'issueDescription',
+  'issueType',
+  'resolutionSummary',
+] as const;
+
+/**
+ * Fields pattern matching may still pre-fill while the LLM model is
+ * resident — format-verifiable identifiers, where regex is actually
+ * trustworthy. Parsing fields that need CONTEXT understanding (name, model,
+ * complaint, resolution) is the LLM's job; regex only covers them as a
+ * stopgap while the model is unavailable.
+ */
+const REGEX_RELIABLE_FIELD_IDS = new Set([
+  'contactNumber',
+  'emailAddress',
+  'serialNumber',
+  'skuNumber',
+]);
+
+/** Structural slice of useLlmParser() the capture hook needs */
+export interface CallCaptureLlmParser {
+  parse: (
+    entries: TranscriptEntry[],
+    missingFieldIds: readonly string[]
+  ) => Promise<ExtractedField[]>;
+  isReady: boolean;
 }
 
 /** Seconds of audio per transcription request — small enough for snappy
@@ -17,6 +47,23 @@ const SEGMENT_MS = 15_000;
 
 /** Pause between recorder segments (stop → start cycle) */
 const RESTART_DELAY_MS = 250;
+
+/** After the transcription queue drains, wait this long before asking the
+ *  LLM to re-read the conversation (more speech may still arrive). */
+const LLM_IDLE_DEBOUNCE_MS = 1_500;
+
+/** Minimum spacing between two LLM parses — WASM generation is slow; asking
+ *  more often than this would just stack the worker. */
+const LLM_MIN_INTERVAL_MS = 30_000;
+
+/** Transcript must be at least this long before a parse is worth the
+ *  inference cost. */
+const LLM_MIN_TRANSCRIPT_CHARS = 120;
+
+/** How long finalize() waits for the final segments to transcribe (ms) */
+const FINALIZE_DRAIN_MS = 6_000;
+
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
 /** Pick the first MediaRecorder mime type this browser supports */
 function pickMimeType(): string | undefined {
@@ -84,7 +131,20 @@ interface SegmentBlobs {
  * Both recorders share one stop/start segment cycle, so every window yields
  * one blob per speaker. Blobs are queued per cycle (customer first, then
  * agent) and transcribed sequentially, producing an interleaved,
- * speaker-tagged transcript; field extraction runs over the merged text.
+ * speaker-tagged transcript.
+ *
+ * Parsing is LLM-first: whenever the transcription queue goes idle, the
+ * on-device LLM (src/lib/llm-parser.ts) re-reads the WHOLE conversation —
+ * agent and customer speech together — and its full-context understanding
+ * of the situation is what fills the form, overriding anything pattern
+ * matching wrote earlier. REGEX extraction (src/lib/field-extraction.ts)
+ * is relegated to a provisional stopgap: it pre-fills empty fields right
+ * after each segment while the LLM model is unavailable, and once the
+ * model is resident it only touches format-verifiable identifiers
+ * (phone / email / serial / SKU). Every regex value is provisional until
+ * the LLM replaces it; LLM output is validated against the canonical
+ * option lists before it reaches the form.
+ *
  * Audio never leaves the machine; there is no API key and no per-minute
  * cost.
  *
@@ -94,8 +154,9 @@ interface SegmentBlobs {
  * speakers cleanly separated (the UI nudges the agent about this).
  */
 export function useCallCapture(
-  onAutoFill: (fieldId: string, value: string) => void,
-  transcriber: CallTranscriber
+  onAutoFill: (fieldId: string, value: string, source: 'regex' | 'llm') => void,
+  transcriber: CallTranscriber,
+  llmParser?: CallCaptureLlmParser
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -123,15 +184,32 @@ export function useCallCapture(
 
   const shouldCaptureRef = useRef(false);
   const entriesRef = useRef<TranscriptEntry[]>([]);
-  /** Merged plain text (all speakers) — input for field extraction */
-  const mergedTextRef = useRef('');
-  const autoFilledRef = useRef(new Set<string>());
+  /** Fields already given a provisional REGEX fill (one push each) */
+  const regexFilledRef = useRef(new Set<string>());
+  /** Fields the LLM has authoritatively filled — regex never touches these */
+  const llmConfirmedRef = useRef(new Set<string>());
+  /** Latest LLM-extracted field per id (drives the suggestion chips) */
+  const llmSuggestionsRef = useRef(new Map<string, ExtractedField>());
   const onAutoFillRef = useRef(onAutoFill);
   const transcriberRef = useRef(transcriber);
+  const llmParserRef = useRef(llmParser);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   /** Sequential transcription chain — keeps transcript ordering stable */
   const queueRef = useRef<Promise<void>>(Promise.resolve());
+
+  /** Mirrors the `queued` state synchronously (idle detection needs it now) */
+  const pendingCountRef = useRef(0);
+  /** True while a Whisper inference is in flight */
+  const transcribingRef = useRef(false);
+  /** Timer for the scheduled idle LLM parse (debounce + throttle retries) */
+  const llmIdleTimerRef = useRef<number | null>(null);
+  /** Timestamp of the last LLM parse start (throttle) */
+  const lastLlmRunRef = useRef(0);
+  /** True while an LLM parse is in flight */
+  const llmRunningRef = useRef(false);
+  /** Latest idle-tick, so the arm timer can reach it without a dep cycle */
+  const llmTickRef = useRef<() => void>(() => undefined);
 
   /** Segment-window sequence number; increments on every stop/start cycle */
   const seqRef = useRef(0);
@@ -151,7 +229,131 @@ export function useCallCapture(
   useEffect(() => {
     onAutoFillRef.current = onAutoFill;
     transcriberRef.current = transcriber;
-  }, [onAutoFill, transcriber]);
+    llmParserRef.current = llmParser;
+  }, [onAutoFill, transcriber, llmParser]);
+
+  // -----------------------------------------------------------------
+  //  Field parsing — LLM-first; regex is a provisional stopgap
+  // -----------------------------------------------------------------
+
+  /**
+   * Provisional pattern-match fill, run after every transcribed segment.
+   * Regex has no real context understanding, so it is scoped down to what
+   * it can genuinely verify:
+   *
+   *  - fields the LLM already claimed are never touched;
+   *  - while the LLM model is RESIDENT, regex only pre-fills
+   *    format-verifiable identifiers (phone / email / serial / SKU);
+   *  - while the model is unavailable (disabled, downloading, failed) it
+   *    covers every field as a plain fallback — a provisional value beats
+   *    an empty one;
+   *  - anything it writes stays provisional: the next LLM pass over the
+   *    full conversation replaces it.
+   */
+  const runRegexExtraction = useCallback(() => {
+    const llmReady = !!llmParserRef.current?.isReady;
+    const fields = extractFields(entriesRef.current).filter((f) => {
+      if (llmConfirmedRef.current.has(f.fieldId)) return false;
+      if (llmReady && !REGEX_RELIABLE_FIELD_IDS.has(f.fieldId)) return false;
+      return true;
+    });
+
+    // Suggestions: regex finds under the LLM's authoritative reading
+    setSuggestions(() => {
+      const map = new Map<string, ExtractedField>();
+      for (const f of fields) map.set(f.fieldId, f);
+      for (const f of llmSuggestionsRef.current.values()) map.set(f.fieldId, f);
+      return [...map.values()];
+    });
+
+    for (const field of fields) {
+      if (!regexFilledRef.current.has(field.fieldId)) {
+        regexFilledRef.current.add(field.fieldId);
+        onAutoFillRef.current(field.fieldId, field.value, 'regex');
+      }
+    }
+  }, []);
+
+  /** Merge authoritative LLM results into suggestions + push to the form */
+  const applyLlmFields = useCallback((fields: ExtractedField[]) => {
+    if (fields.length === 0) return;
+    for (const field of fields) {
+      llmConfirmedRef.current.add(field.fieldId);
+      llmSuggestionsRef.current.set(field.fieldId, field);
+      // Authoritative: replaces any provisional regex value underneath it
+      onAutoFillRef.current(field.fieldId, field.value, 'llm');
+    }
+    setSuggestions((prev) => {
+      const map = new Map(prev.map((f) => [f.fieldId, f]));
+      for (const f of fields) map.set(f.fieldId, f);
+      return [...map.values()];
+    });
+  }, []);
+
+  /** Arm the idle LLM parse after `delayMs` (with a debounce default) */
+  const armIdleParse = useCallback((delayMs: number = LLM_IDLE_DEBOUNCE_MS) => {
+    if (llmIdleTimerRef.current !== null) {
+      window.clearTimeout(llmIdleTimerRef.current);
+    }
+    llmIdleTimerRef.current = window.setTimeout(() => {
+      llmIdleTimerRef.current = null;
+      llmTickRef.current();
+    }, delayMs);
+  }, []);
+
+  /**
+   * One LLM pass over the WHOLE conversation — agent and customer speech
+   * together, every parseable field. The model's reading of the situation
+   * is what fills the form; as the transcript grows, later passes can
+   * improve on earlier answers (the page applies override semantics).
+   */
+  const runLlmParse = useCallback(async (): Promise<void> => {
+    const parser = llmParserRef.current;
+    if (!parser || llmRunningRef.current) return;
+
+    llmRunningRef.current = true;
+    lastLlmRunRef.current = Date.now();
+    const startLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
+    try {
+      // Ask for every field, not just the "missing" ones — understanding
+      // the full context is the point
+      const fields = await parser.parse(entriesRef.current, PARSEABLE_FIELD_IDS);
+      applyLlmFields(fields);
+    } catch {
+      /* parse failed — provisional regex results stand */
+    } finally {
+      llmRunningRef.current = false;
+      // Speech arrived while the model was thinking — schedule one more
+      // pass so the reading includes it (the tick re-applies the throttle)
+      const endLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
+      if (endLen > startLen) armIdleParse();
+    }
+  }, [applyLlmFields, armIdleParse]);
+
+  /**
+   * Idle-tick: parse now when the queue has drained, the throttle window
+   * has elapsed and there is enough conversation to be worth the inference;
+   * otherwise re-arm for exactly when the throttle clears.
+   */
+  const llmTick = useCallback(() => {
+    if (llmRunningRef.current || transcribingRef.current || pendingCountRef.current > 0) return;
+    if (!llmParserRef.current) return;
+
+    const textLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
+    if (entriesRef.current.length === 0 || textLen < LLM_MIN_TRANSCRIPT_CHARS) return;
+
+    const since = Date.now() - lastLlmRunRef.current;
+    if (lastLlmRunRef.current > 0 && since < LLM_MIN_INTERVAL_MS) {
+      armIdleParse(LLM_MIN_INTERVAL_MS - since);
+      return;
+    }
+    void runLlmParse();
+  }, [armIdleParse, runLlmParse]);
+
+  // Keep the arm timer's indirection pointing at the latest tick
+  useEffect(() => {
+    llmTickRef.current = llmTick;
+  }, [llmTick]);
 
   // -----------------------------------------------------------------
   //  Per-speaker audio level meters (single rAF loop, two analysers)
@@ -196,45 +398,46 @@ export function useCallCapture(
   // -----------------------------------------------------------------
   //  Segment transcription chain (local Whisper in the worker)
   // -----------------------------------------------------------------
-  const postSegment = useCallback(async (blob: Blob, speaker: Speaker) => {
-    setIsTranscribing(true);
-    try {
-      const pcm = await blobToPcm16k(blob);
-      const text = (await transcriberRef.current.transcribe(pcm)).trim();
-      if (!text) return;
+  const postSegment = useCallback(
+    async (blob: Blob, speaker: Speaker) => {
+      transcribingRef.current = true;
+      setIsTranscribing(true);
+      try {
+        const pcm = await blobToPcm16k(blob);
+        const text = (await transcriberRef.current.transcribe(pcm)).trim();
+        if (!text) return;
 
-      setError(null);
-      entriesRef.current = [...entriesRef.current, { speaker, text }];
-      setTranscript(entriesRef.current);
-      mergedTextRef.current = `${mergedTextRef.current} ${text}`.trim();
+        setError(null);
+        entriesRef.current = [...entriesRef.current, { speaker, text }];
+        setTranscript(entriesRef.current);
 
-      const fields = extractFields(mergedTextRef.current);
-      setSuggestions(fields);
-      for (const field of fields) {
-        if (!autoFilledRef.current.has(field.fieldId)) {
-          autoFilledRef.current.add(field.fieldId);
-          onAutoFillRef.current(field.fieldId, field.value);
-        }
+        runRegexExtraction();
+      } catch (err) {
+        setError(`Local transcription failed: ${(err as Error).message}`);
+      } finally {
+        transcribingRef.current = false;
+        setIsTranscribing(false);
       }
-    } catch (err) {
-      setError(`Local transcription failed: ${(err as Error).message}`);
-    } finally {
-      setIsTranscribing(false);
-    }
-  }, []);
+    },
+    [runRegexExtraction]
+  );
 
   const enqueueSegment = useCallback(
     (blob: Blob, speaker: Speaker) => {
-      setQueued((n) => n + 1);
+      pendingCountRef.current += 1;
+      setQueued(pendingCountRef.current);
       queueRef.current = queueRef.current
         .then(() => postSegment(blob, speaker))
         .catch(() => undefined)
         .finally(() => {
+          pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+          setQueued(pendingCountRef.current);
           setSegmentsSent((n) => n + 1);
-          setQueued((n) => Math.max(0, n - 1));
+          // Queue drained → schedule an LLM pass over the whole conversation
+          if (pendingCountRef.current === 0) armIdleParse();
         });
     },
-    [postSegment]
+    [postSegment, armIdleParse]
   );
 
   /**
@@ -504,10 +707,49 @@ export function useCallCapture(
     }
   }, [start, stop]);
 
+  /**
+   * Drain-and-parse for hang-up: waits (bounded) for the final partial
+   * segments to transcribe, then runs one last authoritative LLM pass over
+   * the whole conversation — every field, no throttle — so the reading
+   * includes the last seconds of the call. The note generated after this
+   * resolves includes everything the call captured.
+   */
+  const finalize = useCallback(async (): Promise<void> => {
+    const deadline = Date.now() + FINALIZE_DRAIN_MS;
+    while (
+      (pendingCountRef.current > 0 || transcribingRef.current) &&
+      Date.now() < deadline
+    ) {
+      await sleep(150);
+    }
+
+    // Cancel any scheduled idle parse — the explicit pass below supersedes it
+    if (llmIdleTimerRef.current !== null) {
+      window.clearTimeout(llmIdleTimerRef.current);
+      llmIdleTimerRef.current = null;
+    }
+
+    const parser = llmParserRef.current;
+    if (parser?.isReady) {
+      const textLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
+      if (entriesRef.current.length > 0 && textLen >= 40) {
+        // Bounded: the parser's own timeout caps a stuck generation
+        const fields = await parser.parse(entriesRef.current, PARSEABLE_FIELD_IDS);
+        applyLlmFields(fields);
+      }
+    }
+  }, [applyLlmFields]);
+
   const clear = useCallback(() => {
     entriesRef.current = [];
-    mergedTextRef.current = '';
-    autoFilledRef.current = new Set();
+    regexFilledRef.current = new Set();
+    llmConfirmedRef.current = new Set();
+    llmSuggestionsRef.current = new Map();
+    lastLlmRunRef.current = 0;
+    if (llmIdleTimerRef.current !== null) {
+      window.clearTimeout(llmIdleTimerRef.current);
+      llmIdleTimerRef.current = null;
+    }
     setTranscript([]);
     setSuggestions([]);
     setSegmentsSent(0);
@@ -519,6 +761,7 @@ export function useCallCapture(
       shouldCaptureRef.current = false;
       if (segmentTimerRef.current !== null) window.clearTimeout(segmentTimerRef.current);
       if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+      if (llmIdleTimerRef.current !== null) window.clearTimeout(llmIdleTimerRef.current);
       stopLevelLoop();
       try {
         tabRecorderRef.current?.stop();
@@ -542,6 +785,7 @@ export function useCallCapture(
     toggle,
     stop,
     clear,
+    finalize,
     transcript,
     suggestions,
     segmentsSent,
