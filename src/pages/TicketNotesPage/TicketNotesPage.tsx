@@ -102,7 +102,7 @@ const NODES: NodeConfig[] = [
   {
     id: NODE_IDS.DEEBOT_MODEL,
     type: 'select',
-    label: 'Deebot Model',
+    label: 'Robot Model',
     options: DEEBOT_MODELS,
     accent: 'default',
     width: 200,
@@ -664,7 +664,7 @@ Contact number: ${getStr(NODE_IDS.CONTACT_NUMBER) || 'N/A'}
 Email address: ${getStr(NODE_IDS.EMAIL_ADDRESS) || 'N/A'}
 Current shipping address: ${getStr(NODE_IDS.SHIPPING_ADDRESS) || 'N/A'}
 Serial Number: ${getStr(NODE_IDS.SERIAL_NUMBER) || 'N/A'}
-Deebot Model: ${getStr(NODE_IDS.DEEBOT_MODEL) || 'N/A'}
+Robot Model: ${getStr(NODE_IDS.DEEBOT_MODEL) || 'N/A'}
 SKU: ${getStr(NODE_IDS.SKU_NUMBER) || 'N/A'}
 Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}

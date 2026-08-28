@@ -18,7 +18,7 @@
  *   qwen2.5-0.5b — onnx-community/Qwen2.5-0.5B-Instruct (smarter, heavier)
  *
  * Validation is the critical piece: the LLM may hallucinate. Everything it
- * returns is clamped against the canonical option lists (Deebot models,
+ * returns is clamped against the canonical option lists (robot models,
  * issue types) and any field it cannot justify is dropped, so the yellow
  * glow never marks a fabricated value.
  */
@@ -340,7 +340,7 @@ export function buildParsePrompt(
   const skeleton = Object.fromEntries(order.map((id) => [id, '']));
 
   const system = [
-    'You are the ticket-note writer for Ecovacs robot-vacuum support calls.',
+    'You are the ticket-note writer for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
     'You read a transcript where AGENT is the support rep and CUSTOMER is the caller.',
     'The transcript is machine-generated and garbled — read it for INTENT, not literally (e.g. "Acovox" is ECOVACS; "1,000 R2K" is the GOAT O1000 RTK lawn mower; "free of the breeze" means "free of debris").',
     'First understand the whole situation from BOTH speakers together — what the customer complained about, what the agent diagnosed and advised — then extract the ticket fields.',
@@ -348,7 +348,7 @@ export function buildParsePrompt(
     'Keep every value SHORT — condensed note style, never sentences copied verbatim from the transcript.',
     'Rules:',
     '1. customerName / contactNumber / emailAddress are the CUSTOMER\'S own details: take them from the customer stating them, or from the agent reading them back to confirm ("so that\'s John, 555-0123"). NEVER use the agent\'s own name as the customer name.',
-    '2. deebotModel: copy EXACTLY one name from the allowed list below, or "". Take it from the customer\'s own words, the agent\'s question ("is it the X2 OMNI?"), or the customer confirming/correcting the agent\'s guess. Choose the model the call is actually about.',
+    '2. deebotModel (the ROBOT model): copy EXACTLY one name from the allowed list below, or "". The call may be about ANY Ecovacs robot — a DEEBOT vacuum, a GOAT mower, a WINBOT window cleaner or an ULTRAMARINE pool robot — not just vacuums. Take it from the customer\'s own words, the agent\'s question ("is it the X2 OMNI?"), or the customer confirming/correcting the agent\'s guess. Choose the model the call is actually about.',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. purchaseInfo: when and where the customer acquired the unit — the purchase channel (retailer or website, e.g. Amazon, Best Buy, Costco, ecovacs.com) and the date or timeframe (e.g. "last March", "about six months ago"), condensed into one short phrase like "Amazon · March 2025" or "Best Buy · ~2 years ago". Take it from the customer\'s own words or the agent reading it back. Use "" when the conversation never mentions where or when it was bought.',
     '5. issueDescription: ONE concise sentence summarizing the customer\'s PRIMARY complaint — what is wrong with the machine, in the customer\'s terms. The customer describes the problem gradually and the agent confirms/diagnoses it, so REFINE the description as the call goes on: merge newly described symptoms and details into it, and replace it entirely only when the conversation shows it was wrong. When you are given an issue description already on the ticket, start from that and fold in what is new — never drop details it already has.',
@@ -357,7 +357,7 @@ export function buildParsePrompt(
     '8. Use "" for any field the conversation does not clearly state. Never invent values.',
     'Example of resolutionSummary condensation — AGENT said: "can you make sure the clean water tank is properly seated and the valves themselves are probably tight, so if you take out the clean water tank there should be like a valve there, and then make sure that thing is secure and free of the breeze and then put the water tank back in"',
     '→ resolutionSummary: "check clean water tank\'s tightness -> make sure valve is free of debris -> put water tank back in" ("free of the breeze" is a transcription error for "free of debris"; verbatim copying is wrong)',
-    'Allowed deebotModel values: ' + DEEBOT_MODELS.join(', '),
+    'Allowed deebotModel values (all Ecovacs robot models): ' + DEEBOT_MODELS.join(', '),
     'issueType examples: ' + ISSUE_TYPE_EXAMPLES.join(' | '),
     ...(strict
       ? [

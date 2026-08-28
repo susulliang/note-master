@@ -1,5 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { extractFields, isAsrArtifact, type ExtractedField, type Speaker, type TranscriptEntry } from '@/lib/field-extraction';
+import {
+  ACCUMULATING_FIELD_IDS,
+  extractFields,
+  isAsrArtifact,
+  type ExtractedField,
+  type Speaker,
+  type TranscriptEntry,
+} from '@/lib/field-extraction';
 import type { CallTranscriber } from './use-local-transcriber';
 
 // Re-exported for components that consume capture state (VoiceCaptionPanel).
@@ -173,8 +180,12 @@ export function useCallCapture(
 
   const shouldCaptureRef = useRef(false);
   const entriesRef = useRef<TranscriptEntry[]>([]);
-  /** Fields already given a provisional REGEX fill (one push each) */
-  const regexFilledRef = useRef(new Set<string>());
+  /** Fields already given a provisional REGEX fill, with the value pushed.
+   *  Accumulating fields (issue clauses, TBS steps, the issue type derived
+   *  from them) KEEP GROWING as the call goes on — their pushed value is
+   *  tracked so a later, longer extraction can replace the frozen first
+   *  one. Scalar fields (name, phone, serial…) stay first-wins. */
+  const regexFilledRef = useRef(new Map<string, string>());
   /** Fields the LLM has authoritatively filled — regex never touches these */
   const llmConfirmedRef = useRef(new Set<string>());
   /** Latest LLM-extracted field per id (drives the suggestion chips) */
@@ -258,8 +269,20 @@ export function useCallCapture(
     });
 
     for (const field of fields) {
-      if (!regexFilledRef.current.has(field.fieldId)) {
-        regexFilledRef.current.add(field.fieldId);
+      const pushed = regexFilledRef.current.get(field.fieldId);
+      if (pushed === undefined) {
+        // First fill for this field — push and remember it
+        regexFilledRef.current.set(field.fieldId, field.value);
+        onAutoFillRef.current(field.fieldId, field.value, 'regex');
+      } else if (
+        ACCUMULATING_FIELD_IDS.has(field.fieldId) &&
+        field.value !== pushed
+      ) {
+        // Accumulating field (issue clauses, TBS steps, issue type derived
+        // from them) grew as the call went on — replace the stale, shorter
+        // fill so the form keeps picking up late-conversation details.
+        // Scalar fields (name, phone, serial…) stay first-wins.
+        regexFilledRef.current.set(field.fieldId, field.value);
         onAutoFillRef.current(field.fieldId, field.value, 'regex');
       }
     }
@@ -768,7 +791,7 @@ export function useCallCapture(
 
   const clear = useCallback(() => {
     entriesRef.current = [];
-    regexFilledRef.current = new Set();
+    regexFilledRef.current = new Map();
     llmConfirmedRef.current = new Set();
     llmSuggestionsRef.current = new Map();
     lastLlmRunRef.current = 0;

@@ -135,7 +135,7 @@ function ComboboxField({
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Group options by "Category::" prefix when present (e.g. issue types);
-  // un-prefixed option sets (e.g. Deebot models) fall back to one flat group.
+  // un-prefixed option sets (e.g. robot models) fall back to one flat group.
   const groups = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const opt of options) {

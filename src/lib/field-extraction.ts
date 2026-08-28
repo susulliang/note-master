@@ -113,6 +113,12 @@ const ISSUE_TYPE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
   { pattern: /\b(?:cannot|can'?t|won'?t|doesn'?t|not|fails? to|failed to|unable to)\s+mow\b/i, value: 'Failure::Unable to mow' },
   { pattern: /\bleft (?:some |several |numerous |many )?(?:areas?|patches?|spots?|sections?|grass)\s+(?:un-?)?cut\b|\b(?:uncut|un-?cut|missed)\s+(?:areas?|patches?|spots?)\b/i, value: 'Product experience::Missed mowing' },
   { pattern: /\bmow(?:s|ing|ed)?\b.{0,35}\b(?:edges?|corners?)\b.{0,35}\b(?:not|can'?t|miss|un-?cut|unable|poor)\b/i, value: 'Product experience::Unable to mow edges/corners' },
+  // Mower owners rarely say "mow": "I couldn't ever get to the edges",
+  // "it wouldn't do the edges" — the negation + edge noun is the giveaway
+  { pattern: /\b(?:couldn'?t|can'?t|won'?t|wouldn'?t|doesn'?t|didn'?t|not|never)\s+(?:ever\s+)?(?:get to|reach|do|cut|trim|handle)\s+(?:the\s+|any\s+|my\s+)?edges\b/i, value: 'Product experience::Unable to mow edges/corners' },
+  // "goes down and back three or four times and stops" / "all of a sudden
+  // it just stops" — unit dies mid-job, on a mower that is failed mowing
+  { pattern: /\b(?:go(?:es|ing)?|went|mow(?:s|ing|ed)?|run(?:s|ning)?)\b.{0,40}\band stop|\bstops?\s+(?:after|mid|in the middle of|during|partway)\b/i, value: 'Failure::Unable to mow' },
   { pattern: /\bpoor mow(?:ing|s)?\b|\b(?:mow(?:ing)?)? performan(?:ce|t).{0,20}mow/i, value: 'Product experience::Poor mowing performance' },
   { pattern: /\b(?:doesn'?t|not)\s+(?:clean|vacuum|sweep|mop)\s+(?:at all|anything|the floor|the carpet)\b/i, value: 'Failure::Fail to vacuum' },
   { pattern: /\b(?:runs?|drives?) (?:over|through) (?:pet|dog|cat)\b.{0,25}\b(?:feces|poop|pee)\b/i, value: 'Failure::Damaged by pet/animal feces' },
@@ -121,7 +127,7 @@ const ISSUE_TYPE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
 
   // --- Noise / mechanical ---
   { pattern: /\b(?:making|makes|made)\s+(?:a\s+)?(?:loud|weird|strange|funny|grinding|squeaking|clicking|abnormal)\s+(?:noise|sound|noises|sounds)\b/i, value: 'Failure::Robot making abnormal sound/noise' },
-  { pattern: /\b(?:very |really )?noisy\b|\b(?:grind|squeak|click|rattle)(?:ing|s)? (?:sound|noise)?\b/i, value: 'Failure::Robot making abnormal sound/noise' },
+  { pattern: /\b(?:very |really )?noisy\b|\b(?:grind|squeak|click|rattle)(?:ing|s)?\s+(?:sound|noise)s?\b/i, value: 'Failure::Robot making abnormal sound/noise' },
   { pattern: /\bmain brush\b.{0,30}\b(?:tangled|wrapped|stuck|stop(?:s|ped)?|jammed|not (?:spinning|turning))\b/i, value: 'Failure::Main brush entangled / Main brush malfunction' },
   { pattern: /\bside brush\b.{0,30}\b(?:tangled|wrapped|stuck|stop(?:s|ped)?|jammed|not (?:spinning|turning)|fall(?:s|ing)? off|detached)\b/i, value: 'Failure::Side brush tangled or stuck' },
   { pattern: /\b(?:wheel|wheels)\b.{0,30}\b(?:stuck|jammed|not (?:spinning|turning)|fall(?:s|ing)? off|loose|wobbl)/i, value: 'Failure::Drive wheel alarm/Stuck with foreign object' },
@@ -185,7 +191,7 @@ const ISSUE_TYPE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
 
 /** The agent asking what's wrong — the customer's NEXT utterance is the complaint. */
 const AGENT_ISSUE_QUESTION =
-  /(?:what(?:'?s| is| seems to be) (?:the |going on|happening|the matter)|what can i do for you|how can i help|how may i help|tell me (?:what|about|more)|what'?s (?:wrong|the problem|the issue|the trouble|bothering)|describe (?:the|your) (?:issue|problem)|how'?s (?:it|the (?:robot|machine)) (?:doing|going)|what'?s it doing)/i;
+  /(?:what(?:'?s| is| seems to be) (?:the |going on|happening|the matter)|what can i do for you|how can i help|how may i help|tell me (?:what|about|more)|what'?s (?:wrong|the problem|the issue|the trouble|bothering)|describe (?:the|your) (?:issue|problem)|how'?s (?:it|the (?:robot|machine)) (?:doing|going)|what'?s it doing|can i know (?:the |your )?(?:original )?(?:problem|issue)|what was (?:the|that) (?:problem|issue))/i;
 
 // ---------------------------------------------------------------------------
 //  Model canonicalization — spoken model token → exact combobox option
@@ -196,11 +202,16 @@ function normalizeModelKey(raw: string): string {
 }
 
 /**
- * Match a spoken model token against the canonical model list and return the
- * exact option, or null when nothing matches ("T9 plus" → "T9+ White",
- * "x2 omni" → "X2 OMNI"; exact match first, then shortest prefix match).
- * Exported for the LLM field parser, which must REJECT hallucinated names.
+ * ASR cannot tell the letter O from the digit 0 inside model numbers: "O1000
+ * LiDAR PRO" comes back as "01000 LIDAR Pro". Mapping 0→o on BOTH sides
+ * (option and spoken token) makes the spellings comparable — "01000" →
+ * "o1ooo" equals "O1000" → "o1ooo" — without breaking pure-digit models
+ * (T30 → "t3o" on both sides, so those comparisons stay consistent).
  */
+function normalizeModelKeyZeroAsO(raw: string): string {
+  return normalizeModelKey(raw).replace(/0/g, 'o');
+}
+
 /**
  * Whisper emits bracketed pseudo-tags like "[BLANK_AUDIO]", "[INAUDIBLE]"
  * or "[ Inaudible ]" for non-speech audio (silence, noise, music). They
@@ -245,6 +256,21 @@ export function matchCanonicalModel(raw: string): string | null {
       (key.length >= 4 && optKey.endsWith(key))
     ) {
       if (!best || normalizeModelKey(best).length > optKey.length) best = option;
+    }
+  }
+  if (best) return best;
+
+  // O↔0-insensitive pass — same prefix/suffix rules, but comparing the
+  // zero-as-O renderings of both sides, so ASR's "01000 LIDAR Pro" meets
+  // the canonical "O1000 LiDAR PRO" instead of missing it.
+  const okey = normalizeModelKeyZeroAsO(raw);
+  for (const option of DEEBOT_MODELS) {
+    const optKey = normalizeModelKeyZeroAsO(option);
+    if (
+      okey.length >= 3 && optKey.startsWith(okey) ||
+      (okey.length >= 4 && optKey.endsWith(okey))
+    ) {
+      if (!best || normalizeModelKeyZeroAsO(best).length > optKey.length) best = option;
     }
   }
   return best;
@@ -397,22 +423,25 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
   },
   {
     fieldId: 'deebotModel',
-    label: 'Deebot Model',
+    label: 'Robot Model',
     // GOAT lawn-mower models are all 4-digit (O1000, A2500, O1200…), Deebot
-    // models 1-3 digits (X2, T30, N20) — so \d{1,4}. Suffixes must include
-    // the mower variants (RTK, LiDAR, Care Kit) or "you have a O1000 RTK"
-    // captures only "O1000" and canonicalizes to the wrong option.
+    // models 1-3 digits (X2, T30, N20) — so \d{1,4}… except ASR spells the
+    // GOAT letter-O as a zero ("O1000 LiDAR PRO" → "01000 LIDAR Pro"), a
+    // FIVE-digit run: \d{1,5} keeps the whole token (canonicalization's
+    // O↔0 pass then maps it back). Suffixes must include the mower
+    // variants (RTK, LiDAR, Care Kit) or "you have a O1000 RTK" captures
+    // only "O1000" and canonicalizes to the wrong option.
     customer: [
-      /\b(?:i have|i'?ve got|i got|it'?s|model is|my (?:deebot|goat|winbot|robot|machine|vacuum) is|i'?m (?:using|calling about)|i bought|i purchased|i ordered)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
-      /\bmy (?:deebot|goat|winbot|robot|machine|vacuum)(?:'s| is| is a)?\s+(?:a\s+|an\s+|the\s+)?([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\b(?:i have|i'?ve got|i got|it'?s|model is|my (?:deebot|goat|winbot|robot|machine|vacuum) is|i'?m (?:using|calling about)|i bought|i purchased|i ordered)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\bmy (?:deebot|goat|winbot|robot|machine|vacuum)(?:'s| is| is a)?\s+(?:a\s+|an\s+|the\s+)?([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
     agent: [
-      /\b(?:what|which) (?:model|deebot|robot|machine|vacuum|mower)\b.{0,60}?\b(?:is it|do you have|have you got|you'?re using|is (?:that|this))?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)?/i,
-      /\b(?:you have|you'?ve got|you'?re using|your (?:deebot|goat|robot|machine|vacuum|mower) is|is it (?:a|an|the))\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
-      /\b(?:so (?:that'?s|it'?s|we'?re talking about)|the (?:model|deebot) is|model number is)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\b(?:what|which) (?:model|deebot|robot|machine|vacuum|mower)\b.{0,60}?\b(?:is it|do you have|have you got|you'?re using|is (?:that|this))?\s*([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)?/i,
+      /\b(?:you have|you'?ve got|you'?re using|your (?:deebot|goat|robot|machine|vacuum|mower) is|is it (?:a|an|the))\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\b(?:so (?:that'?s|it'?s|we'?re talking about)|the (?:model|deebot) is|model number is)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
     any: [
-      /\bmodel (?:is|number is)?\s*:?\s*(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\bmodel (?:is|number is)?\s*:?\s*(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,5}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
   },
   {
@@ -490,22 +519,36 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\b(?:let'?s|lets) (?:try to |try |go ahead and |see if we can |see if |)([a-z][^.!?]{8,300})(?!\s*\?)/gi,
       // Instructions phrased as questions are still advice ("can you check
       // the wheels?") — but information-gathering questions are not
-      // ("can you describe the issue?") — hence the verb blocklist + the
-      // trailing-question rejection
-      /\b(?:can|could|would) you (?!describe\b|tell\b|explain\b|confirm\b|clarify\b|know\b|remember\b|mention\b|share\b|provide\b|walk\b)(?:please |try to |try |)([a-z][^.!?]{8,300})(?!\s*\?)/gi,
+      // ("can you describe the issue?"). The trailing (?:[.!]|$) rejects
+      // QUESTION sentences: the capture must run to a statement terminator,
+      // and a sentence ending in "?" has none.
+      /\b(?:can|could|would) you (?!describe\b|tell\b|explain\b|confirm\b|clarify\b|know\b|remember\b|mention\b|share\b|provide\b|walk\b)(?:please |try to |try |)([a-z][^.!?]{8,300})(?:[.!]|$)/gi,
       /\bplease (?:press|hold|try|check|confirm|restart|reset|power ?cycle|remove|clean|open|close|go ahead|disconnect|reconnect|download|install|connect|update|verify|make sure)([^.!?]{0,300})/gi,
       /\b(?:i'?m|i am) (?:going to|gonna) (?:send|email|process|submit|create|issue|set ?up|escalate|arrange|schedule|replace|refund|order|generate|open|add|remove|update|review|walk you through|check|look|note|follow up)([^.!?]{0,300})/gi,
       /\b(?:you'?ll|you will|we'?ll|we will|you|we) (?:need to|have to|wanna|going to) ([a-z][^.!?]{8,300})/gi,
       /\bmake sure (?:to |that |you |the )([a-z][^.!?]{5,300})/gi,
       /\bgo ahead and ([a-z][^.!?]{8,300})/gi,
       /\bhold (?:down |the |on )?(?:power )?button ([a-z][^.!?]{5,300})/gi,
-      /\b(?:let me|i'?ll) (?:check|see|look|verify|confirm|pull up|review|look into|take a look)([^.!?]{0,300})/gi,
       // Agent dictating the resolution: "So my resolution will be you
       // reset the machine and you restart the…"
       /\b(?:my|our|the) resolution (?:steps? )?(?:will be|is|would be|are)\s+(?:to\s+|that\s+(?:you|we)\s+)?([a-z][^.!?]{8,300})/gi,
       // Imperative advice to the customer: "and you put it back into the
-      // base station to charge it and see how it behaves"
-      /\byou (?:reset|restart|reboot|power ?cycle|charge|clean|check|press|hold|remove|reconnect|replace|place|put|empty|fill|install|update|map|run|start|stop|pause|resume|disconnect|turn|take|wipe|inspect|examine|test|verify|confirm|ensure|adjust|reseat|seat|tighten|loosen|send|leave)\b[^.!?]{4,300}/gi,
+      // base station to charge it and see how it behaves". Verb list
+      // includes the procedural/guidance verbs (click, go, log, type,
+      // select, visit, use, keep…) or website walk-throughs ("you can
+      // just click on the trading page") never register as steps.
+      /\byou (?:reset|restart|reboot|power ?cycle|charge|clean|check|press|hold|remove|reconnect|replace|place|put|empty|fill|install|update|map|run|start|stop|pause|resume|disconnect|turn|take|wipe|inspect|examine|test|verify|confirm|ensure|adjust|reseat|seat|tighten|loosen|send|leave|click|go|log|type|select|visit|use|keep|enter|find|subscribe|return|trade)\b[^.!?]{4,300}/gi,
+      // Advice phrased with a modal — BY FAR the most common real-agent
+      // phrasing ("you can just go onto the website and go into the
+      // trading program", "you just log in and then type in your current
+      // one", "you can definitely call us back"). Same statement-
+      // terminator guard as above; leading adverbs are skipped so the
+      // step starts with the action verb.
+      /\byou (?:can|could|just|should|may|might|definitely|still|also|then|simply)\s+(?:just\s+|simply\s+|then\s+|also\s+|still\s+|definitely\s+)?([a-z][^.!?]{8,300})(?:[.!]|$)/gi,
+      /\byou(?:'ll| will| would) be able to\s+([a-z][^.!?]{8,300})/gi,
+      // "I would suggest (you) keep using it for a bit" — the agent's own
+      // recommendation phrasing
+      /\bi (?:would|'d) (?:suggest|recommend)\s+(?:that\s+|you\s+|we\s+|to\s+)?([a-zA-Z][^.!?]{8,300})/gi,
     ],
   },
 ];
@@ -564,6 +607,20 @@ function collectAccumulated(text: string, patterns: RegExp[]): string[] {
   }
   return results;
 }
+
+/**
+ * Fields whose extraction GROWS as the call goes on: the joined issue
+ * clauses, the joined resolution steps, and the issue type classified from
+ * those clauses. Every other field is first-wins — its first confident
+ * parse should not be churned by later, noisier mentions.
+ *
+ * The call-capture hook uses this to decide whether a re-extracted regex
+ * value may REPLACE an already-pushed one (accumulating: yes, whenever the
+ * value changed) or must leave it alone (scalar: first fill sticks).
+ */
+export const ACCUMULATING_FIELD_IDS: ReadonlySet<string> = new Set(
+  FIELD_PATTERNS.filter((p) => p.accumulate).map((p) => p.fieldId).concat('issueType')
+);
 
 /**
  * Speaker-aware field extraction over the tagged transcript.
