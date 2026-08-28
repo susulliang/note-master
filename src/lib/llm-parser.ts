@@ -196,10 +196,13 @@ const MAX_TRANSCRIPT_CHARS = 10_000;
 const FILLER_ONLY_TURN =
   /^(?:you|u|yeah|yep|yup|ya|okay|ok|hm+|mhm+|mm+|uh+[- ]?huh+|oh?k?ay|alright|right|sure|great|perfect|awesome|cool|wow)\b[.!]??$/i;
 
-/** Turn is pure ASR noise: an artifact tag or a filler acknowledgment */
+/** Turn is pure ASR noise: an artifact tag, a filler acknowledgment, or a
+ *  punctuation-only leftover (">> [INAUDIBLE]" strips down to ">>" — chat
+ *  speaker markers carry no speech) */
 function isNoiseTurn(text: string): boolean {
   const stripped = stripAsrArtifacts(text);
   if (stripped.length === 0) return true;
+  if (!/[a-z0-9]/i.test(stripped)) return true;
   return FILLER_ONLY_TURN.test(stripped.replace(/[',.]/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
@@ -337,8 +340,8 @@ export function buildParsePrompt(
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. purchaseInfo: where + when the customer acquired the unit, one short phrase ("Amazon · March 2025", "Best Buy · ~2 years ago").',
-    '5. issueDescription: ONE concise sentence of the customer\'s PRIMARY complaint in the customer\'s terms. When given a description already on the ticket, refine it — fold in NEW symptoms or details the customer describes or the agent confirms; never drop what it already has.',
-    '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "How to use::App connection").',
+    '5. issueDescription: ONE concise sentence of the customer\'s PRIMARY reason for calling — a malfunction, OR a request (order/replace a part or accessory, a missing or misplaced item, a how-to question), in the customer\'s terms. When given a description already on the ticket, refine it — fold in NEW symptoms or details the customer describes or the agent confirms; never drop what it already has.',
+    '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "Aftersale-Service inquiry::Accessory Purchase", "How to use::App connection").',
     '7. resolutionSummary: EVERY step the agent advised, in order — each a short imperative verb phrase (3-10 words) joined with " -> ", ASR garble fixed. Your reply REPLACES the previous extraction: include the steps you are given PLUS any new ones.',
     ...(strict
       ? [
@@ -406,7 +409,7 @@ export function buildParaphrasePrompt(input: ParaphraseInput): {
     'Rewrite each fragment list into the concise, professional style of a support-ticket note.',
     'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
     'Rules:',
-    '1. issueDescription: ONE concise sentence (max ~25 words) summarizing the customer\'s PRIMARY problem in the customer\'s own terms — merge related clauses into one statement, drop filler, repetition and back-channel noise.',
+    '1. issueDescription: ONE concise sentence (max ~25 words) summarizing the customer\'s PRIMARY problem or request — a malfunction, or ordering/replacing a part or accessory — in the customer\'s own terms; merge related clauses into one statement, drop filler, repetition and back-channel noise.',
     '2. resolutionSummary: EVERY distinct step, recommendation or option the agent gave, in order. Condense each into a short imperative phrase starting with a verb (3-10 words). Join the phrases with " -> ". NEVER drop a step — a missing step is a missing ticket entry.',
     '3. Fix obvious transcription errors from context (e.g. "econovac" → "ecovacs", "goat leave as 1000" → "GOAT lawn mower", "RTK/RDK" is the positioning module).',
     '4. Copy "" for a field whose input is empty. NEVER invent facts, steps, prices, dates or values that are not in the input.',

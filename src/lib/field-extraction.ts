@@ -191,6 +191,23 @@ const ISSUE_TYPE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
   { pattern: /\b(?:missing|not in (?:the )?box|didn'?t (?:come|arrive) with|no)\b.{0,30}\b(?:part|accessor|manual|remote|adapter|cord|dock|brush|filter|tank|mop)\b/i, value: 'Missing parts::Side brush missing' },
   { pattern: /\b(?:didn'?t|not) receive\b.{0,30}\b(?:part|accessor|gift|item|dock|station)\b/i, value: 'Missing parts::Side brush missing' },
 
+  // --- Parts / accessory ordering — a REQUEST is a valid reason for the
+  // call: "is there a way that I could get that part ordered?", "I need
+  // to buy a replacement dust box", "how can I order a spare filter" ---
+  {
+    pattern: /\b(?:get|order|ordering|buy|buying|purchase|need|replace)\b[^.!?]{0,40}\b(?:part|accessor(?:y|ies)?|dust ?box|dustbin|spare|filter|side brush|main brush|mop pad|battery|remote|dock|station|cord|adapter|bag)\b/i,
+    value: 'Aftersale-Service inquiry::Accessory Purchase',
+  },
+  {
+    pattern: /\b(?:part|accessor(?:y|ies)?|dust ?box|dustbin|spare|filter|side brush|main brush|mop pad|battery|remote|dock|station|cord|adapter|bag)\b[^.!?]{0,40}\b(?:order(?:ed|ing)?|purchase|buy)\b/i,
+    value: 'Aftersale-Service inquiry::Accessory Purchase',
+  },
+  {
+    pattern: /\bhow (?:do|can|could) i (?:order|buy|get|purchase)\b[^.!?]{0,30}\b(?:part|accessor|spare|replacement|dust ?box|filter|brush)\b/i,
+    value: 'Aftersale-Service inquiry::Accessory Purchase',
+  },
+  { pattern: /\b(?:misplaced|lost|went missing)\b.{0,25}\b(?:part|accessor|dust ?box|bin|filter|brush|remote|piece)\b/i, value: 'Aftersale-Service inquiry::Accessory Purchase' },
+
   // --- Purchase / returns / refunds ---
   { pattern: /\bwant (?:to |a )?(?:refund|my money back)\b|\brequest(?:ing)? (?:a )?refund\b|\bask(?:ing)? for (?:a )?refund\b/i, value: 'Return Request::Return and exchange application' },
   { pattern: /\breturn(?:ing)? (?:it|the (?:robot|deebot|machine|item))\b|\bwant to send (?:it|this) back\b/i, value: 'Return Request::Return and exchange application' },
@@ -520,6 +537,18 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\bi'?m having (?:a |an |some )?(?:problem|issue|trouble|difficulties|difficulty)s? with\s+(?:my |the )?([^.!?]{10,300})/gi,
       /\bmy (?:robot|deebot|vacuum|machine|goat|winbot|device|unit)\s+(?:keeps?|is|won'?t|wouldn'?t|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|keeps? on)\s+([^.!?]{5,300})/gi,
       /\bit\s+(?:keeps?|is|was|would|won'?t|wouldn'?t|kept|doesn'?t|does not|can'?t|cannot|isn'?t|stopped|started|quit)\s+([^.!?]{5,300})/gi,
+      // Part/order REQUESTS — the reason for the call may be a request, not
+      // a malfunction: "is there a way that I could get that part
+      // ordered?", "I want to buy a replacement dust box". Requires a
+      // part-ish noun near the request verb so ordinary complaints
+      // ("get the upgraded 1000") never match.
+      /\b((?:is there a way|how (?:do|can|could) i|where can i|can i|could i)\b[^.!?]{0,40}?\b(?:get|order|buy|purchase|replace)\b[^.!?]{0,60}\b(?:part|accessor(?:y|ies)?|spare|replacement|dust ?box|dustbin|filter|brush|battery|remote|dock|cord|adapter|bag)\b[^.!?]{0,60})/gi,
+      /\bi (?:need|want|would like|wanna)\b[^.!?]{0,20}?\b((?:to )?(?:get|order|buy|purchase|replace)\b[^.!?]{0,60}\b(?:part|accessor(?:y|ies)?|spare|replacement|dust ?box|dustbin|filter|brush|battery|remote|dock|cord|adapter|bag)\b[^.!?]{0,60})/gi,
+      // A misplaced/lost part IS the complaint: "it just got misplaced",
+      // "the dust box is damaged". The verb slot is REQUIRED — a bare
+      // "it damaged" is the agent's clarifying question ("Is it
+      // damaged?") riding a scrambled diarization, never a complaint.
+      /\b((?:it|the (?:part|piece|dust ?box|bin|container|filter|brush|remote|accessor\w*))(?:'s|\s+(?:just\s+|has\s+|hasn'?t\s+)?(?:got|gotten|been|is|was|went|seems?|looks?))\s+(?:misplaced|lost|missing|went missing|broken|damaged))\b/gi,
     ],
     agent: [
       /\b(?:issue|problem|concern|trouble|matter) (?:is|was|with the)\s+(?:that\s+|a\s+|the\s+)?([^.!?]{10,300})/gi,
