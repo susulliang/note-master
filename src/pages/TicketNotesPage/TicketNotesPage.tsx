@@ -1031,6 +1031,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           error: llmParser.error,
           isParsing: llmParser.isParsing,
           lastParseMs: llmParser.lastParseMs,
+          window: llmParser.lastWindow,
+          lastReply: llmParser.lastReply,
           onToggleEnabled: handleToggleLlmEnabled,
           onSwitchModel: handleSwitchLlmModel,
           onLoad: handleLoadLlm,

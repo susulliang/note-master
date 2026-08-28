@@ -108,6 +108,12 @@ const ISSUE_TYPE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; value: string }> = [
   { pattern: /\b(?:keeps? |keeps on )?(?:bump|crash|hitt)(?:ing|s)\b.{0,30}\b(?:furniture|walls?|everything|things?)\b/i, value: 'Product experience::Frequent collisions' },
   { pattern: /\b(?:doesn'?t|not|won'?t)\s+(?:avoid|detect|see)\s+(?:obstacles?|things?|objects?)\b/i, value: 'Failure::Robot not avoiding obstacles' },
   { pattern: /\b(?:miss(?:es|ed|ing)|not clean(?:ing)?)\s+(?:spots?|areas?|corners?|edges?)\b/i, value: 'Failure::Missed cleaning in areas' },
+
+  // --- Mowing (GOAT lawn mowers) ---
+  { pattern: /\b(?:cannot|can'?t|won'?t|doesn'?t|not|fails? to|failed to|unable to)\s+mow\b/i, value: 'Failure::Unable to mow' },
+  { pattern: /\bleft (?:some |several |numerous |many )?(?:areas?|patches?|spots?|sections?|grass)\s+(?:un-?)?cut\b|\b(?:uncut|un-?cut|missed)\s+(?:areas?|patches?|spots?)\b/i, value: 'Product experience::Missed mowing' },
+  { pattern: /\bmow(?:s|ing|ed)?\b.{0,35}\b(?:edges?|corners?)\b.{0,35}\b(?:not|can'?t|miss|un-?cut|unable|poor)\b/i, value: 'Product experience::Unable to mow edges/corners' },
+  { pattern: /\bpoor mow(?:ing|s)?\b|\b(?:mow(?:ing)?)? performan(?:ce|t).{0,20}mow/i, value: 'Product experience::Poor mowing performance' },
   { pattern: /\b(?:doesn'?t|not)\s+(?:clean|vacuum|sweep|mop)\s+(?:at all|anything|the floor|the carpet)\b/i, value: 'Failure::Fail to vacuum' },
   { pattern: /\b(?:runs?|drives?) (?:over|through) (?:pet|dog|cat)\b.{0,25}\b(?:feces|poop|pee)\b/i, value: 'Failure::Damaged by pet/animal feces' },
   { pattern: /\b(?:random|erratic|wrong|weird|crazy)\s+(?:route|path|pattern)\b/i, value: 'Failure::Repeated cleaning/chaotic route' },
@@ -206,7 +212,7 @@ function normalizeModelKey(raw: string): string {
  * speech ("it makes a noise while charging") and must survive.
  */
 const ASR_ARTIFACT_TAG =
-  /\[\s*(?:inaudible|blank[_ ]?audio|silence|noise|music(?:\s+playing)?|applause|laughter|crosstalk|unintelligible|no speech)\s*\]/gi;
+  /\[\s*(?:inaudible|blank[_ ]?audio|silence|noise|music(?:\s+playing)?|applause|laughter|crosstalk|unintelligible|no speech|pause)\s*\]/gi;
 
 /** Remove ASR artifact tags from a transcript turn */
 export function stripAsrArtifacts(text: string): string {
@@ -230,7 +236,14 @@ export function matchCanonicalModel(raw: string): string | null {
   let best: string | null = null;
   for (const option of DEEBOT_MODELS) {
     const optKey = normalizeModelKey(option);
-    if (key.length >= 3 && optKey.startsWith(key)) {
+    // Suffix match — the GOAT lawn mowers are usually spoken WITHOUT their
+    // brand ("you have a O1000 RTK"), and the canonical options all carry
+    // the "GOAT " prefix; without this the token fails to canonicalize (or
+    // gets rejected outright on the LLM path) and the model field is lost.
+    if (
+      key.length >= 3 && optKey.startsWith(key) ||
+      (key.length >= 4 && optKey.endsWith(key))
+    ) {
       if (!best || normalizeModelKey(best).length > optKey.length) best = option;
     }
   }
@@ -332,6 +345,12 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
     agent: [
       /\bcustomer'?s? name is\s+([A-Za-z][A-Za-z\s'-]*?)(?:\.|,| and | calling| regarding|$)/i,
       /\bname of the customer is\s+([A-Za-z][A-Za-z\s'-]*?)(?:\.|,| and |$)/i,
+      // Read-back confirmation: "And your name is Rodrik." — the agent
+      // dictating the CUSTOMER's name back to them (optional trailing
+      // "is/was" so ASR garble like "Rodrik is." captures just "Rodrik")
+      /\byour name is\s+([A-Za-z][A-Za-z\s'-]*?)\s*(?:is|was)?\s*(?:\.|,| right| yeah| yes| ok(?:ay)?| and|$)/i,
+      // Agent confirming a correction: "Dominique, right?"
+      /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z'-]+){0,2}),\s*right\?/,
       /\b(?:am i|and) (?:speaking|talking) with\s+([A-Za-z][A-Za-z\s'-]*?)(?:\?|\.|,|$)/i,
       /\bis this\s+([A-Z][A-Za-z\s'-]*?)\s*(?:\?|calling|speaking|$)/,
       /\b(?:thank you|thanks|okay|alright),?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z'-]+){0,2}),?\s+(?:let me|i'?ll|so)\b/,
@@ -341,21 +360,23 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
   {
     fieldId: 'contactNumber',
     label: 'Contact Number',
+    // Every pattern CAPTURES just the digits — without a group the whole
+    // phrase ("your phone number is 310-173-4037") lands in the field.
     customer: [
-      /\bmy (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /\bmy number'?s?\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /(?:\bcall|\btext|\breach)\s+(?:me|us)\s+(?:at|on|back at)\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /\bit'?s\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
+      /\bmy (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /\bmy number'?s?\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /(?:\bcall|\btext|\breach)\s+(?:me|us)\s+(?:at|on|back at)\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /\bit'?s\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
     ],
     agent: [
-      /\b(?:customer'?s?|their|his|her|your) (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /\b(?:customer'?s?|their|his|her) number'?s?\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /\bis\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\s+(?:the|a good|the best) (?:number|one) to (?:reach|call|get)\b/i,
-      /\b(?:best|good) (?:number|way) to (?:reach|call|get) (?:you |him |her |them )?(?:at|is|on)?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
-      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i,
+      /\b(?:customer'?s?|their|his|her|your) (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /\b(?:customer'?s?|their|his|her) number'?s?\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /\bis\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s+(?:the|a good|the best) (?:number|one) to (?:reach|call|get)\b/i,
+      /\b(?:best|good) (?:number|way) to (?:reach|call|get) (?:you |him |her |them )?(?:at|is|on)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
     ],
     any: [
-      /\(?\b\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/,
+      /(\(?\b\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b)/,
     ],
   },
   {
@@ -377,17 +398,21 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
   {
     fieldId: 'deebotModel',
     label: 'Deebot Model',
+    // GOAT lawn-mower models are all 4-digit (O1000, A2500, O1200…), Deebot
+    // models 1-3 digits (X2, T30, N20) — so \d{1,4}. Suffixes must include
+    // the mower variants (RTK, LiDAR, Care Kit) or "you have a O1000 RTK"
+    // captures only "O1000" and canonicalizes to the wrong option.
     customer: [
-      /\b(?:i have|i'?ve got|i got|it'?s|model is|my (?:deebot|goat|winbot|robot|machine|vacuum) is|i'?m (?:using|calling about)|i bought|i purchased|i ordered)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)/i,
-      /\bmy (?:deebot|goat|winbot|robot|machine|vacuum)(?:'s| is| is a)?\s+(?:a\s+|an\s+|the\s+)?([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)/i,
+      /\b(?:i have|i'?ve got|i got|it'?s|model is|my (?:deebot|goat|winbot|robot|machine|vacuum) is|i'?m (?:using|calling about)|i bought|i purchased|i ordered)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\bmy (?:deebot|goat|winbot|robot|machine|vacuum)(?:'s| is| is a)?\s+(?:a\s+|an\s+|the\s+)?([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
     agent: [
-      /\b(?:what|which) (?:model|deebot|robot|machine|vacuum)\b.{0,60}?\b(?:is it|do you have|have you got|you'?re using|is (?:that|this))?\s*([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)?/i,
-      /\b(?:you have|you'?ve got|you'?re using|your (?:deebot|robot|machine|vacuum) is|is it (?:a|an|the))\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)/i,
-      /\b(?:so (?:that'?s|it'?s|we'?re talking about)|the (?:model|deebot) is|model number is)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)/i,
+      /\b(?:what|which) (?:model|deebot|robot|machine|vacuum|mower)\b.{0,60}?\b(?:is it|do you have|have you got|you'?re using|is (?:that|this))?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)?/i,
+      /\b(?:you have|you'?ve got|you'?re using|your (?:deebot|goat|robot|machine|vacuum|mower) is|is it (?:a|an|the))\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
+      /\b(?:so (?:that'?s|it'?s|we'?re talking about)|the (?:model|deebot) is|model number is)\s+(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
     any: [
-      /\bmodel (?:is|number is)?\s*:?\s*(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,3}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|ultra|ai|s|se|x|white|black|complete))*)/i,
+      /\bmodel (?:is|number is)?\s*:?\s*(?:a\s+|an\s+|the\s+)?(deebot|goat|winbot|ozmo)?\s*([a-z]?\d{1,4}[a-z]?\+?(?:\s*(?:omnicyclone|omni|pro|max|plus|combo|turbo|care|kit|ultra|ai|rtk|lidar|s|se|x|white|black|complete))*)/i,
     ],
   },
   {
@@ -419,12 +444,21 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
     ],
   },
   {
-    // LLM-only field: "when and where was it acquired" needs context
-    // understanding (channel + date are usually scattered across phrases),
-    // so there are deliberately no regex patterns — the label exists for
-    // the parsed-field chips in the caption panel.
+    // Primarily LLM-parsed ("when and where was it acquired" needs context
+    // understanding), with a provisional fallback for the common explicit
+    // phrasing "you purchased this machine from Amazon one year ago" —
+    // which conveniently carries channel AND date in one clause.
+    // NOTE: no `g` flag — a global flag makes String.match() return whole
+    // matches only (no capture groups), which is how "purchased this
+    // machine from Amazon one year ago" landed in the field verbatim.
     fieldId: 'purchaseInfo',
     label: 'Purchase',
+    agent: [
+      /\b(?:purchased|bought|got)(?: this| the| my| your| a| an)?\s*(?:machine|robot|unit|device|deebot|goat|mower|vacuum|it)?\s*(?:from|at|on)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{3,60}?)(?:\.|,|$)/i,
+    ],
+    customer: [
+      /\b(?:i|we) (?:purchased|bought|got)(?: it| this| the| my| a| an)?\s*(?:machine|robot|unit|device|deebot|goat|mower|vacuum)?\s*(?:from|at|on)\s+([A-Za-z0-9][A-Za-z0-9 .'-]{3,60}?)(?:\.|,|$)/i,
+    ],
   },
   {
     fieldId: 'issueDescription',
@@ -440,6 +474,11 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
     ],
     agent: [
       /\b(?:issue|problem|concern|trouble|matter) (?:is|was|with the)\s+(?:that\s+|a\s+|the\s+)?([^.!?]{10,300})/gi,
+      // Agent read-back phrasings: "the main issue you have is a diem
+      // battery" / "the main issue with your O1000 RTK model is that it
+      // cannot mow some areas"
+      /\bmain (?:issue|problem|concern)\b[^.!?]{0,60}?\bis (?:that\s+)?([^.!?]{10,300})/gi,
+      /\b(?:issue|problem|concern|trouble) (?:you have|you'?re having|you'?re experiencing|with your)\b[^.!?]{0,40}?\bis\s+(?:that\s+|a\s+|the\s+)?([^.!?]{6,300})/gi,
     ],
   },
   {
@@ -448,8 +487,12 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
     accumulate: true,
     join: ' -> ',
     agent: [
-      /\b(?:let'?s|lets) (?:try to |try |go ahead and |see if we can |see if |)([a-z][^.!?]{8,300})/gi,
-      /\b(?:can|could|would) you (?:please |try to |try |)([a-z][^.!?]{8,300})/gi,
+      /\b(?:let'?s|lets) (?:try to |try |go ahead and |see if we can |see if |)([a-z][^.!?]{8,300})(?!\s*\?)/gi,
+      // Instructions phrased as questions are still advice ("can you check
+      // the wheels?") — but information-gathering questions are not
+      // ("can you describe the issue?") — hence the verb blocklist + the
+      // trailing-question rejection
+      /\b(?:can|could|would) you (?!describe\b|tell\b|explain\b|confirm\b|clarify\b|know\b|remember\b|mention\b|share\b|provide\b|walk\b)(?:please |try to |try |)([a-z][^.!?]{8,300})(?!\s*\?)/gi,
       /\bplease (?:press|hold|try|check|confirm|restart|reset|power ?cycle|remove|clean|open|close|go ahead|disconnect|reconnect|download|install|connect|update|verify|make sure)([^.!?]{0,300})/gi,
       /\b(?:i'?m|i am) (?:going to|gonna) (?:send|email|process|submit|create|issue|set ?up|escalate|arrange|schedule|replace|refund|order|generate|open|add|remove|update|review|walk you through|check|look|note|follow up)([^.!?]{0,300})/gi,
       /\b(?:you'?ll|you will|we'?ll|we will|you|we) (?:need to|have to|wanna|going to) ([a-z][^.!?]{8,300})/gi,
@@ -457,7 +500,12 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\bgo ahead and ([a-z][^.!?]{8,300})/gi,
       /\bhold (?:down |the |on )?(?:power )?button ([a-z][^.!?]{5,300})/gi,
       /\b(?:let me|i'?ll) (?:check|see|look|verify|confirm|pull up|review|look into|take a look)([^.!?]{0,300})/gi,
-      /^(?:do|does|did|is|are|was|were|can|could|would|will|have|has|what|where|when|why|how|which|any|so|and)\b[^.!?]{10,200}\??$/gim,
+      // Agent dictating the resolution: "So my resolution will be you
+      // reset the machine and you restart the…"
+      /\b(?:my|our|the) resolution (?:steps? )?(?:will be|is|would be|are)\s+(?:to\s+|that\s+(?:you|we)\s+)?([a-z][^.!?]{8,300})/gi,
+      // Imperative advice to the customer: "and you put it back into the
+      // base station to charge it and see how it behaves"
+      /\byou (?:reset|restart|reboot|power ?cycle|charge|clean|check|press|hold|remove|reconnect|replace|place|put|empty|fill|install|update|map|run|start|stop|pause|resume|disconnect|turn|take|wipe|inspect|examine|test|verify|confirm|ensure|adjust|reseat|seat|tighten|loosen|send|leave)\b[^.!?]{4,300}/gi,
     ],
   },
 ];
@@ -497,12 +545,21 @@ function collectAccumulated(text: string, patterns: RegExp[]): string[] {
   const seen = new Set<string>();
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const value = cleanValue(match[1] ?? match[0]);
+      // Trailing ", right" is read-back confirmation noise ("a diem
+      // battery, right?") — never part of the actual complaint/step
+      const value = cleanValue(match[1] ?? match[0]).replace(/,?\s*\bright\b$/i, '');
       const key = value.toLowerCase();
-      if (value.length >= 4 && !seen.has(key)) {
-        seen.add(key);
-        results.push(value);
-      }
+      if (value.length < 4 || seen.has(key)) continue;
+      // Containment dedup — several patterns legitimately match the same
+      // span at different lengths ("you reset the machine" vs "you reset
+      // the machine and you put it back into the base station…"): the
+      // longer capture SUBSUMES the shorter one, so keep only the longest
+      // instead of stacking near-duplicate steps.
+      if (results.some((r) => r.toLowerCase().includes(key))) continue;
+      const subsumes = results.findIndex((r) => key.includes(r.toLowerCase()));
+      if (subsumes >= 0) results.splice(subsumes, 1);
+      seen.add(key);
+      results.push(value);
     }
   }
   return results;

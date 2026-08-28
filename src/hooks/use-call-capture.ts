@@ -19,20 +19,6 @@ const PARSEABLE_FIELD_IDS = [
   'resolutionSummary',
 ] as const;
 
-/**
- * Fields pattern matching may still pre-fill while the LLM model is
- * resident — format-verifiable identifiers, where regex is actually
- * trustworthy. Parsing fields that need CONTEXT understanding (name, model,
- * complaint, resolution) is the LLM's job; regex only covers them as a
- * stopgap while the model is unavailable.
- */
-const REGEX_RELIABLE_FIELD_IDS = new Set([
-  'contactNumber',
-  'emailAddress',
-  'serialNumber',
-  'skuNumber',
-]);
-
 /** Structural slice of useLlmParser() the capture hook needs */
 export interface CallCaptureLlmParser {
   parse: (
@@ -142,12 +128,11 @@ interface SegmentBlobs {
  * agent and customer speech together — and its full-context understanding
  * of the situation is what fills the form, overriding anything pattern
  * matching wrote earlier. REGEX extraction (src/lib/field-extraction.ts)
- * is relegated to a provisional stopgap: it pre-fills empty fields right
- * after each segment while the LLM model is unavailable, and once the
- * model is resident it only touches format-verifiable identifiers
- * (phone / email / serial / SKU). Every regex value is provisional until
- * the LLM replaces it; LLM output is validated against the canonical
- * option lists before it reaches the form.
+ * is relegated to provisional pre-fills: it runs right after each segment
+ * and may fill any field the LLM has not yet claimed — an LLM value always
+ * supersedes it on the next pass, so the model's reading of the situation
+ * still wins. LLM output is validated against the canonical option lists
+ * before it reaches the form.
  *
  * Audio never leaves the machine; there is no API key and no per-minute
  * cost.
@@ -242,28 +227,27 @@ export function useCallCapture(
 
   /**
    * Provisional pattern-match fill, run after every transcribed segment.
-   * Regex has no real context understanding, so it is scoped down to what
-   * it can genuinely verify:
    *
-   *  - fields the LLM already claimed are never touched;
-   *  - while the LLM is RESIDENT *and actually producing results*, regex
-   *    only pre-fills format-verifiable identifiers (phone / email /
-   *    serial / SKU);
-   *  - while the model is unavailable (disabled, downloading, failed) —
-   *    or loaded but has never successfully extracted anything from this
-   *    conversation, e.g. a transcript too garbled for it — regex covers
-   *    every field as a plain fallback: a provisional value beats an empty
-   *    one, and the next successful LLM pass still replaces it;
-   *  - anything it writes stays provisional: the next LLM pass over the
-   *    full conversation replaces it.
+   * The LLM is still the PRIMARY parser — but a partial LLM success must
+   * not starve every other field. The gate is per-field, not global:
+   *
+   *  - fields the LLM has authoritatively filled are NEVER touched;
+   *  - every field the LLM has NOT claimed may still get a provisional
+   *    regex fill. When the model is resident and reading well, its next
+   *    pass replaces those values wholesale (mergeAutoFill: an LLM value
+   *    supersedes a regex one); when the model is unavailable, still
+   *    downloading, or simply fails on a garbled transcript (it read the
+   *    phone number but nothing else), the provisional values are all the
+   *    form gets — and a provisional value beats an empty one.
+   *
+   * This is what fixes "it parsed the phone number but missed the name,
+   * issue and resolution": the model confirmed ONE field, and the old
+   * global gate then silenced regex for all the others.
    */
   const runRegexExtraction = useCallback(() => {
-    const llmProducing = !!llmParserRef.current?.isReady && llmConfirmedRef.current.size > 0;
-    const fields = extractFields(entriesRef.current).filter((f) => {
-      if (llmConfirmedRef.current.has(f.fieldId)) return false;
-      if (llmProducing && !REGEX_RELIABLE_FIELD_IDS.has(f.fieldId)) return false;
-      return true;
-    });
+    const fields = extractFields(entriesRef.current).filter(
+      (f) => !llmConfirmedRef.current.has(f.fieldId)
+    );
 
     // Suggestions: regex finds under the LLM's authoritative reading
     setSuggestions(() => {

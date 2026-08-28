@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedField, TranscriptEntry } from '@/lib/field-extraction';
 import {
   buildParsePrompt,
+  buildPromptWindow,
   extractJsonLoose,
   validateLlmFields,
   readLlmModelPref,
@@ -12,6 +13,7 @@ import {
   type LlmModelName,
   type LlmWorkerEvent,
   type PriorLlmValues,
+  type PromptWindow,
 } from '@/lib/llm-parser';
 
 export type LlmParserStatus = 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
@@ -22,8 +24,11 @@ interface PendingParse {
 }
 
 /** Hard cap on a single generation (ms) — WASM can be slow, but the agent
- *  should never wait on a stuck generation. */
+ *  should never wait on a stuck generation. The 1.5B model needs roughly
+ *  double the wall time of the smaller ones for the same reply, so it gets
+ *  a longer leash. */
 const PARSE_TIMEOUT_MS = 45_000;
+const PARSE_TIMEOUT_MS_LARGE_MODEL = 90_000;
 
 /** Generation token cap for extraction. Condensed values keep the JSON
  *  short, but the cap MUST comfortably exceed the longest legitimate reply:
@@ -60,6 +65,10 @@ export function useLlmParser() {
   const [enabled, setEnabledState] = useState(readLlmEnabledPref);
   const [isParsing, setIsParsing] = useState(false);
   const [lastParseMs, setLastParseMs] = useState<number | null>(null);
+  /** What the last parse sent to the model: which entries made the window */
+  const [lastWindow, setLastWindow] = useState<PromptWindow | null>(null);
+  /** Raw model reply of the last parse (capped for display) */
+  const [lastReply, setLastReply] = useState<string | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
@@ -285,12 +294,16 @@ export function useLlmParser() {
       const generate = (system: string, user: string): Promise<string> =>
         new Promise<string>((resolve) => {
           const id = (nextIdRef.current += 1);
+          const timeoutMs =
+            modelRef.current === 'qwen2.5-1.5b'
+              ? PARSE_TIMEOUT_MS_LARGE_MODEL
+              : PARSE_TIMEOUT_MS;
           const timer = window.setTimeout(() => {
             const pending = pendingParsesRef.current.get(id);
             if (!pending) return;
             pendingParsesRef.current.delete(id);
             resolve('');
-          }, PARSE_TIMEOUT_MS);
+          }, timeoutMs);
           pendingParsesRef.current.set(id, { resolve, timer });
           worker.postMessage({
             type: 'parse',
@@ -312,9 +325,12 @@ export function useLlmParser() {
 
       const started = performance.now();
       setIsParsing(true);
+      // Debug trail: exactly what this parse sends to the model
+      setLastWindow(buildPromptWindow(entries));
       try {
         const first = buildParsePrompt(entries, missingFieldIds, prior);
-        let fields = validateReply(await generate(first.system, first.user));
+        let reply = await generate(first.system, first.user);
+        let fields = validateReply(reply);
 
         // Retry when the reply was BROKEN (no balanced JSON object, the
         // truncation/rambling signature) — or when a substantial
@@ -326,11 +342,17 @@ export function useLlmParser() {
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
         if (modelFailed) {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
-          const retried = validateReply(await generate(strict.system, strict.user));
+          const retriedReply = await generate(strict.system, strict.user);
+          const retried = validateReply(retriedReply);
           if (retried !== null && (fields === null || retried.length > 0)) {
             fields = retried;
+            reply = retriedReply;
           }
         }
+
+        // Keep the raw reply (even a broken one — that is the interesting
+        // case to inspect) for the debug panel
+        setLastReply(reply ? reply.slice(0, 600) : '');
 
         return fields ?? [];
       } finally {
@@ -351,6 +373,12 @@ export function useLlmParser() {
     enabled,
     isParsing,
     lastParseMs,
+    /** Which transcript entries the LAST parse sent to the model — the
+     *  caption panel highlights them so parsing behavior is inspectable */
+    lastWindow,
+    /** Raw model reply from the last parse (capped) — debugging what the
+     *  model actually said, not just what survived validation */
+    lastReply,
     isReady: status === 'ready',
     setEnabled,
     load,

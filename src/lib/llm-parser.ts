@@ -35,20 +35,31 @@ import { matchCanonicalModel, canonicalIssueType, classifyIssueType, stripAsrArt
 export const LOCAL_LLM_MODELS = {
   'smollm2-360m': 'HuggingFaceTB/SmolLM2-360M-Instruct',
   'qwen2.5-0.5b': 'onnx-community/Qwen2.5-0.5B-Instruct',
+  'qwen2.5-1.5b': 'onnx-community/Qwen2.5-1.5B-Instruct',
 } as const;
 
 export type LlmModelName = keyof typeof LOCAL_LLM_MODELS;
 
-export const DEFAULT_LLM_MODEL: LlmModelName = 'smollm2-360m';
+/**
+ * Default: Qwen2.5-0.5B. Two consecutive field-test calls produced broken
+ * replies from the 360M model — at that size instruction-following over a
+ * 10-field JSON contract is marginal, while 0.5B handles it far more
+ * reliably. The 1.5B option is there when even sharper reading is wanted.
+ */
+export const DEFAULT_LLM_MODEL: LlmModelName = 'qwen2.5-0.5b';
 
 export const LLM_MODEL_META: Record<LlmModelName, { label: string; note: string }> = {
   'smollm2-360m': {
     label: 'SmolLM2 360M',
-    note: 'Primary AI parser · ~200 MB one-time download',
+    note: 'Fastest · ~200 MB one-time download · weakest reading',
   },
   'qwen2.5-0.5b': {
     label: 'Qwen2.5 0.5B',
-    note: 'Sharper AI parser · ~350 MB one-time download',
+    note: 'Default AI parser · ~350 MB one-time download · reliable JSON extraction',
+  },
+  'qwen2.5-1.5b': {
+    label: 'Qwen2.5 1.5B',
+    note: 'Sharpest AI parser · ~1.1 GB one-time download · best understanding, slower parses',
   },
 };
 
@@ -186,20 +197,72 @@ const ISSUE_TYPE_EXAMPLES = [
  * Render the speaker-tagged transcript into "AGENT:" / "CUSTOMER:" lines,
  * trimmed from the front so the most recent — most relevant — speech stays.
  */
-export function renderTranscript(entries: TranscriptEntry[]): string {
-  // Strip Whisper non-speech artifacts ([BLANK_AUDIO], [INAUDIBLE], …):
-  // they carry no information, waste tokens, and confuse small models.
-  const lines = entries
-    .map((e) => `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${stripAsrArtifacts(e.text)}`)
-    .filter((l) => l.length > 'CUSTOMER: '.length);
-  let text = lines.join('\n');
-  if (text.length > MAX_TRANSCRIPT_CHARS) {
-    text = text.slice(text.length - MAX_TRANSCRIPT_CHARS);
-    // Start at a clean line boundary
-    const nl = text.indexOf('\n');
-    if (nl > 0) text = text.slice(nl + 1);
+/** Filler-only customer turns ("you", "yeah", "okay") — Whisper's rendering
+ *  of back-channel acknowledgments. They confirm nothing specific, carry no
+ *  ticket information, and pad the prompt for a small model, so they are
+ *  excluded from what the LLM sees (the visible transcript keeps them).
+ *  Deliberately excludes yes/no — those can be meaningful answers. */
+const FILLER_ONLY_TURN =
+  /^(?:you|u|yeah|yep|yup|ya|okay|ok|hm+|mhm+|mm+|uh+[- ]?huh+|oh?k?ay|alright|right|sure|great|perfect|awesome|cool|wow)\b[.!]??$/i;
+
+/** Turn is pure ASR noise: an artifact tag or a filler acknowledgment */
+function isNoiseTurn(text: string): boolean {
+  const stripped = stripAsrArtifacts(text);
+  if (stripped.length === 0) return true;
+  return FILLER_ONLY_TURN.test(stripped.replace(/[',.]/g, ' ').replace(/\s+/g, ' ').trim());
+}
+
+/** One LLM prompt's view of the conversation: which entries made the cut */
+export interface PromptWindow {
+  /** Rendered prompt text (speaker-tagged, noise-stripped, tail-capped) */
+  text: string;
+  /** Indexes into the ORIGINAL entries array that the prompt includes */
+  entryIndexes: number[];
+  /** Prompt text length, after the cap */
+  chars: number;
+}
+
+/**
+ * Compute exactly what the LLM will see for a parse — the same slicing
+ * `renderTranscript` performs, but also reporting WHICH entries are inside
+ * the window. Powers the "what the AI sees" debug highlight in the caption
+ * panel: with the transcript growing beyond MAX_TRANSCRIPT_CHARS, older
+ * turns fall out of the window and (thanks to prior-value carry-forward)
+ * only their extracted values survive.
+ */
+export function buildPromptWindow(entries: TranscriptEntry[]): PromptWindow {
+  const kept: Array<{ index: number; line: string }> = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const e = entries[i];
+    if (isNoiseTurn(e.text)) continue;
+    const clean = stripAsrArtifacts(e.text);
+    if (clean.length === 0) continue;
+    kept.push({ index: i, line: `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${clean}` });
   }
-  return text;
+
+  let lines = kept;
+  let chars = kept.reduce((n, k) => n + k.line.length + 1, 0);
+  if (chars > MAX_TRANSCRIPT_CHARS) {
+    // Keep the TAIL: newest speech matters most for the evolving fields
+    lines = [];
+    chars = 0;
+    for (let i = kept.length - 1; i >= 0; i -= 1) {
+      const len = kept[i].line.length + 1;
+      if (chars + len > MAX_TRANSCRIPT_CHARS && lines.length > 0) break;
+      lines.unshift(kept[i]);
+      chars += len;
+    }
+  }
+
+  return {
+    text: lines.map((k) => k.line).join('\n'),
+    entryIndexes: lines.map((k) => k.index),
+    chars,
+  };
+}
+
+export function renderTranscript(entries: TranscriptEntry[]): string {
+  return buildPromptWindow(entries).text;
 }
 
 /**
@@ -241,6 +304,26 @@ export interface PriorLlmValues {
  * after a broken reply (truncated JSON, rambling): the reply must be only
  * the compact JSON object.
  */
+/**
+ * JSON skeleton key order for the model's reply. The fields ONLY the LLM can
+ * produce (long free-text: description, type, resolution) come FIRST and the
+ * format-verifiable identifiers (phone/email/serial/SKU — regex's home turf)
+ * come LAST: if generation truncates mid-JSON, the salvage keeps the fields
+ * no other engine can fill, and the lost tail is exactly what regex covers.
+ */
+const PROMPT_FIELD_ORDER = [
+  'issueDescription',
+  'issueType',
+  'resolutionSummary',
+  'customerName',
+  'contactNumber',
+  'emailAddress',
+  'deebotModel',
+  'skuNumber',
+  'serialNumber',
+  'purchaseInfo',
+] as const;
+
 export function buildParsePrompt(
   entries: TranscriptEntry[],
   missingFieldIds: readonly string[],
@@ -250,9 +333,11 @@ export function buildParsePrompt(
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
   );
-  const skeleton = Object.fromEntries(
-    (wanted.length > 0 ? wanted : [...LLM_FIELD_IDS]).map((id) => [id, ''])
-  );
+  const order =
+    wanted.length > 0
+      ? PROMPT_FIELD_ORDER.filter((id) => (wanted as readonly string[]).includes(id))
+      : [...PROMPT_FIELD_ORDER];
+  const skeleton = Object.fromEntries(order.map((id) => [id, '']));
 
   const system = [
     'You are the ticket-note writer for Ecovacs robot-vacuum support calls.',

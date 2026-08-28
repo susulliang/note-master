@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { BrainCircuit, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bug, BrainCircuit, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -69,6 +69,15 @@ export interface ParserPanelState {
   error: string | null;
   isParsing: boolean;
   lastParseMs: number | null;
+  /**
+   * Debug: what the LAST parse sent to the model — which transcript lines
+   * made the prompt window, the rendered text itself, and the raw model
+   * reply. Powers the "what the AI sees" highlight on transcript lines +
+   * the debug expander, so a mis-parsed call can be inspected in the
+   * field: was the information even inside the prompt?
+   */
+  window?: { entryIndexes: number[]; chars: number; text: string } | null;
+  lastReply?: string | null;
   onToggleEnabled: (enabled: boolean) => void;
   onSwitchModel: (model: LlmModelName) => void;
   onLoad: () => void;
@@ -190,6 +199,18 @@ function EngineProgressRow({
  */
 export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showLlmDebug, setShowLlmDebug] = useState(false);
+
+  // Which transcript lines the last LLM parse included in its prompt —
+  // the "what the AI sees" debug highlight
+  const llmWindowSet = useMemo(
+    () => new Set(parser?.window?.entryIndexes ?? []),
+    [parser?.window]
+  );
+  const llmWindowFirst = useMemo(
+    () => (llmWindowSet.size > 0 ? Math.min(...llmWindowSet) : null),
+    [llmWindowSet]
+  );
 
   const activeSource: 'mic' | 'call' | null = mic.isListening
     ? 'mic'
@@ -495,6 +516,25 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   {(parser.lastParseMs / 1000).toFixed(1)}s/parse
                 </span>
               )}
+
+              {/* Debug: show exactly what the model was sent and what it
+                  replied — makes parsing failures inspectable in the field */}
+              {parser.enabled && parser.status === 'ready' && (
+                <button
+                  type="button"
+                  onClick={() => setShowLlmDebug((v) => !v)}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                    showLlmDebug
+                      ? 'bg-foreground/10 text-foreground'
+                      : 'text-muted-foreground/70 hover:text-foreground'
+                  )}
+                  title="Highlight the transcript lines sent to the AI parser in the last parse, and show the model's raw reply"
+                >
+                  <Bug className="size-2.5" />
+                  {showLlmDebug ? 'hide' : 'debug'}
+                </button>
+              )}
             </div>
 
             {/* Download progress */}
@@ -504,6 +544,44 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   className="h-full rounded-full bg-amber-500 transition-all duration-300"
                   style={{ width: `${Math.max(3, parser.progress)}%` }}
                 />
+              </div>
+            )}
+
+            {/* AI parse debug: prompt window stats + the exact text sent to
+                the model + the model's raw reply */}
+            {showLlmDebug && (
+              <div className="mt-1.5 rounded-lg bg-background/60 p-2 font-mono text-[9px] leading-relaxed">
+                {parser.window ? (
+                  <>
+                    <p className="text-muted-foreground">
+                      prompt window:{' '}
+                      <span className="font-bold text-amber-600 dark:text-amber-400">
+                        {parser.window.entryIndexes.length}
+                      </span>
+                      /{call.transcript.length} lines · {parser.window.chars} chars · ~
+                      {Math.ceil(parser.window.chars / 4)} tokens (system prompt adds ~1.5k
+                      more)
+                      {parser.window.entryIndexes.length < call.transcript.length &&
+                        ' · dim lines were NOT sent'}
+                    </p>
+                    {/* The verbatim transcript text the model received —
+                        filler turns stripped, window-capped */}
+                    <pre className="custom-scrollbar mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded bg-foreground/5 p-1.5 text-foreground/80">
+                      {parser.window.text}
+                    </pre>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">no parse yet</p>
+                )}
+                {parser.lastReply ? (
+                  <p className="mt-1 break-all whitespace-pre-wrap text-foreground/80">
+                    reply: {parser.lastReply}
+                  </p>
+                ) : parser.window ? (
+                  <p className="mt-1 text-destructive/80">
+                    reply: (empty — model produced nothing)
+                  </p>
+                ) : null}
               </div>
             )}
           </div>
@@ -526,28 +604,50 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           {showCallEntries ? (
             call.transcript.length > 0 ? (
               <div className="flex flex-col gap-1">
-                {call.transcript.map((entry, i) => (
-                  <p key={i} className="flex items-start gap-1.5">
-                    <span
+                {call.transcript.map((entry, i) => {
+                  // Debug highlight: amber = inside the last AI prompt
+                  // window, dimmed = older than the window (dropped from
+                  // the prompt; its extracted values live on in the form)
+                  const inWindow = llmWindowSet.has(i);
+                  const beforeWindow =
+                    llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
+                  return (
+                    <p
+                      key={i}
                       className={cn(
-                        'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
-                        entry.speaker === 'agent'
-                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                        'flex items-start gap-1.5 rounded px-1 py-0.5 -mx-1 transition-colors',
+                        inWindow && 'bg-amber-500/10',
+                        beforeWindow && 'opacity-40'
                       )}
                       title={
-                        entry.speaker === 'agent'
-                          ? 'Your microphone'
-                          : 'CCP tab audio'
+                        inWindow
+                          ? 'Included in the last AI parse (sent to the model)'
+                          : beforeWindow
+                            ? 'Older than the AI prompt window — not sent to the model (its extracted values are carried forward in the form)'
+                            : undefined
                       }
                     >
-                      {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
-                    </span>
-                    <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
-                      {entry.text}
-                    </span>
-                  </p>
-                ))}
+                      <span
+                        className={cn(
+                          'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
+                          entry.speaker === 'agent'
+                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                        )}
+                        title={
+                          entry.speaker === 'agent'
+                            ? 'Your microphone'
+                            : 'CCP tab audio'
+                        }
+                      >
+                        {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                      </span>
+                      <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
+                        {entry.text}
+                      </span>
+                    </p>
+                  );
+                })}
               </div>
             ) : (
               <span className="text-[13px] leading-relaxed text-muted-foreground/60">
@@ -606,7 +706,11 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                         : parser.isParsing
                           ? 'parsing conversation…'
                           : parser.lastParseMs !== null
-                            ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s`
+                            ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s${
+                                parser.window
+                                  ? ` · ${parser.window.entryIndexes.length} lines read`
+                                  : ''
+                              }`
                             : parser.status === 'ready'
                               ? 'standby'
                               : 'model not loaded'
