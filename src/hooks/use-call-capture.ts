@@ -2,6 +2,15 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { extractFields, type ExtractedField } from './use-voice-transcription';
 import type { CallTranscriber } from './use-local-transcriber';
 
+/** Who a recorded segment belongs to: the agent's mic vs the customer's tab audio. */
+export type Speaker = 'agent' | 'customer';
+
+/** One transcribed utterance, tagged with who said it. */
+export interface TranscriptEntry {
+  speaker: Speaker;
+  text: string;
+}
+
 /** Seconds of audio per transcription request — small enough for snappy
  *  near-live captions, large enough to amortize per-segment overhead. */
 const SEGMENT_MS = 15_000;
@@ -57,51 +66,65 @@ function readableCaptureError(err: unknown): string {
   return `Could not start capture (${name || 'unknown error'}).`;
 }
 
+/** Blobs captured in one synchronized segment window, per speaker. */
+interface SegmentBlobs {
+  agent?: Blob;
+  customer?: Blob;
+}
+
 /**
- * Call-capture transcription: records the audio of another browser tab
- * (the Amazon Connect CCP softphone) plus the agent's own microphone, and
- * transcribes ~15s segments with a **local Whisper model** (transformers.js
- * WASM, running in a Web Worker) before accumulating the transcript for
- * form auto-fill. Audio never leaves the machine; there is no API key and
- * no per-minute cost.
+ * Call-capture transcription with **speaker separation**.
  *
- * Why not the Web Speech API? It can only hear the microphone — there is
- * no way to feed it tab audio. Capturing via getDisplayMedia({ audio: true })
- * is the browser-sanctioned way to reach audio playing in another tab;
- * the user picks the CCP tab and must tick "Also share tab audio" in the
- * share dialog.
+ * Two streams are recorded simultaneously and transcribed as ~15s segments
+ * each by a **local Whisper model** (transformers.js WASM in a Web Worker):
  *
- * The mixed stream (tab + mic) is recorded with MediaRecorder in a
- * stop/start cycle so every posted blob is a complete, decodable file
- * (raw timeslice chunks lack webm headers and often fail to decode).
- * Segments are transcribed sequentially so transcript text arrives in
- * order.
+ *   tab audio — getDisplayMedia of the CCP tab  → "customer" entries
+ *   mic audio — getUserMedia (echo-cancelled)   → "agent" entries
+ *
+ * Both recorders share one stop/start segment cycle, so every window yields
+ * one blob per speaker. Blobs are queued per cycle (customer first, then
+ * agent) and transcribed sequentially, producing an interleaved,
+ * speaker-tagged transcript; field extraction runs over the merged text.
+ * Audio never leaves the machine; there is no API key and no per-minute
+ * cost.
+ *
+ * Known limitation: browsers can only echo-cancel audio this page plays
+ * itself, so with loudspeakers the mic also hears the customer and their
+ * words can surface as a duplicate Agent line. A headset keeps the two
+ * speakers cleanly separated (the UI nudges the agent about this).
  */
 export function useCallCapture(
   onAutoFill: (fieldId: string, value: string) => void,
   transcriber: CallTranscriber
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
-  const [transcript, setTranscript] = useState('');
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [suggestions, setSuggestions] = useState<ExtractedField[]>([]);
   const [segmentsSent, setSegmentsSent] = useState(0);
   /** Segments recorded but not yet transcribed (worker still catching up) */
   const [queued, setQueued] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [level, setLevel] = useState(0);
-  /** True when the captured stream includes the agent's mic */
+  /** Live input level per speaker — proves each channel is actually arriving */
+  const [customerLevel, setCustomerLevel] = useState(0);
+  const [agentLevel, setAgentLevel] = useState(0);
+  /** True when the agent's mic is being recorded alongside the tab audio */
   const [hasMic, setHasMic] = useState(false);
 
   const displayStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  /** One recorder per speaker — this is what keeps the two voices separable */
+  const tabRecorderRef = useRef<MediaRecorder | null>(null);
+  const micRecorderRef = useRef<MediaRecorder | null>(null);
+  const tabAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
 
   const shouldCaptureRef = useRef(false);
-  const transcriptRef = useRef('');
+  const entriesRef = useRef<TranscriptEntry[]>([]);
+  /** Merged plain text (all speakers) — input for field extraction */
+  const mergedTextRef = useRef('');
   const autoFilledRef = useRef(new Set<string>());
   const onAutoFillRef = useRef(onAutoFill);
   const transcriberRef = useRef(transcriber);
@@ -109,6 +132,13 @@ export function useCallCapture(
   const restartTimerRef = useRef<number | null>(null);
   /** Sequential transcription chain — keeps transcript ordering stable */
   const queueRef = useRef<Promise<void>>(Promise.resolve());
+
+  /** Segment-window sequence number; increments on every stop/start cycle */
+  const seqRef = useRef(0);
+  /** Next window that has not been handed to the transcription queue yet */
+  const nextFlushSeqRef = useRef(1);
+  /** Captured-but-unqueued blobs, keyed by window sequence number */
+  const pendingRef = useRef(new Map<number, SegmentBlobs>());
 
   /** Latest stop() — lets stream 'ended' listeners stop capture safely */
   const stopRef = useRef<(() => void) | null>(null);
@@ -124,26 +154,29 @@ export function useCallCapture(
   }, [onAutoFill, transcriber]);
 
   // -----------------------------------------------------------------
-  //  Audio level meter (same pattern as the mic hook)
+  //  Per-speaker audio level meters (single rAF loop, two analysers)
   // -----------------------------------------------------------------
-  const startLevelLoop = useCallback((analyser: AnalyserNode) => {
-    const buf = new Uint8Array(analyser.fftSize);
-    let lastUpdate = 0;
-    const loop = () => {
-      rafRef.current = requestAnimationFrame(loop);
-      const node = analyserRef.current;
-      if (!node) return;
+  const startLevelLoop = useCallback(() => {
+    const read = (node: AnalyserNode | null): number => {
+      if (!node) return 0;
+      const buf = new Uint8Array(node.fftSize);
       node.getByteTimeDomainData(buf);
       let sum = 0;
-      for (let i = 0; i < buf.length; i++) {
+      for (let i = 0; i < buf.length; i += 1) {
         const v = (buf[i] - 128) / 128;
         sum += v * v;
       }
-      const rms = Math.sqrt(sum / buf.length);
+      return Math.min(1, Math.sqrt(sum / buf.length) * 4);
+    };
+
+    let lastUpdate = 0;
+    const loop = () => {
+      rafRef.current = requestAnimationFrame(loop);
       const now = performance.now();
       if (now - lastUpdate > 100) {
         lastUpdate = now;
-        setLevel(Math.min(1, rms * 4));
+        setCustomerLevel(read(tabAnalyserRef.current));
+        setAgentLevel(read(micAnalyserRef.current));
       }
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -154,14 +187,16 @@ export function useCallCapture(
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    analyserRef.current = null;
-    setLevel(0);
+    tabAnalyserRef.current = null;
+    micAnalyserRef.current = null;
+    setCustomerLevel(0);
+    setAgentLevel(0);
   }, []);
 
   // -----------------------------------------------------------------
   //  Segment transcription chain (local Whisper in the worker)
   // -----------------------------------------------------------------
-  const postSegment = useCallback(async (blob: Blob) => {
+  const postSegment = useCallback(async (blob: Blob, speaker: Speaker) => {
     setIsTranscribing(true);
     try {
       const pcm = await blobToPcm16k(blob);
@@ -169,10 +204,11 @@ export function useCallCapture(
       if (!text) return;
 
       setError(null);
-      transcriptRef.current = `${transcriptRef.current} ${text}`.trim();
-      setTranscript(transcriptRef.current);
+      entriesRef.current = [...entriesRef.current, { speaker, text }];
+      setTranscript(entriesRef.current);
+      mergedTextRef.current = `${mergedTextRef.current} ${text}`.trim();
 
-      const fields = extractFields(transcriptRef.current);
+      const fields = extractFields(mergedTextRef.current);
       setSuggestions(fields);
       for (const field of fields) {
         if (!autoFilledRef.current.has(field.fieldId)) {
@@ -188,10 +224,10 @@ export function useCallCapture(
   }, []);
 
   const enqueueSegment = useCallback(
-    (blob: Blob) => {
+    (blob: Blob, speaker: Speaker) => {
       setQueued((n) => n + 1);
       queueRef.current = queueRef.current
-        .then(() => postSegment(blob))
+        .then(() => postSegment(blob, speaker))
         .catch(() => undefined)
         .finally(() => {
           setSegmentsSent((n) => n + 1);
@@ -201,24 +237,104 @@ export function useCallCapture(
     [postSegment]
   );
 
+  /**
+   * Hand finished windows to the transcription queue, in order. A window is
+   * finished once the next one has started producing data — by then neither
+   * recorder can add to it anymore.
+   */
+  const flushComplete = useCallback(
+    (throughSeq: number) => {
+      while (nextFlushSeqRef.current < throughSeq) {
+        const seq = nextFlushSeqRef.current;
+        const bucket = pendingRef.current.get(seq);
+        pendingRef.current.delete(seq);
+        nextFlushSeqRef.current = seq + 1;
+
+        if (!bucket) continue; // empty window (silence on both channels)
+        if (bucket.customer) enqueueSegment(bucket.customer, 'customer');
+        if (bucket.agent) enqueueSegment(bucket.agent, 'agent');
+      }
+    },
+    [enqueueSegment]
+  );
+
+  /** Final flush on stop — drain every window still pending, in order. */
+  const flushAllPending = useCallback(() => {
+    const seqs = [...pendingRef.current.keys()].sort((a, b) => a - b);
+    for (const seq of seqs) {
+      const bucket = pendingRef.current.get(seq);
+      pendingRef.current.delete(seq);
+      nextFlushSeqRef.current = Math.max(nextFlushSeqRef.current, seq + 1);
+      if (!bucket) continue;
+      if (bucket.customer) enqueueSegment(bucket.customer, 'customer');
+      if (bucket.agent) enqueueSegment(bucket.agent, 'agent');
+    }
+  }, [enqueueSegment]);
+
+  /**
+   * A segment blob arrived from one of the recorders. dataavailable fires
+   * before the cycle's seq increments, so seqRef.current is still the
+   * window the blob belongs to.
+   */
+  const handleSegmentData = useCallback(
+    (speaker: Speaker, event: BlobEvent) => {
+      if (!event.data || event.data.size === 0) return;
+
+      const seq = seqRef.current;
+      const bucket = pendingRef.current.get(seq) ?? {};
+      bucket[speaker] = event.data;
+      pendingRef.current.set(seq, bucket);
+
+      // Once every speaker that can produce audio for this window has
+      // delivered its blob, the window can be queued right away — no need
+      // to wait for the next window to start.
+      const agentExpected = !!micRecorderRef.current;
+      const windowComplete = !!bucket.customer && (!agentExpected || !!bucket.agent);
+
+      if (windowComplete) {
+        flushComplete(seq + 1);
+      } else if (!shouldCaptureRef.current) {
+        // Capture already stopped — don't wait for a blob that will
+        // never come.
+        flushAllPending();
+      }
+    },
+    [flushComplete, flushAllPending]
+  );
+
   // -----------------------------------------------------------------
-  //  Recorder stop/start cycle — each blob is a complete webm file
+  //  Recorder stop/start cycle — each blob is a complete webm file,
+  //  both recorders cycle in lockstep
   // -----------------------------------------------------------------
   const beginSegment = useCallback(() => {
-    const recorder = recorderRef.current;
-    if (!shouldCaptureRef.current || !recorder) return;
+    if (!shouldCaptureRef.current) return;
+
+    seqRef.current += 1;
     try {
-      recorder.start();
+      tabRecorderRef.current?.start();
     } catch {
-      return; // already recording
+      // already recording
     }
-    segmentTimerRef.current = window.setTimeout(() => {
-      try {
-        recorderRef.current?.stop();
-      } catch {
-        /* ignore */
-      }
-    }, SEGMENT_MS);
+    try {
+      micRecorderRef.current?.start();
+    } catch {
+      // already recording
+    }
+
+    if (tabRecorderRef.current || micRecorderRef.current) {
+      segmentTimerRef.current = window.setTimeout(() => {
+        try {
+          tabRecorderRef.current?.stop();
+        } catch {
+          /* ignore */
+        }
+        try {
+          micRecorderRef.current?.stop();
+        } catch {
+          /* ignore */
+        }
+      }, SEGMENT_MS);
+    }
   }, []);
 
   // -----------------------------------------------------------------
@@ -229,6 +345,9 @@ export function useCallCapture(
 
     setError(null);
     shouldCaptureRef.current = true;
+    seqRef.current = 0;
+    nextFlushSeqRef.current = 1;
+    pendingRef.current.clear();
 
     // 1. Capture the CCP tab — video: true is required for tab audio,
     //    and the user must tick "Also share tab audio" in the share dialog
@@ -254,35 +373,43 @@ export function useCallCapture(
     }
     displayStreamRef.current = display;
 
-    // 2. Also open the mic so the agent's half of the conversation is
-    //    transcribed too (the tab stream only carries the customer's side)
+    // 2. Also open the agent's mic. It is recorded as a SEPARATE stream so
+    //    Whisper can be told who is speaking (mic = agent, tab = customer)
+    //    instead of getting an inseparable mix of both voices.
     let mic: MediaStream | null = null;
     try {
-      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       micStreamRef.current = mic;
       setHasMic(true);
     } catch {
-      // Headset/mic unavailable — continue with tab audio only
+      // Headset/mic unavailable — continue with the customer side only
       setHasMic(false);
     }
 
-    // 3. Mix tab + mic into one recording stream
+    // 3. Analysers for the per-speaker level meters (no mixing, no output)
     const ctx = new AudioContext();
     if (ctx.state === 'suspended') {
       await ctx.resume().catch(() => undefined);
     }
     audioCtxRef.current = ctx;
 
-    const dest = ctx.createMediaStreamDestination();
-    const tabSource = ctx.createMediaStreamSource(display);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    tabSource.connect(analyser);
+    const tabAnalyser = ctx.createAnalyser();
+    tabAnalyser.fftSize = 1024;
+    ctx.createMediaStreamSource(display).connect(tabAnalyser);
+    tabAnalyserRef.current = tabAnalyser;
+
     if (mic) {
-      ctx.createMediaStreamSource(mic).connect(analyser);
+      const micAnalyser = ctx.createAnalyser();
+      micAnalyser.fftSize = 1024;
+      ctx.createMediaStreamSource(mic).connect(micAnalyser);
+      micAnalyserRef.current = micAnalyser;
     }
-    analyser.connect(dest);
-    analyserRef.current = analyser;
 
     // 4. User can also stop sharing from the browser's own banner
     display.getAudioTracks()[0].addEventListener('ended', () => {
@@ -290,28 +417,39 @@ export function useCallCapture(
       void stopRef.current?.();
     });
 
-    // 5. Recorder with the stop/start segment cycle
+    // 5. One recorder per speaker, driven by the shared segment cycle
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(
-      dest.stream,
-      mimeType ? { mimeType, audioBitsPerSecond: 32_000 } : undefined
-    );
-    recorder.ondataavailable = (event: BlobEvent) => {
-      if (event.data && event.data.size > 0) {
-        enqueueSegment(event.data);
-      }
-    };
-    recorder.onstop = () => {
+    const recorderOptions = mimeType
+      ? { mimeType, audioBitsPerSecond: 32_000 }
+      : undefined;
+
+    const tabAudioStream = new MediaStream([display.getAudioTracks()[0]]);
+    const tabRecorder = new MediaRecorder(tabAudioStream, recorderOptions);
+    tabRecorder.ondataavailable = (event) => handleSegmentData('customer', event);
+    // The tab recorder owns the restart cadence; the mic recorder rides along.
+    tabRecorder.onstop = () => {
       if (shouldCaptureRef.current) {
         restartTimerRef.current = window.setTimeout(beginSegment, RESTART_DELAY_MS);
+      } else {
+        flushAllPending();
       }
     };
-    recorderRef.current = recorder;
+    tabRecorderRef.current = tabRecorder;
+
+    if (mic) {
+      const micAudioStream = new MediaStream(mic.getAudioTracks());
+      const micRecorder = new MediaRecorder(micAudioStream, recorderOptions);
+      micRecorder.ondataavailable = (event) => handleSegmentData('agent', event);
+      micRecorder.onstop = () => {
+        if (!shouldCaptureRef.current) flushAllPending();
+      };
+      micRecorderRef.current = micRecorder;
+    }
 
     setIsCapturing(true);
-    startLevelLoop(analyser);
+    startLevelLoop();
     beginSegment();
-  }, [isSupported, enqueueSegment, beginSegment, startLevelLoop]);
+  }, [isSupported, beginSegment, startLevelLoop, handleSegmentData, flushAllPending]);
 
   const stop = useCallback(() => {
     shouldCaptureRef.current = false;
@@ -329,13 +467,20 @@ export function useCallCapture(
 
     stopLevelLoop();
 
-    // stop() flushes a final partial segment through ondataavailable
+    // stop() flushes a final partial segment per speaker through
+    // ondataavailable; the onstop handlers then drain anything pending.
     try {
-      recorderRef.current?.stop();
+      tabRecorderRef.current?.stop();
     } catch {
       /* ignore */
     }
-    recorderRef.current = null;
+    try {
+      micRecorderRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    tabRecorderRef.current = null;
+    micRecorderRef.current = null;
 
     displayStreamRef.current?.getTracks().forEach((t) => t.stop());
     displayStreamRef.current = null;
@@ -360,9 +505,10 @@ export function useCallCapture(
   }, [start, stop]);
 
   const clear = useCallback(() => {
-    transcriptRef.current = '';
+    entriesRef.current = [];
+    mergedTextRef.current = '';
     autoFilledRef.current = new Set();
-    setTranscript('');
+    setTranscript([]);
     setSuggestions([]);
     setSegmentsSent(0);
   }, []);
@@ -375,7 +521,12 @@ export function useCallCapture(
       if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
       stopLevelLoop();
       try {
-        recorderRef.current?.stop();
+        tabRecorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        micRecorderRef.current?.stop();
       } catch {
         /* ignore */
       }
@@ -397,7 +548,8 @@ export function useCallCapture(
     queued,
     isTranscribing,
     error,
-    level,
+    customerLevel,
+    agentLevel,
     hasMic,
   };
 }

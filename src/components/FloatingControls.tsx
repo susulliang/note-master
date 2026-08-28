@@ -349,8 +349,8 @@ export default function FloatingControls({
                 aria-label={callCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
                 title={
                   callCapturing
-                    ? 'Call capture: on — transcribing the CCP tab audio'
-                    : 'Call capture: off — share the CCP tab (tick "Also share tab audio") to transcribe the customer'
+                    ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
+                    : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
                 }
               >
                 <MonitorPlay className="size-4" />

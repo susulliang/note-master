@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
 import type { ExtractedField } from '@/hooks/use-voice-transcription';
+import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import {
   WHISPER_MODELS,
@@ -24,13 +25,17 @@ export interface MicPanelState {
 
 export interface CallPanelState {
   isCapturing: boolean;
-  transcript: string;
+  /** Speaker-tagged transcript: Agent = mic, Customer = tab audio */
+  transcript: TranscriptEntry[];
   suggestions: ExtractedField[];
   segmentsSent: number;
   queued: number;
   isTranscribing: boolean;
   error: string | null;
-  level: number;
+  /** Live input level of the CCP tab audio (customer) */
+  customerLevel: number;
+  /** Live input level of the agent's microphone */
+  agentLevel: number;
   hasMic: boolean;
   onToggle: () => void;
   onClear: () => void;
@@ -54,8 +59,39 @@ interface VoiceCaptionPanelProps {
   engine: EnginePanelState;
 }
 
-/** Bar thresholds for the audio level meter */
+/** Bar thresholds for the audio level meters */
 const LEVEL_STEPS = [0.12, 0.3, 0.5, 0.75];
+
+type MeterTone = 'red' | 'blue' | 'amber';
+
+const TONE_BAR: Record<MeterTone, string> = {
+  red: 'bg-red-500',
+  blue: 'bg-blue-500',
+  amber: 'bg-amber-500',
+};
+
+/** Compact labeled 4-bar level meter, one per audio channel */
+function SpeakerMeter({ label, level, tone }: { label: string; level: number; tone: MeterTone }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="flex h-4 items-end gap-[3px]">
+        {LEVEL_STEPS.map((threshold) => (
+          <span
+            key={threshold}
+            className={cn(
+              'w-1 rounded-full transition-colors duration-100',
+              level >= threshold ? TONE_BAR[tone] : 'bg-foreground/15'
+            )}
+            style={{ height: `${3 + threshold * 12}px` }}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
 
 const fieldLabel = (fieldId: string) =>
   FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
@@ -66,13 +102,15 @@ const fieldLabel = (fieldId: string) =>
  *
  *  - mic:  Web Speech API on the agent's microphone (free, instant, but
  *          cannot hear the CCP call audio playing in another tab)
- *  - call: getDisplayMedia capture of the CCP tab audio (+ mic), transcribed
- *          by a local Whisper model in a Web Worker — on-device, no API,
- *          no upload. base.en by default, tiny.en for a faster/lighter run.
+ *  - call: getDisplayMedia capture of the CCP tab audio + the agent's mic,
+ *          each transcribed separately by a local Whisper model in a Web
+ *          Worker so every line is speaker-tagged — Customer (tab audio)
+ *          vs Agent (your mic). On-device, no API, no upload. base.en by
+ *          default, tiny.en for a faster/lighter run.
  *
- * Shows whichever source is active: streaming transcript, audio level,
- * transcribe-in-flight spinner, errors, engine status, and extracted
- * field chips.
+ * Shows whichever source is active: speaker-tagged transcript, per-speaker
+ * audio levels, transcribe-in-flight spinner, errors, engine status, and
+ * extracted field chips.
  */
 export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -83,22 +121,38 @@ export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPan
       ? 'call'
       : null;
 
-  const transcript =
-    activeSource === 'call' ? call.transcript : activeSource === 'mic' ? mic.finalTranscript : mic.finalTranscript || call.transcript;
   const suggestions = activeSource === 'call' ? call.suggestions : mic.suggestions;
   const error = activeSource === 'call' ? call.error : mic.error;
-  const level = activeSource === 'call' ? call.level : mic.level;
-  const interim = activeSource === 'mic' ? mic.interimText : '';
   const isActive = !!activeSource;
+
+  // Call mode (and the idle fallback when the mic captured nothing) renders
+  // the speaker-tagged entry list; mic mode renders plain text.
+  const showCallEntries =
+    activeSource === 'call' || (activeSource === null && !mic.finalTranscript);
+  const micText = showCallEntries ? '' : mic.finalTranscript;
+  const interim = activeSource === 'mic' ? mic.interimText : '';
+
+  const bothQuiet =
+    call.customerLevel < 0.05 && (!call.hasMic || call.agentLevel < 0.05);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript, interim]);
+  }, [call.transcript, micText, interim]);
 
-  const hasContent = transcript.length > 0 || suggestions.length > 0;
+  const hasContent =
+    micText.length > 0 || call.transcript.length > 0 || suggestions.length > 0;
+
+  const callEmptyText =
+    engine.status === 'loading'
+      ? `Loading Whisper ${engine.model} on this machine — one-time download, cached afterwards…`
+      : engine.status === 'error'
+        ? 'Whisper model failed to load — try switching models or reload the page.'
+        : call.hasMic
+          ? 'Capturing both speakers — Customer from the CCP tab, Agent from your mic. First captions arrive after ~15s.'
+          : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.';
 
   // Hidden when idle with nothing captured and no error to show
   if (!isActive && !hasContent && !error) return null;
@@ -123,7 +177,7 @@ export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPan
           )}
           <p className="flex-1 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {activeSource === 'call'
-              ? 'Live captions — call audio'
+              ? 'Live captions — Agent + Customer'
               : activeSource === 'mic'
                 ? 'Live captions — mic'
                 : 'Captured transcript'}
@@ -166,25 +220,39 @@ export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPan
           </Button>
         </div>
 
-        {/* Audio level meter — proves audio is actually arriving */}
-        {isActive && (
+        {/* Per-speaker audio level meters — proves each channel is live */}
+        {isActive && activeSource === 'call' && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-3">
+            <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
+            {call.hasMic ? (
+              <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+            ) : (
+              <span
+                className="text-[10px] text-muted-foreground/70"
+                title="No microphone was shared — only the customer side is transcribed"
+              >
+                mic unavailable — customer only
+              </span>
+            )}
+            {call.hasMic && !bothQuiet && (
+              <span
+                className="ml-auto text-[9px] text-muted-foreground/60"
+                title="Browsers can't echo-cancel audio playing in another tab, so speakers leak the customer's voice into your mic and their words may also appear under Agent. A headset keeps the two speakers cleanly separated."
+              >
+                headset recommended
+              </span>
+            )}
+            {bothQuiet && call.transcript.length === 0 && (
+              <span className="text-[10px] text-muted-foreground/70">
+                no audio detected
+              </span>
+            )}
+          </div>
+        )}
+        {isActive && activeSource === 'mic' && (
           <div className="mt-1.5 flex items-center gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeSource === 'call' ? (call.hasMic ? 'Tab+Mic' : 'Tab') : 'Mic'}
-            </span>
-            <div className="flex h-4 items-end gap-[3px]">
-              {LEVEL_STEPS.map((threshold) => (
-                <span
-                  key={threshold}
-                  className={cn(
-                    'w-1 rounded-full transition-colors duration-100',
-                    level >= threshold ? 'bg-red-500' : 'bg-foreground/15'
-                  )}
-                  style={{ height: `${3 + threshold * 12}px` }}
-                />
-              ))}
-            </div>
-            {level < 0.05 && !transcript && (
+            <SpeakerMeter label="Mic" level={mic.level} tone="red" />
+            {mic.level < 0.05 && !mic.finalTranscript && (
               <span className="text-[10px] text-muted-foreground/70">no audio detected</span>
             )}
           </div>
@@ -276,25 +344,49 @@ export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPan
           ref={scrollRef}
           className="custom-scrollbar mt-2 max-h-[132px] overflow-y-auto rounded-lg bg-background/50 p-2"
         >
-          <p className="text-[13px] leading-relaxed">
-            {transcript && <span className="text-foreground">{transcript}</span>}
-            {activeSource === 'mic' && interim && (
-              <span className="italic text-muted-foreground"> {interim}</span>
-            )}
-            {!transcript && !interim && (
-              <span className="text-muted-foreground/60">
-                {activeSource === 'call'
-                  ? engine.status === 'loading'
-                    ? `Loading Whisper ${engine.model} on this machine — one-time download, cached afterwards…`
-                    : engine.status === 'error'
-                      ? 'Whisper model failed to load — try switching models or reload the page.'
-                      : 'Capturing call audio — first caption appears after ~15s.'
-                  : activeSource === 'mic'
-                    ? 'Listening — the Web Speech API hears only this tab\u2019s microphone, never audio from other tabs.'
-                    : 'No speech captured.'}
+          {showCallEntries ? (
+            call.transcript.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {call.transcript.map((entry, i) => (
+                  <p key={i} className="flex items-start gap-1.5">
+                    <span
+                      className={cn(
+                        'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
+                        entry.speaker === 'agent'
+                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                      )}
+                      title={
+                        entry.speaker === 'agent'
+                          ? 'Your microphone'
+                          : 'CCP tab audio'
+                      }
+                    >
+                      {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                    </span>
+                    <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
+                      {entry.text}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <span className="text-[13px] leading-relaxed text-muted-foreground/60">
+                {callEmptyText}
               </span>
-            )}
-          </p>
+            )
+          ) : (
+            <p className="text-[13px] leading-relaxed">
+              {micText && <span className="text-foreground">{micText}</span>}
+              {interim && <span className="italic text-muted-foreground"> {interim}</span>}
+              {!micText && !interim && (
+                <span className="text-muted-foreground/60">
+                  Listening — the Web Speech API hears only this tab&#8217;s microphone, never
+                  audio from other tabs.
+                </span>
+              )}
+            </p>
+          )}
         </div>
 
         {/* Extracted fields */}
