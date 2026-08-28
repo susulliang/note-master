@@ -187,6 +187,9 @@ const NODES: NodeConfig[] = [
     inputType: 'textarea',
     accent: 'default',
     width: 240,
+    // Doubled height: the LLM accumulates every troubleshooting step the
+    // agent advises across the whole call, so the list grows long
+    textareaRows: 4,
     icon: CheckCircle2,
   },
   {

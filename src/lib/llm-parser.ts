@@ -200,14 +200,25 @@ export function renderTranscript(entries: TranscriptEntry[]): string {
 /**
  * Values the PREVIOUS parse produced, fed back into the next prompt.
  *
- * Resolution steps are cumulative: as the transcript window slides forward,
- * early steps fall out of the context the model can see — without carrying
- * them back in, a replace-semantics re-parse would silently DROP them.
+ * These fields keep evolving as the call goes on:
+ *
+ *  - resolutionSummary is cumulative: as the transcript window slides
+ *    forward, early steps fall out of the context the model can see —
+ *    without carrying them back in, a replace-semantics re-parse would
+ *    silently DROP them.
+ *  - issueDescription is refined in place: the customer keeps describing
+ *    the problem (and the agent confirms/diagnoses it), so each new parse
+ *    merges those details into the description already on the ticket
+ *    rather than starting over from whatever still fits in the window.
  */
 export interface PriorLlmValues {
   /** resolutionSummary the previous parse produced — the model must keep
    *  these steps and append any NEW ones after them */
   resolutionSummary?: string;
+  /** issueDescription the previous parse produced — the model refines it
+   *  with newly described symptoms/details; replaces it only when the
+   *  conversation shows it was wrong */
+  issueDescription?: string;
 }
 
 /**
@@ -248,8 +259,8 @@ export function buildParsePrompt(
     '1. customerName / contactNumber / emailAddress are the CUSTOMER\'S own details: take them from the customer stating them, or from the agent reading them back to confirm ("so that\'s John, 555-0123"). NEVER use the agent\'s own name as the customer name.',
     '2. deebotModel: copy EXACTLY one name from the allowed list below, or "". Take it from the customer\'s own words, the agent\'s question ("is it the X2 OMNI?"), or the customer confirming/correcting the agent\'s guess. Choose the model the call is actually about.',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
-    '4. issueDescription: ONE concise sentence summarizing the customer\'s complaint as understood from the whole conversation — what is wrong with the machine, in the customer\'s terms.',
-    '5. issueType: the single best "Category::Item" match for that complaint. Pick from the examples below when one fits, otherwise write a short "Category::Item" of your own.',
+    '4. issueDescription: ONE concise sentence summarizing the customer\'s PRIMARY complaint — what is wrong with the machine, in the customer\'s terms. The customer describes the problem gradually and the agent confirms/diagnoses it, so REFINE the description as the call goes on: merge newly described symptoms and details into it, and replace it entirely only when the conversation shows it was wrong. When you are given an issue description already on the ticket, start from that and fold in what is new — never drop details it already has.',
+    '5. issueType: the "Category::Item" match for the PRIMARY issue — the single main problem this call is actually about, not a secondary symptom mentioned in passing. Pick from the examples below when one fits, otherwise write a short "Category::Item" of your own.',
     '6. resolutionSummary: EVERY troubleshooting step the AGENT advised during this call, in order. Condense each step to a short imperative phrase starting with a verb (3-10 words). Join the steps with " -> ". Fix obvious speech-transcription errors from context. Your reply REPLACES the previous extraction, so include ALL steps — the ones you are given as already noted PLUS any new ones.',
     '7. Use "" for any field the conversation does not clearly state. Never invent values.',
     'Example of resolutionSummary condensation — AGENT said: "can you make sure the clean water tank is properly seated and the valves themselves are probably tight, so if you take out the clean water tank there should be like a valve there, and then make sure that thing is secure and free of the breeze and then put the water tank back in"',
@@ -264,6 +275,13 @@ export function buildParsePrompt(
   ].join('\n');
 
   const userLines = ['Support call transcript:', renderTranscript(entries)];
+  if (prior?.issueDescription) {
+    userLines.push(
+      '',
+      'Issue description already on the ticket (refine it: fold in any NEW symptoms or details the customer describes or the agent confirms; only replace it if the conversation proves it wrong):',
+      prior.issueDescription
+    );
+  }
   if (prior?.resolutionSummary) {
     userLines.push(
       '',

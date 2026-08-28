@@ -37,8 +37,8 @@ export interface CallCaptureLlmParser {
   parse: (
     entries: TranscriptEntry[],
     missingFieldIds: readonly string[],
-    /** Previously extracted values the model must carry forward */
-    prior?: { resolutionSummary?: string }
+    /** Previously extracted values the model must carry forward / refine */
+    prior?: { resolutionSummary?: string; issueDescription?: string }
   ) => Promise<ExtractedField[]>;
   isReady: boolean;
 }
@@ -310,11 +310,26 @@ export function useCallCapture(
    * is what fills the form; as the transcript grows, later passes can
    * improve on earlier answers (the page applies override semantics).
    *
-   * The previously extracted resolution steps ride along in the prompt:
-   * steps are cumulative, and once they slide out of the transcript window
-   * the model could not re-list them on its own — carrying them forward is
-   * what makes the field KEEP GROWING instead of freezing or shrinking.
+   * Previously extracted values that keep evolving ride along in the prompt:
+   *
+   *  - resolution steps are cumulative — once they slide out of the
+   *    transcript window the model could not re-list them on its own, so
+   *    carrying them forward is what makes the field KEEP GROWING instead
+   *    of freezing or shrinking;
+   *  - the issue description is refined in place — the customer keeps
+   *    describing the problem and the agent confirms/diagnoses it, so each
+   *    parse folds the new details into the description already on the
+   *    ticket.
    */
+  const buildPriorValues = useCallback((): { resolutionSummary?: string; issueDescription?: string } => {
+    const resolutionSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
+    const issueDescription = llmSuggestionsRef.current.get('issueDescription')?.value;
+    return {
+      ...(resolutionSummary ? { resolutionSummary } : {}),
+      ...(issueDescription ? { issueDescription } : {}),
+    };
+  }, []);
+
   const runLlmParse = useCallback(async (): Promise<void> => {
     const parser = llmParserRef.current;
     if (!parser || llmRunningRef.current) return;
@@ -325,11 +340,10 @@ export function useCallCapture(
     try {
       // Ask for every field, not just the "missing" ones — understanding
       // the full context is the point
-      const priorSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
       const fields = await parser.parse(
         entriesRef.current,
         PARSEABLE_FIELD_IDS,
-        priorSummary ? { resolutionSummary: priorSummary } : undefined
+        buildPriorValues()
       );
       applyLlmFields(fields);
     } catch {
@@ -341,7 +355,7 @@ export function useCallCapture(
       const endLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
       if (endLen > startLen) armIdleParse();
     }
-  }, [applyLlmFields, armIdleParse]);
+  }, [applyLlmFields, armIdleParse, buildPriorValues]);
 
   /**
    * Idle-tick: parse now when the queue has drained, the throttle window
@@ -746,19 +760,19 @@ export function useCallCapture(
     if (parser?.isReady) {
       const textLen = entriesRef.current.reduce((n, e) => n + e.text.length, 0);
       if (entriesRef.current.length > 0 && textLen >= 40) {
-        // Carry the accumulated resolution steps in — same cumulative rule
-        // as the periodic passes (see runLlmParse)
-        const priorSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
+        // Carry the accumulated resolution steps + current issue
+        // description in — same evolving-fields rule as the periodic passes
+        // (see runLlmParse)
         // Bounded: the parser's own timeout caps a stuck generation
         const fields = await parser.parse(
           entriesRef.current,
           PARSEABLE_FIELD_IDS,
-          priorSummary ? { resolutionSummary: priorSummary } : undefined
+          buildPriorValues()
         );
         applyLlmFields(fields);
       }
     }
-  }, [applyLlmFields]);
+  }, [applyLlmFields, buildPriorValues]);
 
   const clear = useCallback(() => {
     entriesRef.current = [];
