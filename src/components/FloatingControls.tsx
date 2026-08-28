@@ -33,7 +33,7 @@ interface FloatingControlsProps {
   voiceSupported: boolean;
   voiceListening: boolean;
   onToggleVoice: () => void;
-  /** CCP tab-audio capture → /api/transcribe auto-fill */
+  /** CCP tab-audio capture → local Whisper auto-fill */
   callSupported: boolean;
   callCapturing: boolean;
   onToggleCall: () => void;

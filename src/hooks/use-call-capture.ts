@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { extractFields, type ExtractedField } from './use-voice-transcription';
+import type { CallTranscriber } from './use-local-transcriber';
 
 /** Seconds of audio per transcription request — small enough for snappy
- *  near-live captions, large enough to keep API cost/overhead sensible. */
+ *  near-live captions, large enough to amortize per-segment overhead. */
 const SEGMENT_MS = 15_000;
 
 /** Pause between recorder segments (stop → start cycle) */
@@ -12,6 +13,36 @@ const RESTART_DELAY_MS = 250;
 function pickMimeType(): string | undefined {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
   return candidates.find((m) => MediaRecorder.isTypeSupported(m));
+}
+
+/**
+ * Decode a recorded segment into the 16 kHz mono Float32 PCM that local
+ * Whisper expects. decodeAudioData on a 16 kHz AudioContext resamples the
+ * opus/webm blob; multi-channel audio is downmixed by averaging.
+ *
+ * Runs on the main thread (AudioContext is unavailable in workers) but is
+ * cheap compared to the WASM inference that follows in the worker.
+ */
+async function blobToPcm16k(blob: Blob): Promise<Float32Array> {
+  const ctx = new AudioContext({ sampleRate: 16_000 });
+  try {
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const channels = decoded.numberOfChannels;
+    if (channels <= 1) {
+      // Copy: the decoded buffer is owned by the (soon closed) context.
+      return decoded.getChannelData(0).slice();
+    }
+    const mono = new Float32Array(decoded.length);
+    for (let c = 0; c < channels; c += 1) {
+      const data = decoded.getChannelData(c);
+      for (let i = 0; i < decoded.length; i += 1) {
+        mono[i] += data[i] / channels;
+      }
+    }
+    return mono;
+  } finally {
+    void ctx.close().catch(() => undefined);
+  }
 }
 
 /** Errors that carry a specific, already-human-readable message */
@@ -28,9 +59,11 @@ function readableCaptureError(err: unknown): string {
 
 /**
  * Call-capture transcription: records the audio of another browser tab
- * (the Amazon Connect CCP softphone) plus the agent's own microphone,
- * sends ~15s segments to /api/transcribe (OpenAI speech-to-text), and
- * accumulates the transcript for form auto-fill.
+ * (the Amazon Connect CCP softphone) plus the agent's own microphone, and
+ * transcribes ~15s segments with a **local Whisper model** (transformers.js
+ * WASM, running in a Web Worker) before accumulating the transcript for
+ * form auto-fill. Audio never leaves the machine; there is no API key and
+ * no per-minute cost.
  *
  * Why not the Web Speech API? It can only hear the microphone — there is
  * no way to feed it tab audio. Capturing via getDisplayMedia({ audio: true })
@@ -41,13 +74,19 @@ function readableCaptureError(err: unknown): string {
  * The mixed stream (tab + mic) is recorded with MediaRecorder in a
  * stop/start cycle so every posted blob is a complete, decodable file
  * (raw timeslice chunks lack webm headers and often fail to decode).
- * POSTs are chained sequentially so transcript text arrives in order.
+ * Segments are transcribed sequentially so transcript text arrives in
+ * order.
  */
-export function useCallCapture(onAutoFill: (fieldId: string, value: string) => void) {
+export function useCallCapture(
+  onAutoFill: (fieldId: string, value: string) => void,
+  transcriber: CallTranscriber
+) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [suggestions, setSuggestions] = useState<ExtractedField[]>([]);
   const [segmentsSent, setSegmentsSent] = useState(0);
+  /** Segments recorded but not yet transcribed (worker still catching up) */
+  const [queued, setQueued] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
@@ -65,9 +104,10 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
   const transcriptRef = useRef('');
   const autoFilledRef = useRef(new Set<string>());
   const onAutoFillRef = useRef(onAutoFill);
+  const transcriberRef = useRef(transcriber);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
-  /** Sequential POST chain — keeps transcript ordering stable */
+  /** Sequential transcription chain — keeps transcript ordering stable */
   const queueRef = useRef<Promise<void>>(Promise.resolve());
 
   /** Latest stop() — lets stream 'ended' listeners stop capture safely */
@@ -80,7 +120,8 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
 
   useEffect(() => {
     onAutoFillRef.current = onAutoFill;
-  }, [onAutoFill]);
+    transcriberRef.current = transcriber;
+  }, [onAutoFill, transcriber]);
 
   // -----------------------------------------------------------------
   //  Audio level meter (same pattern as the mic hook)
@@ -118,30 +159,13 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
   }, []);
 
   // -----------------------------------------------------------------
-  //  Segment POST chain
+  //  Segment transcription chain (local Whisper in the worker)
   // -----------------------------------------------------------------
   const postSegment = useCallback(async (blob: Blob) => {
     setIsTranscribing(true);
     try {
-      const form = new FormData();
-      form.append('audio', blob, 'segment.webm');
-
-      const res = await fetch('/api/transcribe', { method: 'POST', body: form });
-
-      if (res.status === 404) {
-        setError(
-          'Transcription endpoint not found — run `vercel dev` for local testing or deploy with the api/ directory.'
-        );
-        return;
-      }
-
-      const data = (await res.json().catch(() => null)) as { text?: string; error?: string } | null;
-      if (!res.ok) {
-        setError(data?.error ?? `Transcription failed (${res.status}).`);
-        return;
-      }
-
-      const text = (data?.text ?? '').trim();
+      const pcm = await blobToPcm16k(blob);
+      const text = (await transcriberRef.current.transcribe(pcm)).trim();
       if (!text) return;
 
       setError(null);
@@ -157,7 +181,7 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
         }
       }
     } catch (err) {
-      setError(`Could not reach the transcription service: ${(err as Error).message}`);
+      setError(`Local transcription failed: ${(err as Error).message}`);
     } finally {
       setIsTranscribing(false);
     }
@@ -165,10 +189,14 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
 
   const enqueueSegment = useCallback(
     (blob: Blob) => {
+      setQueued((n) => n + 1);
       queueRef.current = queueRef.current
         .then(() => postSegment(blob))
         .catch(() => undefined)
-        .finally(() => setSegmentsSent((n) => n + 1));
+        .finally(() => {
+          setSegmentsSent((n) => n + 1);
+          setQueued((n) => Math.max(0, n - 1));
+        });
     },
     [postSegment]
   );
@@ -366,6 +394,7 @@ export function useCallCapture(onAutoFill: (fieldId: string, value: string) => v
     transcript,
     suggestions,
     segmentsSent,
+    queued,
     isTranscribing,
     error,
     level,

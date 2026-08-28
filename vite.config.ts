@@ -52,6 +52,15 @@ export default defineConfig(({ mode }) => {
         '@shared': fileURLToPath(new URL('./shared', import.meta.url)),
       },
     },
+    // The local-Whisper transcribe worker imports @huggingface/transformers
+    // (ESM with dynamic backend loading) — it must stay an ES-module worker,
+    // and esbuild pre-bundling mangles the ORT wasm loader, so exclude it.
+    worker: {
+      format: 'es',
+    },
+    optimizeDeps: {
+      exclude: ['@huggingface/transformers'],
+    },
     define: {
       // Some transitive dependencies of the shadcn/ui scaffolding still read
       // `process.env`; the browser bundle should treat it as an empty object.

@@ -23,6 +23,7 @@ import TemplatePanel from '@/components/TemplatePanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import { useCallCapture } from '@/hooks/use-call-capture';
+import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -673,10 +674,17 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   const voice = useVoiceTranscription(handleAutoFill);
 
   // ---------------------------------------------------------------------
-  //  CCP tab-audio capture → /api/transcribe (OpenAI) → auto-fill
+  //  Local Whisper engine — on-device transcription of the CCP call.
+  //  Fully local (transformers.js WASM in a worker): no API key, no
+  //  upload, no per-minute cost. base.en by default, tiny.en available.
+  // ---------------------------------------------------------------------
+  const localWhisper = useLocalTranscriber();
+
+  // ---------------------------------------------------------------------
+  //  CCP tab-audio capture → local Whisper → auto-fill.
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
-  const call = useCallCapture(handleAutoFill);
+  const call = useCallCapture(handleAutoFill, localWhisper);
 
   const handleToggleVoice = useCallback(() => {
     if (call.isCapturing) call.stop();
@@ -685,8 +693,19 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
   const handleToggleCall = useCallback(() => {
     if (voice.isListening) voice.toggle(); // stop mic mode first
+    if (localWhisper.isSupported && localWhisper.status !== 'ready') {
+      // Warm the model while the user picks the CCP tab in the share dialog
+      void localWhisper.load();
+    }
     call.toggle();
-  }, [call, voice]);
+  }, [call, voice, localWhisper]);
+
+  const handleSwitchWhisperModel = useCallback(
+    (model: Parameters<typeof localWhisper.switchModel>[0]) => {
+      localWhisper.switchModel(model);
+    },
+    [localWhisper]
+  );
 
   const handleClearMic = useCallback(() => {
     voice.clear();
@@ -790,12 +809,23 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           transcript: call.transcript,
           suggestions: call.suggestions,
           segmentsSent: call.segmentsSent,
+          queued: call.queued,
           isTranscribing: call.isTranscribing,
           error: call.error,
           level: call.level,
           hasMic: call.hasMic,
           onToggle: handleToggleCall,
           onClear: handleClearCall,
+        }}
+        engine={{
+          isSupported: localWhisper.isSupported,
+          model: localWhisper.model,
+          status: localWhisper.status,
+          progress: localWhisper.progress,
+          dtype: localWhisper.dtype,
+          error: localWhisper.error,
+          lastInferenceMs: localWhisper.lastInferenceMs,
+          onSwitchModel: handleSwitchWhisperModel,
         }}
       />
     </div>

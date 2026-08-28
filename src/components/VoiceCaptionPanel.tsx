@@ -1,9 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { Loader2, Mic, MicOff, MonitorPlay, Trash2 } from 'lucide-react';
+import { Cpu, Loader2, Mic, MicOff, MonitorPlay, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
 import type { ExtractedField } from '@/hooks/use-voice-transcription';
+import type { WhisperStatus } from '@/hooks/use-local-transcriber';
+import {
+  WHISPER_MODELS,
+  WHISPER_MODEL_META,
+  type WhisperModelName,
+} from '@/lib/whisper-models';
 
 export interface MicPanelState {
   isListening: boolean;
@@ -21,6 +27,7 @@ export interface CallPanelState {
   transcript: string;
   suggestions: ExtractedField[];
   segmentsSent: number;
+  queued: number;
   isTranscribing: boolean;
   error: string | null;
   level: number;
@@ -29,9 +36,22 @@ export interface CallPanelState {
   onClear: () => void;
 }
 
+/** Local Whisper engine state (transformers.js WASM, on-device) */
+export interface EnginePanelState {
+  isSupported: boolean;
+  model: WhisperModelName;
+  status: WhisperStatus;
+  progress: number;
+  dtype: string | null;
+  error: string | null;
+  lastInferenceMs: number | null;
+  onSwitchModel: (model: WhisperModelName) => void;
+}
+
 interface VoiceCaptionPanelProps {
   mic: MicPanelState;
   call: CallPanelState;
+  engine: EnginePanelState;
 }
 
 /** Bar thresholds for the audio level meter */
@@ -46,13 +66,15 @@ const fieldLabel = (fieldId: string) =>
  *
  *  - mic:  Web Speech API on the agent's microphone (free, instant, but
  *          cannot hear the CCP call audio playing in another tab)
- *  - call: getDisplayMedia capture of the CCP tab audio (+ mic) sent to
- *          /api/transcribe (OpenAI) in ~15s segments — hears the customer
+ *  - call: getDisplayMedia capture of the CCP tab audio (+ mic), transcribed
+ *          by a local Whisper model in a Web Worker — on-device, no API,
+ *          no upload. base.en by default, tiny.en for a faster/lighter run.
  *
  * Shows whichever source is active: streaming transcript, audio level,
- * transcribe-in-flight spinner, speech errors, and extracted field chips.
+ * transcribe-in-flight spinner, errors, engine status, and extracted
+ * field chips.
  */
-export default function VoiceCaptionPanel({ mic, call }: VoiceCaptionPanelProps) {
+export default function VoiceCaptionPanel({ mic, call, engine }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeSource: 'mic' | 'call' | null = mic.isListening
@@ -111,7 +133,7 @@ export default function VoiceCaptionPanel({ mic, call }: VoiceCaptionPanelProps)
           {activeSource === 'call' && (
             <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
               {call.isTranscribing && <Loader2 className="size-3 animate-spin" />}
-              {call.segmentsSent} seg
+              {call.queued > 0 ? `${call.queued} queued` : `${call.segmentsSent} seg`}
             </span>
           )}
 
@@ -168,6 +190,80 @@ export default function VoiceCaptionPanel({ mic, call }: VoiceCaptionPanelProps)
           </div>
         )}
 
+        {/* Local Whisper engine — model toggle + status (call mode) */}
+        {activeSource === 'call' && engine.isSupported && (
+          <div className="mt-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold leading-none text-emerald-600 dark:text-emerald-400"
+                title="Transcription runs on this machine — audio never leaves the browser"
+              >
+                <Cpu className="size-2.5" />
+                Local
+              </span>
+
+              {/* base.en ⇄ tiny.en segmented toggle */}
+              <span className="inline-flex overflow-hidden rounded-full border border-border/40">
+                {WHISPER_MODELS.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => engine.onSwitchModel(name)}
+                    disabled={engine.status === 'loading' && engine.model === name}
+                    className={cn(
+                      'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
+                      engine.model === name
+                        ? 'bg-foreground/10 text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    title={WHISPER_MODEL_META[name].note}
+                  >
+                    {WHISPER_MODEL_META[name].label}
+                  </button>
+                ))}
+              </span>
+
+              {/* Engine status */}
+              {engine.status === 'loading' && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="size-2.5 animate-spin" />
+                  downloading {engine.progress}%
+                </span>
+              )}
+              {engine.status === 'ready' && (
+                <span className="text-[10px] text-muted-foreground">
+                  on-device{engine.dtype ? ` · ${engine.dtype}` : ''}
+                </span>
+              )}
+              {engine.status === 'error' && (
+                <span className="text-[10px] text-destructive">model failed to load</span>
+              )}
+              {engine.lastInferenceMs !== null && engine.status === 'ready' && (
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="Inference time for the last 15s segment"
+                >
+                  {(engine.lastInferenceMs / 1000).toFixed(1)}s/seg
+                </span>
+              )}
+            </div>
+
+            {/* Download progress */}
+            {engine.status === 'loading' && (
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${Math.max(3, engine.progress)}%` }}
+                />
+              </div>
+            )}
+
+            {engine.error && (
+              <p className="mt-1 text-[10px] leading-snug text-destructive/90">{engine.error}</p>
+            )}
+          </div>
+        )}
+
         {/* Errors */}
         {error && (
           <p className="mt-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-[11px] leading-snug text-destructive">
@@ -188,7 +284,11 @@ export default function VoiceCaptionPanel({ mic, call }: VoiceCaptionPanelProps)
             {!transcript && !interim && (
               <span className="text-muted-foreground/60">
                 {activeSource === 'call'
-                  ? 'Capturing call audio — first caption appears after ~15s.'
+                  ? engine.status === 'loading'
+                    ? `Loading Whisper ${engine.model} on this machine — one-time download, cached afterwards…`
+                    : engine.status === 'error'
+                      ? 'Whisper model failed to load — try switching models or reload the page.'
+                      : 'Capturing call audio — first caption appears after ~15s.'
                   : activeSource === 'mic'
                     ? 'Listening — the Web Speech API hears only this tab\u2019s microphone, never audio from other tabs.'
                     : 'No speech captured.'}
