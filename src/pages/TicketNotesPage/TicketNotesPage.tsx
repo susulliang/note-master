@@ -20,7 +20,8 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
-import VoiceTranscription from '@/components/VoiceTranscription';
+import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
+import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -641,12 +642,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
 
   // ---------------------------------------------------------------------
   //  Voice transcription (Web Speech API prototype)
+  //  The hook keeps one stable SpeechRecognition instance; the auto-fill
+  //  callback below only fills empty fields so manual input is preserved.
   // ---------------------------------------------------------------------
-  const [voiceListening, setVoiceListening] = useState(false);
-  const toggleVoice = useCallback(() => {
-    setVoiceListening((prev) => !prev);
-  }, []);
-
   const handleAutoFill = useCallback(
     (fieldId: string, value: string) => {
       const nodeIdMap: Record<string, string> = {
@@ -660,15 +658,18 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       const nodeId = nodeIdMap[fieldId];
       if (!nodeId) return;
 
+      // Never overwrite values the agent already typed
       const current = formData[nodeId];
       if (typeof current === 'string' && current.trim().length > 0) {
         return;
       }
       handleFieldChange(nodeId, value, true);
-      toast.success(`Auto-filled ${fieldId} from voice`);
+      toast.success(`Voice filled: ${fieldId}`);
     },
     [formData, handleFieldChange]
   );
+
+  const voice = useVoiceTranscription(handleAutoFill);
 
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
@@ -695,6 +696,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onClearHistory={handleClearHistory}
             uiScale={uiScale}
             onToggleUiScale={handleToggleUiScale}
+            voiceSupported={voice.isSupported}
+            voiceListening={voice.isListening}
+            onToggleVoice={voice.toggle}
           />
           <FlowchartCanvas
             nodes={nodes}
@@ -741,10 +745,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         }}
       />
 
-      <VoiceTranscription
-        onAutoFill={handleAutoFill}
-        isListening={voiceListening}
-        onToggle={toggleVoice}
+      {/* Live captions + extracted-field chips; hidden when idle with no content */}
+      <VoiceCaptionPanel
+        isListening={voice.isListening}
+        onToggle={voice.toggle}
+        onClear={voice.clear}
+        finalTranscript={voice.finalTranscript}
+        interimText={voice.interimText}
+        suggestions={voice.suggestions}
       />
     </div>
   );
