@@ -94,7 +94,7 @@ const LLM_VARIANTS: Record<LlmModelName, Array<{
     {
       device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
       download: '~700 MB', ram: '~900 MB', speed: '~40–80 tok/s',
-      note: 'WebGPU; needs a browser with WebGPU',
+      note: 'WebGPU; discrete GPU — iGPU auto-falls back to CPU at load',
     },
   ],
   'qwen2.5-0.5b': [
@@ -106,7 +106,7 @@ const LLM_VARIANTS: Record<LlmModelName, Array<{
     {
       device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
       download: '~1.4 GB', ram: '~1.4 GB', speed: '~25–50 tok/s',
-      note: 'WebGPU; larger download + GPU memory',
+      note: 'WebGPU; needs a discrete GPU — iGPU auto-falls back to CPU at load',
     },
   ],
   'qwen2.5-1.5b': [

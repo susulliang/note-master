@@ -57,6 +57,17 @@ let loading: Promise<void> | null = null;
 /** Serialize loads: a rapid model toggle must not interleave */
 let loadChain: Promise<void> = Promise.resolve();
 
+/**
+ * How long a freshly created WebGPU pipeline gets to finish a 2-token
+ * warmup generation before the backend is declared unusable.
+ */
+const GPU_WARMUP_TIMEOUT_MS = 45_000;
+
+const GPU_WARMUP_TIMEOUT_MESSAGE =
+  'WebGPU stalled at first inference — the model loaded but a 2-token warmup generation did not finish in 45s. ' +
+  'Typical on integrated GPUs: fp32 weights are streamed once per prompt token over the shared-memory bus, ' +
+  'so prefill is memory-bound and far too slow for real parses. Falling back to the CPU build.';
+
 /** Serialize generations: one LLM at a time, in request order */
 let parseChain: Promise<void> = Promise.resolve();
 
@@ -171,6 +182,45 @@ async function loadModel(
           dtype,
           progress_callback: onProgress as (data: ProgressInfo) => void,
         });
+
+        // A WebGPU pipeline must EARN trust before it gets real parses.
+        // The load-fine-but-stall-at-first-inference failure mode (field
+        // data: ~1k-token prompt, 0 output tokens, 60s GPU leash fired
+        // mid-prefill — fp32 weights streamed once per prompt token are
+        // memory-bandwidth-bound on integrated GPUs) is otherwise only
+        // discovered mid-call, burning the whole parse budget of a LIVE
+        // conversation. A tiny 2-token generation right after load
+        // surfaces it NOW: on timeout the worker reports load-error and
+        // the main thread's GPU-crash recovery reloads a fresh worker
+        // pinned to CPU. (The stuck GPU submission cannot be cancelled,
+        // so the worker is terminated rather than reused. The race works
+        // because ORT-WebGPU inference is async — the event loop, and
+        // therefore the timer, keeps running while the GPU stalls.)
+        if (device === 'webgpu') {
+          const warmed = await Promise.race([
+            pipe(
+              [{ role: 'user', content: 'Say OK.' }],
+              { max_new_tokens: 2, do_sample: false, return_full_text: false }
+            ).then(() => true),
+            new Promise<boolean>((resolve) => {
+              setTimeout(() => resolve(false), GPU_WARMUP_TIMEOUT_MS);
+            }),
+          ]);
+          if (!warmed) {
+            failedAttempts.push({
+              device: 'gpu',
+              dtype,
+              message: GPU_WARMUP_TIMEOUT_MESSAGE,
+            });
+            post({
+              type: 'load-error',
+              model,
+              message: GPU_WARMUP_TIMEOUT_MESSAGE,
+              failedAttempts,
+            });
+            return;
+          }
+        }
 
         // Free the previous model's memory before swapping in the new one —
         // only one pipeline is ever resident (minimum-footprint goal).
