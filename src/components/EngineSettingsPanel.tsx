@@ -17,6 +17,7 @@ import {
   LLM_MODELS,
   LLM_RAM_ESTIMATE_MB,
   buildPromptWindow,
+  getTranscriptCharCap,
   type LlmModelName,
 } from '@/lib/llm-parser';
 
@@ -216,10 +217,10 @@ export default function EngineSettingsPanel({
   const liveWindow = useMemo(
     () =>
       parser?.enabled && parser.status === 'ready'
-        ? buildPromptWindow(transcript)
+        ? buildPromptWindow(transcript, getTranscriptCharCap(parser.device))
         : null,
     // windowTick re-runs this up to 1×/s
-    [parser?.enabled, parser?.status, windowTick, transcript.length === 0]
+    [parser?.enabled, parser?.status, parser?.device, windowTick, transcript.length === 0]
   );
 
   // RAM estimates (fallback when the worker cannot measure its heap)

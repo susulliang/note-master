@@ -259,6 +259,22 @@ export type LlmFieldId = (typeof LLM_FIELD_IDS)[number];
 const MAX_TRANSCRIPT_CHARS = 4_000;
 
 /**
+ * CPU/WASM variant of the cap. Prefill is THE bottleneck on WASM: field
+ * data showed a ~1.3k-token prompt (4k-char window + system prompt)
+ * blowing the whole 120s wall budget before the FIRST output token —
+ * "gen 0.0s · wall 120.0s · TIMED OUT". A tighter tail window cuts
+ * prompt-processing time roughly in half; older turns still contribute
+ * through the prior-values carry-forward, so recall is preserved. The
+ * GPU path keeps the full window — WebGPU prefill is negligible.
+ */
+const MAX_TRANSCRIPT_CHARS_CPU = 2_500;
+
+/** Transcript-window cap for the backend the parser is running on. */
+export function getTranscriptCharCap(device?: 'gpu' | 'cpu' | null): number {
+  return device === 'cpu' ? MAX_TRANSCRIPT_CHARS_CPU : MAX_TRANSCRIPT_CHARS;
+}
+
+/**
  * Render the speaker-tagged transcript into "AGENT:" / "CUSTOMER:" lines,
  * trimmed from the front so the most recent — most relevant — speech stays.
  */
@@ -298,7 +314,10 @@ export interface PromptWindow {
  * turns fall out of the window and (thanks to prior-value carry-forward)
  * only their extracted values survive.
  */
-export function buildPromptWindow(entries: TranscriptEntry[]): PromptWindow {
+export function buildPromptWindow(
+  entries: TranscriptEntry[],
+  maxChars: number = MAX_TRANSCRIPT_CHARS
+): PromptWindow {
   const kept: Array<{ index: number; line: string }> = [];
   for (let i = 0; i < entries.length; i += 1) {
     const e = entries[i];
@@ -310,13 +329,13 @@ export function buildPromptWindow(entries: TranscriptEntry[]): PromptWindow {
 
   let lines = kept;
   let chars = kept.reduce((n, k) => n + k.line.length + 1, 0);
-  if (chars > MAX_TRANSCRIPT_CHARS) {
+  if (chars > maxChars) {
     // Keep the TAIL: newest speech matters most for the evolving fields
     lines = [];
     chars = 0;
     for (let i = kept.length - 1; i >= 0; i -= 1) {
       const len = kept[i].line.length + 1;
-      if (chars + len > MAX_TRANSCRIPT_CHARS && lines.length > 0) break;
+      if (chars + len > maxChars && lines.length > 0) break;
       lines.unshift(kept[i]);
       chars += len;
     }
@@ -329,8 +348,11 @@ export function buildPromptWindow(entries: TranscriptEntry[]): PromptWindow {
   };
 }
 
-export function renderTranscript(entries: TranscriptEntry[]): string {
-  return buildPromptWindow(entries).text;
+export function renderTranscript(
+  entries: TranscriptEntry[],
+  maxChars: number = MAX_TRANSCRIPT_CHARS
+): string {
+  return buildPromptWindow(entries, maxChars).text;
 }
 
 /**
@@ -406,7 +428,9 @@ export function buildParsePrompt(
    * lets generation start immediately. 'json' remains available as the
    * denser alternative for callers that want it.
    */
-  format: 'simple' | 'json' = 'simple'
+  format: 'simple' | 'json' = 'simple',
+  /** Transcript-window cap — see getTranscriptCharCap (CPU gets a tighter tail) */
+  maxChars: number = MAX_TRANSCRIPT_CHARS
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -455,7 +479,7 @@ export function buildParsePrompt(
         ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
         : []),
     ].join('\n');
-    const userLines = ['Support call transcript:', renderTranscript(entries)];
+    const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
     if (prior?.issueDescription) {
       userLines.push('', 'issueDescription currently:', prior.issueDescription);
     }
@@ -483,7 +507,7 @@ export function buildParsePrompt(
       : []),
   ].join('\n');
 
-  const userLines = ['Support call transcript:', renderTranscript(entries)];
+  const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
   if (prior?.issueDescription) {
     userLines.push(
       '',

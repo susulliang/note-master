@@ -5,6 +5,7 @@ import {
   buildParaphrasePrompt,
   buildPromptWindow,
   describeLoadError,
+  getTranscriptCharCap,
   extractJsonLoose,
   extractLineFields,
   validateLlmFields,
@@ -79,6 +80,14 @@ interface PendingParse {
  *  raised: a slow-but-complete parse beats a fast-but-empty one. */
 const PARSE_TIMEOUT_MS = 120_000;
 const PARSE_TIMEOUT_MS_LARGE_MODEL = 240_000;
+/**
+ * WebGPU budget. A working WebGPU pipeline parses in SECONDS — a
+ * generation that has not produced a single token after this long is not
+ * slow, it is HUNG (the load-fine-but-stall-at-first-inference WebGPU
+ * failure mode field-seen on Qwen 0.5B fp32). The shorter leash means the
+ * hang is detected — and recovered from — in a third of the CPU wait.
+ */
+const PARSE_TIMEOUT_MS_GPU = 60_000;
 
 /** Generation token cap for extraction. Condensed values keep the JSON
  *  short, but the cap MUST comfortably exceed the longest legitimate reply:
@@ -311,6 +320,46 @@ export function useLlmParser() {
     return worker;
   }, [handleWorkerEvent]);
 
+  /**
+   * Recover from a HUNG generation. transformers.js cannot cancel an
+   * in-flight generation, and the worker serializes generations through
+   * one chain — so a single stuck inference (0 tokens, no error, timeout
+   * fired) blocks EVERY later parse forever. That is exactly the "later
+   * conversation info stops appending" failure mode. The only reliable
+   * unblock is terminating the worker and reloading the model in a fresh
+   * one (weights come from the browser cache, so the reload is fast).
+   *
+   * A hang on the GPU backend reloads pinned to CPU — the
+   * loads-but-stalls WebGPU mode is the known culprit there and CPU/WASM
+   * q8 is the proven-reliable build. A CPU hang gets a clean same-backend
+   * retry (it may legitimately have been a one-off stall).
+   */
+  const recoverAfterHang = useCallback(() => {
+    const hungOnGpu = deviceRef.current === 'gpu';
+    const target = modelRef.current;
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    // Settle every in-flight generation: they will never get a result now
+    for (const pending of pendingParsesRef.current.values()) {
+      window.clearTimeout(pending.timer);
+      pending.resolve({ text: '', ms: 0, timedOut: true });
+    }
+    pendingParsesRef.current.clear();
+    statusRef.current = 'loading';
+    setStatus('loading');
+    setGenProgress(0);
+    const worker = ensureWorker();
+    const promise = new Promise<void>((resolve) => {
+      pendingLoadsRef.current.push(resolve);
+    });
+    loadPromiseRef.current = promise;
+    worker.postMessage({
+      type: 'load',
+      model: target,
+      ...(hungOnGpu ? { device: 'cpu' as const } : {}),
+    });
+  }, [ensureWorker]);
+
   // Terminate the worker on unmount; settle anything still pending.
   useEffect(() => {
     return () => {
@@ -421,21 +470,29 @@ export function useLlmParser() {
       if (!worker) return Promise.resolve({ text: '', ms: 0, timedOut: false });
       return new Promise<GenerationResult>((resolve) => {
         const id = (nextIdRef.current += 1);
+        // Device-aware leash: WebGPU hangs (not slow) get detected fast;
+        // CPU/WASM keeps the long budget because it IS legitimately slow
         const timeoutMs =
-          modelRef.current === 'qwen2.5-1.5b'
-            ? PARSE_TIMEOUT_MS_LARGE_MODEL
-            : PARSE_TIMEOUT_MS;
+          deviceRef.current === 'gpu'
+            ? PARSE_TIMEOUT_MS_GPU
+            : modelRef.current === 'qwen2.5-1.5b'
+              ? PARSE_TIMEOUT_MS_LARGE_MODEL
+              : PARSE_TIMEOUT_MS;
         const timer = window.setTimeout(() => {
           const pending = pendingParsesRef.current.get(id);
           if (!pending) return;
           pendingParsesRef.current.delete(id);
           resolve({ text: '', ms: 0, timedOut: true });
+          // The worker is still stuck in that generation and cannot cancel
+          // it — terminate + reload so later parses are not queued behind
+          // a dead inference forever
+          recoverAfterHang();
         }, timeoutMs);
         pendingParsesRef.current.set(id, { resolve, timer });
         worker.postMessage({ type: 'parse', id, system, user, maxNewTokens });
       });
     },
-    []
+    [recoverAfterHang]
   );
 
   /**
@@ -477,8 +534,11 @@ export function useLlmParser() {
       const started = performance.now();
       setIsParsing(true);
       setGenProgress(0);
+      // Device-aware transcript window: CPU/WASM prefill is the wall-time
+      // bottleneck, so it gets a tighter tail (see getTranscriptCharCap)
+      const charCap = getTranscriptCharCap(deviceRef.current);
       // Debug trail: exactly what this parse sends to the model
-      setLastWindow(buildPromptWindow(entries));
+      setLastWindow(buildPromptWindow(entries, charCap));
       /** Metrics of the attempt whose reply was ACCEPTED (the strict retry
        *  overwrites these when its reply wins) */
       let promptChars = 0;
@@ -511,7 +571,7 @@ export function useLlmParser() {
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
         if (modelFailed && !firstRun.timedOut) {
           // Brevity-hardened retry, same line format
-          const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
+          const strict = buildParsePrompt(entries, missingFieldIds, prior, true, 'simple', charCap);
           const retriedRun = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
           attempts = 2;
           timedOut = retriedRun.timedOut;

@@ -8,7 +8,7 @@ import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import type { WhisperModelName } from '@/lib/whisper-models';
-import { buildPromptWindow, type LlmModelName } from '@/lib/llm-parser';
+import { buildPromptWindow, getTranscriptCharCap, type LlmModelName } from '@/lib/llm-parser';
 
 export interface MicPanelState {
   isListening: boolean;
@@ -232,10 +232,10 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   const liveWindow = useMemo(
     () =>
       parser?.enabled && parser.status === 'ready'
-        ? buildPromptWindow(call.transcript)
+        ? buildPromptWindow(call.transcript, getTranscriptCharCap(parser.device))
         : null,
     // windowTick re-runs this up to 1×/s; transcriptLen===0 handles the empty case
-    [parser?.enabled, parser?.status, windowTick, transcriptLen === 0]
+    [parser?.enabled, parser?.status, parser?.device, windowTick, transcriptLen === 0]
   );
   const llmWindowSet = useMemo(
     () => new Set(liveWindow?.entryIndexes ?? []),
