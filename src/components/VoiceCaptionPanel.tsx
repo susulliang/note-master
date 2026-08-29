@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bug, BrainCircuit, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2 } from 'lucide-react';
+import { Braces, Bug, BrainCircuit, Copy, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
 import type { ExtractedField } from '@/hooks/use-voice-transcription';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
-import type { LlmParserStatus } from '@/hooks/use-llm-parser';
+import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
@@ -81,6 +81,11 @@ export interface ParserPanelState {
    */
   window?: { entryIndexes: number[]; chars: number; text: string } | null;
   lastReply?: string | null;
+  /**
+   * Debug: speed metrics of the last parse — prompt/reply sizes (chars +
+   * ~tokens), model generation time, output tokens/s, attempt count.
+   */
+  lastStats?: LlmParseStats | null;
   onToggleEnabled: (enabled: boolean) => void;
   onSwitchModel: (model: LlmModelName) => void;
   onLoad: () => void;
@@ -203,6 +208,40 @@ function EngineProgressRow({
 export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showLlmDebug, setShowLlmDebug] = useState(false);
+  /** Floating window showing the raw JSON the LLM last returned */
+  const [showJsonWindow, setShowJsonWindow] = useState(false);
+  const [jsonCopied, setJsonCopied] = useState(false);
+
+  // The raw reply, pretty-printed when it parses as JSON (loose extraction
+  // first — the model sometimes wraps the object in prose or fences)
+  const prettyReply = useMemo(() => {
+    const raw = parser?.lastReply ?? '';
+    if (!raw) return '';
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  }, [parser?.lastReply]);
+
+  const copyJson = () => {
+    const text = parser?.lastReply ?? '';
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setJsonCopied(true);
+      window.setTimeout(() => setJsonCopied(false), 1500);
+    });
+  };
+
+  // Escape closes the floating JSON window
+  useEffect(() => {
+    if (!showJsonWindow) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowJsonWindow(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showJsonWindow]);
 
   // The SLIDING window the NEXT parse will send — computed LIVE from the
   // current transcript, so the amber highlight slides forward in real time
@@ -542,6 +581,14 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   {(parser.lastParseMs / 1000).toFixed(1)}s/parse
                 </span>
               )}
+              {parser.lastStats && parser.lastStats.tokensPerSec > 0 && (
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="Model output speed of the last parse (output tokens per generation second, ~4 chars/token estimate)"
+                >
+                  {parser.lastStats.tokensPerSec} tok/s
+                </span>
+              )}
 
               {/* Debug: show exactly what the model was sent and what it
                   replied — makes parsing failures inspectable in the field */}
@@ -559,6 +606,19 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 >
                   <Bug className="size-2.5" />
                   {showLlmDebug ? 'hide' : 'debug'}
+                </button>
+              )}
+
+              {/* Floating window with the raw JSON the model last returned */}
+              {parser.enabled && parser.status === 'ready' && parser.lastReply && (
+                <button
+                  type="button"
+                  onClick={() => setShowJsonWindow(true)}
+                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground"
+                  title="Open a floating window with the raw JSON the LLM returned on the last parse"
+                >
+                  <Braces className="size-2.5" />
+                  json
                 </button>
               )}
             </div>
@@ -598,6 +658,24 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   </>
                 ) : (
                   <p className="text-muted-foreground">no parse yet</p>
+                )}
+                {/* Speed metrics: prompt size in → reply out, generation
+                    time, output tokens/s (the "json" chip opens the full
+                    reply in a floating window) */}
+                {parser.lastStats && (
+                  <p className="mt-1 text-muted-foreground">
+                    <span className="font-bold text-foreground/80">speed:</span>{' '}
+                    {parser.lastStats.promptChars.toLocaleString()} chars in (~
+                    {parser.lastStats.promptTokens.toLocaleString()} tok) →{' '}
+                    {parser.lastStats.replyChars.toLocaleString()} chars out (~
+                    {parser.lastStats.replyTokens.toLocaleString()} tok) · gen{' '}
+                    {(parser.lastStats.genMs / 1000).toFixed(1)}s · wall{' '}
+                    {(parser.lastStats.wallMs / 1000).toFixed(1)}s ·{' '}
+                    <span className="font-bold text-amber-600 dark:text-amber-400">
+                      {parser.lastStats.tokensPerSec} tok/s
+                    </span>
+                    {parser.lastStats.attempts > 1 && ' · retried'}
+                  </p>
                 )}
                 {parser.lastReply ? (
                   <p className="mt-1 break-all whitespace-pre-wrap text-foreground/80">
@@ -814,6 +892,58 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           </div>
         )}
       </div>
+
+      {/* Floating window: the raw JSON the LLM last returned — pretty-printed
+          when it parses, verbatim when the model rambled. Esc / backdrop /
+          X close it; the copy chip copies the raw reply text. */}
+      {showJsonWindow && parser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => setShowJsonWindow(false)}
+          role="presentation"
+        >
+          <div
+            className="flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border/60 bg-card/95 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="LLM reply JSON"
+          >
+            <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-2">
+              <Braces className="size-3.5 text-amber-600 dark:text-amber-400" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
+                LLM reply · raw JSON
+              </span>
+              <span className="truncate text-[10px] text-muted-foreground">
+                {parser.model}
+                {parser.lastStats
+                  ? ` · ${parser.lastStats.replyChars.toLocaleString()} chars · ${parser.lastStats.tokensPerSec} tok/s`
+                  : ''}
+              </span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={copyJson}
+                  className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-2 py-1 text-[10px] leading-none text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                >
+                  <Copy className="size-2.5" />
+                  {jsonCopied ? 'copied!' : 'copy'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowJsonWindow(false)}
+                  className="inline-flex items-center rounded-full p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  aria-label="Close"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </div>
+            <pre className="custom-scrollbar flex-1 overflow-y-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
+              {prettyReply || '(no reply yet — run a parse first)'}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

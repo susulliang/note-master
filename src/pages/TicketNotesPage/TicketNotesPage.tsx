@@ -1075,6 +1075,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           lastParseMs: llmParser.lastParseMs,
           window: llmParser.lastWindow,
           lastReply: llmParser.lastReply,
+          lastStats: llmParser.lastStats,
           onToggleEnabled: handleToggleLlmEnabled,
           onSwitchModel: handleSwitchLlmModel,
           onLoad: handleLoadLlm,

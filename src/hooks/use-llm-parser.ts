@@ -21,8 +21,35 @@ import {
 
 export type LlmParserStatus = 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
 
+/** One generation round-trip result: the raw reply + how long the
+ *  model spent generating it (worker-measured, excludes queue waits). */
+interface GenerationResult {
+  text: string;
+  ms: number;
+}
+
+/** Debug metrics for the last parse — what went in, what came out, how fast */
+export interface LlmParseStats {
+  /** system+user prompt characters of the ACCEPTED attempt */
+  promptChars: number;
+  /** ~4 chars/token estimate of the prompt */
+  promptTokens: number;
+  /** reply characters of the accepted attempt */
+  replyChars: number;
+  /** ~4 chars/token estimate of the reply */
+  replyTokens: number;
+  /** model generation time of the accepted attempt (ms, worker-measured) */
+  genMs: number;
+  /** whole parse wall time incl. validation + retry (ms) */
+  wallMs: number;
+  /** replyTokens / genMs — output tokens per second of generation */
+  tokensPerSec: number;
+  /** how many generation attempts the parse took (1 = no retry) */
+  attempts: number;
+}
+
 interface PendingParse {
-  resolve: (text: string) => void;
+  resolve: (result: GenerationResult) => void;
   timer: number;
 }
 
@@ -77,6 +104,8 @@ export function useLlmParser() {
   const [isParsing, setIsParsing] = useState(false);
   const [isParaphrasing, setIsParaphrasing] = useState(false);
   const [lastParseMs, setLastParseMs] = useState<number | null>(null);
+  /** Debug metrics of the last parse: prompt/reply sizes + generation speed */
+  const [lastStats, setLastStats] = useState<LlmParseStats | null>(null);
   /** What the last parse sent to the model: which entries made the window */
   const [lastWindow, setLastWindow] = useState<PromptWindow | null>(null);
   /** Raw model reply of the last parse (capped for display) */
@@ -153,8 +182,9 @@ export function useLlmParser() {
         pendingParsesRef.current.delete(data.id);
         window.clearTimeout(pending.timer);
         // Raw generation text — validation/retry lives in parse(), which can
-        // re-prompt; here we only hand the reply back.
-        pending.resolve(data.text);
+        // re-prompt; here we only hand the reply back (with the worker's
+        // own generation-time measurement for the speed metrics).
+        pending.resolve({ text: data.text, ms: data.ms });
         break;
       }
 
@@ -163,7 +193,7 @@ export function useLlmParser() {
         if (!pending) return;
         pendingParsesRef.current.delete(data.id);
         window.clearTimeout(pending.timer);
-        pending.resolve('');
+        pending.resolve({ text: '', ms: 0 });
         break;
       }
     }
@@ -183,7 +213,7 @@ export function useLlmParser() {
       setError(`LLM parser worker crashed: ${event.message || 'unknown error'}`);
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve('');
+        pending.resolve({ text: '', ms: 0 });
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -202,7 +232,7 @@ export function useLlmParser() {
       workerRef.current = null;
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve('');
+        pending.resolve({ text: '', ms: 0 });
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -281,14 +311,15 @@ export function useLlmParser() {
     return !!workerRef.current;
   }, [load]);
 
-  /** One generation round-trip → raw reply text ("" on error/timeout).
-   *  The worker serializes generations internally, so parse and paraphrase
-   *  can never run inference concurrently. */
+  /** One generation round-trip → raw reply text + the worker's own
+   *  generation-time measurement ("" / 0 on error/timeout). The worker
+   *  serializes generations internally, so parse and paraphrase can never
+   *  run inference concurrently. */
   const generateReply = useCallback(
-    (system: string, user: string, maxNewTokens: number): Promise<string> => {
+    (system: string, user: string, maxNewTokens: number): Promise<GenerationResult> => {
       const worker = workerRef.current;
-      if (!worker) return Promise.resolve('');
-      return new Promise<string>((resolve) => {
+      if (!worker) return Promise.resolve({ text: '', ms: 0 });
+      return new Promise<GenerationResult>((resolve) => {
         const id = (nextIdRef.current += 1);
         const timeoutMs =
           modelRef.current === 'qwen2.5-1.5b'
@@ -298,7 +329,7 @@ export function useLlmParser() {
           const pending = pendingParsesRef.current.get(id);
           if (!pending) return;
           pendingParsesRef.current.delete(id);
-          resolve('');
+          resolve({ text: '', ms: 0 });
         }, timeoutMs);
         pendingParsesRef.current.set(id, { resolve, timer });
         worker.postMessage({ type: 'parse', id, system, user, maxNewTokens });
@@ -344,9 +375,18 @@ export function useLlmParser() {
       setIsParsing(true);
       // Debug trail: exactly what this parse sends to the model
       setLastWindow(buildPromptWindow(entries));
+      /** Metrics of the attempt whose reply was ACCEPTED (the strict retry
+       *  overwrites these when its reply wins) */
+      let promptChars = 0;
+      let genMs = 0;
+      let attempts = 0;
       try {
         const first = buildParsePrompt(entries, missingFieldIds, prior);
-        let reply = await generateReply(first.system, first.user, MAX_NEW_TOKENS);
+        promptChars = first.system.length + first.user.length;
+        const firstRun = await generateReply(first.system, first.user, MAX_NEW_TOKENS);
+        attempts = 1;
+        genMs = firstRun.ms;
+        let reply = firstRun.text;
         let fields = validateReply(reply);
 
         // Retry when the reply was BROKEN (no balanced JSON object, the
@@ -359,17 +399,38 @@ export function useLlmParser() {
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
         if (modelFailed) {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
-          const retriedReply = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
-          const retried = validateReply(retriedReply);
+          const retriedRun = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
+          attempts = 2;
+          const retried = validateReply(retriedRun.text);
           if (retried !== null && (fields === null || retried.length > 0)) {
             fields = retried;
-            reply = retriedReply;
+            reply = retriedRun.text;
+            // The retry's prompt+generation are what actually produced the
+            // accepted reply — report those
+            promptChars = strict.system.length + strict.user.length;
+            genMs = retriedRun.ms;
           }
         }
 
         // Keep the raw reply (even a broken one — that is the interesting
         // case to inspect) for the debug panel
-        setLastReply(reply ? reply.slice(0, 600) : '');
+        setLastReply(reply ? reply.slice(0, 4000) : '');
+
+        // Speed metrics for the debug panel: what went in, what came out,
+        // how fast the model generated it (~4 chars/token estimate)
+        const wallMs = Math.round(performance.now() - started);
+        const replyChars = reply.length;
+        const replyTokens = Math.ceil(replyChars / 4);
+        setLastStats({
+          promptChars,
+          promptTokens: Math.ceil(promptChars / 4),
+          replyChars,
+          replyTokens,
+          genMs,
+          wallMs,
+          tokensPerSec: genMs > 0 ? Math.round((replyTokens / genMs) * 1000) : 0,
+          attempts,
+        });
 
         return fields ?? [];
       } finally {
@@ -397,9 +458,9 @@ export function useLlmParser() {
       setIsParaphrasing(true);
       try {
         const { system, user } = buildParaphrasePrompt(input);
-        const reply = await generateReply(system, user, MAX_PARAPHRASE_NEW_TOKENS);
-        if (!reply) return [];
-        const json = extractJsonLoose(reply);
+        const run = await generateReply(system, user, MAX_PARAPHRASE_NEW_TOKENS);
+        if (!run.text) return [];
+        const json = extractJsonLoose(run.text);
         return json ? validateParaphraseReply(json) : [];
       } finally {
         setIsParaphrasing(false);
@@ -418,6 +479,9 @@ export function useLlmParser() {
     /** True while the paraphrasing (note-polish) generation is in flight */
     isParaphrasing,
     lastParseMs,
+    /** Debug metrics of the last parse: prompt/reply chars + tokens, model
+     *  generation time and output tokens/s — powers the speed readout */
+    lastStats,
     /** Which transcript entries the LAST parse sent to the model — the
      *  caption panel highlights them so parsing behavior is inspectable */
     lastWindow,
