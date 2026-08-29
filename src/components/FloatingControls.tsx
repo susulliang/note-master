@@ -421,20 +421,25 @@ export default function FloatingControls({
 
         {/* Engine settings panel — opens from the gear like the History
             panel opens from its button; renders alongside the pill inside
-            the docked-corner flex container. */}
+            the docked-corner flex container. The click-outside catcher sits
+            UNDER the panel (z-40 vs z-50): without an explicit z-index on
+            the panel, the full-screen catcher painted over it and swallowed
+            every click. */}
         {engineOpen && engine && parser && (
           <>
             {/* Click-outside catcher */}
             <div className="fixed inset-0 z-40" onClick={() => setEngineOpen(false)} aria-hidden="true" />
-            <EngineSettingsPanel
-              engine={engine}
-              parser={parser}
-              transcript={transcript ?? []}
-              isCapturing={callCapturing}
-              isTranscribing={!!isTranscribing}
-              onToggleCapture={onToggleCall}
-              onClose={() => setEngineOpen(false)}
-            />
+            <div className="relative z-50">
+              <EngineSettingsPanel
+                engine={engine}
+                parser={parser}
+                transcript={transcript ?? []}
+                isCapturing={callCapturing}
+                isTranscribing={!!isTranscribing}
+                onToggleCapture={onToggleCall}
+                onClose={() => setEngineOpen(false)}
+              />
+            </div>
           </>
         )}
       </div>
