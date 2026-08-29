@@ -690,6 +690,18 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       // QUESTION sentences: the capture must run to a statement terminator,
       // and a sentence ending in "?" has none.
       /\b(?:can|could|would) you (?!describe\b|tell\b|explain\b|confirm\b|clarify\b|know\b|remember\b|mention\b|share\b|provide\b|walk\b)(?:please |try to |try |)([a-z][^.!?]{8,300})(?:[.!]|$)/gi,
+      // Diagnostic/confirming QUESTIONS the agent asks — the resolution box
+      // chronicles basically everything the agent says, and a question is
+      // part of the troubleshooting record ("did you check the power?",
+      // "have you tried restarting it?", "is the light red?",
+      // "any recent wifi changes?"). Whole-match captures: the paraphrase
+      // stage condenses them into terse checks ("checked power state?");
+      // without a model the verbatim question still lands on the ticket.
+      /\bdid you\b[^.!?]{3,90}\?/gi,
+      /\bhave you\b[^.!?]{3,90}\?/gi,
+      /\b(?:do|does) (?:you|the|it|they|your)\b[^.!?]{3,90}\?/gi,
+      /\b(?:is|was|are|were) (?:it|that|the|there)\b[^.!?]{3,70}\?/gi,
+      /\bany (?:recent )?(?:changes?|issues?|problems?|errors?|updates?|damage|noise)\b[^.!?]{0,70}\?/gi,
       /\bplease (?:press|hold|try|check|confirm|restart|reset|power ?cycle|remove|clean|open|close|go ahead|disconnect|reconnect|download|install|connect|update|verify|make sure)([^.!?]{0,300})/gi,
       /\b(?:i'?m|i am) (?:going to|gonna) (?:send|email|process|submit|create|issue|set ?up|escalate|arrange|schedule|replace|refund|order|generate|open|add|remove|update|review|walk you through|check|look|note|follow up)([^.!?]{0,300})/gi,
       /\b(?:you'?ll|you will|we'?ll|we will|you|we) (?:need to|have to|wanna|going to) ([a-z][^.!?]{8,300})/gi,

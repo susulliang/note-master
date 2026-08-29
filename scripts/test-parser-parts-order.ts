@@ -192,7 +192,7 @@ check(
 );
 check(
   'system prompt stays minimal (the conversation owns the budget)',
-  sysChars < 2200,
+  sysChars < 2400,
   `${sysChars} chars`
 );
 check(

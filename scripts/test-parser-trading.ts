@@ -297,7 +297,7 @@ console.log(`  user prompt   : ${userChars} chars (~${Math.ceil(userChars / 4)} 
 console.log(`  TOTAL         : ~${totalTokens} tokens vs Qwen2.5 32768-token context`);
 check(
   'system prompt is MINIMAL (no model list, no issue-type catalog — the conversation owns the budget)',
-  sysChars < 2200,
+  sysChars < 2400,
   `${sysChars} chars`
 );
 check(

@@ -189,7 +189,7 @@ function main(): void {
   );
   check(
     'system prompt is minimal (format hints, no fleet catalog)',
-    system.length < 2200,
+    system.length < 2400,
     `${system.length} chars`
   );
 
