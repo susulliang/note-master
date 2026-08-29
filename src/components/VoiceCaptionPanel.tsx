@@ -8,7 +8,12 @@ import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import type { WhisperModelName } from '@/lib/whisper-models';
-import { buildPromptWindow, getTranscriptCharCap, type LlmModelName } from '@/lib/llm-parser';
+import {
+  buildPromptWindow,
+  getTranscriptCharCap,
+  type LlmDtype,
+  type LlmModelName,
+} from '@/lib/llm-parser';
 
 export interface MicPanelState {
   isListening: boolean;
@@ -67,8 +72,8 @@ export interface ParserPanelState {
   lastParseMs: number | null;
   /** Backend the pipeline runs on: 'gpu' (WebGPU) or 'cpu' (WASM) */
   device?: 'gpu' | 'cpu' | null;
-  /** Precision that actually loaded ('q8' | 'fp32') — drives the RAM estimate */
-  dtype?: 'q8' | 'fp32' | null;
+  /** Precision that actually loaded (q8 / fp32 / fp16 / q4f16) — drives the RAM estimate */
+  dtype?: LlmDtype | null;
   /** Live generation progress of the in-flight parse: 0–1 */
   genProgress?: number;
   /** Worker JS-heap snapshot for the RAM badge (null until reported) */
@@ -88,7 +93,7 @@ export interface ParserPanelState {
    */
   lastStats?: LlmParseStats | null;
   /** Load variants that failed before the current session (manager UI) */
-  failedAttempts?: Array<{ device: 'gpu' | 'cpu'; dtype: 'q8' | 'fp32'; message: string }> | null;
+  failedAttempts?: Array<{ device: 'gpu' | 'cpu'; dtype: LlmDtype; message: string }> | null;
   onLoadDevice?: (model: LlmModelName, device: 'gpu' | 'cpu') => void;
   onToggleEnabled: (enabled: boolean) => void;
   onSwitchModel: (model: LlmModelName) => void;

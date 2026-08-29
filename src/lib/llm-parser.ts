@@ -77,19 +77,28 @@ export const LLM_MODELS = Object.keys(LOCAL_LLM_MODELS) as LlmModelName[];
  * Weights + ONNX runtime + context: rough but the right order of magnitude.
  */
 export const LLM_RAM_ESTIMATE_MB: Record<LlmModelName, Record<LlmDtype, number>> = {
-  'smollm2-360m': { q8: 300, fp32: 900 },
-  'qwen2.5-0.5b': { q8: 450, fp32: 1400 },
-  'qwen2.5-1.5b': { q8: 1100, fp32: 3400 },
+  'smollm2-360m': { q8: 300, fp32: 900, fp16: 500, q4f16: 250 },
+  'qwen2.5-0.5b': { q8: 450, fp32: 1400, fp16: 800, q4f16: 400 },
+  'qwen2.5-1.5b': { q8: 1100, fp32: 3400, fp16: 2000, q4f16: 1000 },
 };
 
+export type LlmDtype = 'q8' | 'fp32' | 'fp16' | 'q4f16';
+
 /**
- * Precision fallback chain, mirroring the Whisper setup: `q8` first (small
+ * WASM/CPU precision chain, mirroring the Whisper setup: `q8` first (small
  * download, well-supported by the WASM execution provider), `fp32` as the
  * larger escape hatch for exports the runtime cannot instantiate.
  */
-export const LLM_DTYPE_CHAIN = ['q8', 'fp32'] as const;
+export const LLM_DTYPE_CHAIN: readonly LlmDtype[] = ['q8', 'fp32'];
 
-export type LlmDtype = (typeof LLM_DTYPE_CHAIN)[number];
+/**
+ * WebGPU precision chain. q4f16 (4-bit weights, fp16 compute) is THE
+ * WebGPU format — ~5x less weight traffic than fp32, which on a
+ * shared-memory iGPU is the difference between a ~10s prefill and a
+ * bandwidth-starved 60s timeout. fp16 (half traffic) and fp32 stay as
+ * error-fallbacks for runtimes/drivers that reject q4f16 graphs.
+ */
+export const LLM_DTYPE_CHAIN_WEBGPU: readonly LlmDtype[] = ['q4f16', 'fp16', 'fp32'];
 
 // ---------------------------------------------------------------------------
 //  Worker protocol (main thread ⇆ src/workers/llm-parser.worker.ts)

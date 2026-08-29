@@ -15,6 +15,7 @@ import {
   readLlmEnabledPref,
   writeLlmEnabledPref,
   LLM_MODELS,
+  type LlmDtype,
   type LlmMemStats,
   type LlmModelName,
   type LlmWorkerEvent,
@@ -147,10 +148,10 @@ export function useLlmParser() {
   /** Worker JS-heap snapshot (RAM badge); null until the worker reports */
   const [memStats, setMemStats] = useState<LlmMemStats | null>(null);
   /** Precision that actually loaded (drives the RAM estimate fallback) */
-  const [dtype, setDtype] = useState<'q8' | 'fp32' | null>(null);
+  const [dtype, setDtype] = useState<LlmDtype | null>(null);
   /** Variants that failed before the current one loaded (download manager) */
   const [failedAttempts, setFailedAttempts] = useState<
-    Array<{ device: 'gpu' | 'cpu'; dtype: 'q8' | 'fp32'; message: string }> | null
+    Array<{ device: 'gpu' | 'cpu'; dtype: LlmDtype; message: string }> | null
   >(null);
 
   const workerRef = useRef<Worker | null>(null);
@@ -665,7 +666,7 @@ export function useLlmParser() {
     lastReply,
     /** Backend the pipeline is running on: 'gpu' (WebGPU) or 'cpu' (WASM) */
     device,
-    /** Precision that actually loaded ('q8' | 'fp32') */
+    /** Precision that actually loaded (q8 / fp32 / fp16 / q4f16) */
     dtype,
     /** Worker JS-heap snapshot for the RAM badge (null until reported) */
     memStats,

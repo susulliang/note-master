@@ -26,6 +26,7 @@ import type { TextGenerationPipeline } from '@huggingface/transformers';
 import {
   LOCAL_LLM_MODELS,
   LLM_DTYPE_CHAIN,
+  LLM_DTYPE_CHAIN_WEBGPU,
   type LlmModelName,
   type LlmDtype,
   type LlmDevice,
@@ -140,25 +141,31 @@ async function loadModel(
 
   // Device order: an explicit request from the download manager pins the
   // backend; otherwise GPU first (order of magnitude faster) with wasm as
-  // the fallback — EXCEPT the 1.5B model, whose fp32 weights (~3.4 GB) are
-  // absurd on any GPU: it goes straight to wasm+q8 (~1.1 GB)
+  // the fallback — EXCEPT the 1.5B model, which stays CPU on AUTO: even
+  // q4f16 (~1 GB) makes a ~1k-token iGPU prefill marginal, so GPU for the
+  // 1.5B is a deliberate choice via the download manager, not a default.
   const devices: Array<'webgpu' | 'wasm'> = deviceRequest
     ? [deviceRequest === 'gpu' ? 'webgpu' : 'wasm']
     : (await hasWebGpu()) && model !== 'qwen2.5-1.5b'
       ? ['webgpu', 'wasm']
       : ['wasm'];
 
-  // DTYPE IS DEVICE-SPECIFIC. Field data: a q8 (DynamicQuantizeLinear)
-  // session on the WebGPU provider LOADS fine but HANGS at first inference
-  // — 0 tokens in 120s on a 387-token prompt, no error thrown. The WebGPU
-  // EP needs fp32 weights; q8 is the WASM/CPU format.
+  // DTYPE IS DEVICE-SPECIFIC.
+  //
+  // WebGPU: q4f16 FIRST (4-bit weights, fp16 compute) — the format the
+  // WebGPU ecosystem standardized on (WebLLM, transformers.js demos).
+  // Field data behind this: fp32 weights stream ~5x more bytes per token,
+  // and on a shared-memory iGPU a ~1k-token prefill is bandwidth-starved
+  // into a 60s timeout with 0 output tokens; q4f16 fits the same prefill
+  // into ~10s. fp16 (half traffic) and fp32 stay as error-fallbacks for
+  // drivers that reject q4f16 graphs. q8 (DynamicQuantizeLinear) is NOT
+  // offered on WebGPU: field data showed it loads fine but hangs at first
+  // inference — q8 is the WASM/CPU format.
   const dtypeOrder = (device: 'webgpu' | 'wasm'): LlmDtype[] => {
     const wasmOrder: LlmDtype[] = preferred
       ? [preferred, ...LLM_DTYPE_CHAIN.filter((dtype) => dtype !== preferred)]
       : [...LLM_DTYPE_CHAIN];
-    return device === 'webgpu'
-      ? ['fp32'] // WebGPU EP: fp32 only — q8 graphs hang at runtime
-      : wasmOrder;
+    return device === 'webgpu' ? [...LLM_DTYPE_CHAIN_WEBGPU] : wasmOrder;
   };
 
   const failedAttempts: Array<{ device: 'gpu' | 'cpu'; dtype: LlmDtype; message: string }> = [];

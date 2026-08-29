@@ -18,6 +18,7 @@ import {
   LLM_RAM_ESTIMATE_MB,
   buildPromptWindow,
   getTranscriptCharCap,
+  type LlmDtype,
   type LlmModelName,
 } from '@/lib/llm-parser';
 
@@ -46,10 +47,10 @@ export interface ParserState {
   isParaphrasing?: boolean;
   lastParseMs: number | null;
   device?: 'gpu' | 'cpu' | null;
-  dtype?: 'q8' | 'fp32' | null;
+  dtype?: LlmDtype | null;
   genProgress?: number;
   memStats?: { heapUsedMb: number; heapLimitMb: number } | null;
-  failedAttempts?: Array<{ device: 'gpu' | 'cpu'; dtype: 'q8' | 'fp32'; message: string }> | null;
+  failedAttempts?: Array<{ device: 'gpu' | 'cpu'; dtype: LlmDtype; message: string }> | null;
   window?: { entryIndexes: number[]; chars: number; text: string } | null;
   lastReply?: string | null;
   lastStats?: LlmParseStats | null;
@@ -74,11 +75,15 @@ interface EngineSettingsPanelProps {
 /**
  * Download-manager variant metadata — the CPU/GPU build options for each
  * LLM, with the numbers the agent needs to decide (one-time download,
- * approximate RAM, expected speed on a plain office CPU).
+ * approximate RAM, expected speed). GPU builds are q4f16 (4-bit weights,
+ * fp16 compute): ~5x less memory traffic than fp32, which is what makes
+ * WebGPU viable even on integrated GPUs. A 2-token load-time warmup
+ * verifies every GPU build before it gets real parses — an unusable GPU
+ * falls back to CPU automatically.
  */
 const LLM_VARIANTS: Record<LlmModelName, Array<{
   device: 'gpu' | 'cpu';
-  dtype: 'q8' | 'fp32';
+  dtype: LlmDtype;
   label: string;
   download: string;
   ram: string;
@@ -92,9 +97,9 @@ const LLM_VARIANTS: Record<LlmModelName, Array<{
       note: 'Fastest download; weakest reading',
     },
     {
-      device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
-      download: '~700 MB', ram: '~900 MB', speed: '~40–80 tok/s',
-      note: 'WebGPU; discrete GPU — iGPU auto-falls back to CPU at load',
+      device: 'gpu', dtype: 'q4f16', label: 'GPU · q4f16',
+      download: '~250 MB', ram: '~250 MB', speed: '~20–60 tok/s',
+      note: 'WebGPU 4-bit; ~3x faster than CPU — works on iGPUs too',
     },
   ],
   'qwen2.5-0.5b': [
@@ -104,16 +109,21 @@ const LLM_VARIANTS: Record<LlmModelName, Array<{
       note: 'Default build; reliable on any machine',
     },
     {
-      device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
-      download: '~1.4 GB', ram: '~1.4 GB', speed: '~25–50 tok/s',
-      note: 'WebGPU; needs a discrete GPU — iGPU auto-falls back to CPU at load',
+      device: 'gpu', dtype: 'q4f16', label: 'GPU · q4f16',
+      download: '~400 MB', ram: '~400 MB', speed: '~15–40 tok/s',
+      note: 'WebGPU 4-bit; ~4x faster than CPU — works on iGPUs too',
     },
   ],
   'qwen2.5-1.5b': [
     {
       device: 'cpu', dtype: 'q8', label: 'CPU · q8',
       download: '~1.1 GB', ram: '~1.1 GB', speed: '~2–5 tok/s',
-      note: 'Sharpest reading; slowest parses. CPU-only (fp32 on GPU is 3.4 GB)',
+      note: 'Sharpest reading; slowest parses',
+    },
+    {
+      device: 'gpu', dtype: 'q4f16', label: 'GPU · q4f16',
+      download: '~1.0 GB', ram: '~1.0 GB', speed: '~10–25 tok/s',
+      note: 'WebGPU 4-bit; discrete GPU recommended — iGPU prefill is marginal at this size',
     },
   ],
 };
@@ -499,7 +509,7 @@ export default function EngineSettingsPanel({
         {parser?.onLoadDevice && (
           <div>
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Model downloads — CPU (q8) vs GPU (fp32)
+              Model downloads — CPU (q8) vs GPU (q4f16)
             </p>
             <div className="flex flex-col gap-1.5">
               {parser.models.map((name) => (
@@ -567,9 +577,10 @@ export default function EngineSettingsPanel({
               </div>
             )}
             <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-              Each build is a separate one-time download cached by the browser. GPU builds need
-              WebGPU (Chrome/Edge 113+); if a GPU build fails, the CPU build is the reliable
-              fallback. Only one model is resident at a time.
+              Each build is a separate one-time download cached by the browser. GPU builds
+              (q4f16) need WebGPU (Chrome/Edge 113+); each is verified with a 2-token warmup
+              at load — a GPU too slow to parse (e.g. fp32-level bandwidth) falls back to the
+              CPU build automatically. Only one model is resident at a time.
             </p>
           </div>
         )}
