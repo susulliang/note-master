@@ -104,10 +104,14 @@ export type LlmWorkerRequest = LlmLoadMessage | LlmParseMessage;
 export type LlmWorkerEvent =
   | { type: 'load-start'; model: LlmModelName }
   | { type: 'progress'; model: LlmModelName; progress: number }
-  | { type: 'ready'; model: LlmModelName; dtype: LlmDtype }
+  | { type: 'ready'; model: LlmModelName; dtype: LlmDtype; device: LlmDevice }
   | { type: 'load-error'; model: LlmModelName; message: string }
+  | { type: 'gen-progress'; id: number; generated: number; maxNewTokens: number }
   | { type: 'result'; id: number; text: string; ms: number }
   | { type: 'parse-error'; id: number; message: string };
+
+/** Execution backend the pipeline actually initialized on */
+export type LlmDevice = 'gpu' | 'cpu';
 
 /** localStorage keys for user preferences */
 const LLM_MODEL_PREF_KEY = 'nm-llm-model';
@@ -172,17 +176,19 @@ export type LlmFieldId = (typeof LLM_FIELD_IDS)[number];
 
 /**
  * Sliding-window size: how many transcript characters each parse feeds the
- * model — the TAIL (newest) of the conversation. On calls longer than the
- * window, older turns slide out of the prompt and their extracted values
- * are carried forward instead (see PriorLlmValues).
+ * model — the TAIL (newest) of the conversation.
  *
- * ~10000 chars ≈ 10 minutes of speech. The system prompt is deliberately
- * minimal (~400 tokens: no model list, no issue-type catalog — just format
- * hints) so the CONVERSATION owns the inference budget, not boilerplate:
- * the whole prompt stays ≈ 2.5-3k tokens, comfortably inside Qwen2.5's
- * 32k-token context and the WASM wall-clock budget.
+ * ~4000 chars ≈ 4 minutes of speech. Field data: a 10k-char window made
+ * CPU/WASM generation time out entirely (90s wall, no reply), so the
+ * window now keeps only the newest conversation slice; older turns slide
+ * out and their extracted values are carried forward instead (see
+ * PriorLlmValues). The system prompt is deliberately minimal (~600
+ * tokens: no model list, no issue-type catalog — just format hints) so
+ * the CONVERSATION owns the inference budget, not boilerplate: the whole
+ * prompt stays ≈ 1.5k tokens, comfortably inside Qwen2.5's 32k-token
+ * context and the WASM wall-clock budget.
  */
-const MAX_TRANSCRIPT_CHARS = 10_000;
+const MAX_TRANSCRIPT_CHARS = 4_000;
 
 /**
  * Render the speaker-tagged transcript into "AGENT:" / "CUSTOMER:" lines,

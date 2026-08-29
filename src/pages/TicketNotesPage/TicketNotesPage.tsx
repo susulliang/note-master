@@ -1071,6 +1071,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           isParsing: llmParser.isParsing,
           isParaphrasing: llmParser.isParaphrasing,
           lastParseMs: llmParser.lastParseMs,
+          device: llmParser.device,
+          genProgress: llmParser.genProgress,
           window: llmParser.lastWindow,
           lastReply: llmParser.lastReply,
           lastStats: llmParser.lastStats,

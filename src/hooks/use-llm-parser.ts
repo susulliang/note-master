@@ -116,6 +116,11 @@ export function useLlmParser() {
   const [lastWindow, setLastWindow] = useState<PromptWindow | null>(null);
   /** Raw model reply of the last parse (capped for display) */
   const [lastReply, setLastReply] = useState<string | null>(null);
+  /** Backend the pipeline initialized on ('gpu' = WebGPU, 'cpu' = WASM) */
+  const [device, setDevice] = useState<'gpu' | 'cpu' | null>(null);
+  /** Live generation progress of the in-flight parse: 0–1 (tokens
+   *  generated / max_new_tokens), streamed per-token by the worker */
+  const [genProgress, setGenProgress] = useState(0);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
@@ -164,6 +169,7 @@ export function useLlmParser() {
         setStatus('ready');
         setProgress(100);
         setError(null);
+        setDevice(data.device);
         {
           const waiters = pendingLoadsRef.current;
           pendingLoadsRef.current = [];
@@ -181,6 +187,15 @@ export function useLlmParser() {
           waiters.forEach((resolve) => resolve());
         }
         break;
+
+      case 'gen-progress': {
+        // Live per-token generation progress of the in-flight parse —
+        // drives the DETERMINATE progress bar (generated/max_new_tokens).
+        // Stale events (a timed-out attempt's late tokens) are ignored.
+        if (!pendingParsesRef.current.has(data.id)) break;
+        setGenProgress(Math.min(1, data.generated / Math.max(1, data.maxNewTokens)));
+        break;
+      }
 
       case 'result': {
         const pending = pendingParsesRef.current.get(data.id);
@@ -379,6 +394,7 @@ export function useLlmParser() {
 
       const started = performance.now();
       setIsParsing(true);
+      setGenProgress(0);
       // Debug trail: exactly what this parse sends to the model
       setLastWindow(buildPromptWindow(entries));
       /** Metrics of the attempt whose reply was ACCEPTED (the strict retry
@@ -498,6 +514,11 @@ export function useLlmParser() {
     /** Raw model reply from the last parse (capped) — debugging what the
      *  model actually said, not just what survived validation */
     lastReply,
+    /** Backend the pipeline is running on: 'gpu' (WebGPU) or 'cpu' (WASM) */
+    device,
+    /** Live generation progress of the in-flight parse (0–1) — tokens
+     *  generated / max_new_tokens, streamed per-token by the worker */
+    genProgress,
     isReady: status === 'ready',
     setEnabled,
     load,

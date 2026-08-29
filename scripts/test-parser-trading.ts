@@ -240,10 +240,17 @@ const window = buildPromptWindow(entries);
 console.log(`  window: ${window.entryIndexes.length}/${entries.length} turns · ${window.chars} chars`);
 const windowText = window.text;
 check(
-  'the WHOLE field-test call fits in the expanded window — even the early complaint is sent',
-  /blinking/i.test(windowText),
-  'the complaint is missing from the window'
+  'window caps at the 4k sliding limit (CPU/WASM generation budget)',
+  window.chars <= 4000,
+  `${window.chars} chars`
 );
+check(
+  'the newest speech stays in the sliding window',
+  /trading page|instant discount/i.test(windowText)
+);
+// The early complaint slides out on this long call — its extracted value
+// rides along in prior.issueDescription instead (checked in the prompt
+// test below), which is the whole point of prior-value carry-forward.
 check(
   'trade-in guidance (late call) IS in the window',
   /trading page|instant discount/i.test(windowText)
@@ -264,7 +271,7 @@ const longWindow = buildPromptWindow(longEntries);
 const longText = longWindow.text;
 check(
   'on a longer call the window caps at the sliding limit',
-  longWindow.chars <= 10000,
+  longWindow.chars <= 4000,
   `${longWindow.chars} chars`
 );
 check(

@@ -72,6 +72,10 @@ export interface ParserPanelState {
   /** True while the paraphrase (note-polish) generation is in flight */
   isParaphrasing?: boolean;
   lastParseMs: number | null;
+  /** Backend the pipeline runs on: 'gpu' (WebGPU) or 'cpu' (WASM) */
+  device?: 'gpu' | 'cpu' | null;
+  /** Live generation progress of the in-flight parse: 0–1 */
+  genProgress?: number;
   /**
    * Debug: what the LAST parse sent to the model — which transcript lines
    * made the prompt window, the rendered text itself, and the raw model
@@ -554,7 +558,28 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </span>
               )}
               {parser.enabled && parser.status === 'ready' && (
-                <span className="text-[10px] text-muted-foreground">standby</span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  standby
+                  {/* Backend badge — GPU means WebGPU inference (an order of
+                      magnitude faster); CPU means the WASM fallback */}
+                  {parser.device && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                        parser.device === 'gpu'
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-foreground/10 text-muted-foreground/80'
+                      )}
+                      title={
+                        parser.device === 'gpu'
+                          ? 'WebGPU acceleration active — inference runs on the GPU'
+                          : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
+                      }
+                    >
+                      {parser.device === 'gpu' ? 'GPU' : 'CPU'}
+                    </span>
+                  )}
+                </span>
               )}
               {parser.enabled && parser.status === 'error' && (
                 <span className="text-[10px] text-destructive" title={parser.error ?? undefined}>
@@ -564,7 +589,9 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
               {parser.isParsing && (
                 <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
                   <Sparkles className="size-2.5 animate-pulse" />
-                  reading the conversation…
+                  {parser.genProgress !== undefined && parser.genProgress > 0
+                    ? `reading the conversation… ${Math.round(parser.genProgress * 100)}%`
+                    : 'reading the conversation…'}
                 </span>
               )}
               {!parser.isParsing && parser.isParaphrasing && (
@@ -644,6 +671,37 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 />
               </div>
             )}
+
+            {/* LIVE generation progress — per-token streamed by the worker
+                (tokens generated / max_new_tokens), so the bar reflects the
+                model's actual parsing speed instead of an indeterminate
+                shimmer. Before the first token arrives (prompt processing),
+                the bar stays at 0 with an indeterminate shimmer. */}
+            {parser.enabled &&
+              parser.status === 'ready' &&
+              (parser.isParsing || parser.isParaphrasing) && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10">
+                    <div
+                      className={cn(
+                        'h-full rounded-full bg-amber-500 transition-all duration-150',
+                        // No tokens yet → prompt is still being processed
+                        !parser.genProgress && 'w-1/4 animate-pulse'
+                      )}
+                      style={
+                        parser.genProgress
+                          ? { width: `${Math.max(2, parser.genProgress * 100)}%` }
+                          : undefined
+                      }
+                    />
+                  </div>
+                  <span className="shrink-0 text-[9px] leading-none text-muted-foreground/80">
+                    {parser.genProgress
+                      ? `${Math.round(parser.genProgress * 100)}%`
+                      : '…'}
+                  </span>
+                </div>
+              )}
 
             {/* AI parse debug: prompt window stats + the exact text sent to
                 the model + the model's raw reply */}
@@ -857,7 +915,10 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                     : parser.status === 'loading'
                       ? parser.progress
                       : parser.isParsing || parser.isParaphrasing
-                        ? 'run'
+                        ? // Determinate when tokens are streaming, else run
+                          parser.genProgress
+                            ? Math.max(3, parser.genProgress * 100)
+                            : 'run'
                         : null
                 }
                 text={
@@ -868,9 +929,13 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                       : parser.status === 'error'
                         ? 'model failed to load'
                         : parser.isParsing
-                          ? 'parsing conversation…'
+                          ? parser.genProgress
+                            ? `parsing… ${Math.round(parser.genProgress * 100)}%`
+                            : 'parsing conversation…'
                           : parser.isParaphrasing
-                            ? 'polishing notes…'
+                            ? parser.genProgress
+                              ? `polishing… ${Math.round(parser.genProgress * 100)}%`
+                              : 'polishing notes…'
                             : parser.lastParseMs !== null
                               ? `parsed · ${(parser.lastParseMs / 1000).toFixed(1)}s${
                                   parser.window
