@@ -338,7 +338,10 @@ export function buildParsePrompt(
   entries: TranscriptEntry[],
   missingFieldIds: readonly string[],
   prior?: PriorLlmValues,
-  strict = false
+  strict = false,
+  /** 'simple' = the LAST-RESORT retry format: plain "field: value" lines
+   *  instead of JSON, for models that keep breaking the JSON contract. */
+  format: 'json' | 'simple' = 'json'
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -363,6 +366,38 @@ export function buildParsePrompt(
           : '',
     ])
   );
+
+  // ---- SIMPLE format: plain lines, the last-resort retry -----------------
+  // Small models struggling with long transcripts keep breaking the JSON
+  // contract (unbalanced braces, quotes inside values, mid-object
+  // truncation). Line labels cannot break structurally — each line stands
+  // alone — so the retry with this format almost always yields fields.
+  if (format === 'simple') {
+    const system = [
+      'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
+      'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
+      'customerName: <the customer\'s own name, or empty>',
+      'contactNumber: <their phone number, or empty>',
+      'emailAddress: <their email, or empty>',
+      'deebotModel: <the robot model, e.g. T30S / X2 OMNI / GOAT O1000 RTK, or empty>',
+      'skuNumber: <SKU as spoken, or empty>',
+      'serialNumber: <serial as spoken, or empty>',
+      'purchaseInfo: <store + when, e.g. "Amazon · March 2025", or empty>',
+      'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>',
+      'issueType: <"Category::Item" or short phrase, or empty>',
+      'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>',
+      'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them.',
+    ].join('\n');
+    const userLines = ['Support call transcript:', renderTranscript(entries)];
+    if (prior?.issueDescription) {
+      userLines.push('', 'issueDescription currently:', prior.issueDescription);
+    }
+    if (prior?.resolutionSummary) {
+      userLines.push('', 'resolutionSummary currently:', prior.resolutionSummary);
+    }
+    userLines.push('', 'Reply with the eleven lines now, one per field.');
+    return { system, user: userLines.join('\n') };
+  }
 
   const system = [
     'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
@@ -569,6 +604,67 @@ export function extractJsonLoose(raw: string): Record<string, unknown> | null {
     }
   }
   return Object.keys(salvaged).length > 0 ? salvaged : null;
+}
+
+/**
+ * SIMPLE-FORMAT extractor: "key: value" lines, no JSON punctuation at all.
+ *
+ * The strict-retry fallback for models that cannot hold the JSON contract
+ * (unbalanced braces, quotes-inside-values, truncation — all the classic
+ * small-model failure modes). Line labels are trivial for even a 360M model
+ * to emit and cannot be structurally broken: every line stands alone, so a
+ * truncated reply still yields every line that completed. Accepted forms:
+ *
+ *   customerName: Dan Knight
+ *   contact number: (310) 173-4037      ← spoken labels tolerated
+ *   issueDescription: stops after a few passes
+ *   - resolutionSummary: reset the machine      ← leading bullets tolerated
+ *
+ * Blank / placeholder values ("n/a", '""') are dropped by the shared
+ * validateLlmFields, exactly as on the JSON path.
+ */
+const LINE_LABELS: Record<string, string> = {
+  customername: 'customerName',
+  name: 'customerName',
+  contactnumber: 'contactNumber',
+  phone: 'contactNumber',
+  phonenumber: 'contactNumber',
+  emailaddress: 'emailAddress',
+  email: 'emailAddress',
+  deebotmodel: 'deebotModel',
+  model: 'deebotModel',
+  skunumber: 'skuNumber',
+  sku: 'skuNumber',
+  serialnumber: 'serialNumber',
+  serial: 'serialNumber',
+  purchaseinfo: 'purchaseInfo',
+  purchase: 'purchaseInfo',
+  issuedescription: 'issueDescription',
+  issue: 'issueDescription',
+  issuetype: 'issueType',
+  resolutionsummary: 'resolutionSummary',
+  resolution: 'resolutionSummary',
+};
+
+export function extractLineFields(raw: string): Record<string, unknown> | null {
+  if (!raw) return null;
+  const out: Record<string, unknown> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    // Leading bullets/dashes/quotes tolerated; label up to the first colon
+    const m = line.match(/^\s*[-*•"']*\s*([A-Za-z][A-Za-z ]{1,30}?)\s*:\s*(.+)$/);
+    if (!m) continue;
+    const fieldId = LINE_LABELS[m[1].toLowerCase().replace(/\s+/g, '')];
+    if (!fieldId || fieldId in out) continue;
+    let value = m[2].trim();
+    // Strip wrapping quotes the model may still emit around values
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1);
+    }
+    value = value.trim();
+    if (value.length === 0) continue;
+    out[fieldId] = value;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -500,9 +500,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </span>
               )}
               {engine.status === 'ready' && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className="text-[10px] text-muted-foreground">
                   on-device{engine.dtype ? ` · ${engine.dtype}` : ''}
-                  <RamBadge stats={engine.memStats} titleBase="Whisper worker" />
                 </span>
               )}
               {engine.status === 'error' && (
@@ -600,29 +599,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </span>
               )}
               {parser.enabled && parser.status === 'ready' && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  standby
-                  {/* Backend badge — GPU means WebGPU inference (an order of
-                      magnitude faster); CPU means the WASM fallback */}
-                  {parser.device && (
-                    <span
-                      className={cn(
-                        'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
-                        parser.device === 'gpu'
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-foreground/10 text-muted-foreground/80'
-                      )}
-                      title={
-                        parser.device === 'gpu'
-                          ? 'WebGPU acceleration active — inference runs on the GPU'
-                          : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
-                      }
-                    >
-                      {parser.device === 'gpu' ? 'GPU' : 'CPU'}
-                    </span>
-                  )}
-                  <RamBadge stats={parser.memStats} titleBase="LLM parser worker" />
-                </span>
+                <span className="text-[10px] text-muted-foreground">standby</span>
               )}
               {parser.enabled && parser.status === 'error' && (
                 <span className="text-[10px] text-destructive" title={parser.error ?? undefined}>
@@ -704,6 +681,35 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </button>
               )}
             </div>
+
+            {/* RESOURCE line — backend + both workers' RAM, on its own line
+                under the status/selector row so the badges never wrap the
+                controls. GPU = WebGPU inference (order of magnitude faster);
+                CPU = WASM fallback. RAM = each worker's JS heap (weights
+                live in WASM/GPU memory). Hidden until the workers report. */}
+            {parser.enabled && parser.status === 'ready' && (parser.device || parser.memStats || engine.memStats) && (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {parser.device && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                      parser.device === 'gpu'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-foreground/10 text-muted-foreground/80'
+                    )}
+                    title={
+                      parser.device === 'gpu'
+                        ? 'WebGPU acceleration active — inference runs on the GPU'
+                        : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
+                    }
+                  >
+                    {parser.device === 'gpu' ? 'GPU' : 'CPU'}
+                  </span>
+                )}
+                <RamBadge stats={parser.memStats} titleBase="LLM parser worker" />
+                <RamBadge stats={engine.memStats} titleBase="Whisper worker" />
+              </div>
+            )}
 
             {/* Download progress */}
             {parser.enabled && parser.status === 'loading' && (

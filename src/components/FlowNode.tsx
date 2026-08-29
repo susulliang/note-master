@@ -832,19 +832,30 @@ function FlowNodeComponent({
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         isActive ? accentGlows[accent] : accentBorders[accent],
         isActive && 'animate-pulse-slow',
-        // Auto-parsed value awaiting proofreading — yellow glow takes
-        // precedence over the accent skins (later in the stylesheet)
-        parsedSource && 'glass-parsed',
+        // Auto-parsed value awaiting proofreading — engine-colored glow
+        // takes precedence over the accent skins (later in the stylesheet):
+        // YELLOW = LLM's full-context reading, BLUE = provisional regex
+        // match the AI may still replace
+        parsedSource === 'llm' && 'glass-parsed',
+        parsedSource && parsedSource !== 'llm' && 'glass-parsed-regex',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
       )}
       onMouseDown={handleMouseDown}
     >
-      {/* Parsed-field badge — which engine filled it, until it's proofread */}
+      {/* Parsed-field badge — which engine filled it, until it's proofread
+          (yellow for the AI parser, blue for the provisional regex match) */}
       {parsedSource && (
         <span
-          className="absolute right-2 top-2 z-10 rounded-full border border-amber-400/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-300"
+          className={cn(
+            'absolute right-2 top-2 z-10 rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+            parsedSource === 'llm'
+              ? 'border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300'
+              : parsedSource === 'paraphrase'
+                ? 'border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300'
+                : 'border-sky-400/40 bg-sky-400/15 text-sky-600 dark:text-sky-300'
+          )}
           title={
             parsedSource === 'llm'
               ? 'Filled by the on-device AI parser from the whole conversation — please verify'
