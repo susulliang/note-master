@@ -1000,6 +1000,42 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}
+            engine={{
+              isSupported: localWhisper.isSupported,
+              model: localWhisper.model,
+              status: localWhisper.status,
+              progress: localWhisper.progress,
+              dtype: localWhisper.dtype,
+              error: localWhisper.error,
+              lastInferenceMs: localWhisper.lastInferenceMs,
+              memStats: localWhisper.memStats,
+              onSwitchModel: handleSwitchWhisperModel,
+            }}
+            parser={{
+              enabled: llmParser.enabled,
+              model: llmParser.model,
+              models: llmParser.models,
+              status: llmParser.status,
+              progress: llmParser.progress,
+              error: llmParser.error,
+              isParsing: llmParser.isParsing,
+              isParaphrasing: llmParser.isParaphrasing,
+              lastParseMs: llmParser.lastParseMs,
+              device: llmParser.device,
+              dtype: llmParser.dtype,
+              genProgress: llmParser.genProgress,
+              memStats: llmParser.memStats,
+              failedAttempts: llmParser.failedAttempts,
+              window: llmParser.lastWindow,
+              lastReply: llmParser.lastReply,
+              lastStats: llmParser.lastStats,
+              onLoadDevice: handleLoadLlmDevice,
+              onToggleEnabled: handleToggleLlmEnabled,
+              onSwitchModel: handleSwitchLlmModel,
+              onLoad: handleLoadLlm,
+            }}
+            transcript={call.transcript}
+            isTranscribing={call.isTranscribing}
           />
           <FlowchartCanvas
             nodes={nodes}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { RotateCcw, History, Type, Mic, MicOff } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -13,6 +13,11 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import HistoryPanel from '@/components/HistoryPanel';
+import EngineSettingsPanel, {
+  type EngineState,
+  type ParserState,
+} from '@/components/EngineSettingsPanel';
+import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import type { NoteHistoryEntry } from '@/data/ticket';
@@ -33,6 +38,11 @@ interface FloatingControlsProps {
   callSupported: boolean;
   callCapturing: boolean;
   onToggleCall: () => void;
+  /** Engine settings panel (gear): whisper/LLM state + handlers */
+  engine?: EngineState;
+  parser?: ParserState;
+  transcript?: TranscriptEntry[];
+  isTranscribing?: boolean;
 }
 
 /** Screen corner the toolbar is docked to */
@@ -75,9 +85,14 @@ export default function FloatingControls({
   callSupported,
   callCapturing,
   onToggleCall,
+  engine,
+  parser,
+  transcript,
+  isTranscribing,
 }: FloatingControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
+  const [engineOpen, setEngineOpen] = useState(false);
 
   // Docked corner (persisted) + transient free position while dragging
   const [corner, setCorner] = useScopedState<Corner>('ecovacs_ticket_toolbar_corner', 'tr');
@@ -344,6 +359,29 @@ export default function FloatingControls({
               <Type className="size-4" />
             </Button>
 
+            {/* Engine settings — the gear opens the Whisper/LLM/downloads/
+                resources/debug panel (like the History button opens history) */}
+            {engine && parser && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setEngineOpen((v) => !v)}
+                className={cn(
+                  'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
+                  engineOpen && 'bg-foreground/10 text-foreground'
+                )}
+                aria-label="Engine settings"
+                title="Engine settings — Whisper & LLM models, downloads, resources, debug"
+              >
+                <Settings className="size-4" />
+                {(engine.status === 'error' || parser.status === 'error') && (
+                  <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-destructive" />
+                  </span>
+                )}
+              </Button>
+            )}
+
             <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
             <Button
@@ -379,6 +417,25 @@ export default function FloatingControls({
             onClearHistory={onClearHistory}
             onClose={onToggleHistory}
           />
+        )}
+
+        {/* Engine settings panel — opens from the gear like the History
+            panel opens from its button; renders alongside the pill inside
+            the docked-corner flex container. */}
+        {engineOpen && engine && parser && (
+          <>
+            {/* Click-outside catcher */}
+            <div className="fixed inset-0 z-40" onClick={() => setEngineOpen(false)} aria-hidden="true" />
+            <EngineSettingsPanel
+              engine={engine}
+              parser={parser}
+              transcript={transcript ?? []}
+              isCapturing={callCapturing}
+              isTranscribing={!!isTranscribing}
+              onToggleCapture={onToggleCall}
+              onClose={() => setEngineOpen(false)}
+            />
+          </>
         )}
       </div>
     </>
