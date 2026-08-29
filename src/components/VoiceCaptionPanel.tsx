@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Braces, Bug, BrainCircuit, Copy, Cpu, Loader2, Mic, MicOff, MonitorPlay, Settings, Sparkles, Trash2, X } from 'lucide-react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { Braces, Bug, BrainCircuit, Copy, Cpu, Loader2, Mic, MicOff, MonitorPlay, Settings, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -356,6 +356,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   const [jsonCopied, setJsonCopied] = useState(false);
   /** Download manager (gear): pick CPU/GPU build of each model */
   const [showDownloadManager, setShowDownloadManager] = useState(false);
+  /** Settings panel (gear): all engine controls + resource/debug readouts */
+  const [showSettings, setShowSettings] = useState(false);
 
   // The raw reply, pretty-printed when it parses as JSON (loose extraction
   // first — the model sometimes wraps the object in prose or fences)
@@ -549,376 +551,258 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           >
             <Trash2 className="size-3.5" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowSettings((v) => !v)}
+            className={cn(
+              'size-7 shrink-0 rounded-full',
+              showSettings
+                ? 'bg-foreground/10 text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+            aria-label="Engine settings"
+            title="Engine settings — Whisper & LLM models, downloads, resource indicators, debug"
+          >
+            <Settings className="size-3.5" />
+          </Button>
         </div>
 
-        {/* Per-speaker audio level meters + engine resource badges — proves
-            each channel is live AND shows what the AI engines are using */}
-        {isActive && activeSource === 'call' && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-3">
-            <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
-            {call.hasMic ? (
-              <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
-            ) : (
-              <span
-                className="text-[10px] text-muted-foreground/70"
-                title="No microphone was shared — only the customer side is transcribed"
-              >
-                mic unavailable — customer only
-              </span>
-            )}
-
-            {/* Engine resources — right side of the meter line */}
-            <span className="ml-auto flex flex-wrap items-center gap-1.5">
-              {parser?.device && parser.status === 'ready' && (
-                <span
-                  className={cn(
-                    'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
-                    parser.device === 'gpu'
-                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                      : 'bg-foreground/10 text-muted-foreground/80'
-                  )}
-                  title={
-                    parser.device === 'gpu'
-                      ? 'WebGPU acceleration active — inference runs on the GPU'
-                      : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
-                  }
-                >
-                  {parser.device === 'gpu' ? 'GPU' : 'CPU'}
-                </span>
-              )}
-              {cpuDuty > 0 && (
-                <span
-                  className={cn(
-                    'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
-                    cpuDuty > 80
-                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                      : 'bg-foreground/10 text-muted-foreground/80'
-                  )}
-                  title="Engine inference load — % of the last 15s that Whisper or the LLM was actually computing (the browser exposes no per-worker CPU number; this duty-cycle is the honest signal)"
-                >
-                  CPU {cpuDuty}%
-                </span>
-              )}
-              <RamBadge stats={parser?.memStats} estimateMb={llmRamEstimate} titleBase="LLM parser worker" />
-              <RamBadge stats={engine.memStats} estimateMb={whisperRamEstimate} titleBase="Whisper worker" />
-            </span>
-
-            {call.hasMic && !bothQuiet && (
-              <span
-                className="text-[9px] text-muted-foreground/60"
-                title="Browsers can't echo-cancel audio playing in another tab, so speakers leak the customer's voice into your mic and their words may also appear under Agent. A headset keeps the two speakers cleanly separated."
-              >
-                headset recommended
-              </span>
-            )}
-            {bothQuiet && call.transcript.length === 0 && (
-              <span className="text-[10px] text-muted-foreground/70">
-                no audio detected
-              </span>
-            )}
-          </div>
-        )}
-        {isActive && activeSource === 'mic' && (
-          <div className="mt-1.5 flex items-center gap-2">
-            <SpeakerMeter label="Mic" level={mic.level} tone="red" />
-            {mic.level < 0.05 && !mic.finalTranscript && (
-              <span className="text-[10px] text-muted-foreground/70">no audio detected</span>
-            )}
-          </div>
-        )}
-
-        {/* Local Whisper engine — model toggle + status (call mode) */}
-        {activeSource === 'call' && engine.isSupported && (
-          <div className="mt-1.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold leading-none text-emerald-600 dark:text-emerald-400"
-                title="Transcription runs on this machine — audio never leaves the browser"
-              >
-                <Cpu className="size-2.5" />
-                Local
-              </span>
-
-              {/* base.en ⇄ tiny.en segmented toggle */}
-              <span className="inline-flex overflow-hidden rounded-full border border-border/40">
-                {WHISPER_MODELS.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => engine.onSwitchModel(name)}
-                    disabled={engine.status === 'loading' && engine.model === name}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
-                      engine.model === name
-                        ? 'bg-foreground/10 text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                    title={WHISPER_MODEL_META[name].note}
+        {/* SETTINGS PANEL (gear) — everything engine-related lives here so
+            the live caption panel stays just captions: model selectors,
+            download management, resource badges, and the parse debug view. */}
+        {showSettings && (
+          <div className="mt-1.5 max-h-[45vh] space-y-2 overflow-y-auto rounded-lg bg-background/60 p-2 custom-scrollbar">
+            {/* ---- Whisper engine ---- */}
+            {engine.isSupported && (
+              <div>
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Whisper (transcription)
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold leading-none text-emerald-600 dark:text-emerald-400"
+                    title="Transcription runs on this machine — audio never leaves the browser"
                   >
-                    {WHISPER_MODEL_META[name].label}
-                  </button>
-                ))}
-              </span>
-
-              {/* Engine status */}
-              {engine.status === 'loading' && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <Loader2 className="size-2.5 animate-spin" />
-                  downloading {engine.progress}%
-                </span>
-              )}
-              {engine.status === 'ready' && (
-                <span className="text-[10px] text-muted-foreground">
-                  on-device{engine.dtype ? ` · ${engine.dtype}` : ''}
-                </span>
-              )}
-              {engine.status === 'error' && (
-                <span className="text-[10px] text-destructive">model failed to load</span>
-              )}
-              {engine.lastInferenceMs !== null && engine.status === 'ready' && (
-                <span
-                  className="text-[10px] text-muted-foreground/70"
-                  title="Inference time for the last 15s segment"
-                >
-                  {(engine.lastInferenceMs / 1000).toFixed(1)}s/seg
-                </span>
-              )}
-            </div>
-
-            {/* Download progress */}
-            {engine.status === 'loading' && (
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all duration-300"
-                  style={{ width: `${Math.max(3, engine.progress)}%` }}
-                />
-              </div>
-            )}
-
-            {engine.error && (
-              <p className="mt-1 text-[10px] leading-snug text-destructive/90">{engine.error}</p>
-            )}
-          </div>
-        )}
-
-        {/* On-device LLM — the PRIMARY parser: reads the whole conversation
-            (agent + customer) and overrides pattern-matched values */}
-        {activeSource === 'call' && parser && (
-          <div className="mt-1.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {/* Enable / disable the AI parser */}
-              <button
-                type="button"
-                onClick={() => parser.onToggleEnabled(!parser.enabled)}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors',
-                  parser.enabled
-                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                    : 'bg-foreground/10 text-muted-foreground'
-                )}
-                title={
-                  parser.enabled
-                    ? 'The on-device LLM reads the whole conversation (agent + customer) and fills the ticket — pattern matches are only provisional until then'
-                    : 'Enable the on-device LLM to parse the conversation (pattern matching only, without it)'
-                }
-              >
-                <BrainCircuit className="size-2.5" />
-                {parser.enabled ? 'AI parser on' : 'AI parser off'}
-              </button>
-
-              {/* Model segmented toggle + download manager gear */}
-              {parser.enabled && (
-                <>
+                    <Cpu className="size-2.5" />
+                    Local
+                  </span>
                   <span className="inline-flex overflow-hidden rounded-full border border-border/40">
-                    {parser.models.map((name) => (
+                    {WHISPER_MODELS.map((name) => (
                       <button
                         key={name}
                         type="button"
-                        onClick={() => parser.onSwitchModel(name)}
-                        disabled={parser.status === 'loading' && parser.model === name}
+                        onClick={() => engine.onSwitchModel(name)}
+                        disabled={engine.status === 'loading' && engine.model === name}
                         className={cn(
                           'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
-                          parser.model === name
+                          engine.model === name
                             ? 'bg-foreground/10 text-foreground'
                             : 'text-muted-foreground hover:text-foreground'
                         )}
-                        title={LLM_MODEL_META[name].note}
+                        title={WHISPER_MODEL_META[name].note}
                       >
-                        {LLM_MODEL_META[name].label}
+                        {WHISPER_MODEL_META[name].label}
                       </button>
                     ))}
                   </span>
-
-                  {/* Gear → download manager: pick the CPU or GPU build of
-                      the selected model (each is a separate one-time
-                      download) */}
-                  {parser.onLoadDevice && (
-                    <button
-                      type="button"
-                      onClick={() => setShowDownloadManager((v) => !v)}
-                      className={cn(
-                        'inline-flex items-center rounded-full p-1 leading-none transition-colors',
-                        showDownloadManager
-                          ? 'bg-foreground/10 text-foreground'
-                          : 'text-muted-foreground/70 hover:text-foreground'
-                      )}
-                      title="Manage model downloads — pick the CPU (q8) or GPU (fp32) build of each model"
+                  {engine.status === 'loading' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <Loader2 className="size-2.5 animate-spin" />
+                      downloading {engine.progress}%
+                    </span>
+                  )}
+                  {engine.status === 'ready' && (
+                    <span className="text-[10px] text-muted-foreground">
+                      on-device{engine.dtype ? ` · ${engine.dtype}` : ''}
+                    </span>
+                  )}
+                  {engine.status === 'error' && (
+                    <span className="text-[10px] text-destructive">model failed to load</span>
+                  )}
+                  {engine.lastInferenceMs !== null && engine.status === 'ready' && (
+                    <span
+                      className="text-[10px] text-muted-foreground/70"
+                      title="Inference time for the last 15s segment"
                     >
-                      <Settings className="size-3" />
-                    </button>
+                      {(engine.lastInferenceMs / 1000).toFixed(1)}s/seg
+                    </span>
                   )}
-                </>
-              )}
-
-              {/* Status */}
-              {parser.enabled && parser.status === 'idle' && (
-                <button
-                  type="button"
-                  onClick={parser.onLoad}
-                  className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-                  title="Download the model now (one-time, cached by the browser)"
-                >
-                  load model
-                </button>
-              )}
-              {parser.enabled && parser.status === 'loading' && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <Loader2 className="size-2.5 animate-spin" />
-                  downloading {parser.progress}%
-                </span>
-              )}
-              {parser.enabled && parser.status === 'ready' && (
-                <span className="text-[10px] text-muted-foreground">standby</span>
-              )}
-              {parser.enabled && parser.status === 'error' && (
-                <span className="text-[10px] text-destructive" title={parser.error ?? undefined}>
-                  model failed to load
-                </span>
-              )}
-              {parser.isParsing && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
-                  <Sparkles className="size-2.5 animate-pulse" />
-                  {parser.genProgress !== undefined && parser.genProgress > 0
-                    ? `reading the conversation… ${Math.round(parser.genProgress * 100)}%`
-                    : 'reading the conversation…'}
-                </span>
-              )}
-              {!parser.isParsing && parser.isParaphrasing && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
-                  <Sparkles className="size-2.5 animate-pulse" />
-                  polishing notes…
-                </span>
-              )}
-              {parser.lastParseMs !== null && !parser.isParsing && (
-                <span
-                  className="text-[10px] text-muted-foreground/70"
-                  title="Duration of the last parse over the whole conversation"
-                >
-                  {(parser.lastParseMs / 1000).toFixed(1)}s/parse
-                </span>
-              )}
-              {parser.lastStats && parser.lastStats.tokensPerSec > 0 && (
-                <span
-                  className="text-[10px] text-muted-foreground/70"
-                  title="Model output speed of the last parse (output tokens per generation second, ~4 chars/token estimate)"
-                >
-                  {parser.lastStats.tokensPerSec} tok/s
-                </span>
-              )}
-
-              {/* Debug: show exactly what the model was sent and what it
-                  replied — makes parsing failures inspectable in the field */}
-              {parser.enabled && parser.status === 'ready' && (
-                <button
-                  type="button"
-                  onClick={() => setShowLlmDebug((v) => !v)}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
-                    showLlmDebug
-                      ? 'bg-foreground/10 text-foreground'
-                      : 'text-muted-foreground/70 hover:text-foreground'
+                  {/* Start / pause transcription */}
+                  {activeSource === 'call' && (
+                    <Button
+                      variant={isActive ? 'destructive' : 'default'}
+                      size="sm"
+                      onClick={call.onToggle}
+                      className="h-6 gap-1 rounded-full px-2.5 text-[10px]"
+                      title={isActive ? 'Stop transcription' : 'Start transcription'}
+                    >
+                      {isActive ? <MicOff className="size-2.5" /> : <Mic className="size-2.5" />}
+                      {isActive ? 'Stop' : 'Start'}
+                    </Button>
                   )}
-                  title="Highlight the transcript lines sent to the AI parser in the last parse, and show the model's raw reply"
-                >
-                  <Bug className="size-2.5" />
-                  {showLlmDebug ? 'hide' : 'debug'}
-                </button>
-              )}
-
-              {/* Floating window with the raw JSON the model last returned —
-                  visible after ANY completed parse attempt, including a
-                  timed-out one (an empty reply is exactly the case worth
-                  inspecting) */}
-              {parser.enabled && parser.status === 'ready' && (parser.lastReply || parser.lastStats) && (
-                <button
-                  type="button"
-                  onClick={() => setShowJsonWindow(true)}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
-                    parser.lastStats?.timedOut
-                      ? 'text-destructive/80 hover:text-destructive'
-                      : 'text-muted-foreground/70 hover:text-foreground'
-                  )}
-                  title={
-                    parser.lastStats?.timedOut
-                      ? 'The last parse TIMED OUT — the model never finished generating. Open the floating window for details'
-                      : 'Open a floating window with the raw JSON the LLM returned on the last parse'
-                  }
-                >
-                  <Braces className="size-2.5" />
-                  json
-                </button>
-              )}
-            </div>
-
-            {/* Download progress */}
-            {parser.enabled && parser.status === 'loading' && (
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
-                <div
-                  className="h-full rounded-full bg-amber-500 transition-all duration-300"
-                  style={{ width: `${Math.max(3, parser.progress)}%` }}
-                />
+                </div>
+                {engine.status === 'loading' && (
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${Math.max(3, engine.progress)}%` }}
+                    />
+                  </div>
+                )}
+                {engine.error && (
+                  <p className="mt-1 text-[10px] leading-snug text-destructive/90">{engine.error}</p>
+                )}
               </div>
             )}
 
-            {/* LIVE generation progress — per-token streamed by the worker
-                (tokens generated / max_new_tokens), so the bar reflects the
-                model's actual parsing speed instead of an indeterminate
-                shimmer. Before the first token arrives (prompt processing),
-                the bar stays at 0 with an indeterminate shimmer. */}
-            {parser.enabled &&
-              parser.status === 'ready' &&
-              (parser.isParsing || parser.isParaphrasing) && (
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10">
+            {/* ---- LLM parser ---- */}
+            {parser && (
+              <div>
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  AI parser (LLM)
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => parser.onToggleEnabled(!parser.enabled)}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors',
+                      parser.enabled
+                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                        : 'bg-foreground/10 text-muted-foreground'
+                    )}
+                    title={
+                      parser.enabled
+                        ? 'The on-device LLM reads the whole conversation (agent + customer) and fills the ticket — pattern matches are only provisional until then'
+                        : 'Enable the on-device LLM to parse the conversation (pattern matching only, without it)'
+                    }
+                  >
+                    <BrainCircuit className="size-2.5" />
+                    {parser.enabled ? 'AI parser on' : 'AI parser off'}
+                  </button>
+                  {parser.enabled && (
+                    <span className="inline-flex overflow-hidden rounded-full border border-border/40">
+                      {parser.models.map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => parser.onSwitchModel(name)}
+                          disabled={parser.status === 'loading' && parser.model === name}
+                          className={cn(
+                            'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
+                            parser.model === name
+                              ? 'bg-foreground/10 text-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )}
+                          title={LLM_MODEL_META[name].note}
+                        >
+                          {LLM_MODEL_META[name].label}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                  {parser.enabled && parser.status === 'idle' && (
+                    <button
+                      type="button"
+                      onClick={parser.onLoad}
+                      className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                      title="Download the model now (one-time, cached by the browser)"
+                    >
+                      load model
+                    </button>
+                  )}
+                  {parser.enabled && parser.status === 'loading' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <Loader2 className="size-2.5 animate-spin" />
+                      downloading {parser.progress}%
+                    </span>
+                  )}
+                  {parser.enabled && parser.status === 'ready' && (
+                    <span className="text-[10px] text-muted-foreground">standby</span>
+                  )}
+                  {parser.enabled && parser.status === 'error' && (
+                    <span className="text-[10px] text-destructive" title={parser.error ?? undefined}>
+                      model failed to load
+                    </span>
+                  )}
+                  {parser.lastParseMs !== null && !parser.isParsing && (
+                    <span
+                      className="text-[10px] text-muted-foreground/70"
+                      title="Duration of the last parse over the whole conversation"
+                    >
+                      {(parser.lastParseMs / 1000).toFixed(1)}s/parse
+                    </span>
+                  )}
+                  {parser.lastStats && parser.lastStats.tokensPerSec > 0 && (
+                    <span
+                      className="text-[10px] text-muted-foreground/70"
+                      title="Model output speed of the last parse (output tokens per generation second, ~4 chars/token estimate)"
+                    >
+                      {parser.lastStats.tokensPerSec} tok/s
+                    </span>
+                  )}
+                </div>
+                {parser.enabled && parser.status === 'loading' && (
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
                     <div
-                      className={cn(
-                        'h-full rounded-full bg-amber-500 transition-all duration-150',
-                        // No tokens yet → prompt is still being processed
-                        !parser.genProgress && 'w-1/4 animate-pulse'
-                      )}
-                      style={
-                        parser.genProgress
-                          ? { width: `${Math.max(2, parser.genProgress * 100)}%` }
-                          : undefined
-                      }
+                      className="h-full rounded-full bg-amber-500 transition-all duration-300"
+                      style={{ width: `${Math.max(3, parser.progress)}%` }}
                     />
                   </div>
-                  <span className="shrink-0 text-[9px] leading-none text-muted-foreground/80">
-                    {parser.genProgress
-                      ? `${Math.round(parser.genProgress * 100)}%`
-                      : '…'}
-                  </span>
-                </div>
-              )}
+                )}
+                {parser.error && (
+                  <p className="mt-1 text-[10px] leading-snug text-destructive/90">{parser.error}</p>
+                )}
+              </div>
+            )}
 
-            {/* Download manager (gear): the CPU/GPU build of each model.
-                Clicking a variant downloads it pinned to that backend —
-                each is a separate one-time download cached by the browser. */}
-            {showDownloadManager && parser.onLoadDevice && (
-              <div className="mt-1.5 rounded-lg bg-background/60 p-2">
-                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Model downloads — CPU (q8) vs GPU (fp32) builds
+            {/* ---- Resource indicators ---- */}
+            <div>
+              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Resources
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {parser?.device && parser.status === 'ready' && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                      parser.device === 'gpu'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-foreground/10 text-muted-foreground/80'
+                    )}
+                    title={
+                      parser.device === 'gpu'
+                        ? 'WebGPU acceleration active — inference runs on the GPU'
+                        : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
+                    }
+                  >
+                    {parser.device === 'gpu' ? 'GPU' : 'CPU'}
+                  </span>
+                )}
+                {cpuDuty > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                      cpuDuty > 80
+                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                        : 'bg-foreground/10 text-muted-foreground/80'
+                    )}
+                    title="Engine inference load — % of the last 15s that Whisper or the LLM was actually computing"
+                  >
+                    CPU {cpuDuty}%
+                  </span>
+                )}
+                <RamBadge stats={parser?.memStats} estimateMb={llmRamEstimate} titleBase="LLM parser worker" />
+                <RamBadge stats={engine.memStats} estimateMb={whisperRamEstimate} titleBase="Whisper worker" />
+              </div>
+            </div>
+
+            {/* ---- Download manager (CPU/GPU builds) ---- */}
+            {parser?.onLoadDevice && (
+              <div>
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Model downloads — CPU (q8) vs GPU (fp32)
                 </p>
                 <div className="flex flex-col gap-1.5">
                   {parser.models.map((name) => (
@@ -959,11 +843,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                               title={`${variant.note}${isFailed ? ' · this build failed to initialize last time — the error is shown below' : ''}`}
                             >
                               <span className="flex items-center gap-1 text-[9px] font-bold uppercase leading-none tracking-wide text-foreground">
-                                {variant.device === 'gpu' ? (
-                                  <Cpu className="size-2.5 text-emerald-500" />
-                                ) : (
-                                  <Cpu className="size-2.5 text-muted-foreground/70" />
-                                )}
+                                <Cpu className="size-2.5 text-muted-foreground/70" />
                                 {variant.label}
                                 {isFailed && <span className="text-destructive">!</span>}
                               </span>
@@ -977,8 +857,6 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                     </div>
                   ))}
                 </div>
-                {/* Why a build failed — e.g. gpu/fp32 downloaded but the
-                    WebGPU session could not initialize on this machine */}
                 {parser.failedAttempts && parser.failedAttempts.length > 0 && (
                   <div className="mt-1.5 rounded-md bg-destructive/10 p-1.5">
                     <p className="text-[9px] font-bold uppercase tracking-wide text-destructive">
@@ -992,83 +870,153 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   </div>
                 )}
                 <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-                  Each build is a separate one-time download cached by the browser. GPU builds
-                  need WebGPU (Chrome/Edge 113+); if a GPU build fails, the CPU build is the
-                  reliable fallback. Only one model is resident at a time.
+                  Each build is a separate one-time download cached by the browser. GPU builds need
+                  WebGPU (Chrome/Edge 113+); if a GPU build fails, the CPU build is the reliable
+                  fallback. Only one model is resident at a time.
                 </p>
               </div>
             )}
 
-            {/* AI parse debug: the LIVE prompt window (what the NEXT parse
-                will send — updates as the conversation grows) + the last
-                parse's speed metrics and raw reply */}
-            {showLlmDebug && (
-              <div className="mt-1.5 rounded-lg bg-background/60 p-2 font-mono text-[9px] leading-relaxed">
-                {liveWindow || parser.window ? (
-                  <>
-                    <p className="text-muted-foreground">
-                      {/* Live window while idle (next parse's input);
-                          during/after a parse show what was actually sent */}
-                      {parser.isParsing
-                        ? 'parsing — window sent: '
-                        : 'next parse window (live): '}
-                      <span className="font-bold text-amber-600 dark:text-amber-400">
-                        {(liveWindow ?? parser.window)!.entryIndexes.length}
-                      </span>
-                      /{call.transcript.length} lines · {(liveWindow ?? parser.window)!.chars}{' '}
-                      chars · ~{Math.ceil((liveWindow ?? parser.window)!.chars / 4)} tokens
-                      (system prompt adds ~0.4k more)
-                      {(liveWindow ?? parser.window)!.entryIndexes.length <
-                        call.transcript.length && ' · grey lines will NOT be sent'}
-                    </p>
-                    {/* The verbatim transcript text the next/last parse sends —
-                        filler turns stripped, window-capped, LIVE-updating */}
-                    <pre className="custom-scrollbar mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded bg-foreground/5 p-1.5 text-foreground/80">
-                      {(liveWindow ?? parser.window)!.text}
-                    </pre>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">no transcript yet</p>
-                )}
-                {/* Speed metrics: prompt size in → reply out, generation
-                    time, output tokens/s (the "json" chip opens the full
-                    reply in a floating window) */}
-                {parser.lastStats && (
-                  <p className="mt-1 text-muted-foreground">
-                    <span className="font-bold text-foreground/80">speed:</span>{' '}
-                    {parser.lastStats.promptChars.toLocaleString()} chars in (~
-                    {parser.lastStats.promptTokens.toLocaleString()} tok) →{' '}
-                    {parser.lastStats.replyChars.toLocaleString()} chars out (~
-                    {parser.lastStats.replyTokens.toLocaleString()} tok) · gen{' '}
-                    {(parser.lastStats.genMs / 1000).toFixed(1)}s · wall{' '}
-                    {(parser.lastStats.wallMs / 1000).toFixed(1)}s ·{' '}
-                    {parser.lastStats.timedOut ? (
-                      <span className="font-bold text-destructive">TIMED OUT</span>
-                    ) : (
-                      <span className="font-bold text-amber-600 dark:text-amber-400">
-                        {parser.lastStats.tokensPerSec} tok/s
-                      </span>
+            {/* ---- Parse debug ---- */}
+            <div>
+              <div className="mb-1 flex items-center gap-1.5">
+                <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Parse debug
+                </p>
+                {parser?.enabled && parser.status === 'ready' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLlmDebug((v) => !v)}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                      showLlmDebug
+                        ? 'bg-foreground/10 text-foreground'
+                        : 'text-muted-foreground/70 hover:text-foreground'
                     )}
-                    {parser.lastStats.attempts > 1 && ' · retried'}
-                  </p>
+                  >
+                    <Bug className="size-2.5" />
+                    {showLlmDebug ? 'hide' : 'show'}
+                  </button>
                 )}
-                {parser.lastReply ? (
-                  <p className="mt-1 break-all whitespace-pre-wrap text-foreground/80">
-                    reply: {parser.lastReply}
-                  </p>
-                ) : parser.lastStats?.timedOut ? (
-                  <p className="mt-1 text-destructive/80">
-                    reply: (empty — generation TIMED OUT, the model never finished)
-                  </p>
-                ) : parser.window ? (
-                  <p className="mt-1 text-destructive/80">
-                    reply: (empty — model produced nothing)
-                  </p>
-                ) : null}
+                {parser?.enabled && parser.status === 'ready' && (parser.lastReply || parser.lastStats) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowJsonWindow(true)}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                      parser.lastStats?.timedOut
+                        ? 'text-destructive/80 hover:text-destructive'
+                        : 'text-muted-foreground/70 hover:text-foreground'
+                    )}
+                    title={
+                      parser.lastStats?.timedOut
+                        ? 'The last parse TIMED OUT — open for details'
+                        : 'The raw reply the LLM last returned'
+                    }
+                  >
+                    <Braces className="size-2.5" />
+                    json
+                  </button>
+                )}
               </div>
+              {showLlmDebug && (
+                <div className="rounded-md bg-foreground/[0.04] p-1.5 font-mono text-[9px] leading-relaxed">
+                  {liveWindow || parser?.window ? (
+                    <>
+                      <p className="text-muted-foreground">
+                        {parser?.isParsing ? 'parsing — window sent: ' : 'next parse window (live): '}
+                        <span className="font-bold text-amber-600 dark:text-amber-400">
+                          {(liveWindow ?? parser?.window)!.entryIndexes.length}
+                        </span>
+                        /{call.transcript.length} lines · {(liveWindow ?? parser?.window)!.chars} chars ·
+                        ~{Math.ceil((liveWindow ?? parser?.window)!.chars / 4)} tokens
+                        {(liveWindow ?? parser?.window)!.entryIndexes.length <
+                          call.transcript.length && ' · grey lines will NOT be sent'}
+                      </p>
+                      <pre className="custom-scrollbar mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded bg-foreground/5 p-1.5 text-foreground/80">
+                        {(liveWindow ?? parser?.window)!.text}
+                      </pre>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">no transcript yet</p>
+                  )}
+                  {parser?.lastStats && (
+                    <p className="mt-1 text-muted-foreground">
+                      <span className="font-bold text-foreground/80">speed:</span>{' '}
+                      {parser.lastStats.promptChars.toLocaleString()} chars in (~
+                      {parser.lastStats.promptTokens.toLocaleString()} tok) →{' '}
+                      {parser.lastStats.replyChars.toLocaleString()} chars out (~
+                      {parser.lastStats.replyTokens.toLocaleString()} tok) · gen{' '}
+                      {(parser.lastStats.genMs / 1000).toFixed(1)}s · wall{' '}
+                      {(parser.lastStats.wallMs / 1000).toFixed(1)}s ·{' '}
+                      {parser.lastStats.timedOut ? (
+                        <span className="font-bold text-destructive">TIMED OUT</span>
+                      ) : (
+                        <span className="font-bold text-amber-600 dark:text-amber-400">
+                          {parser.lastStats.tokensPerSec} tok/s
+                        </span>
+                      )}
+                      {parser.lastStats.attempts > 1 && ' · retried'}
+                    </p>
+                  )}
+                  {parser?.lastReply ? (
+                    <p className="mt-1 break-all whitespace-pre-wrap text-foreground/80">
+                      reply: {parser.lastReply}
+                    </p>
+                  ) : parser?.lastStats?.timedOut ? (
+                    <p className="mt-1 text-destructive/80">
+                      reply: (empty — generation TIMED OUT, the model never finished)
+                    </p>
+                  ) : parser?.window ? (
+                    <p className="mt-1 text-destructive/80">
+                      reply: (empty — model produced nothing)
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Per-speaker audio level meters — proves each channel is live.
+            Engine resources moved to the settings panel (gear). */}
+        {isActive && activeSource === 'call' && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-3">
+            <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
+            {call.hasMic ? (
+              <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+            ) : (
+              <span
+                className="text-[10px] text-muted-foreground/70"
+                title="No microphone was shared — only the customer side is transcribed"
+              >
+                mic unavailable — customer only
+              </span>
+            )}
+            {call.hasMic && !bothQuiet && (
+              <span
+                className="ml-auto text-[9px] text-muted-foreground/60"
+                title="Browsers can't echo-cancel audio playing in another tab, so speakers leak the customer's voice into your mic and their words may also appear under Agent. A headset keeps the two speakers cleanly separated."
+              >
+                headset recommended
+              </span>
+            )}
+            {bothQuiet && call.transcript.length === 0 && (
+              <span className="text-[10px] text-muted-foreground/70">
+                no audio detected
+              </span>
             )}
           </div>
         )}
+        {isActive && activeSource === 'mic' && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <SpeakerMeter label="Mic" level={mic.level} tone="red" />
+            {mic.level < 0.05 && !mic.finalTranscript && (
+              <span className="text-[10px] text-muted-foreground/70">no audio detected</span>
+            )}
+          </div>
+        )}
+
 
         {/* Errors */}
         {error && (
