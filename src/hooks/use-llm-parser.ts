@@ -26,6 +26,8 @@ export type LlmParserStatus = 'idle' | 'loading' | 'ready' | 'error' | 'disabled
 interface GenerationResult {
   text: string;
   ms: number;
+  /** True when the attempt was killed by the timeout (never finished) */
+  timedOut: boolean;
 }
 
 /** Debug metrics for the last parse — what went in, what came out, how fast */
@@ -46,6 +48,8 @@ export interface LlmParseStats {
   tokensPerSec: number;
   /** how many generation attempts the parse took (1 = no retry) */
   attempts: number;
+  /** True when the (final) attempt timed out — the model never finished */
+  timedOut: boolean;
 }
 
 interface PendingParse {
@@ -56,9 +60,11 @@ interface PendingParse {
 /** Hard cap on a single generation (ms) — WASM can be slow, but the agent
  *  should never wait on a stuck generation. The 1.5B model needs roughly
  *  double the wall time of the smaller ones for the same reply, so it gets
- *  a longer leash. */
-const PARSE_TIMEOUT_MS = 45_000;
-const PARSE_TIMEOUT_MS_LARGE_MODEL = 90_000;
+ *  a longer leash. Field data: 45s was NOT enough for the 0.5B model on a
+ *  plain CPU (both attempts timed out → empty reply), so the caps were
+ *  raised: a slow-but-complete parse beats a fast-but-empty one. */
+const PARSE_TIMEOUT_MS = 120_000;
+const PARSE_TIMEOUT_MS_LARGE_MODEL = 240_000;
 
 /** Generation token cap for extraction. Condensed values keep the JSON
  *  short, but the cap MUST comfortably exceed the longest legitimate reply:
@@ -184,7 +190,7 @@ export function useLlmParser() {
         // Raw generation text — validation/retry lives in parse(), which can
         // re-prompt; here we only hand the reply back (with the worker's
         // own generation-time measurement for the speed metrics).
-        pending.resolve({ text: data.text, ms: data.ms });
+        pending.resolve({ text: data.text, ms: data.ms, timedOut: false });
         break;
       }
 
@@ -193,7 +199,7 @@ export function useLlmParser() {
         if (!pending) return;
         pendingParsesRef.current.delete(data.id);
         window.clearTimeout(pending.timer);
-        pending.resolve({ text: '', ms: 0 });
+        pending.resolve({ text: '', ms: 0, timedOut: false });
         break;
       }
     }
@@ -213,7 +219,7 @@ export function useLlmParser() {
       setError(`LLM parser worker crashed: ${event.message || 'unknown error'}`);
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve({ text: '', ms: 0 });
+        pending.resolve({ text: '', ms: 0, timedOut: false });
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -232,7 +238,7 @@ export function useLlmParser() {
       workerRef.current = null;
       for (const pending of pendingParsesRef.current.values()) {
         window.clearTimeout(pending.timer);
-        pending.resolve({ text: '', ms: 0 });
+        pending.resolve({ text: '', ms: 0, timedOut: false });
       }
       pendingParsesRef.current.clear();
       const waiters = pendingLoadsRef.current;
@@ -318,7 +324,7 @@ export function useLlmParser() {
   const generateReply = useCallback(
     (system: string, user: string, maxNewTokens: number): Promise<GenerationResult> => {
       const worker = workerRef.current;
-      if (!worker) return Promise.resolve({ text: '', ms: 0 });
+      if (!worker) return Promise.resolve({ text: '', ms: 0, timedOut: false });
       return new Promise<GenerationResult>((resolve) => {
         const id = (nextIdRef.current += 1);
         const timeoutMs =
@@ -329,7 +335,7 @@ export function useLlmParser() {
           const pending = pendingParsesRef.current.get(id);
           if (!pending) return;
           pendingParsesRef.current.delete(id);
-          resolve({ text: '', ms: 0 });
+          resolve({ text: '', ms: 0, timedOut: true });
         }, timeoutMs);
         pendingParsesRef.current.set(id, { resolve, timer });
         worker.postMessage({ type: 'parse', id, system, user, maxNewTokens });
@@ -380,12 +386,14 @@ export function useLlmParser() {
       let promptChars = 0;
       let genMs = 0;
       let attempts = 0;
+      let timedOut = false;
       try {
         const first = buildParsePrompt(entries, missingFieldIds, prior);
         promptChars = first.system.length + first.user.length;
         const firstRun = await generateReply(first.system, first.user, MAX_NEW_TOKENS);
         attempts = 1;
         genMs = firstRun.ms;
+        timedOut = firstRun.timedOut;
         let reply = firstRun.text;
         let fields = validateReply(reply);
 
@@ -401,6 +409,7 @@ export function useLlmParser() {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
           const retriedRun = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
           attempts = 2;
+          timedOut = retriedRun.timedOut;
           const retried = validateReply(retriedRun.text);
           if (retried !== null && (fields === null || retried.length > 0)) {
             fields = retried;
@@ -430,6 +439,7 @@ export function useLlmParser() {
           wallMs,
           tokensPerSec: genMs > 0 ? Math.round((replyTokens / genMs) * 1000) : 0,
           attempts,
+          timedOut,
         });
 
         return fields ?? [];

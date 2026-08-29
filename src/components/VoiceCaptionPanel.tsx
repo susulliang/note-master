@@ -609,13 +609,25 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </button>
               )}
 
-              {/* Floating window with the raw JSON the model last returned */}
-              {parser.enabled && parser.status === 'ready' && parser.lastReply && (
+              {/* Floating window with the raw JSON the model last returned —
+                  visible after ANY completed parse attempt, including a
+                  timed-out one (an empty reply is exactly the case worth
+                  inspecting) */}
+              {parser.enabled && parser.status === 'ready' && (parser.lastReply || parser.lastStats) && (
                 <button
                   type="button"
                   onClick={() => setShowJsonWindow(true)}
-                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground"
-                  title="Open a floating window with the raw JSON the LLM returned on the last parse"
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                    parser.lastStats?.timedOut
+                      ? 'text-destructive/80 hover:text-destructive'
+                      : 'text-muted-foreground/70 hover:text-foreground'
+                  )}
+                  title={
+                    parser.lastStats?.timedOut
+                      ? 'The last parse TIMED OUT — the model never finished generating. Open the floating window for details'
+                      : 'Open a floating window with the raw JSON the LLM returned on the last parse'
+                  }
                 >
                   <Braces className="size-2.5" />
                   json
@@ -671,15 +683,23 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                     {parser.lastStats.replyTokens.toLocaleString()} tok) · gen{' '}
                     {(parser.lastStats.genMs / 1000).toFixed(1)}s · wall{' '}
                     {(parser.lastStats.wallMs / 1000).toFixed(1)}s ·{' '}
-                    <span className="font-bold text-amber-600 dark:text-amber-400">
-                      {parser.lastStats.tokensPerSec} tok/s
-                    </span>
+                    {parser.lastStats.timedOut ? (
+                      <span className="font-bold text-destructive">TIMED OUT</span>
+                    ) : (
+                      <span className="font-bold text-amber-600 dark:text-amber-400">
+                        {parser.lastStats.tokensPerSec} tok/s
+                      </span>
+                    )}
                     {parser.lastStats.attempts > 1 && ' · retried'}
                   </p>
                 )}
                 {parser.lastReply ? (
                   <p className="mt-1 break-all whitespace-pre-wrap text-foreground/80">
                     reply: {parser.lastReply}
+                  </p>
+                ) : parser.lastStats?.timedOut ? (
+                  <p className="mt-1 text-destructive/80">
+                    reply: (empty — generation TIMED OUT, the model never finished)
                   </p>
                 ) : parser.window ? (
                   <p className="mt-1 text-destructive/80">
@@ -939,7 +959,10 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
               </div>
             </div>
             <pre className="custom-scrollbar flex-1 overflow-y-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
-              {prettyReply || '(no reply yet — run a parse first)'}
+              {prettyReply ||
+                (parser.lastStats?.timedOut
+                  ? `(no reply — the model TIMED OUT after ${(parser.lastStats.wallMs / 1000).toFixed(0)}s (${parser.lastStats.attempts} attempt${parser.lastStats.attempts > 1 ? 's' : ''}) and never finished generating. The prompt was ${parser.lastStats.promptChars.toLocaleString()} chars (~${parser.lastStats.promptTokens.toLocaleString()} tok). A slower model or a shorter conversation may complete.)`
+                  : '(no reply yet — run a parse first)')}
             </pre>
           </div>
         </div>
