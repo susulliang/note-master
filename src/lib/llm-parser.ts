@@ -117,7 +117,10 @@ export interface LlmParseMessage {
   maxNewTokens: number;
 }
 
-export type LlmWorkerRequest = LlmLoadMessage | LlmParseMessage;
+export type LlmWorkerRequest =
+  | LlmLoadMessage
+  | LlmParseMessage
+  | { type: 'reset' };
 
 export type LlmWorkerEvent =
   | { type: 'load-start'; model: LlmModelName }
@@ -144,6 +147,31 @@ export type LlmWorkerEvent =
 
 /** Execution backend the pipeline actually initialized on */
 export type LlmDevice = 'gpu' | 'cpu';
+
+/**
+ * Make a raw load error readable. ORT-WebGPU surfaces device failures as
+ * bare unsigned ints (e.g. 3999415816 = 0xEE06xxxx = WebGPU device lost —
+ * the GPU reset mid-upload: VRAM exhaustion or a driver TDR timeout), and
+ * "3999415816" tells the agent nothing. Map the known signatures to plain
+ * language with the recovery the app already performs.
+ */
+export function describeLoadError(raw: string): string {
+  // WebGPU device-lost codes: 0xEE06xxxx range as unsigned decimal
+  const n = /^(\d{8,10})$/.exec(raw.trim())?.[1];
+  if (n) {
+    const v = Number(n);
+    if (v >= 0xee000000 && v <= 0xeeffffff) {
+      return `WebGPU device lost (${n}) — the GPU reset while uploading the model (VRAM pressure or a driver timeout). Not a hardware failure.`;
+    }
+  }
+  if (/device (has been )?lost/i.test(raw)) {
+    return `${raw} — the GPU reset mid-load (VRAM pressure or driver timeout). Not a hardware failure.`;
+  }
+  if (/out of memory|oom/i.test(raw)) {
+    return `${raw} — not enough GPU/CPU memory for this build; try a smaller model.`;
+  }
+  return raw;
+}
 
 /** Snapshot of the worker's JS heap — powers the RAM badge */
 export interface LlmMemStats {

@@ -306,6 +306,15 @@ scope.addEventListener('message', (event) => {
     return;
   }
 
+  if (data.type === 'reset') {
+    // Hard reset: drop the resident pipeline. Used after a WebGPU
+    // device-lost crash left stale state (env.webgpu.device) that would
+    // poison every later load — the main thread terminates and recreates
+    // this whole worker, so this is mostly belt-and-braces.
+    current = null;
+    return;
+  }
+
   if (data.type === 'parse') {
     // Serialize generations through one chain — concurrent WASM inference
     // would thrash CPU and blow the memory budget.

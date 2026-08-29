@@ -4,6 +4,7 @@ import {
   buildParsePrompt,
   buildParaphrasePrompt,
   buildPromptWindow,
+  describeLoadError,
   extractJsonLoose,
   extractLineFields,
   validateLlmFields,
@@ -20,6 +21,17 @@ import {
   type PriorLlmValues,
   type PromptWindow,
 } from '@/lib/llm-parser';
+
+/** True when the raw error is a WebGPU device-lost code (0xEE00xxxx–0xEEFFxxxx
+ *  as a bare unsigned decimal, e.g. 3999415816) or names a lost device. */
+function isDeviceLostCode(raw: string): boolean {
+  const n = /^(\d{8,10})$/.exec(raw.trim())?.[1];
+  if (n) {
+    const v = Number(n);
+    if (v >= 0xee000000 && v <= 0xeeffffff) return true;
+  }
+  return /device (has been )?lost/i.test(raw);
+}
 
 export type LlmParserStatus = 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
 
@@ -194,17 +206,48 @@ export function useLlmParser() {
         }
         break;
 
-      case 'load-error':
+      case 'load-error': {
         statusRef.current = 'error';
         setStatus('error');
-        setError(data.message);
-        setFailedAttempts(data.failedAttempts ?? null);
+        setError(describeLoadError(data.message));
+        setFailedAttempts(
+          (data.failedAttempts ?? []).map((f) => ({
+            ...f,
+            message: describeLoadError(f.message),
+          }))
+        );
         {
           const waiters = pendingLoadsRef.current;
           pendingLoadsRef.current = [];
           waiters.forEach((resolve) => resolve());
         }
+        // GPU device-lost recovery: a crashed WebGPU device leaves a stale
+        // reference in transformers.js' shared state (env.webgpu.device),
+        // which poisons every later pipeline creation on ANY backend — that
+        // is why the wasm fallback after a GPU crash also fails. A fresh
+        // worker is a fresh ORT instance; recreate it and load wasm once.
+        const gpuCrashed = (data.failedAttempts ?? []).some(
+          (f) => f.device === 'gpu' || isDeviceLostCode(f.message)
+        );
+        if (gpuCrashed) {
+          const model = data.model;
+          window.setTimeout(() => {
+            workerRef.current?.terminate();
+            workerRef.current = null;
+            statusRef.current = 'loading';
+            setStatus('loading');
+            setError(null);
+            const worker = ensureWorker();
+            const promise = new Promise<void>((resolve) => {
+              pendingLoadsRef.current.push(resolve);
+            });
+            loadPromiseRef.current = promise;
+            // Clean worker + explicit cpu pin: skip the GPU entirely
+            worker.postMessage({ type: 'load', model, device: 'cpu' });
+          }, 250);
+        }
         break;
+      }
 
       case 'gen-progress': {
         // Live per-token generation progress of the in-flight parse —
