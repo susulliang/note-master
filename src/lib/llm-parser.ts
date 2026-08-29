@@ -541,13 +541,98 @@ export function extractJsonLoose(raw: string): Record<string, unknown> | null {
   return Object.keys(salvaged).length > 0 ? salvaged : null;
 }
 
-/** Normalize a phone number read out digit-by-digit-ish ("two one two...") */
+// ---------------------------------------------------------------------------
+//  LLM-first cleanup helpers
+//
+//  Rule: the LLM's parsed value is ALWAYS the primary source. Regex / format
+//  checks CLEAN the value when they can, but MUST NOT drop (block) a value
+//  just because it didn't match a shape — only purely empty CATEGORY labels
+//  ("the contact number", "no email provided", "sku") that carry ZERO
+//  payload content are still filtered out. A spoken-word phone number
+//  ("five five five one two three four"), a digit-free serial (ALPHA-BRAVO),
+//  or an email the LLM wrote oddly are all kept — the agent can proofread
+//  a slightly malformed value; they cannot proofread a value that was
+//  silently erased.
+// ---------------------------------------------------------------------------
+
+/** English digit word → digit. Covers 0–19, decades, and the common "oh"/"o"
+ *  ASR spelling for zero inside digit sequences ("two one oh" → 210). */
+const NUMBER_WORDS: Readonly<Record<string, string>> = {
+  zero: '0', oh: '0', o: '0',
+  one: '1', two: '2', three: '3', four: '4', five: '5',
+  six: '6', seven: '7', eight: '8', nine: '9',
+  ten: '10', eleven: '11', twelve: '12', thirteen: '13', fourteen: '14',
+  fifteen: '15', sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19',
+  twenty: '20', thirty: '30', forty: '40', fifty: '50',
+  sixty: '60', seventy: '70', eighty: '80', ninety: '90',
+};
+
+/** Replace standalone English number-words with their digits. Existing digits
+ *  and non-number words pass through untouched. */
+function wordsToDigits(text: string): string {
+  return text.replace(/[A-Za-z]+/g, (word) => {
+    const hit = NUMBER_WORDS[word.toLowerCase()];
+    return hit ?? word;
+  });
+}
+
+/**
+ * Pure CATEGORY-LABEL placeholders — the LLM wrote what KIND of info goes
+ * here, instead of the info itself. Each pattern matches WHOLE values only
+ * (^…$) — a real phone number that coincidentally contains the word
+ * "number" must NOT be caught. Scoped per field so a complaint that
+ * legitimately mentions "serial" (in context) never gets stripped.
+ *
+ * These are the ONLY "hard drop" rules; format regex (digit counts, email
+ * shape, letter/digit mix) never blocks — it only cleans.
+ */
+const PLACEHOLDER_PATTERNS: Readonly<Record<string, readonly RegExp[]>> = {
+  contactNumber: [
+    /^(?:the )?(?:customer(?:'s|s)? )?(?:phone|contact|telephone|cell|mobile|best)?\s*(?:number|no\.?|#)?(?: is)?\.?$/i,
+    /^(?:call|reach|text|contact)\s+(?:me|us|them|you|him|her)(?:\s+(?:at|on|back))?\.?$/i,
+    /^(?:provided )?over (?:the )?phone$/i,
+    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
+  ],
+  emailAddress: [
+    /^(?:the )?(?:customer(?:'s|s)? )?(?:e-?mail|e-?mail address)(?: is)?\.?$/i,
+    /^(?:contacted|reached)(?: them)? (?:by|via|over) (?:phone|call|message)\.?$/i,
+    /^no (?:e-?mail|address)(?: (?:on file|provided|available))?\.?$/i,
+    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
+  ],
+  skuNumber: [
+    /^(?:the )?(?:sku|part)(?: number| code| no\.?)?(?: is)?\.?$/i,
+    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
+  ],
+  serialNumber: [
+    /^(?:the )?(?:serial|s\s*\/\s*n)(?: number| no\.?)?(?: is)?\.?$/i,
+    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
+  ],
+};
+
+/** True when `value` is a pure category-label placeholder (no content) for
+ *  the given field. These are the only values still hard-dropped; format
+ *  mismatches are kept so the agent can proofread them. */
+function isPlaceholderFor(fieldId: string, value: string): boolean {
+  const patterns = PLACEHOLDER_PATTERNS[fieldId];
+  if (!patterns) return false;
+  const trimmed = value.trim();
+  return patterns.some((re) => re.test(trimmed));
+}
+
+/** Normalize a phone number read out digit-by-digit-ish ("two one two five…")
+ *
+ *  LLM-first: spoken word-digits are converted FIRST, then formatting runs on
+ *  whatever digit content came out (US 10-digit → (xxx) xxx-xxxx). Anything
+ *  that doesn't perfectly format (international, extensions, partial reads)
+ *  returns the cleaned conversion — with real digits where the LLM read
+ *  words — instead of being dropped. */
 function sanitizePhone(value: string): string {
-  const digits = value.replace(/[^\d]/g, '');
+  const converted = wordsToDigits(value);
+  const digits = converted.replace(/[^\d]/g, '');
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
-  return value.replace(/\s+/g, ' ').trim();
+  return converted.replace(/\s+/g, ' ').trim();
 }
 
 /** Normalize a spoken email ("john at gmail dot com") */
@@ -568,12 +653,22 @@ function isBlank(value: string): boolean {
 /**
  * Validate + canonicalize the LLM's JSON into ExtractedFields.
  *
- *  - unknown field ids are dropped;
- *  - models must match a canonical combobox option (hallucinated names out);
- *  - issue types are canonicalized, falling back to the keyword classifier
- *    over the LLM's text, then to a trimmed free-text label;
- *  - emails/phones are normalized from spoken phrasing;
- *  - values are length-capped.
+ * LLM-FIRST RULE: the model's output is always accepted as the primary
+ * reading. Format-shape regexes CLEAN values when they can (spoken-word
+ * numbers → digits, channel canonicalization, keyword classification, etc.)
+ * but MUST NOT silently drop a field because it didn't match a pattern. The
+ * only hard drops are:
+ *
+ *  - isBlank() — explicit "n/a / unknown / none" placeholders;
+ *  - isPlaceholderFor() — pure category labels ("the phone number", "no
+ *    email provided") where the LLM named the FIELD instead of the VALUE;
+ *  - tiny content (< 2 chars) for name/model fields (pure noise);
+ *  - unknown field ids.
+ *
+ * Model names canonicalize; issue types use keyword-classifier as a
+ * polish fallback but keep free-text otherwise; emails/phones are cleaned.
+ * Values are then length-capped (cap is generous — the UI shows overflow
+ * ellipsis visually so nothing meaningful is cut).
  *
  * Returns only fields with a non-empty validated value.
  */
@@ -585,30 +680,49 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
     if (typeof value !== 'string') continue;
     let cleaned = value.replace(/\s+/g, ' ').trim();
     if (isBlank(cleaned)) continue;
+    const rawBeforeClean = cleaned; // used by placeholder checks against the unmolested value
 
     switch (fieldId) {
       case 'deebotModel': {
         // Canonicalize onto the fleet list when the model's naming maps
         // to it ("O1000 RTK" → GOAT O1000 RTK, ASR zero/O confusion
-        // included). When it does NOT map, the prompt deliberately carries
-        // no model list — keep the model's own naming as-is: a free-text
-        // model on the form (flagged for verification) beats an empty
-        // field. Only obvious noise (single characters) is dropped.
+        // included). When it does NOT map, keep the model's own naming as
+        // is: a free-text model (glow-marked for verification) beats an
+        // empty field. Only obvious pure noise (< 2 chars) is dropped —
+        // all real model identifiers have letter+digit pairs (≥ 2).
         if (cleaned.length < 2) continue;
         cleaned = matchCanonicalModel(cleaned) ?? cleaned;
         break;
       }
       case 'contactNumber': {
-        // A real phone number has ≥7 digits; a hallucinated word like
-        // "number" or "unknown" has none and must be dropped
-        if (cleaned.replace(/\D/g, '').length < 7) continue;
+        // LLM-first: wordsToDigits FIRST converts spoken words → digits
+        // (the number the model actually read), then US 10-digit format
+        // applies on top if it fits. FORMAT REGEX IS NOT A GATE. If the
+        // cleaned value is a pure CATEGORY LABEL placeholder ("number",
+        // "customer's phone", "not provided"), drop it — otherwise keep
+        // whatever the LLM produced (partial, international, extension…)
+        // so the agent can proofread it. A value they can correct beats a
+        // value silently erased.
         cleaned = sanitizePhone(cleaned);
+        const digitCount = cleaned.replace(/\D/g, '').length;
+        if (digitCount < 7 && isPlaceholderFor('contactNumber', rawBeforeClean)) continue;
         break;
       }
-      case 'emailAddress':
+      case 'emailAddress': {
+        // Sanitize spoken ("john at gmail dot com") → john@gmail.com.
+        // Regex SHAPE is NOT a hard gate: if the result fits the pattern,
+        // great; if not, only drop it when it's a pure no-content
+        // placeholder ("no email", "contacted by phone", "the customer's
+        // email address"). Anything else — odd TLDs, odd formatting — is
+        // kept so the agent can proofread, not silently lose.
+        const beforeEmail = cleaned;
         cleaned = sanitizeEmail(cleaned);
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) continue;
+        if (
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) &&
+          isPlaceholderFor('emailAddress', beforeEmail)
+        ) continue;
         break;
+      }
       case 'purchaseInfo': {
         // Shape the model's purchase answer the same way the regex
         // backstop does: canonicalize the channel spelling ("bestbuy",
@@ -621,13 +735,19 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
         break;
       }
       case 'skuNumber':
-      case 'serialNumber':
-        // Real identifiers contain digits — reject words the model lifted
-        // from the conversation ("number", "serial number as well")
-        if (!/\d/.test(cleaned)) continue;
+      case 'serialNumber': {
+        // LLM-FIRST: the "must contain a digit" regex gate is REMOVED.
+        // Uncommon-but-real alphanumeric identifiers (DEEBOT-X2-ACC,
+        // "ALPHA BRAVO CHARLIE" read back as words) must reach the form
+        // for the agent to verify. Only pure CATEGORY placeholders are
+        // dropped: "serial", "sku number", "not provided" — labels with
+        // zero payload content from the LLM.
+        const placeholderKey = fieldId as 'skuNumber' | 'serialNumber';
+        if (isPlaceholderFor(placeholderKey, cleaned)) continue;
         break;
+      }
       case 'issueType': {
-        // Fuzzy-match against the ~800 canonical options; when the LLM
+        // Fuzzy-match against the canonical options; when the LLM
         // phrased a complaint ("won't charge") run the keyword classifier;
         // otherwise keep the (trimmed) free-text label as a custom value
         const canonical =
