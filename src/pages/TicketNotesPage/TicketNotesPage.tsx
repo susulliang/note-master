@@ -909,12 +909,24 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
    *     fields parsed from the last seconds of the call make it into the
    *     note;
    *  3. generates the note from the then-current form data.
+   *
+   * Reads voice/call through a ref so the callback identity stays stable —
+   * FlowchartCanvas is memoized and would otherwise re-render on every
+   * capture-state tick (audio level meters fire 10×/s).
    */
+  const voiceRef = useRef(voice);
+  const callRef = useRef(call);
+  useEffect(() => {
+    voiceRef.current = voice;
+    callRef.current = call;
+  }, [voice, call]);
   const handleHangUp = useCallback(async () => {
-    if (voice.isListening) voice.stop();
-    if (call.isCapturing) {
-      call.stop();
-      await call.finalize();
+    const voiceNow = voiceRef.current;
+    const callNow = callRef.current;
+    if (voiceNow.isListening) voiceNow.stop();
+    if (callNow.isCapturing) {
+      callNow.stop();
+      await callNow.finalize();
       // Let React commit the final auto-fills before reading the form data
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -923,7 +935,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     const text = buildNoteText(formDataRef.current);
     setNoteText(text);
     setShowOutput(true);
-  }, [voice, call, buildNoteText]);
+  }, [buildNoteText]);
 
   const handleClearMic = useCallback(() => {
     voice.clear();

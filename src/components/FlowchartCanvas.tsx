@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
@@ -193,7 +193,14 @@ function computeDefaultLayout(
   return positions;
 }
 
-export default function FlowchartCanvas({
+/**
+ * MEMOIZED: the canvas is the heaviest subtree on the page (every node +
+ * the SVG connector layer). Unrelated page-state churn — audio level
+ * meters (10×/s while capturing), LLM generation progress, transcript
+ * ticks — must not re-render it; only its own props (formData, positions,
+ * activeNodeId, parsedFields, nodes, handlers) do.
+ */
+const FlowchartCanvas = memo(function FlowchartCanvas({
   nodes,
   positions,
   formData,
@@ -490,4 +497,6 @@ export default function FlowchartCanvas({
       </div>
     </div>
   );
-}
+});
+
+export default FlowchartCanvas;

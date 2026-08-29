@@ -174,18 +174,28 @@ async function runParse(job: ParseJob): Promise<void> {
     // Stream per-token progress so the main thread can drive a REAL
     // generation progress bar (generated / max_new_tokens) instead of an
     // indeterminate shimmer. The streamer's token_callback fires once per
-    // decoded token.
+    // decoded token — THROTTLED to one postMessage per 125ms: a per-token
+    // message would re-render the whole page (React state update per
+    // token) and make the page laggy during fast GPU generation. The
+    // final count is always sent (result follows immediately anyway).
     let generated = 0;
+    let lastPost = 0;
+    const postProgress = () => {
+      const now = performance.now();
+      if (now - lastPost < 125) return;
+      lastPost = now;
+      post({
+        type: 'gen-progress',
+        id: job.id,
+        generated,
+        maxNewTokens: job.maxNewTokens,
+      });
+    };
     const streamer = new TextStreamer(current.pipe.tokenizer, {
       skip_prompt: true,
       token_callback_function: () => {
         generated += 1;
-        post({
-          type: 'gen-progress',
-          id: job.id,
-          generated,
-          maxNewTokens: job.maxNewTokens,
-        });
+        postProgress();
       },
     });
 
