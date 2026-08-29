@@ -188,21 +188,19 @@ for (const [raw, expected] of shapeCases) {
 }
 
 console.log('\n=== 3. Parse prompt names the channels ===');
+// The line format is the primary reply contract; its purchaseInfo template
+// carries the channel list and the "·" store-first format.
 const { system } = buildParsePrompt(
   [{ speaker: 'customer', text: 'I bought it from Amazon about a year ago' }],
   ['purchaseInfo']
 );
 check(
-  'prompt rule lists the common channels',
-  /Amazon, Best Buy, eBay, Target, Walmart, Costco, Home Depot/.test(system)
+  'prompt line contract asks for store + when ("·" format) with an example',
+  /purchaseInfo: <store \+ when/i.test(system) && /·/.test(system)
 );
 check(
-  'prompt rule asks for store-first then when ("·" format)',
-  /store\/site first/.test(system) && /·/.test(system)
-);
-check(
-  'prompt rule names the official store',
-  /official store/.test(system)
+  'prompt names the common channels in the example',
+  /Amazon/.test(system)
 );
 
 console.log('\n=== 4. LLM reply validation ===');

@@ -317,28 +317,36 @@ check(
 );
 check('prompt far below the model context window', totalTokens < 8000);
 
-// Prior values must ride INSIDE the JSON skeleton the model edits — prose
-// instructions alone froze the evolving fields on small models.
+// Prior values must ride INSIDE the reply structure the model edits —
+// prose-only carry-forward froze the evolving fields on small models.
+// The line format carries them as "issueDescription currently:" blocks.
 check(
-  'prior issueDescription is seeded INTO the JSON skeleton (edit-me, not prose-only)',
-  prompt.user.includes('"issueDescription":"GOAT mower leaves edges uncut; stops after a few passes with blinking 1-1 error"'),
-  'skeleton not pre-filled with the prior issue clauses'
+  'prior issueDescription is carried into the prompt (edit-me, not prose-only)',
+  prompt.user.includes('issueDescription currently:') &&
+    prompt.user.includes('GOAT mower leaves edges uncut; stops after a few passes with blinking 1-1 error'),
+  'prior issue clauses missing from the prompt'
 );
 check(
-  'prior resolutionSummary is seeded INTO the JSON skeleton',
-  prompt.user.includes('"resolutionSummary":"warranty replacement already sent -> use trade-in program on website"'),
-  'skeleton not pre-filled with the prior steps'
+  'prior resolutionSummary is carried into the prompt',
+  prompt.user.includes('resolutionSummary currently:') &&
+    prompt.user.includes('warranty replacement already sent -> use trade-in program on website'),
+  'prior steps missing from the prompt'
 );
-// Without a prior, the skeleton must stay empty ("" for unknown) — seeding
-// must not leak stale values into a fresh parse.
+// The reply contract is the line format (primary since JSON kept timing
+// out at 0 output tokens on CPU/WASM)
+check(
+  'primary format is the simple line contract (eleven field lines)',
+  /customerName: /.test(prompt.system) && /resolutionSummary: /.test(prompt.system),
+  'line-format field templates missing from the system prompt'
+);
+// Without a prior, no carry-forward blocks should appear
 const freshPrompt = buildParsePrompt(entries, [
   'customerName', 'contactNumber', 'emailAddress', 'deebotModel', 'skuNumber', 'serialNumber', 'purchaseInfo', 'issueDescription', 'issueType', 'resolutionSummary',
 ]);
 check(
-  'fresh parse (no prior) hands the model an empty skeleton',
-  freshPrompt.user.includes('"issueDescription":""') &&
-    freshPrompt.user.includes('"resolutionSummary":""'),
-  'skeleton should be empty without prior values'
+  'fresh parse (no prior) carries no stale values',
+  !freshPrompt.user.includes('currently:'),
+  'carry-forward blocks present without prior values'
 );
 
 console.log('\n=== 4. LLM reply validation on this call ===');

@@ -439,6 +439,7 @@ export function useLlmParser() {
         const chars = entries.reduce((n, e) => n + e.text.length, 0);
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
         if (modelFailed && !firstRun.timedOut) {
+          // Brevity-hardened retry, same line format
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
           const retriedRun = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
           attempts = 2;
@@ -451,25 +452,6 @@ export function useLlmParser() {
             // accepted reply — report those
             promptChars = strict.system.length + strict.user.length;
             genMs = retriedRun.ms;
-          }
-
-          // LAST RESORT — simple line format. When even the strict JSON
-          // retry produced nothing usable, the model cannot hold the JSON
-          // contract (long transcript, small weights). Plain "field: value"
-          // lines cannot break structurally, so this attempt nearly always
-          // yields fields where JSON failed.
-          if ((fields === null || fields.length === 0) && !retriedRun.timedOut) {
-            const simple = buildParsePrompt(entries, missingFieldIds, prior, true, 'simple');
-            const simpleRun = await generateReply(simple.system, simple.user, MAX_NEW_TOKENS);
-            attempts = 3;
-            timedOut = simpleRun.timedOut;
-            const simpled = validateReply(simpleRun.text);
-            if (simpled !== null && simpled.length > 0) {
-              fields = simpled;
-              reply = simpleRun.text;
-              promptChars = simple.system.length + simple.user.length;
-              genMs = simpleRun.ms;
-            }
           }
         }
 

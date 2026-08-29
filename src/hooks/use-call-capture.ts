@@ -433,18 +433,82 @@ export function useCallCapture(
     }
   }, [armParaphrase]);
 
-  /** Merge authoritative LLM results into suggestions + push to the form */
-  const applyLlmFields = useCallback((fields: ExtractedField[]) => {
+  /**
+ * APPEND GUARD for the two cumulative fields (issue clauses, resolution
+ * steps): the LLM's next parse is only a partial re-read of what the box
+ * already holds (its window slid, or it simply dropped clauses). Merge so
+ * nothing on the box is ever LOST:
+ *
+ *  - clauses already in `current` keep their position;
+ *  - NEW clauses from `next` append after them;
+ *  - clauses present in both are deduped (case-insensitive containment,
+ *    same rule as the regex accumulator);
+ *  - when next's value is just a re-wording of the whole current value
+ *    (no new clauses), next WINS — the model refined the wording.
+ *
+ * Scalar fields (name, phone, serial…) return `next` unchanged: a later
+ * correction should REPLACE, not append.
+ */
+const CUMULATIVE_FIELD_IDS = new Set(['issueDescription', 'resolutionSummary']);
+
+function mergeAccumulated(fieldId: string, current: string | undefined, next: string): string {
+  const cur = (current ?? '').trim();
+  if (!cur) return next;
+  if (!CUMULATIVE_FIELD_IDS.has(fieldId)) return next;
+  if (next.trim() === cur) return next;
+
+  const splitClauses = (v: string) =>
+    v
+      .split(/\s*(?:;|->)\s*/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+  const curClauses = splitClauses(cur);
+  const nextClauses = splitClauses(next);
+  if (curClauses.length === 0 || nextClauses.length === 0) return next;
+
+  // Subsumed: next's clauses are all already inside current (containment
+  // either direction) → current already holds everything; keep current but
+  // prefer next's wording when it is the LONGER reading
+  const lower = (s: string) => s.toLowerCase();
+  const nextHasNew = nextClauses.some(
+    (n) => !curClauses.some((c) => lower(c).includes(lower(n)) || lower(n).includes(lower(c)))
+  );
+  if (!nextHasNew) return next.length > cur.length ? next : cur;
+
+  // Append-guard: keep every current clause, then add only the NEW ones
+  const merged = [...curClauses];
+  for (const n of nextClauses) {
+    const dup = merged.some(
+      (c) => lower(c).includes(lower(n)) || lower(n).includes(lower(c))
+    );
+    if (!dup) merged.push(n);
+  }
+  const joiner = fieldId === 'resolutionSummary' ? ' -> ' : '; ';
+  return merged.join(joiner);
+}
+
+/** Merge authoritative LLM results into suggestions + push to the form */
+const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     if (fields.length === 0) return;
+    const applied: ExtractedField[] = [];
     for (const field of fields) {
       llmConfirmedRef.current.add(field.fieldId);
-      llmSuggestionsRef.current.set(field.fieldId, field);
+      // APPEND GUARD: never let a partial re-read shrink the cumulative
+      // boxes — merge the model's new clauses ONTO what's already there
+      const prior = llmSuggestionsRef.current.get(field.fieldId);
+      const merged = prior
+        ? mergeAccumulated(field.fieldId, prior.value, field.value)
+        : field.value;
+      const finalField = merged === field.value ? field : { ...field, value: merged };
+      llmSuggestionsRef.current.set(field.fieldId, finalField);
+      applied.push(finalField);
       // Authoritative: replaces any provisional regex value underneath it
-      onAutoFillRef.current(field.fieldId, field.value, 'llm');
+      onAutoFillRef.current(field.fieldId, finalField.value, 'llm');
     }
     setSuggestions((prev) => {
       const map = new Map(prev.map((f) => [f.fieldId, f]));
-      for (const f of fields) map.set(f.fieldId, f);
+      for (const f of applied) map.set(f.fieldId, f);
       return [...map.values()];
     });
   }, []);

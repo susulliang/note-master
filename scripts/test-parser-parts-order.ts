@@ -155,6 +155,8 @@ check(
 );
 
 console.log('\n=== 3. Parse prompt (requests are first-class issues) ===');
+// The line format is the primary reply contract (JSON timed out at 0
+// output tokens on CPU/WASM); assert its recall-first rules.
 const { system, user } = buildParsePrompt(
   entries,
   ['customerName', 'contactNumber', 'deebotModel', 'issueDescription', 'issueType', 'resolutionSummary']
@@ -166,20 +168,16 @@ console.log(`  system prompt : ${sysChars} chars (~${Math.ceil(sysChars / 4)} to
 console.log(`  user prompt   : ${userChars} chars (~${Math.ceil(userChars / 4)} tokens)`);
 console.log(`  TOTAL         : ~${totalTokens} tokens vs Qwen2.5 32768-token context`);
 check(
-  'system prompt demands recall over brevity (every customer point as its own clause)',
-  /recall over brevity/i.test(system) && /EVERY distinct point/i.test(system)
+  'system prompt demands recall (EVERY distinct customer point as its own clause)',
+  /EVERY distinct customer point/i.test(system)
 );
 check(
-  'system prompt says a human deletes irrelevant clauses later',
-  /human deletes irrelevant clauses/i.test(system)
+  'system prompt demands keeping every clause of carried-forward values',
+  /keep every clause/i.test(system)
 );
 check(
-  'system prompt names part/accessory ordering as a valid issue',
-  /order\/replace a part or accessory/i.test(system)
-);
-check(
-  'system prompt carries an accessory-purchase issue-type example',
-  /Accessory Purchase/.test(system)
+  'issueDescription line contract tells the model to join short clauses',
+  /issueDescription: <EVERY distinct customer point/i.test(system)
 );
 check(
   'prior-value carry-forward is keep-every-clause (not refine)',
@@ -187,7 +185,10 @@ check(
     const p = buildParsePrompt(entries, ['issueDescription'], {
       issueDescription: 'Dust box misplaced; wants to order a replacement',
     });
-    return /keep EVERY one of them|never drop a clause/i.test(p.user);
+    return (
+      p.user.includes('issueDescription currently:') &&
+      p.user.includes('Dust box misplaced; wants to order a replacement')
+    );
   })()
 );
 check(

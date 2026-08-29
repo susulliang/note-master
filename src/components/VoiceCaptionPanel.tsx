@@ -752,31 +752,36 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </div>
               )}
 
-            {/* AI parse debug: prompt window stats + the exact text sent to
-                the model + the model's raw reply */}
+            {/* AI parse debug: the LIVE prompt window (what the NEXT parse
+                will send — updates as the conversation grows) + the last
+                parse's speed metrics and raw reply */}
             {showLlmDebug && (
               <div className="mt-1.5 rounded-lg bg-background/60 p-2 font-mono text-[9px] leading-relaxed">
-                {parser.window ? (
+                {liveWindow || parser.window ? (
                   <>
                     <p className="text-muted-foreground">
-                      last parse window:{' '}
+                      {/* Live window while idle (next parse's input);
+                          during/after a parse show what was actually sent */}
+                      {parser.isParsing
+                        ? 'parsing — window sent: '
+                        : 'next parse window (live): '}
                       <span className="font-bold text-amber-600 dark:text-amber-400">
-                        {parser.window.entryIndexes.length}
+                        {(liveWindow ?? parser.window)!.entryIndexes.length}
                       </span>
-                      /{call.transcript.length} lines · {parser.window.chars} chars · ~
-                      {Math.ceil(parser.window.chars / 4)} tokens (system prompt adds ~0.4k
-                      more)
-                      {parser.window.entryIndexes.length < call.transcript.length &&
-                        ' · dim lines were NOT sent'}
+                      /{call.transcript.length} lines · {(liveWindow ?? parser.window)!.chars}{' '}
+                      chars · ~{Math.ceil((liveWindow ?? parser.window)!.chars / 4)} tokens
+                      (system prompt adds ~0.4k more)
+                      {(liveWindow ?? parser.window)!.entryIndexes.length <
+                        call.transcript.length && ' · grey lines will NOT be sent'}
                     </p>
-                    {/* The verbatim transcript text the model received —
-                        filler turns stripped, window-capped */}
+                    {/* The verbatim transcript text the next/last parse sends —
+                        filler turns stripped, window-capped, LIVE-updating */}
                     <pre className="custom-scrollbar mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded bg-foreground/5 p-1.5 text-foreground/80">
-                      {parser.window.text}
+                      {(liveWindow ?? parser.window)!.text}
                     </pre>
                   </>
                 ) : (
-                  <p className="text-muted-foreground">no parse yet</p>
+                  <p className="text-muted-foreground">no transcript yet</p>
                 )}
                 {/* Speed metrics: prompt size in → reply out, generation
                     time, output tokens/s (the "json" chip opens the full

@@ -339,9 +339,15 @@ export function buildParsePrompt(
   missingFieldIds: readonly string[],
   prior?: PriorLlmValues,
   strict = false,
-  /** 'simple' = the LAST-RESORT retry format: plain "field: value" lines
-   *  instead of JSON, for models that keep breaking the JSON contract. */
-  format: 'json' | 'simple' = 'json'
+  /**
+   * 'simple' — plain "field: value" lines — is now the PRIMARY format.
+   * Field data: JSON replies timed out at 0 output tokens (prompt
+   * processing alone exceeded the budget on CPU/WASM), while line output
+   * has no punctuation contract to hold, cannot break structurally, and
+   * lets generation start immediately. 'json' remains available as the
+   * denser alternative for callers that want it.
+   */
+  format: 'simple' | 'json' = 'simple'
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -351,7 +357,7 @@ export function buildParsePrompt(
       ? PROMPT_FIELD_ORDER.filter((id) => (wanted as readonly string[]).includes(id))
       : [...PROMPT_FIELD_ORDER];
   // Seed the EVOLVING fields with their prior values: the model only has
-  // to EDIT the JSON it is handed (append new clauses) instead of
+  // to EDIT the structure it is handed (append new clauses) instead of
   // re-deriving the whole list from prose instructions. Field data showed
   // prose-only carry-forward froze both boxes on the small models — they
   // either echoed the prose or dropped it; a pre-filled skeleton makes the
@@ -367,11 +373,10 @@ export function buildParsePrompt(
     ])
   );
 
-  // ---- SIMPLE format: plain lines, the last-resort retry -----------------
-  // Small models struggling with long transcripts keep breaking the JSON
-  // contract (unbalanced braces, quotes inside values, mid-object
-  // truncation). Line labels cannot break structurally — each line stands
-  // alone — so the retry with this format almost always yields fields.
+  // ---- SIMPLE format (PRIMARY): plain lines ------------------------------
+  // Line labels cannot break structurally — each line stands alone, so a
+  // truncated reply still yields every line that completed, and generation
+  // starts without the model having to plan a punctuation-perfect object.
   if (format === 'simple') {
     const system = [
       'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
@@ -387,6 +392,9 @@ export function buildParsePrompt(
       'issueType: <"Category::Item" or short phrase, or empty>',
       'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>',
       'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them.',
+      ...(strict
+        ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
+        : []),
     ].join('\n');
     const userLines = ['Support call transcript:', renderTranscript(entries)];
     if (prior?.issueDescription) {
