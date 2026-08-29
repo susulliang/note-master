@@ -125,6 +125,8 @@ export function useLlmParser() {
   const [genProgress, setGenProgress] = useState(0);
   /** Worker JS-heap snapshot (RAM badge); null until the worker reports */
   const [memStats, setMemStats] = useState<LlmMemStats | null>(null);
+  /** Precision that actually loaded (drives the RAM estimate fallback) */
+  const [dtype, setDtype] = useState<'q8' | 'fp32' | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
@@ -174,6 +176,7 @@ export function useLlmParser() {
         setProgress(100);
         setError(null);
         setDevice(data.device);
+        setDtype(data.dtype);
         {
           const waiters = pendingLoadsRef.current;
           pendingLoadsRef.current = [];
@@ -534,6 +537,8 @@ export function useLlmParser() {
     lastReply,
     /** Backend the pipeline is running on: 'gpu' (WebGPU) or 'cpu' (WASM) */
     device,
+    /** Precision that actually loaded ('q8' | 'fp32') */
+    dtype,
     /** Worker JS-heap snapshot for the RAM badge (null until reported) */
     memStats,
     /** Live generation progress of the in-flight parse (0–1) — tokens

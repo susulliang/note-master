@@ -41,6 +41,16 @@ export const WHISPER_MODEL_META: Record<
 export const WHISPER_MODELS = Object.keys(LOCAL_WHISPER_MODELS) as WhisperModelName[];
 
 /**
+ * Approximate resident-memory footprint per model + precision (MB) — the
+ * fallback RAM badge when the worker cannot measure its own heap
+ * (performance.memory is main-thread-only in Chromium, absent elsewhere).
+ */
+export const WHISPER_RAM_ESTIMATE_MB: Record<WhisperModelName, Record<WhisperDtype, number>> = {
+  'base.en': { q8: 150, fp32: 480 },
+  'tiny.en': { q8: 60, fp32: 200 },
+};
+
+/**
  * Precision fallback chain. `q8` (classic DynamicQuantizeLinear quantization)
  * is the intended dtype — small download and well-supported by the WASM/CPU
  * execution provider. `fp32` is the much larger escape hatch (~4× download)

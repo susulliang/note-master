@@ -71,6 +71,18 @@ export const LLM_MODEL_META: Record<LlmModelName, { label: string; note: string 
 export const LLM_MODELS = Object.keys(LOCAL_LLM_MODELS) as LlmModelName[];
 
 /**
+ * Approximate resident-memory footprint per model + precision (MB) — the
+ * fallback RAM badge when the worker cannot measure its own heap
+ * (performance.memory is main-thread-only in Chromium, absent elsewhere).
+ * Weights + ONNX runtime + context: rough but the right order of magnitude.
+ */
+export const LLM_RAM_ESTIMATE_MB: Record<LlmModelName, Record<LlmDtype, number>> = {
+  'smollm2-360m': { q8: 300, fp32: 900 },
+  'qwen2.5-0.5b': { q8: 450, fp32: 1400 },
+  'qwen2.5-1.5b': { q8: 1100, fp32: 3400 },
+};
+
+/**
  * Precision fallback chain, mirroring the Whisper setup: `q8` first (small
  * download, well-supported by the WASM execution provider), `fp32` as the
  * larger escape hatch for exports the runtime cannot instantiate.

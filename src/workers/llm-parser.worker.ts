@@ -123,18 +123,32 @@ async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<voi
 
   post({ type: 'load-start', model });
 
-  const order: LlmDtype[] = preferred
-    ? [preferred, ...LLM_DTYPE_CHAIN.filter((dtype) => dtype !== preferred)]
-    : [...LLM_DTYPE_CHAIN];
-  // GPU first (an order of magnitude faster), wasm as the fallback
-  const devices: Array<'webgpu' | 'wasm'> = (await hasWebGpu())
-    ? ['webgpu', 'wasm']
-    : ['wasm'];
+  // GPU first (an order of magnitude faster), wasm as the fallback — EXCEPT
+  // for the 1.5B model, whose fp32 weights (~3.4 GB) are absurd on any GPU:
+  // it goes straight to wasm+q8 (~1.1 GB)
+  const devices: Array<'webgpu' | 'wasm'> =
+    (await hasWebGpu()) && model !== 'qwen2.5-1.5b'
+      ? ['webgpu', 'wasm']
+      : ['wasm'];
+
+  // DTYPE IS DEVICE-SPECIFIC. Field data: a q8 (DynamicQuantizeLinear)
+  // session on the WebGPU provider LOADS fine but HANGS at first inference
+  // — 0 tokens in 120s on a 387-token prompt, no error thrown. The WebGPU
+  // EP needs fp32 weights; q8 is the WASM/CPU format. Trying q8-on-webgpu
+  // first therefore silently broke every parse on GPU machines.
+  const dtypeOrder = (device: 'webgpu' | 'wasm'): LlmDtype[] => {
+    const wasmOrder: LlmDtype[] = preferred
+      ? [preferred, ...LLM_DTYPE_CHAIN.filter((dtype) => dtype !== preferred)]
+      : [...LLM_DTYPE_CHAIN];
+    return device === 'webgpu'
+      ? ['fp32'] // WebGPU EP: fp32 only — q8 graphs hang at runtime
+      : wasmOrder;
+  };
 
   let lastError: unknown = null;
 
   for (const device of devices) {
-    for (const dtype of order) {
+    for (const dtype of dtypeOrder(device)) {
       // Aggregate per-file download progress into one 0–100 number.
       const fileProgress = new Map<string, number>();
       const onProgress = (data: ProgressInfo) => {

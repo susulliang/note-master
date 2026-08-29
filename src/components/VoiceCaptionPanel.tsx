@@ -10,11 +10,14 @@ import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
+  WHISPER_RAM_ESTIMATE_MB,
+  type WhisperDtype,
   type WhisperModelName,
 } from '@/lib/whisper-models';
 import {
   LLM_MODEL_META,
   LLM_MODELS,
+  LLM_RAM_ESTIMATE_MB,
   buildPromptWindow,
   type LlmModelName,
 } from '@/lib/llm-parser';
@@ -76,6 +79,8 @@ export interface ParserPanelState {
   lastParseMs: number | null;
   /** Backend the pipeline runs on: 'gpu' (WebGPU) or 'cpu' (WASM) */
   device?: 'gpu' | 'cpu' | null;
+  /** Precision that actually loaded ('q8' | 'fp32') — drives the RAM estimate */
+  dtype?: 'q8' | 'fp32' | null;
   /** Live generation progress of the in-flight parse: 0–1 */
   genProgress?: number;
   /** Worker JS-heap snapshot for the RAM badge (null until reported) */
@@ -144,27 +149,83 @@ const fieldLabel = (fieldId: string) =>
   FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
 
 /**
- * Worker RAM badge — the worker's JS-heap usage / ceiling (MB). Updates at
- * most every 2s (throttled in the worker), so it costs nothing to render.
- * Amber when above 75% of the heap ceiling; hidden until the worker reports
- * (non-Chromium browsers have no performance.memory).
+ * Worker RAM badge — measured JS-heap usage when the worker can report it
+ * (Chromium main-thread API; usually unavailable inside workers), otherwise
+ * the model's approximate resident footprint (`≈` marks the estimate).
+ * Amber when above 75% of the heap ceiling; hidden until something is known.
  */
-function RamBadge({ stats, titleBase }: { stats?: { heapUsedMb: number; heapLimitMb: number } | null; titleBase: string }) {
-  if (!stats) return null;
-  const pct = stats.heapLimitMb > 0 ? stats.heapUsedMb / stats.heapLimitMb : 0;
-  return (
-    <span
-      className={cn(
-        'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
-        pct > 0.75
-          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-          : 'bg-foreground/10 text-muted-foreground/80'
-      )}
-      title={`${titleBase} · worker JS heap ${stats.heapUsedMb} MB / ${stats.heapLimitMb} MB (weights live in WASM/GPU memory, not this number)`}
-    >
-      RAM {stats.heapUsedMb}MB
-    </span>
-  );
+function RamBadge({
+  stats,
+  estimateMb,
+  titleBase,
+}: {
+  stats?: { heapUsedMb: number; heapLimitMb: number } | null;
+  estimateMb?: number | null;
+  titleBase: string;
+}) {
+  if (stats) {
+    const pct = stats.heapLimitMb > 0 ? stats.heapUsedMb / stats.heapLimitMb : 0;
+    return (
+      <span
+        className={cn(
+          'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+          pct > 0.75
+            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+            : 'bg-foreground/10 text-muted-foreground/80'
+        )}
+        title={`${titleBase} · worker JS heap ${stats.heapUsedMb} MB / ${stats.heapLimitMb} MB (weights live in WASM/GPU memory, not this number)`}
+      >
+        RAM {stats.heapUsedMb}MB
+      </span>
+    );
+  }
+  if (estimateMb) {
+    return (
+      <span
+        className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide text-muted-foreground/80"
+        title={`${titleBase} · ≈${estimateMb} MB estimated resident footprint (weights + runtime) — exact per-worker RAM is not measurable from inside the page`}
+      >
+        RAM ≈{estimateMb}MB
+      </span>
+    );
+  }
+  return null;
+}
+
+/**
+ * Inference duty-cycle: what fraction of the trailing `windowMs` the given
+ * activity flag has been true (0–100). This is the closest thing to a
+ * per-worker CPU-usage number the page can compute — no browser API
+ * exposes per-worker CPU, but "how much of the last 15s the Whisper/LLM
+ * engine was actually inferring" is the signal that matters for lag.
+ */
+function useDutyCycle(active: boolean, windowMs = 15_000): number {
+  const spansRef = useRef<Array<{ start: number; end: number }>>([]);
+  const activeRef = useRef(active);
+  const startRef = useRef<number | null>(null);
+  const [, tick] = useState(0);
+
+  useEffect(() => {
+    if (active && !activeRef.current) startRef.current = performance.now();
+    if (!active && activeRef.current && startRef.current !== null) {
+      spansRef.current.push({ start: startRef.current, end: performance.now() });
+      startRef.current = null;
+    }
+    activeRef.current = active;
+  }, [active]);
+
+  // Recompute on a slow cadence — a % that updates 2×/s is plenty and
+  // costs nothing on the render path
+  useEffect(() => {
+    const t = window.setInterval(() => tick((n) => n + 1), 500);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const now = performance.now();
+  spansRef.current = spansRef.current.filter((s) => now - s.end < windowMs);
+  let busy = spansRef.current.reduce((sum, s) => sum + (s.end - s.start), 0);
+  if (startRef.current !== null) busy += now - startRef.current;
+  return Math.min(100, Math.round((busy / windowMs) * 100));
 }
 
 /**
@@ -322,6 +383,23 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
       ? 'call'
       : null;
 
+  // ---- Resource badges (speaker-meter line) -----------------------------
+  // RAM: measured worker heap when available, otherwise the model's
+  // approximate resident footprint (weights + runtime), marked "≈".
+  const llmRamEstimate =
+    parser?.enabled && parser.status === 'ready' && parser.dtype
+      ? LLM_RAM_ESTIMATE_MB[parser.model][parser.dtype]
+      : null;
+  const whisperRamEstimate =
+    engine.status === 'ready' && engine.dtype
+      ? WHISPER_RAM_ESTIMATE_MB[engine.model][engine.dtype as WhisperDtype]
+      : null;
+  // CPU: inference duty-cycle — % of the trailing 15s either worker was
+  // actually inferring (Whisper segment or LLM generation). The honest
+  // per-worker CPU signal the page can compute.
+  const llmBusy = !!parser?.isParsing || !!parser?.isParaphrasing;
+  const cpuDuty = useDutyCycle(call.isTranscribing || llmBusy);
+
   const suggestions = activeSource === 'call' ? call.suggestions : mic.suggestions;
   const error = activeSource === 'call' ? call.error : mic.error;
   const isActive = !!activeSource;
@@ -421,7 +499,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           </Button>
         </div>
 
-        {/* Per-speaker audio level meters — proves each channel is live */}
+        {/* Per-speaker audio level meters + engine resource badges — proves
+            each channel is live AND shows what the AI engines are using */}
         {isActive && activeSource === 'call' && (
           <div className="mt-1.5 flex flex-wrap items-center gap-3">
             <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
@@ -435,9 +514,46 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 mic unavailable — customer only
               </span>
             )}
+
+            {/* Engine resources — right side of the meter line */}
+            <span className="ml-auto flex flex-wrap items-center gap-1.5">
+              {parser?.device && parser.status === 'ready' && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                    parser.device === 'gpu'
+                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-foreground/10 text-muted-foreground/80'
+                  )}
+                  title={
+                    parser.device === 'gpu'
+                      ? 'WebGPU acceleration active — inference runs on the GPU'
+                      : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
+                  }
+                >
+                  {parser.device === 'gpu' ? 'GPU' : 'CPU'}
+                </span>
+              )}
+              {cpuDuty > 0 && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                    cpuDuty > 80
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      : 'bg-foreground/10 text-muted-foreground/80'
+                  )}
+                  title="Engine inference load — % of the last 15s that Whisper or the LLM was actually computing (the browser exposes no per-worker CPU number; this duty-cycle is the honest signal)"
+                >
+                  CPU {cpuDuty}%
+                </span>
+              )}
+              <RamBadge stats={parser?.memStats} estimateMb={llmRamEstimate} titleBase="LLM parser worker" />
+              <RamBadge stats={engine.memStats} estimateMb={whisperRamEstimate} titleBase="Whisper worker" />
+            </span>
+
             {call.hasMic && !bothQuiet && (
               <span
-                className="ml-auto text-[9px] text-muted-foreground/60"
+                className="text-[9px] text-muted-foreground/60"
                 title="Browsers can't echo-cancel audio playing in another tab, so speakers leak the customer's voice into your mic and their words may also appear under Agent. A headset keeps the two speakers cleanly separated."
               >
                 headset recommended
@@ -681,35 +797,6 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </button>
               )}
             </div>
-
-            {/* RESOURCE line — backend + both workers' RAM, on its own line
-                under the status/selector row so the badges never wrap the
-                controls. GPU = WebGPU inference (order of magnitude faster);
-                CPU = WASM fallback. RAM = each worker's JS heap (weights
-                live in WASM/GPU memory). Hidden until the workers report. */}
-            {parser.enabled && parser.status === 'ready' && (parser.device || parser.memStats || engine.memStats) && (
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                {parser.device && (
-                  <span
-                    className={cn(
-                      'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
-                      parser.device === 'gpu'
-                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-foreground/10 text-muted-foreground/80'
-                    )}
-                    title={
-                      parser.device === 'gpu'
-                        ? 'WebGPU acceleration active — inference runs on the GPU'
-                        : 'Running on CPU (WASM) — no WebGPU available, inference is slower'
-                    }
-                  >
-                    {parser.device === 'gpu' ? 'GPU' : 'CPU'}
-                  </span>
-                )}
-                <RamBadge stats={parser.memStats} titleBase="LLM parser worker" />
-                <RamBadge stats={engine.memStats} titleBase="Whisper worker" />
-              </div>
-            )}
 
             {/* Download progress */}
             {parser.enabled && parser.status === 'loading' && (
