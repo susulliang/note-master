@@ -64,6 +64,28 @@ const scope = self as unknown as {
 const post = (message: WhisperWorkerEvent) => scope.postMessage(message);
 
 /**
+ * Report the worker's JS-heap usage to the main thread (the RAM badge).
+ * Throttled to one post per 2s. Model weights live in WASM memory, not
+ * the JS heap, so this tracks worker overhead; still the best per-worker
+ * signal available from inside the page. Hidden on non-Chromium browsers
+ * where performance.memory is unavailable.
+ */
+let memReportedAt = 0;
+function postMemStats(force = false): void {
+  const now = performance.now();
+  if (!force && now - memReportedAt < 2000) return;
+  memReportedAt = now;
+  const memory = (self as { performance?: { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } } })
+    .performance?.memory;
+  if (!memory) return;
+  post({
+    type: 'mem-stats',
+    heapUsedMb: Math.round(memory.usedJSHeapSize / 1048576),
+    heapLimitMb: Math.round(memory.jsHeapSizeLimit / 1048576),
+  });
+}
+
+/**
  * Load `model`, trying precisions from `preferred` (then the rest of the
  * chain, most quantized first). Resolves once a session is ready; posts
  * `ready` with the dtype that worked or `load-error` if all fail.
@@ -112,6 +134,7 @@ async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Pro
       }
       current = { model, pipe, dtype };
       post({ type: 'ready', model, dtype });
+      postMemStats(true); // fresh model resident — heap just grew
       return;
     } catch (err) {
       // e.g. a quantized export that the current runtime can't instantiate
@@ -142,6 +165,7 @@ async function handleTranscribe(id: number, audio: Float32Array): Promise<void> 
     const text = (Array.isArray(output) ? (output[0]?.text ?? '') : (output.text ?? '')).trim();
 
     post({ type: 'result', id, text, ms: Math.round(performance.now() - started) });
+    postMemStats(); // throttled — keeps the RAM badge live across segments
   } catch (err) {
     post({
       type: 'transcribe-error',

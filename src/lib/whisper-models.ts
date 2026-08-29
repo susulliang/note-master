@@ -78,7 +78,16 @@ export type WhisperWorkerEvent =
   | { type: 'ready'; model: WhisperModelName; dtype: WhisperDtype }
   | { type: 'load-error'; model: WhisperModelName; message: string }
   | { type: 'result'; id: number; text: string; ms: number }
-  | { type: 'transcribe-error'; id: number; message: string };
+  | { type: 'transcribe-error'; id: number; message: string }
+  | { type: 'mem-stats'; heapUsedMb: number; heapLimitMb: number };
+
+/** Snapshot of the Whisper worker's JS heap — powers the RAM badge */
+export interface WhisperMemStats {
+  /** MB currently used by the worker's JS heap */
+  heapUsedMb: number;
+  /** MB heap ceiling the browser granted the worker */
+  heapLimitMb: number;
+}
 
 /** localStorage keys for user preferences */
 const MODEL_PREF_KEY = 'nm-whisper-model';

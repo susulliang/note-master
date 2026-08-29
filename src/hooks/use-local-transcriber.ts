@@ -4,6 +4,7 @@ import {
   writeModelPref,
   readDtypePref,
   writeDtypePref,
+  type WhisperMemStats,
   type WhisperModelName,
   type WhisperDtype,
   type WhisperWorkerEvent,
@@ -45,6 +46,8 @@ export function useLocalTranscriber() {
   const [dtype, setDtype] = useState<WhisperDtype | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastInferenceMs, setLastInferenceMs] = useState<number | null>(null);
+  /** Worker JS-heap snapshot (RAM badge); null until the worker reports */
+  const [memStats, setMemStats] = useState<WhisperMemStats | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
@@ -134,6 +137,10 @@ export function useLocalTranscriber() {
         }
         break;
       }
+
+      case 'mem-stats':
+        setMemStats({ heapUsedMb: data.heapUsedMb, heapLimitMb: data.heapLimitMb });
+        break;
     }
   }, []);
 
@@ -249,6 +256,8 @@ export function useLocalTranscriber() {
     dtype,
     error,
     lastInferenceMs,
+    /** Worker JS-heap snapshot for the RAM badge (null until reported) */
+    memStats,
     load,
     switchModel,
     transcribe,

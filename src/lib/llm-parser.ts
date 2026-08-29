@@ -108,10 +108,19 @@ export type LlmWorkerEvent =
   | { type: 'load-error'; model: LlmModelName; message: string }
   | { type: 'gen-progress'; id: number; generated: number; maxNewTokens: number }
   | { type: 'result'; id: number; text: string; ms: number }
-  | { type: 'parse-error'; id: number; message: string };
+  | { type: 'parse-error'; id: number; message: string }
+  | { type: 'mem-stats'; heapUsedMb: number; heapLimitMb: number };
 
 /** Execution backend the pipeline actually initialized on */
 export type LlmDevice = 'gpu' | 'cpu';
+
+/** Snapshot of the worker's JS heap — powers the RAM badge */
+export interface LlmMemStats {
+  /** MB currently used by the worker's JS heap */
+  heapUsedMb: number;
+  /** MB heap ceiling the browser granted the worker */
+  heapLimitMb: number;
+}
 
 /** localStorage keys for user preferences */
 const LLM_MODEL_PREF_KEY = 'nm-llm-model';

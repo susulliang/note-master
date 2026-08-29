@@ -12,6 +12,7 @@ import {
   readLlmEnabledPref,
   writeLlmEnabledPref,
   LLM_MODELS,
+  type LlmMemStats,
   type LlmModelName,
   type LlmWorkerEvent,
   type ParaphraseInput,
@@ -121,6 +122,8 @@ export function useLlmParser() {
   /** Live generation progress of the in-flight parse: 0–1 (tokens
    *  generated / max_new_tokens), streamed per-token by the worker */
   const [genProgress, setGenProgress] = useState(0);
+  /** Worker JS-heap snapshot (RAM badge); null until the worker reports */
+  const [memStats, setMemStats] = useState<LlmMemStats | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
@@ -217,6 +220,10 @@ export function useLlmParser() {
         pending.resolve({ text: '', ms: 0, timedOut: false });
         break;
       }
+
+      case 'mem-stats':
+        setMemStats({ heapUsedMb: data.heapUsedMb, heapLimitMb: data.heapLimitMb });
+        break;
     }
   }, []);
 
@@ -522,6 +529,8 @@ export function useLlmParser() {
     lastReply,
     /** Backend the pipeline is running on: 'gpu' (WebGPU) or 'cpu' (WASM) */
     device,
+    /** Worker JS-heap snapshot for the RAM badge (null until reported) */
+    memStats,
     /** Live generation progress of the in-flight parse (0–1) — tokens
      *  generated / max_new_tokens, streamed per-token by the worker */
     genProgress,

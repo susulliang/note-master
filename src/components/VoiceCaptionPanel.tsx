@@ -57,6 +57,8 @@ export interface EnginePanelState {
   dtype: string | null;
   error: string | null;
   lastInferenceMs: number | null;
+  /** Worker JS-heap snapshot for the RAM badge (null until reported) */
+  memStats?: { heapUsedMb: number; heapLimitMb: number } | null;
   onSwitchModel: (model: WhisperModelName) => void;
 }
 
@@ -76,6 +78,8 @@ export interface ParserPanelState {
   device?: 'gpu' | 'cpu' | null;
   /** Live generation progress of the in-flight parse: 0–1 */
   genProgress?: number;
+  /** Worker JS-heap snapshot for the RAM badge (null until reported) */
+  memStats?: { heapUsedMb: number; heapLimitMb: number } | null;
   /**
    * Debug: what the LAST parse sent to the model — which transcript lines
    * made the prompt window, the rendered text itself, and the raw model
@@ -138,6 +142,30 @@ function SpeakerMeter({ label, level, tone }: { label: string; level: number; to
 
 const fieldLabel = (fieldId: string) =>
   FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
+
+/**
+ * Worker RAM badge — the worker's JS-heap usage / ceiling (MB). Updates at
+ * most every 2s (throttled in the worker), so it costs nothing to render.
+ * Amber when above 75% of the heap ceiling; hidden until the worker reports
+ * (non-Chromium browsers have no performance.memory).
+ */
+function RamBadge({ stats, titleBase }: { stats?: { heapUsedMb: number; heapLimitMb: number } | null; titleBase: string }) {
+  if (!stats) return null;
+  const pct = stats.heapLimitMb > 0 ? stats.heapUsedMb / stats.heapLimitMb : 0;
+  return (
+    <span
+      className={cn(
+        'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+        pct > 0.75
+          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+          : 'bg-foreground/10 text-muted-foreground/80'
+      )}
+      title={`${titleBase} · worker JS heap ${stats.heapUsedMb} MB / ${stats.heapLimitMb} MB (weights live in WASM/GPU memory, not this number)`}
+    >
+      RAM {stats.heapUsedMb}MB
+    </span>
+  );
+}
 
 /**
  * One tiny engine-progress row: label, hairline activity bar, status text.
@@ -248,16 +276,29 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   }, [showJsonWindow]);
 
   // The SLIDING window the NEXT parse will send — computed LIVE from the
-  // current transcript, so the amber highlight slides forward in real time
+  // current transcript, so the yellow underline slides forward in real time
   // as new lines arrive (the same tail-window slicing the parser applies).
   // Highlighting the last parse's frozen snapshot instead made the window
   // look stuck on an early chunk of the call between the throttled parses.
+  //
+  // Debounced by 1s: the window only ever loses its OLDEST lines as the
+  // call grows (new lines enter at the tail cap immediately), so a one
+  // second delay on the highlight is invisible — while running
+  // buildPromptWindow (regex over every turn) on EVERY transcript tick
+  // was a real cost on 60-minute calls.
+  const [windowTick, setWindowTick] = useState(0);
+  const transcriptLen = call.transcript.length;
+  useEffect(() => {
+    const t = window.setTimeout(() => setWindowTick((n) => n + 1), 1000);
+    return () => window.clearTimeout(t);
+  }, [transcriptLen]);
   const liveWindow = useMemo(
     () =>
       parser?.enabled && parser.status === 'ready'
         ? buildPromptWindow(call.transcript)
         : null,
-    [parser?.enabled, parser?.status, call.transcript]
+    // windowTick re-runs this up to 1×/s; transcriptLen===0 handles the empty case
+    [parser?.enabled, parser?.status, windowTick, transcriptLen === 0]
   );
   const llmWindowSet = useMemo(
     () => new Set(liveWindow?.entryIndexes ?? []),
@@ -459,8 +500,9 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 </span>
               )}
               {engine.status === 'ready' && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                   on-device{engine.dtype ? ` · ${engine.dtype}` : ''}
+                  <RamBadge stats={engine.memStats} titleBase="Whisper worker" />
                 </span>
               )}
               {engine.status === 'error' && (
@@ -579,6 +621,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                       {parser.device === 'gpu' ? 'GPU' : 'CPU'}
                     </span>
                   )}
+                  <RamBadge stats={parser.memStats} titleBase="LLM parser worker" />
                 </span>
               )}
               {parser.enabled && parser.status === 'error' && (

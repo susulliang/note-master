@@ -71,6 +71,31 @@ const scope = self as unknown as {
 
 const post = (message: LlmWorkerEvent) => scope.postMessage(message);
 
+/**
+ * Report the worker's JS-heap usage to the main thread (the RAM badge).
+ * Throttled to one post per 2s — a per-result report would just add
+ * message traffic during back-to-back parses. Model weights live in
+ * WASM/GPU memory, not the JS heap, so this number tracks the WORKER
+ * OVERHEAD (prompt strings, tokenizer state, pipeline plumbing); the
+ * weights themselves show up in the browser's about:blank worker process
+ * instead. Still the best per-worker signal available from inside the
+ * page.
+ */
+let memReportedAt = 0;
+function postMemStats(force = false): void {
+  const now = performance.now();
+  if (!force && now - memReportedAt < 2000) return;
+  memReportedAt = now;
+  const memory = (self as { performance?: { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } } })
+    .performance?.memory;
+  if (!memory) return; // non-Chromium: API unavailable, badge just stays hidden
+  post({
+    type: 'mem-stats',
+    heapUsedMb: Math.round(memory.usedJSHeapSize / 1048576),
+    heapLimitMb: Math.round(memory.jsHeapSizeLimit / 1048576),
+  });
+}
+
 /** WebGPU available in this worker? (navigator.gpu exists and an adapter
  *  can be requested — some browsers expose gpu but have no adapter.) */
 async function hasWebGpu(): Promise<boolean> {
@@ -139,6 +164,7 @@ async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<voi
         }
         current = { model, pipe, dtype, device: device === 'webgpu' ? 'gpu' : 'cpu' };
         post({ type: 'ready', model, dtype, device: current.device });
+        postMemStats(true); // fresh model resident — heap just grew
         return;
       } catch (err) {
         // e.g. a quantized export the current runtime can't instantiate —
@@ -227,6 +253,7 @@ async function runParse(job: ParseJob): Promise<void> {
     }
 
     post({ type: 'result', id: job.id, text, ms: Math.round(performance.now() - started) });
+    postMemStats(); // throttled — keeps the RAM badge live across parses
   } catch (err) {
     post({
       type: 'parse-error',

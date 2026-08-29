@@ -1071,6 +1071,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           dtype: localWhisper.dtype,
           error: localWhisper.error,
           lastInferenceMs: localWhisper.lastInferenceMs,
+          memStats: localWhisper.memStats,
           onSwitchModel: handleSwitchWhisperModel,
         }}
         parser={{
@@ -1085,6 +1086,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           lastParseMs: llmParser.lastParseMs,
           device: llmParser.device,
           genProgress: llmParser.genProgress,
+          memStats: llmParser.memStats,
           window: llmParser.lastWindow,
           lastReply: llmParser.lastReply,
           lastStats: llmParser.lastStats,
