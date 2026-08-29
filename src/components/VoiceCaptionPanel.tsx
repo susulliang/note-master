@@ -797,19 +797,20 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   const sent = inWindow && lastSentMax !== null && i <= lastSentMax;
                   const beforeWindow =
                     llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
-                  const llmWorking = !!parser?.isParsing || !!parser?.isParaphrasing;
                   return (
                     <p
                       key={i}
+                      // STATIC underlines only — no fills, rings or pulse
+                      // animations: a 40-line transcript re-rendering with
+                      // animated shadows on every progress tick was a
+                      // measurable perf drag. Yellow underline = inside the
+                      // AI window (being parsed next); grey underline =
+                      // already read by the AI (its values are on the form).
                       className={cn(
-                        'flex items-start gap-1.5 rounded-r border-l-2 px-1 py-0.5 -mx-1 transition-colors duration-300',
-                        sent &&
-                          'border-l-amber-500 bg-amber-500/[0.13] shadow-[inset_0_0_0_1px_rgba(245,158,11,0.18)]',
-                        inWindow &&
-                          !sent &&
-                          'border-l-amber-400/70 bg-amber-400/[0.06]',
-                        inWindow && llmWorking && 'ring-1 ring-amber-400/50 animate-pulse',
-                        beforeWindow && 'border-l-transparent opacity-40'
+                        'flex items-start gap-1.5 border-b-2 border-transparent px-1 py-0.5 -mx-1',
+                        inWindow
+                          ? 'border-b-amber-400/80'
+                          : beforeWindow && 'border-b-foreground/15 opacity-40'
                       )}
                       title={
                         sent
@@ -862,14 +863,14 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
           )}
         </div>
 
-        {/* Legend for the sliding-window highlight — always visible once a
-            parse has run, so the amber/dimmed lines are self-explanatory */}
+        {/* Legend for the sliding-window underline — always visible once a
+            parse has run, so the yellow/grey lines are self-explanatory */}
         {activeSource === 'call' &&
           call.transcript.length > 0 &&
           llmWindowSet.size > 0 && (
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] leading-none text-muted-foreground/80">
               <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2.5 w-1.5 rounded-sm border-l-2 border-amber-500 bg-amber-500/30" />
+                <span className="inline-block h-0.5 w-3 rounded-sm bg-amber-400/80" />
                 <span>
                   <span className="font-bold text-amber-600 dark:text-amber-400">
                     {llmWindowSet.size}
@@ -885,7 +886,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   </span>
                 )}
               {llmWindowFirst !== null && llmWindowFirst > 0 && (
-                <span className="opacity-70">dimmed = slid out (values live on in the form)</span>
+                <span className="opacity-70">grey/dimmed = slid out (values live on in the form)</span>
               )}
             </div>
           )}

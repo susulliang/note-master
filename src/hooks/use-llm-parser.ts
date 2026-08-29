@@ -419,9 +419,15 @@ export function useLlmParser() {
         // the situation, and a second, brevity-hardened pass often reads
         // what the first one missed. (A short transcript that legitimately
         // mentions nothing needs no retry.)
+        //
+        // NEVER retry a TIMEOUT: the worker is still busy generating the
+        // first attempt (transformers.js cannot cancel it), so the retry
+        // would queue behind it — doubling the stall with zero chance of
+        // being faster. The next idle parse (armed in runLlmParse's
+        // finally) retries with the newest transcript instead.
         const chars = entries.reduce((n, e) => n + e.text.length, 0);
         const modelFailed = fields === null || (fields.length === 0 && chars >= SUBSTANTIAL_TRANSCRIPT_CHARS);
-        if (modelFailed) {
+        if (modelFailed && !firstRun.timedOut) {
           const strict = buildParsePrompt(entries, missingFieldIds, prior, true);
           const retriedRun = await generateReply(strict.system, strict.user, MAX_NEW_TOKENS);
           attempts = 2;

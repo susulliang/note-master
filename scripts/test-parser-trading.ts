@@ -317,6 +317,30 @@ check(
 );
 check('prompt far below the model context window', totalTokens < 8000);
 
+// Prior values must ride INSIDE the JSON skeleton the model edits — prose
+// instructions alone froze the evolving fields on small models.
+check(
+  'prior issueDescription is seeded INTO the JSON skeleton (edit-me, not prose-only)',
+  prompt.user.includes('"issueDescription":"GOAT mower leaves edges uncut; stops after a few passes with blinking 1-1 error"'),
+  'skeleton not pre-filled with the prior issue clauses'
+);
+check(
+  'prior resolutionSummary is seeded INTO the JSON skeleton',
+  prompt.user.includes('"resolutionSummary":"warranty replacement already sent -> use trade-in program on website"'),
+  'skeleton not pre-filled with the prior steps'
+);
+// Without a prior, the skeleton must stay empty ("" for unknown) — seeding
+// must not leak stale values into a fresh parse.
+const freshPrompt = buildParsePrompt(entries, [
+  'customerName', 'contactNumber', 'emailAddress', 'deebotModel', 'skuNumber', 'serialNumber', 'purchaseInfo', 'issueDescription', 'issueType', 'resolutionSummary',
+]);
+check(
+  'fresh parse (no prior) hands the model an empty skeleton',
+  freshPrompt.user.includes('"issueDescription":""') &&
+    freshPrompt.user.includes('"resolutionSummary":""'),
+  'skeleton should be empty without prior values'
+);
+
 console.log('\n=== 4. LLM reply validation on this call ===');
 const validated = validateLlmFields({
   customerName: 'Dan Knight',

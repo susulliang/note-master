@@ -338,7 +338,22 @@ export function buildParsePrompt(
     wanted.length > 0
       ? PROMPT_FIELD_ORDER.filter((id) => (wanted as readonly string[]).includes(id))
       : [...PROMPT_FIELD_ORDER];
-  const skeleton = Object.fromEntries(order.map((id) => [id, '']));
+  // Seed the EVOLVING fields with their prior values: the model only has
+  // to EDIT the JSON it is handed (append new clauses) instead of
+  // re-deriving the whole list from prose instructions. Field data showed
+  // prose-only carry-forward froze both boxes on the small models — they
+  // either echoed the prose or dropped it; a pre-filled skeleton makes the
+  // old clauses part of the reply's own structure.
+  const skeleton = Object.fromEntries(
+    order.map((id) => [
+      id,
+      id === 'issueDescription' && prior?.issueDescription
+        ? prior.issueDescription
+        : id === 'resolutionSummary' && prior?.resolutionSummary
+          ? prior.resolutionSummary
+          : '',
+    ])
+  );
 
   const system = [
     'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
@@ -374,7 +389,7 @@ export function buildParsePrompt(
   }
   userLines.push(
     '',
-    `Extract these ticket fields as JSON ("" when unknown): ${JSON.stringify(skeleton)}`
+    `Extract these ticket fields as JSON ("" when unknown; the two fields already hold the ticket's current value — keep ALL of it and append any NEW clauses from the transcript): ${JSON.stringify(skeleton)}`
   );
 
   return { system, user: userLines.join('\n') };
