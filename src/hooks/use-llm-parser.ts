@@ -127,10 +127,15 @@ export function useLlmParser() {
   const [memStats, setMemStats] = useState<LlmMemStats | null>(null);
   /** Precision that actually loaded (drives the RAM estimate fallback) */
   const [dtype, setDtype] = useState<'q8' | 'fp32' | null>(null);
+  /** Variants that failed before the current one loaded (download manager) */
+  const [failedAttempts, setFailedAttempts] = useState<
+    Array<{ device: 'gpu' | 'cpu'; dtype: 'q8' | 'fp32'; message: string }> | null
+  >(null);
 
   const workerRef = useRef<Worker | null>(null);
   const modelRef = useRef(model);
   const statusRef = useRef<LlmParserStatus>(status);
+  const deviceRef = useRef<'gpu' | 'cpu' | null>(device);
   const enabledRef = useRef(enabled);
   const nextIdRef = useRef(0);
   /** Load() waiters — resolved on ready (load-error resolves them too; the
@@ -149,6 +154,9 @@ export function useLlmParser() {
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
+  useEffect(() => {
+    deviceRef.current = device;
+  }, [device]);
 
   const handleWorkerEvent = useCallback((event: MessageEvent<LlmWorkerEvent>) => {
     const data = event.data;
@@ -176,7 +184,9 @@ export function useLlmParser() {
         setProgress(100);
         setError(null);
         setDevice(data.device);
+        deviceRef.current = data.device;
         setDtype(data.dtype);
+        setFailedAttempts(data.failedAttempts ?? null);
         {
           const waiters = pendingLoadsRef.current;
           pendingLoadsRef.current = [];
@@ -188,6 +198,7 @@ export function useLlmParser() {
         statusRef.current = 'error';
         setStatus('error');
         setError(data.message);
+        setFailedAttempts(data.failedAttempts ?? null);
         {
           const waiters = pendingLoadsRef.current;
           pendingLoadsRef.current = [];
@@ -273,28 +284,42 @@ export function useLlmParser() {
     };
   }, []);
 
-  /** Load (or switch to) a model. Resolves when ready or failed. */
+  /**
+   * Load (or switch to) a model — optionally pinned to a backend ('gpu'
+   * forces WebGPU+fp32, 'cpu' forces wasm+q8). Resolves when ready or
+   * failed. The download manager uses the device pin; the automatic path
+   * leaves it undefined (GPU when available, wasm fallback).
+   */
   const load = useCallback(
-    (target?: LlmModelName): Promise<void> => {
+    (target?: LlmModelName, device?: 'gpu' | 'cpu'): Promise<void> => {
       const requested = target ?? modelRef.current;
       if (!enabledRef.current) {
         statusRef.current = 'disabled';
         setStatus('disabled');
         return Promise.resolve();
       }
-      if (statusRef.current === 'ready' && modelRef.current === requested) {
+      if (
+        statusRef.current === 'ready' &&
+        modelRef.current === requested &&
+        (!device || deviceRef.current === device)
+      ) {
         return Promise.resolve();
       }
 
       const worker = ensureWorker();
       statusRef.current = 'loading';
       setStatus('loading');
+      setFailedAttempts(null);
 
       const promise = new Promise<void>((resolve) => {
         pendingLoadsRef.current.push(resolve);
       });
       loadPromiseRef.current = promise;
-      worker.postMessage({ type: 'load', model: requested });
+      worker.postMessage({
+        type: 'load',
+        model: requested,
+        ...(device ? { device } : {}),
+      });
       return promise;
     },
     [ensureWorker]
@@ -541,6 +566,8 @@ export function useLlmParser() {
     dtype,
     /** Worker JS-heap snapshot for the RAM badge (null until reported) */
     memStats,
+    /** Load variants that failed before the current session (manager UI) */
+    failedAttempts,
     /** Live generation progress of the in-flight parse (0–1) — tokens
      *  generated / max_new_tokens, streamed per-token by the worker */
     genProgress,

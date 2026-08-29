@@ -115,27 +115,32 @@ async function hasWebGpu(): Promise<boolean> {
  * Resolves once a session is ready; posts `ready` with the dtype+device
  * that worked or `load-error` if all fail.
  */
-async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<void> {
-  if (current?.model === model) {
+async function loadModel(
+  model: LlmModelName,
+  preferred?: LlmDtype,
+  deviceRequest?: 'gpu' | 'cpu'
+): Promise<void> {
+  if (current?.model === model && (!deviceRequest || current.device === deviceRequest)) {
     post({ type: 'ready', model, dtype: current.dtype, device: current.device });
     return;
   }
 
   post({ type: 'load-start', model });
 
-  // GPU first (an order of magnitude faster), wasm as the fallback — EXCEPT
-  // for the 1.5B model, whose fp32 weights (~3.4 GB) are absurd on any GPU:
-  // it goes straight to wasm+q8 (~1.1 GB)
-  const devices: Array<'webgpu' | 'wasm'> =
-    (await hasWebGpu()) && model !== 'qwen2.5-1.5b'
+  // Device order: an explicit request from the download manager pins the
+  // backend; otherwise GPU first (order of magnitude faster) with wasm as
+  // the fallback — EXCEPT the 1.5B model, whose fp32 weights (~3.4 GB) are
+  // absurd on any GPU: it goes straight to wasm+q8 (~1.1 GB)
+  const devices: Array<'webgpu' | 'wasm'> = deviceRequest
+    ? [deviceRequest === 'gpu' ? 'webgpu' : 'wasm']
+    : (await hasWebGpu()) && model !== 'qwen2.5-1.5b'
       ? ['webgpu', 'wasm']
       : ['wasm'];
 
   // DTYPE IS DEVICE-SPECIFIC. Field data: a q8 (DynamicQuantizeLinear)
   // session on the WebGPU provider LOADS fine but HANGS at first inference
   // — 0 tokens in 120s on a 387-token prompt, no error thrown. The WebGPU
-  // EP needs fp32 weights; q8 is the WASM/CPU format. Trying q8-on-webgpu
-  // first therefore silently broke every parse on GPU machines.
+  // EP needs fp32 weights; q8 is the WASM/CPU format.
   const dtypeOrder = (device: 'webgpu' | 'wasm'): LlmDtype[] => {
     const wasmOrder: LlmDtype[] = preferred
       ? [preferred, ...LLM_DTYPE_CHAIN.filter((dtype) => dtype !== preferred)]
@@ -145,7 +150,7 @@ async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<voi
       : wasmOrder;
   };
 
-  let lastError: unknown = null;
+  const failedAttempts: Array<{ device: 'gpu' | 'cpu'; dtype: LlmDtype; message: string }> = [];
 
   for (const device of devices) {
     for (const dtype of dtypeOrder(device)) {
@@ -177,13 +182,24 @@ async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<voi
           }
         }
         current = { model, pipe, dtype, device: device === 'webgpu' ? 'gpu' : 'cpu' };
-        post({ type: 'ready', model, dtype, device: current.device });
+        post({
+          type: 'ready',
+          model,
+          dtype,
+          device: current.device,
+          ...(failedAttempts.length > 0 ? { failedAttempts } : {}),
+        });
         postMemStats(true); // fresh model resident — heap just grew
         return;
       } catch (err) {
-        // e.g. a quantized export the current runtime can't instantiate —
-        // fall through to the next precision / device.
-        lastError = err;
+        // Record WHY this variant failed (the download manager surfaces
+        // it — e.g. gpu/fp32 weights downloaded then session-init crashed)
+        // and fall through to the next precision / device.
+        failedAttempts.push({
+          device: device === 'webgpu' ? 'gpu' : 'cpu',
+          dtype,
+          message: (err as Error | null)?.message ?? String(err),
+        });
       }
     }
   }
@@ -192,8 +208,9 @@ async function loadModel(model: LlmModelName, preferred?: LlmDtype): Promise<voi
     type: 'load-error',
     model,
     message: `Could not load ${model} in any precision. Last error: ${
-      (lastError as Error | null)?.message ?? String(lastError)
+      failedAttempts[failedAttempts.length - 1]?.message ?? 'unknown'
     }`,
+    ...(failedAttempts.length > 0 ? { failedAttempts } : {}),
   });
 }
 
@@ -283,7 +300,7 @@ scope.addEventListener('message', (event) => {
   if (data.type === 'load') {
     // Chain loads so switching models rapidly is well-defined; `loading`
     // tracks the latest request (the model the user last asked for).
-    const run = loadChain.then(() => loadModel(data.model, data.dtype));
+    const run = loadChain.then(() => loadModel(data.model, data.dtype, data.device));
     loadChain = run.catch(() => undefined);
     loading = run.catch(() => undefined);
     return;

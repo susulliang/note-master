@@ -99,6 +99,12 @@ export interface LlmLoadMessage {
   type: 'load';
   model: LlmModelName;
   dtype?: LlmDtype;
+  /**
+   * Explicit backend request from the download manager: 'gpu' forces
+   * WebGPU (+fp32), 'cpu' forces wasm (q8/fp32 chain). Undefined keeps
+   * the auto order (GPU when available, else wasm).
+   */
+  device?: 'gpu' | 'cpu';
 }
 
 export interface LlmParseMessage {
@@ -116,8 +122,21 @@ export type LlmWorkerRequest = LlmLoadMessage | LlmParseMessage;
 export type LlmWorkerEvent =
   | { type: 'load-start'; model: LlmModelName }
   | { type: 'progress'; model: LlmModelName; progress: number }
-  | { type: 'ready'; model: LlmModelName; dtype: LlmDtype; device: LlmDevice }
-  | { type: 'load-error'; model: LlmModelName; message: string }
+  | {
+      type: 'ready';
+      model: LlmModelName;
+      dtype: LlmDtype;
+      device: LlmDevice;
+      /** Which variants were TRIED and rejected before this one worked —
+       *  the download manager shows why e.g. gpu/fp32 failed */
+      failedAttempts?: Array<{ device: LlmDevice; dtype: LlmDtype; message: string }>;
+    }
+  | {
+      type: 'load-error';
+      model: LlmModelName;
+      message: string;
+      failedAttempts?: Array<{ device: LlmDevice; dtype: LlmDtype; message: string }>;
+    }
   | { type: 'gen-progress'; id: number; generated: number; maxNewTokens: number }
   | { type: 'result'; id: number; text: string; ms: number }
   | { type: 'parse-error'; id: number; message: string }

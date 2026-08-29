@@ -899,6 +899,16 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     void llmParser.load();
   }, [llmParser]);
 
+  /** Download-manager load: pin the model to a backend (gpu=fp32, cpu=q8) */
+  const handleLoadLlmDevice = useCallback(
+    (model: Parameters<typeof llmParser.load>[0], device: 'gpu' | 'cpu') => {
+      // Switching to a different model also updates the selector
+      llmParser.switchModel(model as Parameters<typeof llmParser.switchModel>[0]);
+      void llmParser.load(model, device);
+    },
+    [llmParser]
+  );
+
   /**
    * Hang Up & Generate Note:
    *
@@ -1091,6 +1101,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           window: llmParser.lastWindow,
           lastReply: llmParser.lastReply,
           lastStats: llmParser.lastStats,
+          failedAttempts: llmParser.failedAttempts,
+          onLoadDevice: handleLoadLlmDevice,
           onToggleEnabled: handleToggleLlmEnabled,
           onSwitchModel: handleSwitchLlmModel,
           onLoad: handleLoadLlm,

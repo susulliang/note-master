@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Braces, Bug, BrainCircuit, Copy, Cpu, Loader2, Mic, MicOff, MonitorPlay, Sparkles, Trash2, X } from 'lucide-react';
+import { Braces, Bug, BrainCircuit, Copy, Cpu, Loader2, Mic, MicOff, MonitorPlay, Settings, Sparkles, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -99,6 +99,9 @@ export interface ParserPanelState {
    * ~tokens), model generation time, output tokens/s, attempt count.
    */
   lastStats?: LlmParseStats | null;
+  /** Load variants that failed before the current session (manager UI) */
+  failedAttempts?: Array<{ device: 'gpu' | 'cpu'; dtype: 'q8' | 'fp32'; message: string }> | null;
+  onLoadDevice?: (model: LlmModelName, device: 'gpu' | 'cpu') => void;
   onToggleEnabled: (enabled: boolean) => void;
   onSwitchModel: (model: LlmModelName) => void;
   onLoad: () => void;
@@ -113,6 +116,53 @@ interface VoiceCaptionPanelProps {
 
 /** Bar thresholds for the audio level meters */
 const LEVEL_STEPS = [0.12, 0.3, 0.5, 0.75];
+
+/**
+ * Download-manager variant metadata — the CPU/GPU build options for each
+ * LLM, with the numbers the agent needs to decide (one-time download,
+ * approximate RAM, expected speed on a plain office CPU).
+ */
+const LLM_VARIANTS: Record<LlmModelName, Array<{
+  device: 'gpu' | 'cpu';
+  dtype: 'q8' | 'fp32';
+  label: string;
+  download: string;
+  ram: string;
+  speed: string;
+  note: string;
+}>> = {
+  'smollm2-360m': [
+    {
+      device: 'cpu', dtype: 'q8', label: 'CPU · q8',
+      download: '~200 MB', ram: '~300 MB', speed: '~10–20 tok/s',
+      note: 'Fastest download; weakest reading',
+    },
+    {
+      device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
+      download: '~700 MB', ram: '~900 MB', speed: '~40–80 tok/s',
+      note: 'WebGPU; needs a browser with WebGPU',
+    },
+  ],
+  'qwen2.5-0.5b': [
+    {
+      device: 'cpu', dtype: 'q8', label: 'CPU · q8',
+      download: '~350 MB', ram: '~450 MB', speed: '~5–12 tok/s',
+      note: 'Default build; reliable on any machine',
+    },
+    {
+      device: 'gpu', dtype: 'fp32', label: 'GPU · fp32',
+      download: '~1.4 GB', ram: '~1.4 GB', speed: '~25–50 tok/s',
+      note: 'WebGPU; larger download + GPU memory',
+    },
+  ],
+  'qwen2.5-1.5b': [
+    {
+      device: 'cpu', dtype: 'q8', label: 'CPU · q8',
+      download: '~1.1 GB', ram: '~1.1 GB', speed: '~2–5 tok/s',
+      note: 'Sharpest reading; slowest parses. CPU-only (fp32 on GPU is 3.4 GB)',
+    },
+  ],
+};
 
 type MeterTone = 'red' | 'blue' | 'amber';
 
@@ -304,6 +354,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   /** Floating window showing the raw JSON the LLM last returned */
   const [showJsonWindow, setShowJsonWindow] = useState(false);
   const [jsonCopied, setJsonCopied] = useState(false);
+  /** Download manager (gear): pick CPU/GPU build of each model */
+  const [showDownloadManager, setShowDownloadManager] = useState(false);
 
   // The raw reply, pretty-printed when it parses as JSON (loose extraction
   // first — the model sometimes wraps the object in prose or fences)
@@ -674,27 +726,48 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                 {parser.enabled ? 'AI parser on' : 'AI parser off'}
               </button>
 
-              {/* Model segmented toggle */}
+              {/* Model segmented toggle + download manager gear */}
               {parser.enabled && (
-                <span className="inline-flex overflow-hidden rounded-full border border-border/40">
-                  {parser.models.map((name) => (
+                <>
+                  <span className="inline-flex overflow-hidden rounded-full border border-border/40">
+                    {parser.models.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => parser.onSwitchModel(name)}
+                        disabled={parser.status === 'loading' && parser.model === name}
+                        className={cn(
+                          'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
+                          parser.model === name
+                            ? 'bg-foreground/10 text-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                        title={LLM_MODEL_META[name].note}
+                      >
+                        {LLM_MODEL_META[name].label}
+                      </button>
+                    ))}
+                  </span>
+
+                  {/* Gear → download manager: pick the CPU or GPU build of
+                      the selected model (each is a separate one-time
+                      download) */}
+                  {parser.onLoadDevice && (
                     <button
-                      key={name}
                       type="button"
-                      onClick={() => parser.onSwitchModel(name)}
-                      disabled={parser.status === 'loading' && parser.model === name}
+                      onClick={() => setShowDownloadManager((v) => !v)}
                       className={cn(
-                        'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
-                        parser.model === name
+                        'inline-flex items-center rounded-full p-1 leading-none transition-colors',
+                        showDownloadManager
                           ? 'bg-foreground/10 text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
+                          : 'text-muted-foreground/70 hover:text-foreground'
                       )}
-                      title={LLM_MODEL_META[name].note}
+                      title="Manage model downloads — pick the CPU (q8) or GPU (fp32) build of each model"
                     >
-                      {LLM_MODEL_META[name].label}
+                      <Settings className="size-3" />
                     </button>
-                  ))}
-                </span>
+                  )}
+                </>
               )}
 
               {/* Status */}
@@ -838,6 +911,93 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
                   </span>
                 </div>
               )}
+
+            {/* Download manager (gear): the CPU/GPU build of each model.
+                Clicking a variant downloads it pinned to that backend —
+                each is a separate one-time download cached by the browser. */}
+            {showDownloadManager && parser.onLoadDevice && (
+              <div className="mt-1.5 rounded-lg bg-background/60 p-2">
+                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Model downloads — CPU (q8) vs GPU (fp32) builds
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {parser.models.map((name) => (
+                    <div key={name} className="rounded-md bg-foreground/[0.04] p-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-foreground">
+                          {LLM_MODEL_META[name].label}
+                        </span>
+                        {parser.model === name && parser.status === 'ready' && parser.device && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide text-emerald-600 dark:text-emerald-400">
+                            active · {parser.device} · {parser.dtype}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {LLM_VARIANTS[name].map((variant) => {
+                          const isActive =
+                            parser.model === name &&
+                            parser.status === 'ready' &&
+                            parser.device === variant.device &&
+                            parser.dtype === variant.dtype;
+                          const isFailed = parser.failedAttempts?.some(
+                            (f) => f.device === variant.device && f.dtype === variant.dtype
+                          );
+                          return (
+                            <button
+                              key={variant.label}
+                              type="button"
+                              disabled={isActive || (parser.status === 'loading' && parser.model === name)}
+                              onClick={() => parser.onLoadDevice?.(name, variant.device)}
+                              className={cn(
+                                'flex flex-col items-start gap-0.5 rounded-md border px-2 py-1 text-left transition-colors',
+                                isActive
+                                  ? 'border-emerald-400/50 bg-emerald-500/10'
+                                  : 'border-border/50 hover:bg-foreground/[0.06]',
+                                isFailed && 'border-destructive/40'
+                              )}
+                              title={`${variant.note}${isFailed ? ' · this build failed to initialize last time — the error is shown below' : ''}`}
+                            >
+                              <span className="flex items-center gap-1 text-[9px] font-bold uppercase leading-none tracking-wide text-foreground">
+                                {variant.device === 'gpu' ? (
+                                  <Cpu className="size-2.5 text-emerald-500" />
+                                ) : (
+                                  <Cpu className="size-2.5 text-muted-foreground/70" />
+                                )}
+                                {variant.label}
+                                {isFailed && <span className="text-destructive">!</span>}
+                              </span>
+                              <span className="text-[8px] leading-none text-muted-foreground/80">
+                                ↓{variant.download} · RAM {variant.ram} · {variant.speed}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Why a build failed — e.g. gpu/fp32 downloaded but the
+                    WebGPU session could not initialize on this machine */}
+                {parser.failedAttempts && parser.failedAttempts.length > 0 && (
+                  <div className="mt-1.5 rounded-md bg-destructive/10 p-1.5">
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-destructive">
+                      failed builds
+                    </p>
+                    {parser.failedAttempts.map((f, i) => (
+                      <p key={i} className="mt-0.5 break-all text-[8px] leading-snug text-destructive/80">
+                        {f.device}/{f.dtype}: {f.message.slice(0, 200)}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
+                  Each build is a separate one-time download cached by the browser. GPU builds
+                  need WebGPU (Chrome/Edge 113+); if a GPU build fails, the CPU build is the
+                  reliable fallback. Only one model is resident at a time.
+                </p>
+              </div>
+            )}
 
             {/* AI parse debug: the LIVE prompt window (what the NEXT parse
                 will send — updates as the conversation grows) + the last
