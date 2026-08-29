@@ -853,13 +853,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   // ---------------------------------------------------------------------
   const call = useCallCapture(handleAutoFill, localWhisper, llmParser);
 
+  /** Panel mic-mode toggle (no longer in the toolbar — call capture covers
+   *  both speakers with the same Mic icon) */
   const handleToggleVoice = useCallback(() => {
     if (call.isCapturing) call.stop();
     voice.toggle();
   }, [call, voice]);
 
   const handleToggleCall = useCallback(() => {
-    if (voice.isListening) voice.toggle(); // stop mic mode first
     if (localWhisper.isSupported && localWhisper.status !== 'ready') {
       // Warm the model while the user picks the CCP tab in the share dialog
       void localWhisper.load();
@@ -870,7 +871,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       void llmParser.load();
     }
     call.toggle();
-  }, [call, voice, localWhisper, llmParser]);
+  }, [call, localWhisper, llmParser]);
 
   const handleSwitchWhisperModel = useCallback(
     (model: Parameters<typeof localWhisper.switchModel>[0]) => {
@@ -974,9 +975,6 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             onClearHistory={handleClearHistory}
             uiScale={uiScale}
             onToggleUiScale={handleToggleUiScale}
-            voiceSupported={voice.isSupported}
-            voiceListening={voice.isListening}
-            onToggleVoice={handleToggleVoice}
             callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}

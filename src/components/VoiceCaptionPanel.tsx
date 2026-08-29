@@ -314,7 +314,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
   if (!isActive && !hasContent && !error) return null;
 
   return (
-    <div className="fixed bottom-3 left-3 z-40 w-[min(420px,calc(100vw-24px))]">
+    <div className="fixed bottom-3 left-3 z-40 w-[min(640px,calc(100vw-24px))]">
       <div
         className={cn(
           'glass-panel rounded-xl p-3 transition-all duration-300',
@@ -703,7 +703,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
             captured conversation without scrolling the page instead */}
         <div
           ref={scrollRef}
-          className="custom-scrollbar mt-2 max-h-[264px] overflow-y-auto rounded-lg bg-background/50 p-2"
+          className="custom-scrollbar mt-2 max-h-[min(480px,60vh)] overflow-y-auto rounded-lg bg-background/50 p-2"
         >
           {showCallEntries ? (
             call.transcript.length > 0 ? (

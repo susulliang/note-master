@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { RotateCcw, History, Type, Mic, MicOff, MonitorPlay } from 'lucide-react';
+import { RotateCcw, History, Type, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -29,11 +29,7 @@ interface FloatingControlsProps {
   onClearHistory: () => void;
   uiScale: UiScale;
   onToggleUiScale: () => void;
-  /** Web Speech API voice auto-fill */
-  voiceSupported: boolean;
-  voiceListening: boolean;
-  onToggleVoice: () => void;
-  /** CCP tab-audio capture → local Whisper auto-fill */
+  /** CCP tab-audio + mic capture → local Whisper auto-fill (both speakers) */
   callSupported: boolean;
   callCapturing: boolean;
   onToggleCall: () => void;
@@ -76,9 +72,6 @@ export default function FloatingControls({
   onClearHistory,
   uiScale,
   onToggleUiScale,
-  voiceSupported,
-  voiceListening,
-  onToggleVoice,
   callSupported,
   callCapturing,
   onToggleCall,
@@ -304,39 +297,6 @@ export default function FloatingControls({
 
             <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
-            {voiceSupported && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onToggleVoice}
-                className={cn(
-                  'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
-                  voiceListening &&
-                    'bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive'
-                )}
-                aria-label={
-                  voiceListening ? 'Stop voice transcription' : 'Start voice transcription'
-                }
-                title={
-                  voiceListening
-                    ? 'Voice auto-fill: listening — click to stop'
-                    : 'Voice auto-fill: off — click to start listening'
-                }
-              >
-                {voiceListening ? (
-                  <MicOff className="size-4" />
-                ) : (
-                  <Mic className="size-4" />
-                )}
-                {voiceListening && (
-                  <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                    <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
-                  </span>
-                )}
-              </Button>
-            )}
-
             {callSupported && (
               <Button
                 variant="ghost"
@@ -354,7 +314,11 @@ export default function FloatingControls({
                     : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
                 }
               >
-                <MonitorPlay className="size-4" />
+                {callCapturing ? (
+                  <MicOff className="size-4" />
+                ) : (
+                  <Mic className="size-4" />
+                )}
                 {callCapturing && (
                   <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
