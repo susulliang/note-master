@@ -24,6 +24,8 @@ interface NodeConfig {
   onRemoveQuickText?: (text: string) => void;
   templateMatches?: TemplateEntry[];
   onOpenTemplate?: (template: TemplateEntry) => void;
+  /** HIDDEN: press-and-hold the field to reveal its derived PIN (SN node) */
+  pinFromValue?: boolean;
 }
 
 interface FlowchartCanvasProps {
@@ -492,6 +494,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             templateMatches={node.templateMatches}
             onOpenTemplate={node.onOpenTemplate}
             parsedSource={parsedFields?.[node.id] ?? null}
+            enablePinBubble={node.pinFromValue}
           />
         ))}
       </div>

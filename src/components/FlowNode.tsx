@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/command';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import type { AutoFillSource } from '@/lib/field-extraction';
+import { snToPin } from '@/lib/sn-pin';
 
 export type NodeType =
   | 'start'
@@ -86,6 +87,12 @@ export interface FlowNodeProps {
    * display layer accepts the full source union.)
    */
   parsedSource?: AutoFillSource | null;
+  /**
+   * HIDDEN feature: press-and-hold the field (~600ms) to pop a floating
+   * bubble with the PIN derived from its value (see snToPin). Set on the
+   * Serial Number node only.
+   */
+  enablePinBubble?: boolean;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -329,12 +336,16 @@ function FlowNodeComponent({
   zIndex,
   onHeightChange,
   parsedSource = null,
+  enablePinBubble = false,
 }: FlowNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+  // HIDDEN PIN bubble: press-and-hold the field → PIN derived from its value
+  const [showPin, setShowPin] = useState(false);
+  const pinPressTimerRef = useRef<number | null>(null);
   // Hang-up drag/click disambiguation
   const pendingDragRef = useRef<{ startX: number; startY: number } | null>(null);
   const suppressClickRef = useRef(false);
@@ -349,6 +360,33 @@ function FlowNodeComponent({
   const handleFocus = useCallback(() => {
     onFocus(id);
   }, [id, onFocus]);
+
+  // ---- HIDDEN PIN bubble (Serial Number field) -------------------------
+  // Press-and-hold the input ~600ms → floating bubble with the PIN derived
+  // from the current value. A quick click just focuses the field as usual.
+  const startPinPress = useCallback(() => {
+    if (!enablePinBubble) return;
+    pinPressTimerRef.current = window.setTimeout(() => {
+      pinPressTimerRef.current = null;
+      setShowPin(true);
+    }, 600);
+  }, [enablePinBubble]);
+
+  const cancelPinPress = useCallback(() => {
+    if (pinPressTimerRef.current !== null) {
+      window.clearTimeout(pinPressTimerRef.current);
+      pinPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelPinPress, [cancelPinPress]);
+
+  // The bubble self-dismisses after 5s
+  useEffect(() => {
+    if (!showPin) return;
+    const t = window.setTimeout(() => setShowPin(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [showPin]);
 
   /**
    * Insert a quick text chip into the field value.
@@ -635,6 +673,7 @@ function FlowNodeComponent({
 
     // input type
     const strValue = typeof value === 'string' ? value : '';
+    const pin = enablePinBubble ? snToPin(strValue) : null;
     return (
       <div className="px-2.5 py-1.5">
         {label && (
@@ -656,16 +695,37 @@ function FlowNodeComponent({
             placeholder="Type here..."
           />
         ) : (
-          <Input
-            type={inputType}
-            data-field-id={id}
-            value={strValue}
-            onChange={(e) => onChange(e.target.value)}
-            onFocus={handleFocus}
-            onBlur={onBlur}
-            className="h-9 text-sm"
-            placeholder="Type here..."
-          />
+          <div
+            className="relative"
+            onMouseDown={startPinPress}
+            onMouseUp={cancelPinPress}
+            onMouseLeave={cancelPinPress}
+          >
+            <Input
+              type={inputType}
+              data-field-id={id}
+              value={strValue}
+              onChange={(e) => onChange(e.target.value)}
+              onFocus={handleFocus}
+              onBlur={onBlur}
+              className="h-9 text-sm"
+              placeholder="Type here..."
+            />
+            {/* HIDDEN PIN bubble — press-and-hold the field to reveal */}
+            {showPin && (
+              <div className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2">
+                <div className="glass-panel flex items-center gap-2.5 rounded-lg px-3.5 py-2 shadow-lg">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                    PIN
+                  </span>
+                  <span className="font-mono text-lg font-bold tracking-[0.25em] text-primary">
+                    {pin ?? '—'}
+                  </span>
+                  <div className="absolute left-1/2 top-full size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 glass-panel" />
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {quickTextGroups ? (
           /* Grouped quick inserts — collapsed preview row; hovering expands

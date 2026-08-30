@@ -70,6 +70,8 @@ interface NodeConfig {
   onRemoveQuickText?: (text: string) => void;
   templateMatches?: TemplateEntry[];
   onOpenTemplate?: (template: TemplateEntry) => void;
+  /** HIDDEN: press-and-hold the field to reveal its derived PIN (SN node) */
+  pinFromValue?: boolean;
 }
 
 const NODES: NodeConfig[] = [
@@ -127,6 +129,8 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: Hash,
+    // HIDDEN: press-and-hold the field ~600ms → floating PIN bubble (snToPin)
+    pinFromValue: true,
   },
   {
     id: NODE_IDS.PURCHASE_INFO,
