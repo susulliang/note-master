@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Braces, Bug, BrainCircuit, Cloud, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
+import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { TranscriptEntry, ExtractedField } from '@/hooks/use-call-capture';
+import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import {
@@ -61,29 +61,23 @@ export interface ParserState {
 }
 
 /**
- * DeepSeek cloud-parser state — the on-demand "Cloud parse" action. Unlike
- * the local LLM this never runs automatically: one button click, one API
- * round-trip, results overwrite every provisional regex fill.
+ * DeepSeek cloud-parser state for the settings panel — just the API-key
+ * management shown on the DeepSeek row of Model selection. The Parse
+ * button itself lives in the caption panel header.
  */
 export interface CloudState {
   /** True when a DeepSeek API key is stored */
   hasKey: boolean;
-  /** True while the round-trip is in flight */
-  isParsing: boolean;
-  /** Last failure (bad key, network, API error) — surfaced under the button */
+  /** Last failure (bad key, network, API error) — surfaced on the row */
   error: string | null;
-  /** Last successful round-trip, for the status line */
-  lastResult?: { ms: number; fields: ExtractedField[] } | null;
   /** Store (or clear, with '') the DeepSeek API key */
   onSetApiKey: (key: string) => void;
-  /** Send the current window to DeepSeek and apply the fields */
-  onParse: () => void;
 }
 
 interface EngineSettingsPanelProps {
   engine: EngineState;
   parser?: ParserState;
-  /** On-demand DeepSeek cloud parser (the Cloud parse button) */
+  /** DeepSeek cloud parser (API-key management on its Model selection row) */
   cloud?: CloudState;
   /** Live transcript (drives the parse-debug window preview) */
   transcript: TranscriptEntry[];
@@ -393,92 +387,6 @@ export default function EngineSettingsPanel({
           </div>
         )}
 
-        {/* ---- Cloud parse (DeepSeek, on demand) ---- */}
-        {cloud && (
-          <div>
-            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Cloud parse (DeepSeek v4 Flash)
-            </p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                variant="default"
-                size="sm"
-                disabled={cloud.isParsing || transcript.length === 0}
-                onClick={cloud.onParse}
-                className="h-6 gap-1 rounded-full px-2.5 text-[10px]"
-                title={
-                  transcript.length === 0
-                    ? 'Nothing to parse yet — the transcript is empty'
-                    : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills)'
-                }
-              >
-                {cloud.isParsing ? (
-                  <Loader2 className="size-2.5 animate-spin" />
-                ) : (
-                  <Cloud className="size-2.5" />
-                )}
-                {cloud.isParsing ? 'Parsing…' : 'Cloud parse'}
-              </Button>
-              {cloud.hasKey ? (
-                <span className="text-[10px] text-muted-foreground/70" title="A DeepSeek API key is stored locally">
-                  <KeyRound className="mr-0.5 inline size-2.5" />
-                  key stored
-                </span>
-              ) : (
-                <span className="text-[10px] text-amber-600 dark:text-amber-400">
-                  API key needed below
-                </span>
-              )}
-              {cloud.lastResult && !cloud.isParsing && (
-                <span
-                  className="text-[10px] text-muted-foreground/70"
-                  title="Last cloud round-trip"
-                >
-                  {(cloud.lastResult.ms / 1000).toFixed(1)}s · {cloud.lastResult.fields.length} fields
-                </span>
-              )}
-            </div>
-            {/* API key entry — shown when no key is stored, or while typing a new one */}
-            {(cloud.hasKey ? apiKeyDraft.length > 0 : true) && (
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <input
-                  type="password"
-                  value={apiKeyDraft}
-                  onChange={(e) => {
-                    setApiKeyDraft(e.target.value);
-                    setKeySaved(false);
-                  }}
-                  placeholder="DeepSeek API key (sk-…)"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="h-6 min-w-0 flex-1 rounded-md border border-border/50 bg-foreground/[0.04] px-2 font-mono text-[10px] text-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:outline-none"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={apiKeyDraft.trim().length === 0 || keySaved}
-                  onClick={() => {
-                    cloud.onSetApiKey(apiKeyDraft);
-                    setApiKeyDraft('');
-                    setKeySaved(true);
-                  }}
-                  className="h-6 rounded-full px-2.5 text-[10px]"
-                >
-                  {keySaved ? 'Saved' : 'Save key'}
-                </Button>
-              </div>
-            )}
-            {cloud.error && (
-              <p className="mt-1 text-[10px] leading-snug text-destructive/90">{cloud.error}</p>
-            )}
-            <p className="mt-1 text-[8px] leading-snug text-muted-foreground/70">
-              One explicit parse per click: sends the current transcript window to the DeepSeek
-              API and overwrites every provisional pattern-matched field. The key is stored only
-              in this browser.
-            </p>
-          </div>
-        )}
-
         {/* ---- LLM parser ---- */}
         {parser && (
           <div>
@@ -617,13 +525,79 @@ export default function EngineSettingsPanel({
           </div>
         </div>
 
-        {/* ---- Download manager (CPU/GPU builds) ---- */}
+        {/* ---- Model selection: remote (DeepSeek) + local builds ---- */}
         {parser?.onLoadDevice && (
           <div>
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Model downloads — CPU (q8) vs GPU (q4f16)
+              Model selection
             </p>
             <div className="flex flex-col gap-1.5">
+              {/* Remote LLM — no download; parsed on demand from the caption
+                  panel's Parse button. The row manages the API key. */}
+              {cloud && (
+                <div className="rounded-md bg-foreground/[0.04] p-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-foreground">
+                      DeepSeek v4 Flash
+                    </span>
+                    <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide text-accent">
+                      remote
+                    </span>
+                    {cloud.hasKey ? (
+                      <span
+                        className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/70"
+                        title="A DeepSeek API key is stored locally in this browser"
+                      >
+                        <KeyRound className="size-2.5" />
+                        key stored
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                        API key needed
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[8px] leading-snug text-muted-foreground/80">
+                    Sharpest reading · runs in the cloud · no download — triggered per click by
+                    the Parse button in the caption panel
+                  </p>
+                  {/* API key entry — shown when no key is stored, or while typing a new one */}
+                  {(cloud.hasKey ? apiKeyDraft.length > 0 : true) && (
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <input
+                        type="password"
+                        value={apiKeyDraft}
+                        onChange={(e) => {
+                          setApiKeyDraft(e.target.value);
+                          setKeySaved(false);
+                        }}
+                        placeholder="DeepSeek API key (sk-…)"
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="h-6 min-w-0 flex-1 rounded-md border border-border/50 bg-foreground/[0.04] px-2 font-mono text-[10px] text-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:outline-none"
+                      />
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={apiKeyDraft.trim().length === 0 || keySaved}
+                        onClick={() => {
+                          cloud.onSetApiKey(apiKeyDraft);
+                          setApiKeyDraft('');
+                          setKeySaved(true);
+                        }}
+                        className="h-6 rounded-full px-2.5 text-[10px]"
+                      >
+                        {keySaved ? 'Saved' : 'Save key'}
+                      </Button>
+                    </div>
+                  )}
+                  {cloud.error && (
+                    <p className="mt-1 break-words text-[9px] leading-snug text-destructive/90">
+                      {cloud.error}
+                    </p>
+                  )}
+                </div>
+              )}
               {parser.models.map((name) => (
                 <div key={name} className="rounded-md bg-foreground/[0.04] p-1.5">
                   <div className="flex items-center gap-2">
@@ -689,10 +663,10 @@ export default function EngineSettingsPanel({
               </div>
             )}
             <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-              Each build is a separate one-time download cached by the browser. GPU builds
-              (q4f16) need WebGPU (Chrome/Edge 113+); each is verified with a 2-token warmup
-              at load — a GPU too slow to parse (e.g. fp32-level bandwidth) falls back to the
-              CPU build automatically. Only one model is resident at a time.
+              DeepSeek runs remotely per Parse click (no download). Local builds are one-time
+              downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+)
+              and are verified with a 2-token warmup at load — a GPU too slow to parse falls
+              back to the CPU build automatically. Only one local model is resident at a time.
             </p>
           </div>
         )}
@@ -851,6 +825,3 @@ export default function EngineSettingsPanel({
     </div>
   );
 }
-
-// Re-export types used by the caption panel's props
-export type { ExtractedField };

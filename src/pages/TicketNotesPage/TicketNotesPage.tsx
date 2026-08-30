@@ -1045,11 +1045,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             }}
             cloud={{
               hasKey: cloudParser.hasKey,
-              isParsing: call.isCloudParsing,
               error: cloudParser.error,
-              lastResult: cloudParser.lastResult,
               onSetApiKey: cloudParser.setApiKey,
-              onParse: () => void call.cloudParse(),
             }}
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}
@@ -1159,6 +1156,12 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           onToggleEnabled: handleToggleLlmEnabled,
           onSwitchModel: handleSwitchLlmModel,
           onLoad: handleLoadLlm,
+        }}
+        cloud={{
+          isParsing: call.isCloudParsing,
+          error: cloudParser.error,
+          lastResult: cloudParser.lastResult,
+          onParse: () => void call.cloudParse(),
         }}
       />
     </div>

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic, MicOff, MonitorPlay, Trash2 } from 'lucide-react';
+import { Loader2, Mic, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -58,6 +58,23 @@ export interface EnginePanelState {
   onSwitchModel: (model: WhisperModelName) => void;
 }
 
+/**
+ * On-demand DeepSeek cloud parse state — the "Parse" button in the panel
+ * header. One click sends the current transcript window to the DeepSeek
+ * API; returned fields overwrite every provisional regex fill. The API
+ * key is managed in the toolbar settings panel (Model selection).
+ */
+export interface CloudPanelState {
+  /** True while the round-trip is in flight */
+  isParsing: boolean;
+  /** Last failure (bad key, network, API error) — surfaced under the header */
+  error: string | null;
+  /** Last successful round-trip, for the status readout */
+  lastResult?: { ms: number; fields: ExtractedField[] } | null;
+  /** Send the current transcript window to DeepSeek and apply the fields */
+  onParse: () => void;
+}
+
 /** On-device LLM parser state — the PRIMARY field parser */
 export interface ParserPanelState {
   enabled: boolean;
@@ -105,6 +122,8 @@ interface VoiceCaptionPanelProps {
   call: CallPanelState;
   engine: EnginePanelState;
   parser?: ParserPanelState;
+  /** On-demand DeepSeek cloud parse (the Parse button in the header) */
+  cloud?: CloudPanelState;
 }
 
 /** Bar thresholds for the audio level meters */
@@ -214,7 +233,7 @@ function EngineProgressRow({
  * audio levels, transcribe-in-flight spinner, errors, engine status, and
  * extracted field chips.
  */
-export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCaptionPanelProps) {
+export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The SLIDING window the NEXT parse will send — computed LIVE from the
@@ -334,23 +353,30 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
             </span>
           )}
 
-          <Button
-            variant={isActive ? 'destructive' : 'ghost'}
-            size="sm"
-            onClick={activeSource === 'call' ? call.onToggle : mic.onToggle}
-            className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
-            aria-label={isActive ? 'Stop capture' : 'Resume capture'}
-            title={isActive ? 'Stop capture' : 'Resume capture'}
-          >
-            {activeSource === 'call' ? (
-              <MonitorPlay className="size-3" />
-            ) : isActive ? (
-              <MicOff className="size-3" />
-            ) : (
-              <Mic className="size-3" />
-            )}
-            {isActive ? 'Stop' : 'Listen'}
-          </Button>
+          {/* DeepSeek cloud parse — the on-demand extraction trigger.
+              Capture start/stop lives on the toolbar mic button. */}
+          {cloud && (
+            <Button
+              variant="default"
+              size="sm"
+              disabled={cloud.isParsing || call.transcript.length === 0}
+              onClick={cloud.onParse}
+              className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+              aria-label="Parse the transcript with DeepSeek"
+              title={
+                call.transcript.length === 0
+                  ? 'Nothing to parse yet — the transcript is empty'
+                  : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills)'
+              }
+            >
+              {cloud.isParsing ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Sparkles className="size-3" />
+              )}
+              Parse
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -362,6 +388,20 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser }: VoiceCa
             <Trash2 className="size-3.5" />
           </Button>
         </div>
+
+        {/* Cloud parse status: failures and the last round-trip timing */}
+        {cloud && (cloud.error || (cloud.lastResult && !cloud.isParsing)) && (
+          <p
+            className={cn(
+              'mt-1 truncate text-[10px] leading-snug',
+              cloud.error ? 'text-destructive/90' : 'text-muted-foreground/70'
+            )}
+            title={cloud.error ?? undefined}
+          >
+            {cloud.error ??
+              `DeepSeek: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`}
+          </p>
+        )}
 
         {/* Per-speaker audio level meters — proves each channel is live.
             Engine controls/resources live in the toolbar's settings panel. */}
