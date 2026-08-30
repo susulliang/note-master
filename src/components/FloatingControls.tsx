@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import HistoryPanel from '@/components/HistoryPanel';
 import EngineSettingsPanel, {
+  type CloudState,
   type EngineState,
   type ParserState,
 } from '@/components/EngineSettingsPanel';
@@ -41,6 +42,8 @@ interface FloatingControlsProps {
   /** Engine settings panel (gear): whisper/LLM state + handlers */
   engine?: EngineState;
   parser?: ParserState;
+  /** On-demand DeepSeek cloud parser state (the Cloud parse button) */
+  cloud?: CloudState;
   transcript?: TranscriptEntry[];
   isTranscribing?: boolean;
 }
@@ -87,6 +90,7 @@ export default function FloatingControls({
   onToggleCall,
   engine,
   parser,
+  cloud,
   transcript,
   isTranscribing,
 }: FloatingControlsProps) {
@@ -433,6 +437,7 @@ export default function FloatingControls({
               <EngineSettingsPanel
                 engine={engine}
                 parser={parser}
+                cloud={cloud}
                 transcript={transcript ?? []}
                 isCapturing={callCapturing}
                 isTranscribing={!!isTranscribing}

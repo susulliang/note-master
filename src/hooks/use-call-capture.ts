@@ -41,6 +41,15 @@ export interface CallCaptureLlmParser {
   isReady: boolean;
 }
 
+/** Structural slice of useCloudParser() the capture hook needs */
+export interface CallCaptureCloudParser {
+  /** One DeepSeek extraction over the current window; never rejects */
+  parse: (
+    entries: TranscriptEntry[],
+    prior?: { resolutionSummary?: string; issueDescription?: string }
+  ) => Promise<ExtractedField[]>;
+}
+
 /** Seconds of audio per transcription request — small enough for snappy
  *  near-live captions, large enough to amortize per-segment overhead. */
 const SEGMENT_MS = 15_000;
@@ -162,11 +171,14 @@ interface SegmentBlobs {
 export function useCallCapture(
   onAutoFill: (fieldId: string, value: string, source: AutoFillSource) => void,
   transcriber: CallTranscriber,
-  llmParser?: CallCaptureLlmParser
+  llmParser?: CallCaptureLlmParser,
+  cloudParser?: CallCaptureCloudParser
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [suggestions, setSuggestions] = useState<ExtractedField[]>([]);
+  /** True while the on-demand DeepSeek cloud parse is in flight */
+  const [isCloudParsing, setIsCloudParsing] = useState(false);
   const [segmentsSent, setSegmentsSent] = useState(0);
   /** Segments recorded but not yet transcribed (worker still catching up) */
   const [queued, setQueued] = useState(0);
@@ -203,6 +215,9 @@ export function useCallCapture(
   const onAutoFillRef = useRef(onAutoFill);
   const transcriberRef = useRef(transcriber);
   const llmParserRef = useRef(llmParser);
+  const cloudParserRef = useRef(cloudParser);
+  /** True while the cloud parse round-trip is in flight (re-entry guard) */
+  const cloudRunningRef = useRef(false);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   /** Sequential transcription chain — keeps transcript ordering stable */
@@ -252,7 +267,8 @@ export function useCallCapture(
     onAutoFillRef.current = onAutoFill;
     transcriberRef.current = transcriber;
     llmParserRef.current = llmParser;
-  }, [onAutoFill, transcriber, llmParser]);
+    cloudParserRef.current = cloudParser;
+  }, [onAutoFill, transcriber, llmParser, cloudParser]);
 
   // -----------------------------------------------------------------
   //  Field parsing — LLM-first; regex is a provisional stopgap
@@ -576,6 +592,45 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       if (endLen > startLen) armIdleParse();
     }
   }, [applyLlmFields, armIdleParse, buildPriorValues]);
+
+  /**
+   * On-demand DeepSeek cloud parse — the explicit "Cloud parse" button.
+   *
+   * Semantics differ from the local parser's append-guard on purpose:
+   * the cloud model reads the CURRENT window with the prior cumulative
+   * values already in its prompt, so its reply REPLACES both the
+   * provisional regex fills and any earlier local-LLM reading per field.
+   * (The local append-guard exists because a 0.5B model's re-read can
+   * silently drop clauses; a frontier model handed the prior values is
+   * trusted to restate them.)
+   */
+  const runCloudParse = useCallback(async (): Promise<void> => {
+    const cloud = cloudParserRef.current;
+    if (!cloud || cloudRunningRef.current) return;
+
+    cloudRunningRef.current = true;
+    setIsCloudParsing(true);
+    try {
+      const fields = await cloud.parse(entriesRef.current, buildPriorValues());
+      if (fields.length === 0) return;
+      const applied: ExtractedField[] = [];
+      for (const field of fields) {
+        llmConfirmedRef.current.add(field.fieldId);
+        llmSuggestionsRef.current.set(field.fieldId, field);
+        applied.push(field);
+        // REPLACE: authoritative over regex and prior local-LLM values
+        onAutoFillRef.current(field.fieldId, field.value, 'llm');
+      }
+      setSuggestions((prev) => {
+        const map = new Map(prev.map((f) => [f.fieldId, f]));
+        for (const f of applied) map.set(f.fieldId, f);
+        return [...map.values()];
+      });
+    } finally {
+      cloudRunningRef.current = false;
+      setIsCloudParsing(false);
+    }
+  }, [buildPriorValues]);
 
   /**
    * Idle-tick: parse now when the queue has drained, the throttle window
@@ -1076,6 +1131,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     finalize,
     transcript,
     suggestions,
+    /** On-demand DeepSeek parse of the current window (the Cloud button) */
+    cloudParse: runCloudParse,
+    isCloudParsing,
     segmentsSent,
     queued,
     isTranscribing,

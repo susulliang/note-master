@@ -26,6 +26,7 @@ import type { AutoFillSource } from '@/lib/field-extraction';
 import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { useLlmParser } from '@/hooks/use-llm-parser';
+import { useCloudParser } from '@/hooks/use-cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -848,10 +849,18 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   const llmParser = useLlmParser();
 
   // ---------------------------------------------------------------------
+  //  On-demand DeepSeek cloud parser — the explicit "Cloud parse" button
+  //  in the engine settings panel. One click sends the current transcript
+  //  window to the DeepSeek API; the reply's fields overwrite every
+  //  provisional regex fill. Needs the agent's API key (stored locally).
+  // ---------------------------------------------------------------------
+  const cloudParser = useCloudParser();
+
+  // ---------------------------------------------------------------------
   //  CCP tab-audio capture → local Whisper → auto-fill.
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
-  const call = useCallCapture(handleAutoFill, localWhisper, llmParser);
+  const call = useCallCapture(handleAutoFill, localWhisper, llmParser, cloudParser);
 
   /** Panel mic-mode toggle (no longer in the toolbar — call capture covers
    *  both speakers with the same Mic icon) */
@@ -1033,6 +1042,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               onToggleEnabled: handleToggleLlmEnabled,
               onSwitchModel: handleSwitchLlmModel,
               onLoad: handleLoadLlm,
+            }}
+            cloud={{
+              hasKey: cloudParser.hasKey,
+              isParsing: call.isCloudParsing,
+              error: cloudParser.error,
+              lastResult: cloudParser.lastResult,
+              onSetApiKey: cloudParser.setApiKey,
+              onParse: () => void call.cloudParse(),
             }}
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}

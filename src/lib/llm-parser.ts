@@ -215,12 +215,14 @@ export function writeLlmModelPref(model: LlmModelName): void {
 export function readLlmEnabledPref(): boolean {
   try {
     const value = localStorage.getItem(LLM_ENABLED_PREF_KEY);
-    // Enabled by default; the pref only stores explicit opt-outs
-    return value === null ? true : value === '1';
+    // Disabled by default: the on-demand DeepSeek cloud parse is the
+    // primary extraction path now; the local LLM is an explicit opt-in
+    // (model download + slower parses) via the settings panel toggle
+    return value === '1';
   } catch {
     /* private mode / unavailable */
   }
-  return true;
+  return false;
 }
 
 export function writeLlmEnabledPref(enabled: boolean): void {
