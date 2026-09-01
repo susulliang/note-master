@@ -45,18 +45,55 @@ interface SopPanelProps {
 
 /* ----------------------------- Markdown mini renderer ---------------------------- */
 
-/** Resolve an image src reference from SOP.md content. The markdown lives
- *  in the workspace at `SOP/SOP.md` and its sibling folder `图片和附件/`
- *  is served by a Vite middleware under the URL prefix `/SOP/`. This
- *  helper converts relative paths (`图片和附件/foo.png`) to absolute URL
- *  paths (`/SOP/图片和附件/foo.png`) while leaving full URLs (https://…,
- *  data:…) and already-absolute paths alone. */
+/**
+ * Resolve a markdown image src (relative to SOP.md's on-disk location) to
+ * a URL the browser can fetch. SOP.md lives at the root of `/workspace/SOP/`
+ * and the pictures live next to it in a subfolder called `图片和附件`, so
+ * `![](图片和附件/image%201.png)`  →  `/SOP/图片和附件/image%201.png`.
+ *
+ * Critical: markdown links often come pre-percent-encoded (spaces are `%20`,
+ * chinese chars might be encoded or literal depending on which tool pasted
+ * the image link). We ALWAYS normalize with decodeURIComponent first so a
+ * double-encoding bug cannot slip through; then we re-encode each path
+ * segment individually (encodeURI encodes the entire string but it does not
+ * re-encode literal `%` so paths that still contain `%20` after a failed
+ * decode are kept verbatim — which is fine).
+ */
 function resolveSopImageSrc(rawSrc: string): string {
   const src = rawSrc.trim();
   if (!src) return '';
-  if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(src)) return src; // https: data: mailto: ftp: …
+  // Absolute URL (http:/https:/data:/file:) → pass through untouched
+  if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(src)) return src;
+  // Already site-absolute (starts with /) → pass through
   if (src.startsWith('/')) return src;
-  return '/SOP/' + encodeURI(src).replace(/#/g, '%23');
+
+  // Step 1: undo any pre-encoding added by the markdown editor so we have
+  // a plain filesystem path (best-effort: if someone used a literal '%'
+  // decoding may throw, we fall back to the original string).
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(src);
+  } catch {
+    decoded = src;
+  }
+
+  // Step 2: strip any leading `./` and backslash separators from Windows
+  // pasted paths; collapse parent/child traversal so we never escape /SOP.
+  let normalized = decoded.replace(/\\/g, '/').replace(/^\.\/+/, '');
+  const segments = normalized.split('/').filter((s) => s !== '' && s !== '.');
+  const cleaned: string[] = [];
+  for (const seg of segments) {
+    if (seg === '..') cleaned.pop(); // disallow `../` escapes
+    else cleaned.push(seg);
+  }
+  if (cleaned.length === 0) return '';
+
+  // Step 3: re-encode each path segment individually so reserved chars
+  // (spaces, chinese, `#`, `?`, etc.) become valid URL bytes. `encodeURI`
+  // preserves `/` so doing it per-segment means we handle `#`/`?` too
+  // (encodeURI doesn't touch them, but encodeURIComponent does everything).
+  const encoded = cleaned.map((s) => encodeURIComponent(s)).join('/');
+  return '/SOP/' + encoded;
 }
 
 /** Very small in-house markdown renderer — just enough for SOP content.
