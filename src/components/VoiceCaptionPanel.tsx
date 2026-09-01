@@ -326,8 +326,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
   return (
     <div
       className={cn(
-        'glass-panel h-full w-full rounded-xl p-3 transition-all duration-300',
-        isActive && 'border border-red-500/40 shadow-[0_0_24px_rgba(239,68,68,0.12)]'
+        'flex h-full w-full flex-col gap-2 transition-all duration-300'
       )}
     >
         {/* Header: source badge + status + controls */}

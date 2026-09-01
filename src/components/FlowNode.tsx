@@ -465,25 +465,15 @@ function FlowNodeComponent({
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
-      // Panel nodes (transcript / tracker) are full of interactive content
-      // (buttons, textarea, scroll, popovers, text selection). For those
-      // nodes, dragging is ONLY allowed from the dedicated drag-handle
-      // strip at the top. Any click inside the panel body must behave as
-      // normal — otherwise selecting text or pressing the Start/Parse
-      // buttons would kick off a node move.
-      if (type === 'transcript' || type === 'ticketTracker') {
-        const handle = (e.target as HTMLElement).closest('[data-node-drag-handle]');
-        if (!handle) return;
-      } else {
-        // Non-panel nodes: whole box is draggable, except when grabbing an
-        // interactive control (text fields, chips, buttons) inside it
-        const target = e.target as HTMLElement;
-        const interactive = target.closest(
-          'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
-        );
-        if (interactive && type !== 'hangup') {
-          return;
-        }
+      // Whole box is draggable, except when grabbing an interactive control
+      // (text fields, chips, buttons) inside it. Applies equally to plain
+      // gridboxes and embedded panel nodes (transcript / 24h tracker).
+      const target = e.target as HTMLElement;
+      const interactive = target.closest(
+        'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
+      );
+      if (interactive && type !== 'hangup') {
+        return;
       }
       if (type === 'hangup') {
         // The hang-up node's whole body is one button: start a pending drag
@@ -649,16 +639,23 @@ function FlowNodeComponent({
 
     if (type === 'transcript' || type === 'ticketTracker') {
       // Pull the live content from context (captured at top of the function)
-      // so the canvas memo stays clean while audio meters tick 10×/s. The
-      // panel's own root element already ships glass-panel styling, so we
-      // skip any extra container padding or framing here.
+      // so the canvas memo stays clean while audio meters tick 10×/s. Wrap
+      // with the same label row + inner padding used by every other gridbox
+      // so the two panels visually match the rest of the canvas.
       const content =
         (type === 'transcript'
           ? panelsCtx?.transcriptContent
           : panelsCtx?.trackerContent) ?? panelContent;
       return (
-        <div data-panel-body className="min-h-0">
-          {content}
+        <div className="px-2.5 py-1.5">
+          {label && (
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {label}
+            </div>
+          )}
+          <div data-panel-body className="min-h-0">
+            {content}
+          </div>
         </div>
       );
     }
@@ -955,22 +952,18 @@ function FlowNodeComponent({
       className={cn(
         'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
-        // Panel nodes bring their own glass-panel styling (and their own
-        // border/rounded rules). The wrapper just needs absolute-position,
-        // drag cursor, and the active glow when focused. Overflow hidden
-        // keeps the drag-handle strip and inner panel clipped to the
-        // rounded-xl frame. Inside the panel, user-select is re-enabled so
-        // the agent can highlight / copy captions and tracker text.
-        isPanelNode
-          ? cn(
-              'overflow-hidden',
-              '[&_[data-panel-body]]:select-text [&_[data-panel-body]_*]:select-text',
-              '[&_[data-panel-body]>*]:!rounded-t-none',
-              isActive ? 'glass-active' : ''
-            )
-          : isActive
-            ? cn(accentGlows[accent], 'animate-pulse-slow')
-            : accentBorders[accent],
+        // Embedded panel nodes (transcript / 24h tracker) carry the same
+        // glass-card frame + accent border + active glow as every other
+        // gridbox in the canvas. The inner panel root no longer ships its
+        // own glass-panel wrapping — we keep a single outer frame, exactly
+        // like the input / select / dynamic-list nodes.
+        isActive
+          ? cn(accentGlows[accent], 'animate-pulse-slow')
+          : accentBorders[accent],
+        // For panel bodies (which contain readable caption text / tracker
+        // rows) re-enable user-select so agents can highlight and copy.
+        isPanelNode &&
+          '[&_[data-panel-body]]:select-text [&_[data-panel-body]_*]:select-text',
         // Auto-parsed value awaiting proofreading — engine-colored glow
         // takes precedence over the accent skins (later in the stylesheet):
         // YELLOW = LLM's full-context reading, BLUE = provisional regex
@@ -1009,30 +1002,6 @@ function FlowNodeComponent({
               ? 'AI polished'
               : 'auto parsed'}
         </span>
-      )}
-      {/* Panel nodes are embedded toolboxes with their own buttons/scroll/text
-          selection. To avoid stealing clicks from the inner UI, the node is
-          only draggable from this slim drag-handle strip running across the
-          top. A "grip" glyph (three vertically-stacked dots) signals the
-          affordance. */}
-      {isPanelNode && (
-        <div
-          data-node-drag-handle
-          className="group/node-handle relative flex h-[18px] w-full cursor-grab items-center justify-center border-b border-border/40 bg-card/60 text-muted-foreground/60 backdrop-blur-sm transition-colors hover:bg-card/80 hover:text-muted-foreground active:cursor-grabbing rounded-t-[inherit]"
-          title="Drag to reposition this panel on the canvas"
-        >
-          <svg viewBox="0 0 10 16" width="10" height="10" fill="currentColor" aria-hidden="true">
-            <circle cx="2" cy="2" r="1.2" />
-            <circle cx="8" cy="2" r="1.2" />
-            <circle cx="2" cy="8" r="1.2" />
-            <circle cx="8" cy="8" r="1.2" />
-            <circle cx="2" cy="14" r="1.2" />
-            <circle cx="8" cy="14" r="1.2" />
-          </svg>
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-medium uppercase tracking-widest opacity-70 group-hover/node-handle:opacity-100">
-            {type === 'transcript' ? 'Live Transcript' : '24H Tracker'}
-          </span>
-        </div>
       )}
       {renderContent()}
     </div>

@@ -224,11 +224,13 @@ const NODES: NodeConfig[] = [
   {
     id: NODE_IDS.TRANSCRIPT_PANEL,
     type: 'transcript',
+    label: 'Live Call Transcript',
     width: 640,
   },
   {
     id: NODE_IDS.TICKET_TRACKER,
     type: 'ticketTracker',
+    label: '24H Ticket Tracker',
     width: 380,
   },
 ];

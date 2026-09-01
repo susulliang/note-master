@@ -113,15 +113,13 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
     return base + 76; // py-2 x2 + min-h-12 button + slack
   }
   if (node.type === 'transcript') {
-    // Transcript panel: drag handle (18px + border) + header (32px) +
+    // Label row ~18px + wrapper padding ~28px + header (32px) +
     // level meters (28px) + transcript area min 120px + engine rows (40px)
-    // + extracted fields padding → ~260px plus the 20px handle buffer.
-    return 300;
+    return 310;
   }
   if (node.type === 'ticketTracker') {
-    // Drag handle ~20px + header (40) + paste area (88) + ~6 table rows
-    // (216) + footer (48) → ~412, rounded up for breathing room.
-    return 420;
+    // Label row + wrapper padding + header (40) + paste area (88) + ~6 rows
+    return 440;
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
