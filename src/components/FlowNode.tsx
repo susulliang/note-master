@@ -1,4 +1,14 @@
-import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Plus, X, ChevronDown, Check, PhoneOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -18,6 +28,21 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import type { TemplateEntry } from '@/lib/amr-templates';
+
+/**
+ * Supplies the live React content for the two panel-node toolboxes that sit
+ * inside the flowchart canvas. Using a context (instead of threading the
+ * JSX elements through the FlowchartCanvas memo-boundary) keeps the canvas
+ * layout memo stable when audio meters / LLM progress / transcript state
+ * updates 10×/s during capture — only the actual transcript/tracker nodes
+ * re-render. TicketNotesPage renders a Provider above FlowchartCanvas with
+ * the up-to-date VoiceCaptionPanel and TicketTrackerPanel trees.
+ */
+export interface TicketPanelsContextShape {
+  transcriptContent?: React.ReactNode;
+  trackerContent?: React.ReactNode;
+}
+export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { snToPin } from '@/lib/sn-pin';
 
@@ -28,7 +53,9 @@ export type NodeType =
   | 'select'
   | 'dynamic-list'
   | 'hangup'
-  | 'templates';
+  | 'templates'
+  | 'transcript'
+  | 'ticketTracker';
 
 export interface QuickTextGroup {
   label: string;
@@ -93,6 +120,13 @@ export interface FlowNodeProps {
    * Serial Number node only.
    */
   enablePinBubble?: boolean;
+  /**
+   * Arbitrary React content rendered inside a glass-panel node for the
+   * 'transcript' and 'ticketTracker' panel node types. Allows embedding
+   * complex interactive panels as draggable canvas boxes without hard-
+   * coding them in the FlowNode switch statement.
+   */
+  panelContent?: React.ReactNode;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -337,7 +371,9 @@ function FlowNodeComponent({
   onHeightChange,
   parsedSource = null,
   enablePinBubble = false,
+  panelContent,
 }: FlowNodeProps) {
+  const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAddQuickText, setShowAddQuickText] = useState(false);
@@ -429,14 +465,25 @@ function FlowNodeComponent({
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
-      // Whole box is draggable, except when grabbing an interactive control
-      // (text fields, chips, buttons) inside it
-      const target = e.target as HTMLElement;
-      const interactive = target.closest(
-        'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
-      );
-      if (interactive && type !== 'hangup') {
-        return;
+      // Panel nodes (transcript / tracker) are full of interactive content
+      // (buttons, textarea, scroll, popovers, text selection). For those
+      // nodes, dragging is ONLY allowed from the dedicated drag-handle
+      // strip at the top. Any click inside the panel body must behave as
+      // normal — otherwise selecting text or pressing the Start/Parse
+      // buttons would kick off a node move.
+      if (type === 'transcript' || type === 'ticketTracker') {
+        const handle = (e.target as HTMLElement).closest('[data-node-drag-handle]');
+        if (!handle) return;
+      } else {
+        // Non-panel nodes: whole box is draggable, except when grabbing an
+        // interactive control (text fields, chips, buttons) inside it
+        const target = e.target as HTMLElement;
+        const interactive = target.closest(
+          'input, textarea, button, select, [contenteditable="true"], [role="combobox"], [role="listbox"]'
+        );
+        if (interactive && type !== 'hangup') {
+          return;
+        }
       }
       if (type === 'hangup') {
         // The hang-up node's whole body is one button: start a pending drag
@@ -596,6 +643,22 @@ function FlowNodeComponent({
               No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, and FAQs.
             </p>
           )}
+        </div>
+      );
+    }
+
+    if (type === 'transcript' || type === 'ticketTracker') {
+      // Pull the live content from context (captured at top of the function)
+      // so the canvas memo stays clean while audio meters tick 10×/s. The
+      // panel's own root element already ships glass-panel styling, so we
+      // skip any extra container padding or framing here.
+      const content =
+        (type === 'transcript'
+          ? panelsCtx?.transcriptContent
+          : panelsCtx?.trackerContent) ?? panelContent;
+      return (
+        <div data-panel-body className="min-h-0">
+          {content}
         </div>
       );
     }
@@ -878,6 +941,8 @@ function FlowNodeComponent({
     );
   };
 
+  const isPanelNode = type === 'transcript' || type === 'ticketTracker';
+
   return (
     <div
       ref={nodeRef}
@@ -890,14 +955,28 @@ function FlowNodeComponent({
       className={cn(
         'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
-        isActive ? accentGlows[accent] : accentBorders[accent],
-        isActive && 'animate-pulse-slow',
+        // Panel nodes bring their own glass-panel styling (and their own
+        // border/rounded rules). The wrapper just needs absolute-position,
+        // drag cursor, and the active glow when focused. Overflow hidden
+        // keeps the drag-handle strip and inner panel clipped to the
+        // rounded-xl frame. Inside the panel, user-select is re-enabled so
+        // the agent can highlight / copy captions and tracker text.
+        isPanelNode
+          ? cn(
+              'overflow-hidden',
+              '[&_[data-panel-body]]:select-text [&_[data-panel-body]_*]:select-text',
+              '[&_[data-panel-body]>*]:!rounded-t-none',
+              isActive ? 'glass-active' : ''
+            )
+          : isActive
+            ? cn(accentGlows[accent], 'animate-pulse-slow')
+            : accentBorders[accent],
         // Auto-parsed value awaiting proofreading — engine-colored glow
         // takes precedence over the accent skins (later in the stylesheet):
         // YELLOW = LLM's full-context reading, BLUE = provisional regex
         // match the AI may still replace
-        parsedSource === 'llm' && 'glass-parsed',
-        parsedSource && parsedSource !== 'llm' && 'glass-parsed-regex',
+        parsedSource === 'llm' && !isPanelNode && 'glass-parsed',
+        parsedSource && parsedSource !== 'llm' && !isPanelNode && 'glass-parsed-regex',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
@@ -930,6 +1009,30 @@ function FlowNodeComponent({
               ? 'AI polished'
               : 'auto parsed'}
         </span>
+      )}
+      {/* Panel nodes are embedded toolboxes with their own buttons/scroll/text
+          selection. To avoid stealing clicks from the inner UI, the node is
+          only draggable from this slim drag-handle strip running across the
+          top. A "grip" glyph (three vertically-stacked dots) signals the
+          affordance. */}
+      {isPanelNode && (
+        <div
+          data-node-drag-handle
+          className="group/node-handle relative flex h-[18px] w-full cursor-grab items-center justify-center border-b border-border/40 bg-card/60 text-muted-foreground/60 backdrop-blur-sm transition-colors hover:bg-card/80 hover:text-muted-foreground active:cursor-grabbing rounded-t-[inherit]"
+          title="Drag to reposition this panel on the canvas"
+        >
+          <svg viewBox="0 0 10 16" width="10" height="10" fill="currentColor" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.2" />
+            <circle cx="8" cy="2" r="1.2" />
+            <circle cx="2" cy="8" r="1.2" />
+            <circle cx="8" cy="8" r="1.2" />
+            <circle cx="2" cy="14" r="1.2" />
+            <circle cx="8" cy="14" r="1.2" />
+          </svg>
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-medium uppercase tracking-widest opacity-70 group-hover/node-handle:opacity-100">
+            {type === 'transcript' ? 'Live Transcript' : '24H Tracker'}
+          </span>
+        </div>
       )}
       {renderContent()}
     </div>

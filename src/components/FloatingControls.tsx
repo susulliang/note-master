@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { RotateCcw, History, Settings, Type, Mic, MicOff, Clock } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -13,7 +13,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import HistoryPanel from '@/components/HistoryPanel';
-import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import EngineSettingsPanel, {
   type CloudState,
   type EngineState,
@@ -98,7 +97,6 @@ export default function FloatingControls({
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
   const [engineOpen, setEngineOpen] = useState(false);
-  const [trackerOpen, setTrackerOpen] = useState(false);
 
   // Docked corner (persisted) + transient free position while dragging
   const [corner, setCorner] = useScopedState<Corner>('ecovacs_ticket_toolbar_corner', 'tr');
@@ -282,22 +280,6 @@ export default function FloatingControls({
               )}
             </Button>
 
-            {/* Over 24H ticket tracker — paste case numbers, set quick
-                statuses, copy the CASE STATUS list */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTrackerOpen((v) => !v)}
-              className={cn(
-                'size-8 rounded-full text-muted-foreground hover:text-foreground',
-                trackerOpen && 'bg-foreground/10 text-foreground'
-              )}
-              aria-label="Toggle over 24H ticket tracker"
-              title="Over 24H tracker — paste case numbers and track their statuses"
-            >
-              <Clock className="size-4" />
-            </Button>
-
             <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
             <AlertDialog>
@@ -440,10 +422,6 @@ export default function FloatingControls({
             onClose={onToggleHistory}
           />
         )}
-
-        {/* Over 24H ticket tracker — toggled by the clock button, rendered
-            alongside the pill like the History panel */}
-        {trackerOpen && <TicketTrackerPanel onClose={() => setTrackerOpen(false)} />}
 
         {/* Engine settings panel — opens from the gear like the History
             panel opens from its button; renders alongside the pill inside

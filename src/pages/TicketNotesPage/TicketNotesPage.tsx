@@ -20,6 +20,7 @@ import FloatingControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
+import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -49,6 +50,7 @@ import {
   HOWTO_TOP_ISSUES,
 } from '@/data/ticket';
 import type { NoteHistoryEntry } from '@/data/ticket';
+import { TicketPanelsContext } from '@/components/FlowNode';
 import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
 import type { TemplateEntry } from '@/lib/amr-templates';
 
@@ -213,6 +215,21 @@ const NODES: NodeConfig[] = [
     type: 'hangup',
     accent: 'red',
     width: 280,
+  },
+  // Side tool panels: seated directly in the flowchart canvas as draggable
+  // boxes. Actual live content (VoiceCaptionPanel / TicketTrackerPanel)
+  // is injected from the component body via FlowchartCanvas override props
+  // so that hook state / callbacks stay fresh without rebuilding the whole
+  // nodes array every render.
+  {
+    id: NODE_IDS.TRANSCRIPT_PANEL,
+    type: 'transcript',
+    width: 640,
+  },
+  {
+    id: NODE_IDS.TICKET_TRACKER,
+    type: 'ticketTracker',
+    width: 380,
   },
 ];
 
@@ -1055,20 +1072,94 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}
           />
-          <FlowchartCanvas
-            nodes={nodes}
-            positions={positions}
-            formData={formData}
-            onFieldChange={handleFieldChange}
-            activeNodeId={activeNodeId}
-            onNodeFocus={handleNodeFocus}
-            onNodeBlur={handleNodeBlur}
-            onPositionChange={handlePositionChange}
-            onHangUp={handleHangUp}
-            autoFocusId={NODE_IDS.DETAILED_ISSUE}
-            onLayoutReset={handleLayoutReset}
-            parsedFields={parsedFields}
-          />
+          <TicketPanelsContext.Provider
+            value={{
+              transcriptContent: (
+                <VoiceCaptionPanel
+                  mic={{
+                    isListening: voice.isListening,
+                    finalTranscript: voice.finalTranscript,
+                    interimText: voice.interimText,
+                    suggestions: voice.suggestions,
+                    error: voice.error,
+                    level: voice.level,
+                    onToggle: handleToggleVoice,
+                    onClear: handleClearMic,
+                  }}
+                  call={{
+                    isCapturing: call.isCapturing,
+                    transcript: call.transcript,
+                    suggestions: call.suggestions,
+                    segmentsSent: call.segmentsSent,
+                    queued: call.queued,
+                    isTranscribing: call.isTranscribing,
+                    error: call.error,
+                    customerLevel: call.customerLevel,
+                    agentLevel: call.agentLevel,
+                    hasMic: call.hasMic,
+                    onToggle: handleToggleCall,
+                    onClear: handleClearCall,
+                  }}
+                  engine={{
+                    isSupported: localWhisper.isSupported,
+                    model: localWhisper.model,
+                    status: localWhisper.status,
+                    progress: localWhisper.progress,
+                    dtype: localWhisper.dtype,
+                    error: localWhisper.error,
+                    lastInferenceMs: localWhisper.lastInferenceMs,
+                    memStats: localWhisper.memStats,
+                    onSwitchModel: handleSwitchWhisperModel,
+                  }}
+                  parser={{
+                    enabled: llmParser.enabled,
+                    model: llmParser.model,
+                    models: llmParser.models,
+                    status: llmParser.status,
+                    progress: llmParser.progress,
+                    error: llmParser.error,
+                    isParsing: llmParser.isParsing,
+                    isParaphrasing: llmParser.isParaphrasing,
+                    lastParseMs: llmParser.lastParseMs,
+                    device: llmParser.device,
+                    dtype: llmParser.dtype,
+                    genProgress: llmParser.genProgress,
+                    memStats: llmParser.memStats,
+                    window: llmParser.lastWindow,
+                    lastReply: llmParser.lastReply,
+                    lastStats: llmParser.lastStats,
+                    failedAttempts: llmParser.failedAttempts,
+                    onLoadDevice: handleLoadLlmDevice,
+                    onToggleEnabled: handleToggleLlmEnabled,
+                    onSwitchModel: handleSwitchLlmModel,
+                    onLoad: handleLoadLlm,
+                  }}
+                  cloud={{
+                    isParsing: call.isCloudParsing,
+                    error: cloudParser.error,
+                    lastResult: cloudParser.lastResult,
+                    onParse: () => void call.cloudParse(),
+                  }}
+                />
+              ),
+              trackerContent: <TicketTrackerPanel />,
+            }}
+          >
+            <FlowchartCanvas
+              nodes={nodes}
+              positions={positions}
+              formData={formData}
+              onFieldChange={handleFieldChange}
+              activeNodeId={activeNodeId}
+              onNodeFocus={handleNodeFocus}
+              onNodeBlur={handleNodeBlur}
+              onPositionChange={handlePositionChange}
+              onHangUp={handleHangUp}
+              autoFocusId={NODE_IDS.DETAILED_ISSUE}
+              onLayoutReset={handleLayoutReset}
+              parsedFields={parsedFields}
+            />
+          </TicketPanelsContext.Provider>
         </main>
       </div>
 
@@ -1098,74 +1189,6 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           classNames: {
             toast: 'glass-panel font-sans text-sm !text-foreground',
           },
-        }}
-      />
-
-      {/* Live captions + extracted-field chips; hidden when idle with no content */}
-      <VoiceCaptionPanel
-        mic={{
-          isListening: voice.isListening,
-          finalTranscript: voice.finalTranscript,
-          interimText: voice.interimText,
-          suggestions: voice.suggestions,
-          error: voice.error,
-          level: voice.level,
-          onToggle: handleToggleVoice,
-          onClear: handleClearMic,
-        }}
-        call={{
-          isCapturing: call.isCapturing,
-          transcript: call.transcript,
-          suggestions: call.suggestions,
-          segmentsSent: call.segmentsSent,
-          queued: call.queued,
-          isTranscribing: call.isTranscribing,
-          error: call.error,
-          customerLevel: call.customerLevel,
-          agentLevel: call.agentLevel,
-          hasMic: call.hasMic,
-          onToggle: handleToggleCall,
-          onClear: handleClearCall,
-        }}
-        engine={{
-          isSupported: localWhisper.isSupported,
-          model: localWhisper.model,
-          status: localWhisper.status,
-          progress: localWhisper.progress,
-          dtype: localWhisper.dtype,
-          error: localWhisper.error,
-          lastInferenceMs: localWhisper.lastInferenceMs,
-          memStats: localWhisper.memStats,
-          onSwitchModel: handleSwitchWhisperModel,
-        }}
-        parser={{
-          enabled: llmParser.enabled,
-          model: llmParser.model,
-          models: llmParser.models,
-          status: llmParser.status,
-          progress: llmParser.progress,
-          error: llmParser.error,
-          isParsing: llmParser.isParsing,
-          isParaphrasing: llmParser.isParaphrasing,
-          lastParseMs: llmParser.lastParseMs,
-          device: llmParser.device,
-          dtype: llmParser.dtype,
-          genProgress: llmParser.genProgress,
-          memStats: llmParser.memStats,
-          window: llmParser.lastWindow,
-          lastReply: llmParser.lastReply,
-          lastStats: llmParser.lastStats,
-          failedAttempts: llmParser.failedAttempts,
-          onLoadDevice: handleLoadLlmDevice,
-          onToggleEnabled: handleToggleLlmEnabled,
-          onSwitchModel: handleSwitchLlmModel,
-          onLoad: handleLoadLlm,
-        }}
-        cloud={{
-          isParsing: call.isCloudParsing,
-          error: cloudParser.error,
-          lastResult: cloudParser.lastResult,
-          onParse: () => void call.cloudParse(),
         }}
       />
     </div>

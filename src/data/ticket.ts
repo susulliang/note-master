@@ -1122,6 +1122,8 @@ export const NODE_IDS = {
   RESOLUTION_SUMMARY: 'resolutionSummary',
   ADDITIONAL_NOTES: 'additionalNotes',
   HANG_UP: 'hangUp',
+  TRANSCRIPT_PANEL: 'transcriptPanel',
+  TICKET_TRACKER: 'ticketTracker',
 } as const;
 
 export interface NoteHistoryEntry {
@@ -1150,6 +1152,9 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   [NODE_IDS.TEMPLATE_MATCHES],
   [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS, NODE_IDS.RESOLUTION_SUMMARY],
   [NODE_IDS.ADDITIONAL_NOTES],
+  // Side tool panels: live transcript + 24h ticket tracker. Both draggable
+  // boxes on the canvas so the agent can reposition them around the flow.
+  [NODE_IDS.TRANSCRIPT_PANEL, NODE_IDS.TICKET_TRACKER],
   [NODE_IDS.HANG_UP],
 ];
 

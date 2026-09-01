@@ -26,6 +26,8 @@ interface NodeConfig {
   onOpenTemplate?: (template: TemplateEntry) => void;
   /** HIDDEN: press-and-hold the field to reveal its derived PIN (SN node) */
   pinFromValue?: boolean;
+  /** Embedded React content for 'transcript' and 'ticketTracker' panel nodes */
+  panelContent?: React.ReactNode;
 }
 
 interface FlowchartCanvasProps {
@@ -109,6 +111,17 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   }
   if (node.type === 'hangup') {
     return base + 76; // py-2 x2 + min-h-12 button + slack
+  }
+  if (node.type === 'transcript') {
+    // Transcript panel: drag handle (18px + border) + header (32px) +
+    // level meters (28px) + transcript area min 120px + engine rows (40px)
+    // + extracted fields padding → ~260px plus the 20px handle buffer.
+    return 300;
+  }
+  if (node.type === 'ticketTracker') {
+    // Drag handle ~20px + header (40) + paste area (88) + ~6 table rows
+    // (216) + footer (48) → ~412, rounded up for breathing room.
+    return 420;
   }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
@@ -495,6 +508,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             onOpenTemplate={node.onOpenTemplate}
             parsedSource={parsedFields?.[node.id] ?? null}
             enablePinBubble={node.pinFromValue}
+            panelContent={node.panelContent}
           />
         ))}
       </div>

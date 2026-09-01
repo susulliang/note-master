@@ -317,16 +317,19 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
           : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.';
 
   // Hidden when idle with nothing captured and no error to show
-  if (!isActive && !hasContent && !error) return null;
+  // — EXCEPT when mounted inside the canvas (default): the box always
+  // renders an empty-state placeholder so it stays draggable and the
+  // agent has a stable target to reposition on the grid.
+  const hideWhenEmpty = false;
+  if (hideWhenEmpty && !isActive && !hasContent && !error) return null;
 
   return (
-    <div className="fixed bottom-3 left-3 z-40 w-[min(640px,calc(100vw-24px))]">
-      <div
-        className={cn(
-          'glass-panel rounded-xl p-3 transition-all duration-300',
-          isActive && 'border border-red-500/40 shadow-[0_0_24px_rgba(239,68,68,0.12)]'
-        )}
-      >
+    <div
+      className={cn(
+        'glass-panel h-full w-full rounded-xl p-3 transition-all duration-300',
+        isActive && 'border border-red-500/40 shadow-[0_0_24px_rgba(239,68,68,0.12)]'
+      )}
+    >
         {/* Header: source badge + status + controls */}
         <div className="flex items-center gap-2">
           {isActive ? (
@@ -455,7 +458,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             captured conversation without scrolling the page instead */}
         <div
           ref={scrollRef}
-          className="custom-scrollbar mt-2 max-h-[min(480px,60vh)] overflow-y-auto rounded-lg bg-background/50 p-2"
+          className="custom-scrollbar mt-2 max-h-[220px] min-h-[120px] overflow-y-auto rounded-lg bg-background/50 p-2"
         >
           {showCallEntries ? (
             call.transcript.length > 0 ? (
@@ -651,7 +654,6 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

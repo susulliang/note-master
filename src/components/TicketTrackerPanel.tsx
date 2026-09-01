@@ -19,7 +19,8 @@ interface TrackedCase {
 }
 
 interface TicketTrackerPanelProps {
-  onClose: () => void;
+  /** @deprecated Panel is now a permanent draggable canvas node; close button removed. */
+  onClose?: () => void;
 }
 
 /** Dedupe key: digits only, so "03741727" and "3741727" are the same case */
@@ -36,7 +37,7 @@ function caseKey(token: string): string {
  * sheet. The list persists in localStorage so a refresh mid-shift keeps
  * the statuses.
  */
-export default function TicketTrackerPanel({ onClose }: TicketTrackerPanelProps) {
+export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
   const [cases, setCases] = useScopedState<TrackedCase[]>('ecovacs_ticket_24h_tracker', []);
   const [input, setInput] = useState('');
 
@@ -93,7 +94,7 @@ export default function TicketTrackerPanel({ onClose }: TicketTrackerPanelProps)
   };
 
   return (
-    <div className="glass-panel flex max-h-[calc(100vh-7rem)] w-[380px] flex-col overflow-hidden rounded-xl">
+    <div className="glass-panel flex h-full w-full min-h-[340px] flex-col overflow-hidden rounded-xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-foreground/10 px-3 py-2.5">
         <div className="flex items-center gap-2">
@@ -107,15 +108,6 @@ export default function TicketTrackerPanel({ onClose }: TicketTrackerPanelProps)
             </span>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground hover:text-foreground"
-          onClick={onClose}
-          aria-label="Close tracker"
-        >
-          <X className="size-4" />
-        </Button>
       </div>
 
       {/* Paste area */}
