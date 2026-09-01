@@ -7,42 +7,50 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 /**
- * Serves the workspace-level SOP/ folder (SOP.md + 图片和附件/) under the
- * URL prefix `/SOP/*`. This lets SopPanel render real <img> tags for the
- * reference screenshots — even Chinese filenames and whitespace work because
- * Vite's static middleware does percent-encoding transparently.
+ * Serves the workspace-level SOP/ folder (SOP.md + assets/) under the
+ * app-base-scoped URL prefix `${base}SOP/*` during `vite dev` only.
  *
- * Two modes:
- *   - dev   : configureServer adds a tiny fs middleware ahead of Vite's.
- *   - build : closeBundle copies `SOP/` into dist/client/SOP/ so the static
- *             bundle ships with images included (Vercel/Cloudflare Pages).
+ * SopPanel's `resolveSopImageSrc` produces `${BASE_URL}SOP/…` URLs,
+ * matching this middleware's accepted prefix. For production builds the
+ * SOP folder is copied into every deploy output folder by
+ * `scripts/build.sh` directly (it has the authoritative ROOT path and
+ * knows the 4-folder Miaoda layout) rather than via this plugin's
+ * closeBundle hook — some container/cwd combinations cause
+ * `configResolved` to report a nested ROOT that places outputs in a
+ * phantom subdir, so the shell script (which runs at the real repo root)
+ * is the only trustworthy copier. The closeBundle hook is retained as a
+ * best-effort safety net but build.sh owns the copy step.
  */
 function sopFolderPlugin(): Plugin {
-  const SOP_URL_PREFIX = '/SOP';
-  let rootDir = process.cwd();
-  let outDir = 'dist/client';
+  const SOP_URL_SEGMENT = 'SOP';
+  let basePrefix = '/';
 
   return {
     name: 'ecovacs-sop-folder',
     configResolved(config) {
-      rootDir = config.root;
-      outDir = config.build.outDir;
+      const b = config.base || '/';
+      basePrefix = b.endsWith('/') ? b : b + '/';
     },
     configureServer(server) {
-      // Runs before Vite's other middlewares — resolve `/SOP/x/y.ext` to
-      // `<root>/SOP/x/y.ext`. Uses Vite's own `fs.cachedRead` via the
-      // standard static middleware pattern by redirecting to a "virtual
-      // public path": we just pipe the file through the dev server's
-      // existing file-serving path so range requests, content-type, etc.
-      // are handled correctly.
-      const sopRoot = path.join(rootDir, 'SOP');
+      // NOTE: use process.cwd() (which inside `vite` dev at repo root is
+      // correct) — not config.root, because some Miaoda wrappers set a
+      // synthetic root that misses the /workspace/SOP folder.
+      const sopRoot = path.join(process.cwd(), 'SOP');
       server.middlewares.use((req, _res, next) => {
-        const url = (req.url ?? '').split('?')[0]!;
-        if (url.startsWith(SOP_URL_PREFIX + '/') || url === SOP_URL_PREFIX) {
-          const rel = decodeURIComponent(url.slice(SOP_URL_PREFIX.length + 1));
+        const rawUrl = (req.url ?? '').split('?')[0]!;
+        let rel: string | null = null;
+        const basePrefixed = basePrefix + SOP_URL_SEGMENT;
+        if (rawUrl.startsWith(basePrefixed + '/') || rawUrl === basePrefixed) {
+          rel = decodeURIComponent(rawUrl.slice(basePrefixed.length + 1));
+        } else {
+          const absPrefixed = '/' + SOP_URL_SEGMENT;
+          if (rawUrl.startsWith(absPrefixed + '/') || rawUrl === absPrefixed) {
+            rel = decodeURIComponent(rawUrl.slice(absPrefixed.length + 1));
+          }
+        }
+        if (rel !== null) {
           const target = path.normalize(path.join(sopRoot, rel));
           if (target.startsWith(sopRoot) && existsSync(target)) {
-            req.url = url; // keep original url
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             const fs = require('node:fs');
             const statSync = fs.statSync(target);
@@ -58,19 +66,33 @@ function sopFolderPlugin(): Plugin {
       });
     },
     async closeBundle() {
-      const sopSrc = path.join(rootDir, 'SOP');
-      const sopDst = path.join(rootDir, outDir, 'SOP');
+      // Best-effort fallback — see the doc comment above: the real copy
+      // step lives in scripts/build.sh (step 3.5) and always runs there.
+      // This hook only runs when `vite build` is invoked directly
+      // (standalone/vercel) and only fires if `scripts/build.sh` hasn't
+      // already produced the same folder.
+      const sopSrc = path.join(process.cwd(), 'SOP');
+      // config.build.outDir might be a relative path. resolve via cwd.
+      // We can't read it from configResolved here — closeBundle's this
+      // value isn't a plugin ctx with direct access; infer from common.
+      const outDirRel = 'dist/client';
       try {
         await stat(sopSrc);
-        await mkdir(path.dirname(sopDst), { recursive: true });
-        // Copy recursively. We always overwrite to get the latest SOP
-        // version; build already empties the outDir prior to this.
-        cpSync(sopSrc, sopDst, { recursive: true, errorOnExist: false });
-        this.info?.(`ecovacs-sop-folder: copied ${sopSrc} → ${sopDst}`);
+        const bases = ['/', basePrefix];
+        const seen = new Set<string>();
+        for (const b of bases) {
+          const sub = (b === '/' ? '' : b.replace(/^\/+/, '')) + SOP_URL_SEGMENT;
+          const dst = path.resolve(process.cwd(), outDirRel, sub);
+          const norm = path.normalize(dst);
+          if (seen.has(norm)) continue;
+          seen.add(norm);
+          await mkdir(path.dirname(norm), { recursive: true });
+          cpSync(sopSrc, norm, { recursive: true, errorOnExist: false });
+          this.info?.(`ecovacs-sop-folder: copied ${sopSrc} → ${norm}`);
+        }
       } catch (e) {
-        // SOP folder missing is not fatal — the SOP markdown is still
-        // embedded via the ?raw import and images simply won't resolve.
-        this.warn?.(`ecovacs-sop-folder: no SOP source dir at ${sopSrc}`);
+        // Non-fatal: build.sh will retry at repo-root immediately after.
+        this.warn?.(`ecovacs-sop-folder: closeBundle copy skipped (${String(e)})`);
       }
     },
   };

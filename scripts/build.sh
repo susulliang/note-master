@@ -56,6 +56,39 @@ if [ -d "$ROOT/dist/client/assets" ]; then
   cp -r "$ROOT/dist/client/assets" "$OUTPUT_RESOURCE/"
 fi
 
+# 3.5 SOP assets (SOP.md + SOP/assets/*.png|*.jpg|…) — static files served
+#     under `${CLIENT_BASE_PATH}/SOP/…` in the browser. This step owns
+#     the copy; vite's sopFolderPlugin only runs the middleware in dev.
+#     NOTE: Miaoda PaaS has 4 deploy output folders and each one may be
+#     served from a different route prefix depending on platform config,
+#     so we mirror SOP/ into every output folder to guarantee a hit
+#     regardless of which route the browser resolves. Under 4 MB total.
+SOP_SRC="$ROOT/SOP"
+if [ -d "$SOP_SRC" ]; then
+  # 1. Copy SOP/ into every deploy output folder (base-root SOP/ path)
+  for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
+    mkdir -p "$dst"
+    cp -r "$SOP_SRC" "$dst/"
+  done
+  # 2. If Miaoda app base path exists (CLIENT_BASE_PATH = /app/$MIAODA_APP_ID),
+  #    also mirror SOP under the scoped subdirectory inside each output
+  #    folder so URLs like /app/X123/SOP/assets/image%2054.png resolve,
+  #    matching what resolveSopImageSrc produces via BASE_URL.
+  if [ -n "${CLIENT_BASE_PATH}" ]; then
+    # strip leading '/' to get a relative path inside the output folder
+    REL_BASE="${CLIENT_BASE_PATH#/}"
+    if [ -n "${REL_BASE}" ]; then
+      for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
+        target="$dst/$REL_BASE/SOP"
+        mkdir -p "$(dirname "$target")"
+        # Remove any stale copy so we don't mix old 图片和附件 + new assets
+        rm -rf "$target"
+        cp -r "$SOP_SRC" "$target"
+      done
+    fi
+  fi
+fi
+
 # 4. shared/static → dist/output_static/ (exclude source extensions)
 #
 # NOTE: we used to use `rsync -a --exclude=…` here, but rsync is not installed

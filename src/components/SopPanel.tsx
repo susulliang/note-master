@@ -105,7 +105,15 @@ function resolveSopImageSrc(rawSrc: string): string {
   // Step 4: re-encode per path segment (handles spaces, chinese, #, ?
   // uniformly) and drop under /SOP/ where the middleware serves them.
   const encoded = cleaned.map((s) => encodeURIComponent(s)).join('/');
-  return '/SOP/' + encoded;
+  // IMPORTANT — prepend Vite's configured `base` so the URL works when
+  // the app is deployed under a sub-path (e.g. Miaoda sets MIAODA_APP_ID
+  // which makes `base = '/app/$id/'`). Without this, a site mounted at
+  // `/app/xxx/` would request `/SOP/assets/foo.png` from the server root
+  // where the folder doesn't exist, causing 404s.
+  // Vite guarantees import.meta.env.BASE_URL always includes a trailing
+  // `/`, so we drop any leading `/` on our side to avoid double slashes.
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '/');
+  return base + 'SOP/' + encoded;
 }
 
 /** Very small in-house markdown renderer — just enough for SOP content.
@@ -139,7 +147,10 @@ function renderBodyMarkdown(
         const alt = (m[1] || '').trim() || 'image';
         const rawSrc = (m[2] || '').trim();
         const resolved = resolveSopImageSrc(rawSrc);
-        const base = rawSrc.split('/').pop() || rawSrc || alt;
+        // Display filename as user-readable: decode any %20/etc. so the
+        // badge reads "image 54.png" instead of "image%2054.png".
+        let base = rawSrc.split('/').pop() || rawSrc || alt;
+        try { base = decodeURIComponent(base); } catch { /* keep raw */ }
         out.push(
           <span
             key={`img-${k++}`}
