@@ -1,8 +1,107 @@
 import path from 'node:path';
+import { mkdir, stat } from 'node:fs/promises';
+import { cpSync, existsSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+
+/**
+ * Serves the workspace-level SOP/ folder (SOP.md + 图片和附件/) under the
+ * URL prefix `/SOP/*`. This lets SopPanel render real <img> tags for the
+ * reference screenshots — even Chinese filenames and whitespace work because
+ * Vite's static middleware does percent-encoding transparently.
+ *
+ * Two modes:
+ *   - dev   : configureServer adds a tiny fs middleware ahead of Vite's.
+ *   - build : closeBundle copies `SOP/` into dist/client/SOP/ so the static
+ *             bundle ships with images included (Vercel/Cloudflare Pages).
+ */
+function sopFolderPlugin(): Plugin {
+  const SOP_URL_PREFIX = '/SOP';
+  let rootDir = process.cwd();
+  let outDir = 'dist/client';
+
+  return {
+    name: 'ecovacs-sop-folder',
+    configResolved(config) {
+      rootDir = config.root;
+      outDir = config.build.outDir;
+    },
+    configureServer(server) {
+      // Runs before Vite's other middlewares — resolve `/SOP/x/y.ext` to
+      // `<root>/SOP/x/y.ext`. Uses Vite's own `fs.cachedRead` via the
+      // standard static middleware pattern by redirecting to a "virtual
+      // public path": we just pipe the file through the dev server's
+      // existing file-serving path so range requests, content-type, etc.
+      // are handled correctly.
+      const sopRoot = path.join(rootDir, 'SOP');
+      server.middlewares.use((req, _res, next) => {
+        const url = (req.url ?? '').split('?')[0]!;
+        if (url.startsWith(SOP_URL_PREFIX + '/') || url === SOP_URL_PREFIX) {
+          const rel = decodeURIComponent(url.slice(SOP_URL_PREFIX.length + 1));
+          const target = path.normalize(path.join(sopRoot, rel));
+          if (target.startsWith(sopRoot) && existsSync(target)) {
+            req.url = url; // keep original url
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const fs = require('node:fs');
+            const statSync = fs.statSync(target);
+            if (statSync.isFile()) {
+              const contentType = contentTypeFor(target);
+              _res.setHeader('Content-Type', contentType);
+              _res.setHeader('Cache-Control', 'public, max-age=3600');
+              return fs.createReadStream(target).pipe(_res);
+            }
+          }
+        }
+        next();
+      });
+    },
+    async closeBundle() {
+      const sopSrc = path.join(rootDir, 'SOP');
+      const sopDst = path.join(rootDir, outDir, 'SOP');
+      try {
+        await stat(sopSrc);
+        await mkdir(path.dirname(sopDst), { recursive: true });
+        // Copy recursively. We always overwrite to get the latest SOP
+        // version; build already empties the outDir prior to this.
+        cpSync(sopSrc, sopDst, { recursive: true, errorOnExist: false });
+        this.info?.(`ecovacs-sop-folder: copied ${sopSrc} → ${sopDst}`);
+      } catch (e) {
+        // SOP folder missing is not fatal — the SOP markdown is still
+        // embedded via the ?raw import and images simply won't resolve.
+        this.warn?.(`ecovacs-sop-folder: no SOP source dir at ${sopSrc}`);
+      }
+    },
+  };
+}
+
+function contentTypeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.bmp':
+      return 'image/bmp';
+    case '.md':
+      return 'text/markdown; charset=utf-8';
+    case '.txt':
+      return 'text/plain; charset=utf-8';
+    case '.pdf':
+      return 'application/pdf';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 /**
  * Canonical Vite config — used by both `vite` (dev) and `vite build` (prod).
@@ -31,6 +130,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       tailwindcss(),
       react(),
+      sopFolderPlugin(),
       {
         name: 'ecovacs-capabilities-stub',
         resolveId(id) {

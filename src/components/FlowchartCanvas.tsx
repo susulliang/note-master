@@ -51,6 +51,16 @@ interface FlowchartCanvasProps {
    * rendered with the yellow proofreading glow until the agent edits them.
    */
   parsedFields?: Record<string, AutoFillSource>;
+  /**
+   * Optional set of node ids that the user intentionally hid from the
+   * canvas via the BOXES toolbar toggle. Hidden nodes are:
+   *  • Skipped entirely from layout (no space reserved, no default position
+   *    computed, no connection drawn to/from them).
+   *  • Still keep their values in formData + localStorage — they just
+   *    aren't rendered; the Hang Up note still includes them.
+   * If undefined all nodes are treated as visible (default).
+   */
+  hiddenNodes?: Set<string>;
 }
 
 // Layout constants (px) — compact spacing
@@ -154,7 +164,8 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
 function computeDefaultLayout(
   nodes: NodeConfig[],
   canvasWidth: number,
-  heightOf: (n: NodeConfig) => number
+  heightOf: (n: NodeConfig) => number,
+  hiddenNodes: Set<string> | undefined
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
@@ -164,7 +175,10 @@ function computeDefaultLayout(
   for (const row of NODE_LAYOUT_ROWS) {
     const rowNodes = row
       .map((id) => nodeById.get(id))
-      .filter((n): n is NodeConfig => Boolean(n));
+      .filter((n): n is NodeConfig => Boolean(n))
+      // Hidden nodes are skipped by the layout entirely — they leave no
+      // gap so neighbours slide up/left to take their place.
+      .filter((n) => !hiddenNodes?.has(n.id));
     if (rowNodes.length === 0) continue;
 
     // Greedy packing: fill each line with as many nodes as fit
@@ -231,6 +245,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   autoFocusId,
   onLayoutReset,
   parsedFields,
+  hiddenNodes,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -284,11 +299,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // still extend the canvas on purpose)
   const effectiveNodes = useMemo(() => {
     const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
-    return nodes.map((n) => {
-      const w = n.width ?? 240;
-      return w > avail ? { ...n, width: Math.floor(avail) } : n;
-    });
-  }, [nodes, containerWidth]);
+    return nodes
+      .filter((n) => !hiddenNodes?.has(n.id))
+      .map((n) => {
+        const w = n.width ?? 240;
+        return w > avail ? { ...n, width: Math.floor(avail) } : n;
+      });
+  }, [nodes, containerWidth, hiddenNodes]);
 
   // Measured height with estimate fallback
   const heightOf = useCallback(
@@ -298,8 +315,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf),
-    [effectiveNodes, containerWidth, heightOf]
+    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf, hiddenNodes),
+    [effectiveNodes, containerWidth, heightOf, hiddenNodes]
   );
 
   const effectivePositions = useMemo(() => {
@@ -397,6 +414,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // Generate SVG connection paths
   const renderConnections = () => {
     return NODE_CONNECTIONS.map((conn, idx) => {
+      // A connection is drawn only when BOTH endpoints are currently
+      // visible. If either node was hidden from the canvas via the BOXES
+      // toggle we simply skip the line — nothing "hangs in mid-air".
+      if (hiddenNodes?.has(conn.from) || hiddenNodes?.has(conn.to)) return null;
       const fromPos = effectivePositions[conn.from];
       const toPos = effectivePositions[conn.to];
       const fromNode = effectiveNodes.find((n) => n.id === conn.from);

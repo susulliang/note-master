@@ -45,16 +45,39 @@ interface SopPanelProps {
 
 /* ----------------------------- Markdown mini renderer ---------------------------- */
 
+/** Resolve an image src reference from SOP.md content. The markdown lives
+ *  in the workspace at `SOP/SOP.md` and its sibling folder `图片和附件/`
+ *  is served by a Vite middleware under the URL prefix `/SOP/`. This
+ *  helper converts relative paths (`图片和附件/foo.png`) to absolute URL
+ *  paths (`/SOP/图片和附件/foo.png`) while leaving full URLs (https://…,
+ *  data:…) and already-absolute paths alone. */
+function resolveSopImageSrc(rawSrc: string): string {
+  const src = rawSrc.trim();
+  if (!src) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(src)) return src; // https: data: mailto: ftp: …
+  if (src.startsWith('/')) return src;
+  return '/SOP/' + encodeURI(src).replace(/#/g, '%23');
+}
+
 /** Very small in-house markdown renderer — just enough for SOP content.
- *  Supports headings, bold/italic, lists, blockquotes, links, image badges,
+ *  Supports headings, bold/italic, lists, blockquotes, links, images,
  *  and paragraph breaks. Not a real GFM implementation; intentionally tiny
- *  so we don't ship 100KB of markdown-it just for one info panel. */
-function renderBodyMarkdown(lines: string[]): React.ReactElement[] {
+ *  so we don't ship 100KB of markdown-it just for one info panel.
+ *
+ *  Images render as clickable inline thumbnails — clicking them opens a
+ *  near-fullscreen lightbox. The caller supplies the lightbox trigger
+ *  via `onImageClick`. */
+function renderBodyMarkdown(
+  lines: string[],
+  opts?: { onImageClick?: (resolvedSrc: string, altText: string) => void }
+): React.ReactElement[] {
   const blocks: React.ReactElement[] = [];
   let i = 0;
   const keyRef = { n: 0 };
+  const onImageClick = opts?.onImageClick;
   const inline = (s: string): (string | React.ReactElement)[] => {
-    // Images → gray badge with filename
+    // Images → clickable thumbnail + filename caption badge. Links, bold,
+    // inline code as before.
     let k = 0;
     const out: (string | React.ReactElement)[] = [];
     const re = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(\*\*|__)([^*_]+?)\5|(`+)([^`]+?)\7/g;
@@ -63,17 +86,49 @@ function renderBodyMarkdown(lines: string[]): React.ReactElement[] {
     while ((m = re.exec(s)) !== null) {
       if (m.index > last) out.push(s.substring(last, m.index));
       if (m[1] !== undefined) {
-        // image
-        const alt = m[1] || 'image';
-        const src = m[2] || '';
-        const base = src.split('/').pop() || alt;
+        // image: render a real <img> thumbnail + badge, click opens lightbox
+        const alt = (m[1] || '').trim() || 'image';
+        const rawSrc = (m[2] || '').trim();
+        const resolved = resolveSopImageSrc(rawSrc);
+        const base = rawSrc.split('/').pop() || rawSrc || alt;
         out.push(
           <span
             key={`img-${k++}`}
-            className="inline-flex items-center gap-1 rounded-md border border-foreground/10 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground"
-            title={`📎 Image: ${base}${alt && alt !== base ? ` / ${alt}` : ''}`}
+            className="my-2 inline-flex w-full max-w-md flex-col gap-1.5 rounded-lg border border-foreground/10 bg-card/40 p-2 text-[11px] text-muted-foreground shadow-sm"
           >
-            🖼️ {base}
+            <button
+              type="button"
+              className="group w-full cursor-zoom-in overflow-hidden rounded-md bg-foreground/5 transition-all hover:bg-foreground/10 active:scale-[0.995]"
+              onClick={() => onImageClick?.(resolved, alt)}
+              title={`Click to open full-size image: ${base}${alt && alt !== base ? ` / ${alt}` : ''}`}
+            >
+              {resolved ? (
+                <img
+                  src={resolved}
+                  alt={alt}
+                  loading="lazy"
+                  onError={(e) => {
+                    // Fallback to filename badge if the image fails to load
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    const sibling = (e.currentTarget as HTMLImageElement).parentElement?.querySelector<HTMLElement>('[data-sop-img-fallback]');
+                    if (sibling) sibling.style.display = 'flex';
+                  }}
+                  className="h-auto max-h-52 w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
+                />
+              ) : null}
+              <span
+                data-sop-img-fallback
+                className="hidden min-h-20 w-full items-center justify-center gap-2 rounded-md border border-dashed border-foreground/10 px-2 py-4 text-[10px] text-muted-foreground"
+              >
+                🖼️ <span className="truncate">{base}</span>
+                <span className="text-muted-foreground/60">（image unavailable）</span>
+              </span>
+            </button>
+            <span className="flex items-center gap-1 truncate px-0.5">
+              <span className="shrink-0">🖼️</span>
+              <span className="truncate" title={base}>{base}</span>
+              {alt && alt !== base && <span className="ml-auto max-w-[55%] truncate text-muted-foreground/70" title={alt}>— {alt}</span>}
+            </span>
           </span>
         );
       } else if (m[3] !== undefined) {
@@ -268,6 +323,18 @@ export default function SopPanel({
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmResult, setLlmResult] = useState<{ bestId: string; reason: string; notePreview: string } | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
+
+  // --- SOP image lightbox ----------------------------------------------
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  // Close lightbox on Escape key (standard UX)
+  useEffect(() => {
+    if (!lightbox) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightbox(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   const runLlmRerank = useCallback(async () => {
     setLlmError(null);
@@ -571,9 +638,18 @@ export default function SopPanel({
         )}
       </div>
 
-      {/* Content viewer */}
+      {/* Content viewer. NOTE: this scrolling reader area is intentionally
+          NOT draggable as a gridbox node handle — the content area swallows
+          mouse-down so only the SopPanel's header/chip/status row initiates
+          a node drag. Users interact with text selection, scroll, image
+          clicks etc. without accidentally nudging the box. */}
       <div
         className="flex-1 overflow-y-auto rounded-md border border-foreground/10 bg-background/40 px-3 py-2.5 max-h-[260px]"
+        onMouseDownCapture={(e) => {
+          // Text selection / scroll / img click / link click — all need to
+          // bypass the FlowNode outer drag-handler.
+          e.stopPropagation();
+        }}
         onClick={() => {
           // Click outside → close the open heading picker dropdown
           if (dropdownOpen) setDropdownOpen(false);
@@ -587,8 +663,8 @@ export default function SopPanel({
             <p>
               As you fill in <strong>Issue Type</strong>, <strong>Detailed Issue</strong>, and <strong>Purchase Channel/Date</strong>,
               the chips above will auto-rank. Click any chip to read the full SOP content for that heading.
-              Or hit <span className="text-primary font-semibold">AI match from note</span> once your ticket is complete to have the local LLM rerank the
-              candidates against the formatted final note.
+              Or hit <span className="text-primary font-semibold">SOP AI Match</span> once your ticket fields are ready to have the AI rerank the
+              indexed heading candidates against the ticket fields and current SOP title matches.
             </p>
           </div>
         )}
@@ -608,11 +684,70 @@ export default function SopPanel({
               )}
             </div>
             <div className="space-y-0.5">
-              {renderBodyMarkdown(activeSection.bodyLines)}
+              {renderBodyMarkdown(activeSection.bodyLines, {
+                onImageClick: (src, alt) => setLightbox({ src, alt }),
+              })}
             </div>
           </div>
         )}
       </div>
+
+      {/* Near-fullscreen image lightbox — anchored to viewport (fixed), sits
+          above everything with a near-black frosted backdrop. Covers the
+          whole browser window regardless of canvas scroll position. */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-6 backdrop-blur-md animate-in fade-in duration-150"
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.alt || 'Full-size SOP image'}
+          onMouseDownCapture={(e) => {
+            // Don't let the lightbox overlay be a drag handle for the
+            // parent FlowNode either.
+            e.stopPropagation();
+          }}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 z-10 flex size-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white/80 shadow-lg transition hover:bg-white/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightbox(null);
+            }}
+            aria-label="Close image viewer"
+          >
+            ✕
+          </button>
+          <div
+            className="relative z-0 max-h-[92vh] max-w-[92vw] rounded-xl border border-white/10 bg-black/40 p-2 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightbox.src}
+              alt={lightbox.alt}
+              className="block max-h-[90vh] max-w-[90vw] w-auto h-auto rounded-lg object-contain"
+              onError={(e) => {
+                const target = (e.currentTarget as HTMLImageElement);
+                target.style.display = 'none';
+                const parent = target.parentElement;
+                if (parent && !parent.querySelector('[data-sop-lightbox-missing]')) {
+                  const fallback = document.createElement('div');
+                  fallback.setAttribute('data-sop-lightbox-missing', '');
+                  fallback.className = 'flex h-72 w-96 max-w-[85vw] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-6 text-center text-[13px] text-white/70';
+                  fallback.innerHTML = '🖼️ <strong class="text-white/90">Image unavailable</strong><br /><span class="mt-2 max-w-[85%] truncate text-[11px] text-white/50">' + lightbox.src + '</span>';
+                  parent.prepend(fallback);
+                }
+              }}
+            />
+            <div className="mt-2 px-1 text-[11px] text-white/55">
+              <span className="mr-2 font-mono text-[10px] uppercase tracking-wider text-white/40">SOP reference image</span>
+              {lightbox.alt && <span className="text-white/70">{lightbox.alt}  ·  </span>}
+              <span className="truncate">{decodeURIComponent(lightbox.src.split('/').pop() || '')}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

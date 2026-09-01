@@ -373,6 +373,62 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_node_position_overrides',
     {}
   );
+  /**
+   * Canvas gridboxes the agent has intentionally HIDDEN from view via the
+   * BOXES toolbar toggle. Hidden nodes are still:
+   *  • Stored in formData + localStorage (values preserved)
+   *  • Included in the Hang Up final note (their data is part of the ticket)
+   * But they are simply not rendered in the flowchart canvas nor their
+   * bezier connections drawn, to let the agent focus on the flow.
+   *
+   * Persisted key: `ecovacs_ticket_hidden_nodes` (string[] of node ids).
+   */
+  const [hiddenNodeIds, setHiddenNodeIds] = useScopedState<string[]>(
+    'ecovacs_ticket_hidden_nodes',
+    []
+  );
+  const hiddenNodesSet = useMemo(
+    () => new Set(hiddenNodeIds),
+    [hiddenNodeIds]
+  );
+  /** The 7 gridboxes the user asked for toggle controls for — a stable
+   *  ordered list we render in the BOXES dropdown. Labels match their
+   *  request exactly: Shipping address, Call Transcript, 24H tracker,
+   *  SOP box, SKU box, SERIAL Number box, additional note box. */
+  const GRIDBOX_VISIBILITY_TOGGLES = useMemo(
+    () => [
+      { id: NODE_IDS.SHIPPING_ADDRESS, label: 'Shipping address' },
+      { id: NODE_IDS.TRANSCRIPT_PANEL, label: 'Call Transcript' },
+      { id: NODE_IDS.TICKET_TRACKER, label: '24H tracker' },
+      { id: NODE_IDS.SOP_PANEL, label: 'SOP box' },
+      { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
+      { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
+      { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
+    ],
+    []
+  );
+  const handleToggleGridbox = useCallback(
+    (id: string, nextVisible: boolean) => {
+      setHiddenNodeIds((prev) => {
+        const cur = new Set(prev);
+        if (nextVisible) {
+          cur.delete(id);
+        } else {
+          cur.add(id);
+        }
+        return Array.from(cur);
+      });
+    },
+    [setHiddenNodeIds]
+  );
+  const gridboxVisibilityToggles = useMemo(
+    () =>
+      GRIDBOX_VISIBILITY_TOGGLES.map((t) => ({
+        ...t,
+        visible: !hiddenNodesSet.has(t.id),
+      })),
+    [GRIDBOX_VISIBILITY_TOGGLES, hiddenNodesSet]
+  );
   const [rawTheme, setTheme] = useScopedState<ThemeId>('ecovacs_ticket_theme', 'midnight');
   // Normalize legacy 'dark'/'light' values from older sessions
   const theme = normalizeTheme(rawTheme);
@@ -1097,6 +1153,10 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             }}
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}
+            gridboxVisibility={{
+              toggles: gridboxVisibilityToggles,
+              onToggle: handleToggleGridbox,
+            }}
           />
           <TicketPanelsContext.Provider
             value={{
@@ -1200,6 +1260,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               autoFocusId={NODE_IDS.DETAILED_ISSUE}
               onLayoutReset={handleLayoutReset}
               parsedFields={parsedFields}
+              hiddenNodes={hiddenNodesSet}
             />
           </TicketPanelsContext.Provider>
         </main>

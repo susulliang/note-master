@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { RotateCcw, History, Settings, Type, Mic, MicOff } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Mic, MicOff, Boxes } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Switch } from '@/components/ui/switch';
 import HistoryPanel from '@/components/HistoryPanel';
 import EngineSettingsPanel, {
   type CloudState,
@@ -46,6 +47,12 @@ interface FloatingControlsProps {
   cloud?: CloudState;
   transcript?: TranscriptEntry[];
   isTranscribing?: boolean;
+  /** Optional gridbox (flowchart node) visibility toggles. When supplied the
+   *  toolbar renders a Boxes icon button that opens a small toggle panel. */
+  gridboxVisibility?: {
+    toggles: Array<{ id: string; label: string; visible: boolean }>;
+    onToggle: (id: string, nextVisible: boolean) => void;
+  };
 }
 
 /** Screen corner the toolbar is docked to */
@@ -93,10 +100,12 @@ export default function FloatingControls({
   cloud,
   transcript,
   isTranscribing,
+  gridboxVisibility,
 }: FloatingControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
   const [engineOpen, setEngineOpen] = useState(false);
+  const [boxesOpen, setBoxesOpen] = useState(false);
 
   // Docked corner (persisted) + transient free position while dragging
   const [corner, setCorner] = useScopedState<Corner>('ecovacs_ticket_toolbar_corner', 'tr');
@@ -316,6 +325,43 @@ export default function FloatingControls({
 
             <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
 
+            {/* Gridbox visibility toggles — the BOXES button + dropdown
+                panel. Shows toggles for 7 specific gridboxes (Shipping
+                address, Call Transcript, 24h tracker, SOP, SKU, Serial,
+                Additional notes) so the agent can declutter the canvas
+                without deleting data (node values persist while hidden). */}
+            {gridboxVisibility && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setBoxesOpen((v) => !v);
+                  if (engineOpen) setEngineOpen(false);
+                }}
+                className={cn(
+                  'relative size-8 rounded-full text-muted-foreground hover:text-foreground',
+                  boxesOpen && 'bg-foreground/10 text-foreground'
+                )}
+                aria-label="Toggle gridboxes"
+                title="Gridboxes — show / hide Shipping address, Transcript, 24h tracker, SOP, SKU, Serial, Additional notes"
+              >
+                <Boxes className="size-4" />
+                {/* If any toggle is currently turned OFF, show a small amber
+                    count badge so agent notices the canvas has hidden boxes. */}
+                {(() => {
+                  const hiddenCount = gridboxVisibility.toggles.filter((t) => !t.visible).length;
+                  if (hiddenCount === 0) return null;
+                  return (
+                    <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500/90 text-[9px] font-bold text-black">
+                      {hiddenCount}
+                    </span>
+                  );
+                })()}
+              </Button>
+            )}
+
+            {gridboxVisibility && <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />}
+
             {callSupported && (
               <Button
                 variant="ghost"
@@ -421,6 +467,72 @@ export default function FloatingControls({
             onClearHistory={onClearHistory}
             onClose={onToggleHistory}
           />
+        )}
+
+        {/* BOXES gridbox visibility panel — small glass card anchored under
+            the toolbar with 7 switches. Same geometry convention as Engine
+            settings: fixed outside-click catcher at z-40, panel at z-50. */}
+        {boxesOpen && gridboxVisibility && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setBoxesOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="relative z-50">
+              <div className="glass-panel w-72 rounded-2xl p-3 text-[11px] shadow-2xl animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="mb-1.5 flex items-center justify-between px-0.5">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground">
+                      <Boxes className="size-3.5 text-primary" />
+                      Gridboxes
+                    </div>
+                    <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+                      Hide or show canvas gridboxes — node values are kept even while hidden.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground"
+                    onClick={() => setBoxesOpen(false)}
+                    aria-label="Close gridboxes panel"
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-col gap-0.5 rounded-xl border border-foreground/10 bg-foreground/[0.03] p-1.5">
+                  {gridboxVisibility.toggles.map((t) => (
+                    <div
+                      key={t.id}
+                      className="group flex items-center gap-2 rounded-md px-1.5 py-1.5 transition hover:bg-foreground/[0.05]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={cn(
+                            'truncate text-[11px]',
+                            t.visible ? 'text-foreground' : 'text-muted-foreground/70 line-through decoration-muted-foreground/50'
+                          )}
+                        >
+                          {t.label}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={t.visible}
+                        onCheckedChange={(next) => gridboxVisibility.onToggle(t.id, !!next)}
+                        aria-label={`Toggle ${t.label}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 px-0.5 text-[10px] text-muted-foreground/70">
+                  {gridboxVisibility.toggles.filter((t) => !t.visible).length === 0
+                    ? 'All gridboxes are visible.'
+                    : `${gridboxVisibility.toggles.filter((t) => !t.visible).length} gridbox(es) hidden — they still keep their values and participate in the final note.`}
+                </p>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Engine settings panel — opens from the gear like the History
