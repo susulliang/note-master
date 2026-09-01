@@ -53,7 +53,7 @@ Currently, the [**maximum discount**](https://lmgx8md8u1.feishu.cn/docx/QgAbdVEW
 
 Canada \& USA（2026年1月11日后生效）
 
-![image\.png](图片和附件/image%2054.png)
+![image\.png](assets/image%2054.png)
 
 **购买机器 \(大货\)：CCRB5**
 
@@ -77,11 +77,11 @@ Canada \& USA（2026年1月11日后生效）
 
 第二步：点击网站上方导航栏的“**Upgrade Program**” 
 
-![image\.png](图片和附件/image%2032.png)
+![image\.png](assets/image%2032.png)
 
 第三步：在Upgrade Program界面下滑，找到以下截图界面中的“**How it works**"，点击右上角的"**Rules**"便可了解具体规则。
 
-![image\.png](图片和附件/image%2028.png)
+![image\.png](assets/image%2028.png)
 
 
 
@@ -90,7 +90,7 @@ Canada \& USA（2026年1月11日后生效）
 若客户需要了解更多Upgrade Program的相关咨询，请参考以下模板。
 **使用模板：** US \& CA Upgrade Program/Loyal Customer Buy New
 
-![image\.png](图片和附件/image%2031.png)
+![image\.png](assets/image%2031.png)
 
 
 
@@ -100,7 +100,7 @@ Canada \& USA（2026年1月11日后生效）
 
 客户使用旧机 Serial Number 码在官网兑换 Voucher 进行购买，客户无需寄回旧机。
 
-![image\.png](图片和附件/image%2053.png)
+![image\.png](assets/image%2053.png)
 
 
 
@@ -110,7 +110,7 @@ Canada \& USA（2026年1月11日后生效）
 
 **美国官网Trade In以旧换新，于2026年7月7日正式上线：**https://www\.ecovacs\.com/us/upgrade
 
-![image\.png](图片和附件/image%2026.png)
+![image\.png](assets/image%2026.png)
 
 **客户操作流程：**
 
@@ -150,11 +150,11 @@ Canada \& USA（2026年1月11日后生效）
 
 1. Log in to [Ecovacs Admin Portal](https://eco-intl-sso.ecovacs.com/login?service=https%3A%2F%2Fadmin-us.ecovacs.com%2Fsite%2Flogin)\. 
 
-![image\.png](图片和附件/image%2040.png)
+![image\.png](assets/image%2040.png)
 
 2. Search using the** order number** or the **email** used to place the order\.
 
-![image\.png](图片和附件/image%2022.png)
+![image\.png](assets/image%2022.png)
 
 
 
@@ -202,7 +202,7 @@ Please kindly note that your package has already been delivered to the original 
 
 官网的订单 \- Case Owner \> Queues \> AMR DTC Group
 
-![image](图片和附件/image)
+![image](assets/image)
 
 官网保价政策：[Price Match Guarantee（US）](https://help.ecovacs.com/us/support/price-match-guarantee-policy)；[Price Match Guarantee（CA）](https://help.ecovacs.com/ca/support/price-match-guarantee-policy)
 
@@ -276,17 +276,17 @@ Please kindly note that your package has already been delivered to the original 
 
 （1）若客人想取消订单，需要**询问退货的理由，**然后拿订单或购买邮箱到查询订单网站进行查询是否有货运信息，如果没有tracking number，用以下邮件模板把工单转到AMR DTC Group名下让DTC取消订单
 
-![image\.png](图片和附件/image%2015.png)
+![image\.png](assets/image%2015.png)
 
-![image50\.png](图片和附件/image50.png)
+![image50\.png](assets/image50.png)
 
 （2）如果订单如图所示显示在处理中且下面**没有tracking number**，即可使用cancel order request 邮件模板升级给DTC
 
-![image51\.png](图片和附件/image51.png)
+![image51\.png](assets/image51.png)
 
 
 
-![image52\.png](图片和附件/image52.png)
+![image52\.png](assets/image52.png)
 
 
 
@@ -302,7 +302,7 @@ Please kindly note that your package has already been delivered to the original 
 
 官网的订单升级 \- Case Owner \> Queues \> AMR DTC Group
 
-![image](图片和附件/image%204)
+![image](assets/image%204)
 
 ##### 5\.2\.1\.2 DTC订单换货要求
 
@@ -390,7 +390,7 @@ Please kindly note that your package has already been delivered to the original 
 
 - 质保起始日期 = **生产日期\(如下图\)**** \+ 4个月**
 
-![image\.png](图片和附件/image%2024.png)
+![image\.png](assets/image%2024.png)
 
 
 
@@ -492,13 +492,13 @@ Please kindly note that your package has already been delivered to the original 
 
 - 用户提供了机器的SN后，先通过Salesforce系统**全局搜索****/Search All**确认该SN是否有换机的记录，**避免非必要升级或错误承诺质保**
 
-![image\.png](图片和附件/image%209.png)
+![image\.png](assets/image%209.png)
 
 - 如确认该SN存在同一用户的换机记录（有关联的换机WO, SN状态为Destroyed），则以重复质保（Duplicate Claim）为由拒绝质保
 
-![image\.png](图片和附件/image%2017.png)
+![image\.png](assets/image%2017.png)
 
-![image\.png](图片和附件/image%2049.png)
+![image\.png](assets/image%2049.png)
 
 - 如核实不存在上述无质保效益的情况，则报备至当值的**Tier 2/Team Leader**，将内部升级至HQ以验证该**机器SN的配网激活时间**（内部信息，请勿向用户提供\)
 
@@ -584,7 +584,7 @@ Please kindly note that your package has already been delivered to the original 
 
 （1）客户通过售后渠道获得的官方翻新机
 
-![image\.png](图片和附件/image%2035.png)
+![image\.png](assets/image%2035.png)
 
 （2）Ebay的Yeedi商店售出的官方翻新机
 
@@ -614,7 +614,7 @@ Please kindly note that your package has already been delivered to the original 
 
 测试机，即Ecovacs给个人发放的测试样机。请使用下面邮件模板来收集信息，每个测试机的warranty都不一样，以**具体协议**为准。
 
-![image\.png](图片和附件/image%2033.png)
+![image\.png](assets/image%2033.png)
 
 
 
@@ -628,7 +628,7 @@ Please kindly note that your package has already been delivered to the original 
 
 ###### 1\.2\.1\.1  用 Collect Info 邮件模板收集客人机器的SN等信息。
 
-![image\.png](图片和附件/image%2013.png)
+![image\.png](assets/image%2013.png)
 
 
 
@@ -644,11 +644,11 @@ Please kindly note that your package has already been delivered to the original 
 
 **手机版：**
 
-![img\_v3\_0211g\_04da3fc5\-d601\-40ab\-8000\-10d42abbc09g\.jpg](图片和附件/img_v3_0211g_04da3fc5-d601-40ab-8000-10d42abbc09g.jpg)
+![img\_v3\_0211g\_04da3fc5\-d601\-40ab\-8000\-10d42abbc09g\.jpg](assets/img_v3_0211g_04da3fc5-d601-40ab-8000-10d42abbc09g.jpg)
 
 **网页版：**
 
-![image\.png](图片和附件/image%2034.png)
+![image\.png](assets/image%2034.png)
 
 
 
@@ -671,23 +671,23 @@ Please kindly note that your package has already been delivered to the original 
 1. 收集用户信息及**设备****Serial Number****;**
 *设备**Serial Number**必须要用** ****Search ******SN**** **功能验证机器是否为用户购买的机器，若不一样要和用户再次确认*
 
-![img\_v3\_02s8\_75cb5315\-6175\-49a4\-931e\-2c5978aa42cg\.jpg](图片和附件/img_v3_02s8_75cb5315-6175-49a4-931e-2c5978aa42cg.jpg)
+![img\_v3\_02s8\_75cb5315\-6175\-49a4\-931e\-2c5978aa42cg\.jpg](assets/img_v3_02s8_75cb5315-6175-49a4-931e-2c5978aa42cg.jpg)
 
 2. 点击**Create AMR Work Order**去创建保修工单，取决于用户机型是否需要寄回发送不同邮件模板告知用户
 
-![image\.png](图片和附件/image%2042.png)
+![image\.png](assets/image%2042.png)
 
-![image\.png](图片和附件/image%2012.png)
+![image\.png](assets/image%2012.png)
 
 3. 若不缺货，点击'AMR dispatch‘帮用户保修即可；若缺货，系统会以**红字**显示，此时，我们需要用Post把case升级到**Tier 3 \(Elma\)**** **名下让他安排换机
 
-![image\.png](图片和附件/image%2055.png)
+![image\.png](assets/image%2055.png)
 
-![img\_v3\_02sq\_77a1f47a\-359b\-4dca\-b38e\-462df77a0eag\.jpg](图片和附件/img_v3_02sq_77a1f47a-359b-4dca-b38e-462df77a0eag.jpg)
+![img\_v3\_02sq\_77a1f47a\-359b\-4dca\-b38e\-462df77a0eag\.jpg](assets/img_v3_02sq_77a1f47a-359b-4dca-b38e-462df77a0eag.jpg)
 
     - 仓库一旦发货，WO的状态会更新为'**Shipped out**‘，同时WO处的’**Dispatch Label Tracking No**'会更新
 
-![image\.png](图片和附件/image%2018.png)
+![image\.png](assets/image%2018.png)
 
 4. 向用户发送邮件，通知新机的**Tracking\#**和换机的机型（由于库存原因，换机机型可能会和原始机型不一致，**务必要告知用户换机机型**，万一出现了**机型降级**的情况一下要及时向Tier 2/Team Leader反馈）。
 
@@ -729,9 +729,9 @@ Please kindly note that your package has already been delivered to the original 
 
 2025/12/16起，[失效SN登记表](https://lmgx8md8u1.feishu.cn/sheets/Cv6Us9tH9ht0QKtJajgcanmenNf?from=from_copylink)仅仅作为查询用途，**无需再进行手动新增**
 
-![image](图片和附件/image%203)
+![image](assets/image%203)
 
-![image\.png](图片和附件/image%2021.png)
+![image\.png](assets/image%2021.png)
 
 
 
@@ -776,16 +776,16 @@ Please kindly note that your package has already been delivered to the original 
 
 **Macro 5 \- Inform Label Status**
 
-![image\.png](图片和附件/image%2023.png)
+![image\.png](assets/image%2023.png)
 
 **Macro 6 \- Inform Replacement's Tracking \& Remind to Ship Original Machine**
 
-![image\.png](图片和附件/image%205.png)
+![image\.png](assets/image%205.png)
 
 **完整的流程及对应****邮件模板****参考此文档: **[Warranty Replacement Process](https://lmgx8md8u1.feishu.cn/docx/TQ35dIWGpoz8eMxP9D0cgAJknwf?from=from_copylink)
 *附**SF **邮件模板**路径*
 
-![image\.png](图片和附件/image%2041.png)
+![image\.png](assets/image%2041.png)
 
 #### 2\.4 特殊岛屿区域处理流程
 
@@ -803,7 +803,7 @@ Please kindly note that your package has already been delivered to the original 
 
 **若换货，请按照****Tier 3****指引处理下一步。**
 
-![image\.png](图片和附件/image%2025.png)
+![image\.png](assets/image%2025.png)
 
 特殊岛屿区域包括：
 
@@ -845,11 +845,11 @@ Please kindly note that your package has already been delivered to the original 
 
     - **邮件模板：**Offer OOW Courtesy Service \(No BSD/IFR\<24 months\)
 
-![image\.png](图片和附件/image%206.png)
+![image\.png](assets/image%206.png)
 
 - 创建完WO之后请用邮件模板 **OOW ****Courtesy ****\- No Need to Return Original Machine**** **告知用户保修流程（请**不要使用**普通的**Macro 2 \- No Need to Return Original Machine**的邮件模板）
 
-![image\.png](图片和附件/image%2011.png)
+![image\.png](assets/image%2011.png)
 
 
 
@@ -861,15 +861,15 @@ Please kindly note that your package has already been delivered to the original 
 
 ***指引用户联系******BESENDER******后，请选定Case Tag \> ******US OOW Case******进行标记***
 
-![image\.png](图片和附件/image%202.png)
+![image\.png](assets/image%202.png)
 
 - **维修****：**\(购买超2年\) US OOW **BESENDER** 邮件模板
 
-![image\.png](图片和附件/image%2037.png)
+![image\.png](assets/image%2037.png)
 
 - **购买****耗材类****配件****：**\(购买超2年\) US OOW **BESENDER **\- **Buy Parts****/Accessories**** **邮件模板
 
-![image\.png](图片和附件/image%2051.png)
+![image\.png](assets/image%2051.png)
 
 
 
@@ -891,7 +891,7 @@ A\. 关于报价：
 
 ③Options：维修完成后，RC→用户时，需要点选*Residential Area*；如用户要求签名收货（此选项收费更高），点选*Signature Package*
 
-![img\_v3\_0214f\_e676f92b\-5729\-470f\-abb0\-6a92f10e2cxx\.jpg](图片和附件/img_v3_0214f_e676f92b-5729-470f-abb0-6a92f10e2cxx.jpg)
+![img\_v3\_0214f\_e676f92b\-5729\-470f\-abb0\-6a92f10e2cxx\.jpg](assets/img_v3_0214f_e676f92b-5729-470f-abb0-6a92f10e2cxx.jpg)
 
 
 
@@ -1018,11 +1018,11 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
 注意：如果推荐用户去亚马逊买配件，给的链接必须是我们官方的。即美国亚马逊seller必须是[Amazon\.com](http://Amazon.com) , 加拿大seller必须是Ecovacs Robotics**。**非官方的seller链接不能发。
 
-![image](图片和附件/image%201)
+![image](assets/image%201)
 
 
 
-![image](图片和附件/image%202)
+![image](assets/image%202)
 
 
 
@@ -1042,7 +1042,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
 先找到对应部件的 **SKU**，到 **\(客服端\) Besender网站**确认客户所需部件是否有**可操作**库存。
 
-![image\.png](图片和附件/image%2020.png)
+![image\.png](assets/image%2020.png)
 
 1. **若有库存**：
 
@@ -1050,7 +1050,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
     **使用话术：**
 
-![image\.png](图片和附件/image%2045.png)
+![image\.png](assets/image%2045.png)
 
 2. **若无库存**：
 
@@ -1058,7 +1058,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
     [BSD Parts PO Tracking](https://ecovacs.feishu.cn/sheets/JzKOsmaqdhoeZxtg93ycTnS0nUb?from=from_copylink&sheet=cLDTFt)
 
-![image\.png](图片和附件/image%2016.png)
+![image\.png](assets/image%2016.png)
 
     - 若表格中显示该配件近期会补货：
 
@@ -1094,7 +1094,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
     - 先找到对应部件的 **SKU**，到 **\(客服端\) Besender网站**确认客户所需部件是否有**可操作**库存。
 
-![image\.png](图片和附件/image%2050.png)
+![image\.png](assets/image%2050.png)
 
     1. **若有库存**：
 
@@ -1102,7 +1102,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
         **使用话术：**
 
-![image\.png](图片和附件/image%203.png)
+![image\.png](assets/image%203.png)
 
     2. **若无库存**：
 
@@ -1110,7 +1110,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
         [BSD Parts PO Tracking](https://ecovacs.feishu.cn/sheets/JzKOsmaqdhoeZxtg93ycTnS0nUb?from=from_copylink&sheet=cLDTFt)
 
-![image\.png](图片和附件/image%204.png)
+![image\.png](assets/image%204.png)
 
         - 若表格中显示该配件近期会补货：
 
@@ -1134,17 +1134,17 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
 **首先在 Besender 系统查询配件库存情况**：
 
-![image\.png](图片和附件/image%2048.png)
+![image\.png](assets/image%2048.png)
 
 - 若 **有库存**：可直接使用下面的邮件模板收集用户信息后**创建 WO 进行补发**。
 
-![image\.png](图片和附件/image%208.png)
+![image\.png](assets/image%208.png)
 
 - 若 **无库存**：前往配件到货 ETA 表格查询未来库存情况
 
 [BSD Parts PO Tracking](https://ecovacs.feishu.cn/sheets/JzKOsmaqdhoeZxtg93ycTnS0nUb?from=from_copylink&sheet=cLDTFt)
 
-![image\.png](图片和附件/image%2038.png)
+![image\.png](assets/image%2038.png)
 
 - 若表格中显示该配件未来会补货：
 
@@ -1161,7 +1161,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
 2. 先找到对应部件的 **SKU**，到 **\(客服端\) Besender网站**确认客户所需部件是否有**可操作**库存。
 
-![image\.png](图片和附件/image%2044.png)
+![image\.png](assets/image%2044.png)
 
 
 
@@ -1171,7 +1171,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
     - **使用话术：**
 
-![image\.png](图片和附件/image%2046.png)
+![image\.png](assets/image%2046.png)
 
 - **若无库存**：
 
@@ -1179,7 +1179,7 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
     [BSD Parts PO Tracking](https://ecovacs.feishu.cn/sheets/JzKOsmaqdhoeZxtg93ycTnS0nUb?from=from_copylink&sheet=cLDTFt)
 
-![image\.png](图片和附件/image%2047.png)
+![image\.png](assets/image%2047.png)
 
     - 若表格中显示该配件近期会补货：
 
@@ -1201,13 +1201,13 @@ When offering a one\-time courtesy service, the agent must clearly inform the cu
 
 ##### 5\.1\.1 常规处理流程
 
-![image\.png](图片和附件/image%2030.png)
+![image\.png](assets/image%2030.png)
 
 ##### **5\.1\.2 特殊说明**
 
 1. 接到删除账号请求必须要先建议用户在APP内自行删除，若用户不同意在APP中自行删除，则通知Tier 2/Team Leader处理。
 
-![image\.png](图片和附件/image%2043.png)
+![image\.png](assets/image%2043.png)
 
 2. 在升级Tier 2/Team Leader 处理删除账号请求之前，**必须确认待删除邮箱与用户当前的联络邮箱是否一致**。 如不一致，需要求用户使用待删除账号的邮箱重新提交删除账号请求（发邮件至客服邮箱support\.us@ecovacs\.com并附带当前工单号）。
 
@@ -1227,7 +1227,7 @@ We appreciate your understanding and patience during this time\. Should you have
 
 ##### 5\.2\.1 常规处理流程
 
-![image\.png](图片和附件/image%2029.png)
+![image\.png](assets/image%2029.png)
 
 ##### **5\.2\.2 特殊说明**
 
@@ -1290,9 +1290,9 @@ Payment issue：无法下单
 
 升级给DTC的case**只需要把****Case owner****换成****AMR DTC Group**并把状态保持为**open**即可
 
-![image\.png](图片和附件/image%2014.png)
+![image\.png](assets/image%2014.png)
 
-![image\.png](图片和附件/image%207.png)
+![image\.png](assets/image%207.png)
 
 
 
@@ -1324,7 +1324,7 @@ Customer request for Delay repair progress：维修中心在包裹送达3个工�
 
 如果我们需要**跟进 case 或 WO 的处理进度**，请将 **case owner **修改为** ****Elma**，并在 **Post** 中 **@****Elma**，同时写明具体请求内容。
 
-![image\.png](图片和附件/image%2052.png)
+![image\.png](assets/image%2052.png)
 
 
 
@@ -1487,7 +1487,7 @@ Potential Amazon bad reviews
 
 #### 3\.2 常规处理流程（Handling Flow）
 
-![image\.png](图片和附件/image%2010.png)
+![image\.png](assets/image%2010.png)
 
 #### 3\.3 特殊说明（Special Instructions）
 
@@ -1510,7 +1510,7 @@ Potential Amazon bad reviews
 
 **邮件模板**** 1**** **
 
-![image\.png](图片和附件/image%2027.png)
+![image\.png](assets/image%2027.png)
 
 We would like to kindly inform you that our North America warranty policy applies exclusively to products purchased and used within the United States and Canada\. Regrettably, we do not offer a global warranty\. As such, if your machine has been taken outside North America, it will not qualify for warranty coverage under our policy\.
 
@@ -1530,7 +1530,7 @@ We sincerely appreciate your understanding and cooperation in this matter\. Our 
 
 **邮件模板**** 2**
 
-![image\.png](图片和附件/image%2019.png)
+![image\.png](assets/image%2019.png)
 
 Dear Valued Customer,
 
@@ -1558,7 +1558,7 @@ If you have any further questions or need assistance, our team is here to help\.
 
 **邮件模板**** 1**
 
-![image\.png](图片和附件/image%2039.png)
+![image\.png](assets/image%2039.png)
 
 
 
@@ -1566,7 +1566,7 @@ If you have any further questions or need assistance, our team is here to help\.
 
 **邮件模板**** 2**
 
-![image\.png](图片和附件/image.png)
+![image\.png](assets/image.png)
 
 
 
@@ -1676,11 +1676,11 @@ CERTIFIED REFURBISHED PRODUCTS Limited Warranty \- ECOVACS Robotics, Inc\. warra
 
 ***指引用户联系******ATRAVESAR******后，请选定Case Tag \>****** CA OOW Case******进行标记***
 
-![image\.png](图片和附件/image%201.png)
+![image\.png](assets/image%201.png)
 
 - **邮件模板：**\(购买超2年\) CA OOW \- Atravesar Services **\(建议先给邮箱 **[**service@atravesar\.ca**](mailto:info@atravesar.ca)**\)**
 
-![image\.png](图片和附件/image%2036.png)
+![image\.png](assets/image%2036.png)
 
 
 

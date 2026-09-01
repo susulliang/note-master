@@ -47,29 +47,30 @@ interface SopPanelProps {
 
 /**
  * Resolve a markdown image src (relative to SOP.md's on-disk location) to
- * a URL the browser can fetch. SOP.md lives at the root of `/workspace/SOP/`
- * and the pictures live next to it in a subfolder called `图片和附件`, so
- * `![](图片和附件/image%201.png)`  →  `/SOP/图片和附件/image%201.png`.
+ * a URL the browser can fetch. SOP.md lives at the repo root `SOP/SOP.md`
+ * and its pictures sit next to it in `SOP/assets/`. We serve that folder
+ * under the URL prefix `/SOP/`, so:
  *
- * Critical: markdown links often come pre-percent-encoded (spaces are `%20`,
- * chinese chars might be encoded or literal depending on which tool pasted
- * the image link). We ALWAYS normalize with decodeURIComponent first so a
- * double-encoding bug cannot slip through; then we re-encode each path
- * segment individually (encodeURI encodes the entire string but it does not
- * re-encode literal `%` so paths that still contain `%20` after a failed
- * decode are kept verbatim — which is fine).
+ *   ![](assets/image%201.png)  →  `/SOP/assets/image%201.png`
+ *   ![](./SOP/assets/foo.png)  →  `/SOP/assets/foo.png`
+ *   ![](图片和附件/old.png)     →  `/SOP/assets/old.png`  (compat rewrite)
+ *
+ * We ALWAYS `decodeURIComponent` first then re-encode per segment — this
+ * eliminates any double-encoding bug (spaces arriving as `%20` must not
+ * become `%2520`).
  */
 function resolveSopImageSrc(rawSrc: string): string {
   const src = rawSrc.trim();
   if (!src) return '';
   // Absolute URL (http:/https:/data:/file:) → pass through untouched
   if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(src)) return src;
-  // Already site-absolute (starts with /) → pass through
+  // Already site-absolute — if it already starts with /SOP/ trust it,
+  // otherwise pass through as-is.
   if (src.startsWith('/')) return src;
 
-  // Step 1: undo any pre-encoding added by the markdown editor so we have
-  // a plain filesystem path (best-effort: if someone used a literal '%'
-  // decoding may throw, we fall back to the original string).
+  // Step 1: undo any existing percent-encoding (spaces, chinese, etc.) so
+  // we start from a plain filesystem path. Best-effort — a stray '%' won't
+  // kill the path.
   let decoded: string;
   try {
     decoded = decodeURIComponent(src);
@@ -77,9 +78,22 @@ function resolveSopImageSrc(rawSrc: string): string {
     decoded = src;
   }
 
-  // Step 2: strip any leading `./` and backslash separators from Windows
-  // pasted paths; collapse parent/child traversal so we never escape /SOP.
+  // Step 2: normalise separators + any writer-side prefix
+  //    - backslashes → slashes
+  //    - drop any leading ./
+  //    - if the MD writer pasted a workspace-relative path like
+  //      "SOP/assets/foo.png" or "./SOP/assets/foo.png", strip that prefix
+  //      so we treat it as a path relative to the MD file.
   let normalized = decoded.replace(/\\/g, '/').replace(/^\.\/+/, '');
+  if (normalized.startsWith('SOP/')) normalized = normalized.slice(4);
+
+  // Backward compat: before renaming to `assets/` the folder was the
+  // chinese name. Rewrite any old references so they still resolve.
+  if (normalized.startsWith('图片和附件/')) {
+    normalized = 'assets/' + normalized.slice(5);
+  }
+
+  // Step 3: collapse `.` and `..` segments so we never escape /SOP.
   const segments = normalized.split('/').filter((s) => s !== '' && s !== '.');
   const cleaned: string[] = [];
   for (const seg of segments) {
@@ -88,10 +102,8 @@ function resolveSopImageSrc(rawSrc: string): string {
   }
   if (cleaned.length === 0) return '';
 
-  // Step 3: re-encode each path segment individually so reserved chars
-  // (spaces, chinese, `#`, `?`, etc.) become valid URL bytes. `encodeURI`
-  // preserves `/` so doing it per-segment means we handle `#`/`?` too
-  // (encodeURI doesn't touch them, but encodeURIComponent does everything).
+  // Step 4: re-encode per path segment (handles spaces, chinese, #, ?
+  // uniformly) and drop under /SOP/ where the middleware serves them.
   const encoded = cleaned.map((s) => encodeURIComponent(s)).join('/');
   return '/SOP/' + encoded;
 }
