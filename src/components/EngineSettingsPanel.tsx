@@ -540,76 +540,10 @@ export default function EngineSettingsPanel({
               Model selection
             </p>
             <div className="flex flex-col gap-1.5">
-              {/* Remote LLM — no download; parsed on demand from the caption
-                  panel's Parse button. The row manages the API key (server
-                  env secret when set, otherwise a locally-stored key).
-                  Hidden entirely when VITE_DEEPSEEK_API_KEY env secret is
-                  set (default backend mode — key comes from deploy secrets
-                  and DeepSeek is assumed, not shown to the agent). */}
-              {cloud && !cloud.isDefault && (
-                <div className="rounded-md bg-foreground/[0.04] p-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold text-foreground">
-                      DeepSeek v4 Flash
-                    </span>
-                    <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide text-accent">
-                      remote
-                    </span>
-                    {cloud.hasKey ? (
-                      <span
-                        className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/70"
-                        title="A DeepSeek API key is stored locally in this browser"
-                      >
-                        <KeyRound className="size-2.5" />
-                        key stored
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
-                        API key needed
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-[8px] leading-snug text-muted-foreground/80">
-                    Sharpest reading · runs in the cloud · no download — triggered per click by
-                    the Parse button in the caption panel
-                  </p>
-                  {/* API key entry — shown when no key is stored, or while typing a new one */}
-                  {(cloud.hasKey ? apiKeyDraft.length > 0 : true) && (
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <input
-                        type="password"
-                        value={apiKeyDraft}
-                        onChange={(e) => {
-                          setApiKeyDraft(e.target.value);
-                          setKeySaved(false);
-                        }}
-                        placeholder="DeepSeek API key (sk-…)"
-                        autoComplete="off"
-                        spellCheck={false}
-                        className="h-6 min-w-0 flex-1 rounded-md border border-border/50 bg-foreground/[0.04] px-2 font-mono text-[10px] text-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:outline-none"
-                      />
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={apiKeyDraft.trim().length === 0 || keySaved}
-                        onClick={() => {
-                          cloud.onSetApiKey(apiKeyDraft);
-                          setApiKeyDraft('');
-                          setKeySaved(true);
-                        }}
-                        className="h-6 rounded-full px-2.5 text-[10px]"
-                      >
-                        {keySaved ? 'Saved' : 'Save key'}
-                      </Button>
-                    </div>
-                  )}
-                  {cloud.error && (
-                    <p className="mt-1 break-words text-[9px] leading-snug text-destructive/90">
-                      {cloud.error}
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* Remote AI parsing is always available via the caption
+                  panel's Parse button (no model download, no local key
+                  entry). Below are the local ONNX builds — one-time
+                  browser-cached alternatives that run fully offline. */}
               {parser.models.map((name) => (
                 <div key={name} className="rounded-md bg-foreground/[0.04] p-1.5">
                   <div className="flex items-center gap-2">
@@ -675,9 +609,11 @@ export default function EngineSettingsPanel({
               </div>
             )}
             <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-              {cloud?.isDefault
-                ? 'An AI parser runs remotely per Parse click (no download). Local builds below are one-time downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup at load — a GPU too slow to parse falls back to the CPU build automatically. Only one local model is resident at a time.'
-                : 'DeepSeek runs remotely per Parse click (API key from an env secret when set, otherwise locally stored here). Local builds are one-time downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup at load — a GPU too slow to parse falls back to the CPU build automatically. Only one local model is resident at a time.'}
+              A remote AI parser is always available per Parse click (no download, no key entry).
+              The local builds below are one-time downloads cached by the browser; GPU builds
+              (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup at
+              load — a GPU too slow to parse falls back to the CPU build automatically. Only one
+              local model is resident at a time.
             </p>
           </div>
         )}

@@ -507,7 +507,7 @@ export default function SopPanel({
             )}
             title={
               cloudGenerate
-                ? 'Use AI to match ticket fields against the indexed SOP heading titles and return the best relevant section. Backed by DeepSeek (env secret).'
+                ? 'Use AI to match ticket fields against the indexed SOP heading titles and return the best relevant section. Runs on the remote AI backend (no local download).'
                 : llmStatus === 'loading'
                   ? 'Local LLM is still downloading / warming up…'
                   : 'Use the on-device LLM to match ticket fields against the indexed SOP heading titles and return the best relevant section.'
