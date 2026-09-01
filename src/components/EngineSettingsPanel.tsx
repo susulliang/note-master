@@ -61,17 +61,25 @@ export interface ParserState {
 }
 
 /**
- * DeepSeek cloud-parser state for the settings panel — just the API-key
- * management shown on the DeepSeek row of Model selection. The Parse
- * button itself lives in the caption panel header.
+ * Cloud-parser state for the settings panel. When an env secret provides
+ * a key (VITE_DEEPSEEK_API_KEY) `isDefault` is true and the panel treats
+ * the remote LLM as the default backend — the DeepSeek row and key-entry
+ * UI are hidden because the agent never needs to manage the secret at
+ * the client level; the agent can still instead OPT IN to a local model
+ * build via the Model selection list below.
+ *
+ * When `isDefault` is false the panel renders the DeepSeek row with
+ * API-key management (agent enters the key locally).
  */
 export interface CloudState {
-  /** True when a DeepSeek API key is stored */
+  /** True when a DeepSeek API key is available (env secret OR local storage) */
   hasKey: boolean;
   /** Last failure (bad key, network, API error) — surfaced on the row */
   error: string | null;
-  /** Store (or clear, with '') the DeepSeek API key */
+  /** Store (or clear, with '') the DeepSeek API key in local storage */
   onSetApiKey: (key: string) => void;
+  /** True when the env var sets DeepSeek as the default backend → row is hidden */
+  isDefault?: boolean;
 }
 
 interface EngineSettingsPanelProps {
@@ -533,8 +541,10 @@ export default function EngineSettingsPanel({
             </p>
             <div className="flex flex-col gap-1.5">
               {/* Remote LLM — no download; parsed on demand from the caption
-                  panel's Parse button. The row manages the API key. */}
-              {cloud && (
+                  panel's Parse button. The row manages the API key.
+                  Hidden entirely when VITE_DEEPSEEK_API_KEY env secret is set
+                  (default backend mode — the key comes from server deploy secrets). */}
+              {cloud && !cloud.isDefault && (
                 <div className="rounded-md bg-foreground/[0.04] p-1.5">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-semibold text-foreground">
@@ -663,10 +673,9 @@ export default function EngineSettingsPanel({
               </div>
             )}
             <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-              DeepSeek runs remotely per Parse click (no download). Local builds are one-time
-              downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+)
-              and are verified with a 2-token warmup at load — a GPU too slow to parse falls
-              back to the CPU build automatically. Only one local model is resident at a time.
+              {cloud?.isDefault
+                ? 'The remote AI model runs per Parse click (no download). Local builds below are one-time downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup — a GPU too slow falls back to CPU automatically. Only one local model is resident at a time.'
+                : 'DeepSeek runs remotely per Parse click (no download). Local builds are one-time downloads cached by the browser; GPU builds (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup at load — a GPU too slow to parse falls back to the CPU build automatically. Only one local model is resident at a time.'}
             </p>
           </div>
         )}

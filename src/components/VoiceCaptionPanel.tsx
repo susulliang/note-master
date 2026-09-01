@@ -59,19 +59,28 @@ export interface EnginePanelState {
 }
 
 /**
- * On-demand DeepSeek cloud parse state — the "Parse" button in the panel
- * header. One click sends the current transcript window to the DeepSeek
- * API; returned fields overwrite every provisional regex fill. The API
- * key is managed in the toolbar settings panel (Model selection).
+ * On-demand cloud-parse state — the "Parse" button in the panel header.
+ * One click sends the current transcript window to the remote backend and
+ * returned fields overwrite every provisional regex fill.
+ *
+ * When `isDefault` is true (VITE_DEEPSEEK_API_KEY env secret set) the UI
+ * drops the "DeepSeek" brand tag: the button reads generically as "Parse"
+ * and there is no branded label in the status copy — this is just "the AI
+ * parser" for the agent. The status label and the inline AI progress bar
+ * still reflect the cloud parse's live streamed progress.
  */
 export interface CloudPanelState {
   /** True while the round-trip is in flight */
   isParsing: boolean;
+  /** Live streamed progress: 0..1 (0 = idle). Fills the AI progress bar. */
+  progress?: number;
+  /** True when cloud is the DEFAULT backend — brand tags are hidden */
+  isDefault?: boolean;
   /** Last failure (bad key, network, API error) — surfaced under the header */
   error: string | null;
   /** Last successful round-trip, for the status readout */
   lastResult?: { ms: number; fields: ExtractedField[] } | null;
-  /** Send the current transcript window to DeepSeek and apply the fields */
+  /** Send the current transcript window and apply the fields */
   onParse: () => void;
 }
 
@@ -355,7 +364,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             </span>
           )}
 
-          {/* DeepSeek cloud parse — the on-demand extraction trigger.
+          {/* Cloud / remote AI parse — the on-demand extraction trigger.
+              When cloud.isDefault the brand tag is hidden (just "Parse").
               Capture start/stop lives on the toolbar mic button. */}
           {cloud && (
             <Button
@@ -364,11 +374,17 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
               disabled={cloud.isParsing || call.transcript.length === 0}
               onClick={cloud.onParse}
               className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
-              aria-label="Parse the transcript with DeepSeek"
+              aria-label={
+                cloud.isDefault
+                  ? 'Parse the transcript with AI'
+                  : 'Parse the transcript with DeepSeek'
+              }
               title={
                 call.transcript.length === 0
                   ? 'Nothing to parse yet — the transcript is empty'
-                  : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills)'
+                  : cloud.isDefault
+                    ? 'Send the current transcript window to the AI parser and fill every field (overwrites regex fills)'
+                    : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills)'
               }
             >
               {cloud.isParsing ? (
@@ -401,7 +417,9 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             title={cloud.error ?? undefined}
           >
             {cloud.error ??
-              `DeepSeek: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`}
+              (cloud.isDefault
+                ? `AI: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`
+                : `DeepSeek: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`)}
           </p>
         )}
 
@@ -583,23 +601,38 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
               }
               tone="emerald"
             />
-            {parser && (
+            {/* Unified AI progress row. Priority: cloud parse (streamed live
+                progress, the default backend when VITE_DEEPSEEK_API_KEY is
+                set), then the on-device LLM parser's own download/generation.
+                Either provider drives the same "AI" label — no branded name
+                when cloud is default. */}
+            {(parser || cloud) && (
               <EngineProgressRow
                 label="AI"
-                bar={
-                  !parser.enabled
-                    ? null
-                    : parser.status === 'loading'
-                      ? parser.progress
-                      : parser.isParsing || parser.isParaphrasing
-                        ? // Determinate when tokens are streaming, else run
-                          parser.genProgress
-                            ? Math.max(3, parser.genProgress * 100)
-                            : 'run'
-                        : null
-                }
-                text={
-                  !parser.enabled
+                bar={(() => {
+                  if (cloud?.isParsing) {
+                    const p = cloud.progress ?? 0;
+                    return p > 0 ? Math.max(3, Math.min(100, Math.round(p * 100))) : 'run';
+                  }
+                  if (!parser) return null;
+                  if (!parser.enabled) return null;
+                  if (parser.status === 'loading') return parser.progress;
+                  if (parser.isParsing || parser.isParaphrasing) {
+                    return parser.genProgress
+                      ? Math.max(3, parser.genProgress * 100)
+                      : 'run';
+                  }
+                  return null;
+                })()}
+                text={(() => {
+                  if (cloud?.isParsing) {
+                    const p = cloud.progress ?? 0;
+                    return p >= 0.02
+                      ? `parsing… ${Math.round(p * 100)}%`
+                      : 'parsing conversation…';
+                  }
+                  if (!parser) return 'idle';
+                  return !parser.enabled
                     ? 'parser off'
                     : parser.status === 'loading'
                       ? `downloading model ${parser.progress}%`
@@ -621,10 +654,13 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                                 }`
                               : parser.status === 'ready'
                                 ? 'standby'
-                                : 'model not loaded'
-                }
+                                : 'model not loaded';
+                })()}
                 tone="amber"
-                error={parser.enabled && parser.status === 'error'}
+                error={
+                  !!(parser && parser.enabled && parser.status === 'error') &&
+                  !(cloud?.isParsing)
+                }
               />
             )}
           </div>

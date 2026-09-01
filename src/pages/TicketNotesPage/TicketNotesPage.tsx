@@ -1077,6 +1077,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               hasKey: cloudParser.hasKey,
               error: cloudParser.error,
               onSetApiKey: cloudParser.setApiKey,
+              isDefault: cloudParser.isDefault,
             }}
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}
@@ -1145,6 +1146,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   }}
                   cloud={{
                     isParsing: call.isCloudParsing,
+                    progress: cloudParser.progress,
+                    isDefault: cloudParser.isDefault,
                     error: cloudParser.error,
                     lastResult: cloudParser.lastResult,
                     onParse: () => void call.cloudParse(),
