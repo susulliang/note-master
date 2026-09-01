@@ -174,6 +174,98 @@ async function readSseStream(
 }
 
 /**
+ * Generic chat completion against the DeepSeek endpoint — returns the
+ * full assistant reply text (not field-structured) along with wall-time
+ * and a soft timedOut flag that mirrors the local LLM generate signature.
+ * Used by the SOP panel for heading-selection reranking, and any other
+ * small non-parsing LLM task in the workspace. The key chain is the same
+ * as parseWithDeepseek (env var → localStorage).
+ */
+export async function generateWithDeepseek(
+  system: string,
+  user: string,
+  maxTokens = 512,
+  onProgress?: (pct: number, stage: DeepseekProgressStage) => void
+): Promise<{ text: string; ms: number; timedOut: boolean }> {
+  const key = getEffectiveApiKey();
+  const started = performance.now();
+  onProgress?.(0, 'connecting');
+  if (!key) return { text: '', ms: Math.round(performance.now() - started), timedOut: false };
+  if (!system && !user) return { text: '', ms: 0, timedOut: false };
+
+  let response: Response;
+  try {
+    response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+        Accept: onProgress ? 'text/event-stream' : 'application/json',
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          ...(system ? [{ role: 'system' as const, content: system }] : []),
+          { role: 'user', content: user },
+        ],
+        temperature: 0.2,
+        max_tokens: Math.max(1, Math.min(8192, maxTokens | 0)),
+        thinking: { type: 'disabled' },
+        stream: Boolean(onProgress),
+      }),
+    });
+  } catch (err) {
+    return {
+      text: `Network error: ${(err as Error).message}`,
+      ms: Math.round(performance.now() - started),
+      timedOut: true,
+    };
+  }
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = (await response.json()) as { error?: { message?: string } };
+      if (body?.error?.message) detail = body.error.message;
+    } catch {
+      /* noop */
+    }
+    return { text: `HTTP ${response.status}: ${detail}`, ms: Math.round(performance.now() - started), timedOut: true };
+  }
+
+  let raw = '';
+  if (onProgress && response.body) {
+    onProgress(0.05, 'streaming');
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let outChars = 0;
+      raw = await readSseStream(reader, decoder, (delta) => {
+        outChars += delta.length;
+        const estTokens = Math.ceil(outChars / 4);
+        const denom = Math.max(1, maxTokens | 0 || 512);
+        const pct = Math.max(0.1, Math.min(0.95, estTokens / denom));
+        onProgress(pct, 'streaming');
+      });
+    } catch {
+      return { text: 'Stream disconnected mid-reply.', ms: Math.round(performance.now() - started), timedOut: true };
+    }
+    onProgress(0.97, 'finalizing');
+  } else {
+    try {
+      const body = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      raw = body.choices?.[0]?.message?.content ?? '';
+    } catch {
+      return { text: 'Malformed response body.', ms: Math.round(performance.now() - started), timedOut: true };
+    }
+  }
+  onProgress?.(1, 'finalizing');
+  return { text: raw, ms: Math.round(performance.now() - started), timedOut: !raw };
+}
+
+/**
  * Run one DeepSeek extraction over the transcript. NEVER rejects — network
  * and API errors come back as an `error` string so callers can surface
  * them without try/catch gymnastics. A result with fields=[] and an error

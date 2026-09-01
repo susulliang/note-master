@@ -11,7 +11,9 @@ import { extractJsonLoose } from '@/lib/llm-parser';
 import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/** Min shape of the parser hook's exposed `generate` return */
+/** Min shape of the parser hook's exposed `generate` return. The cloud
+ *  DeepSeek completion returns the same shape so the two backends share a
+ *  single code path inside the SopPanel rerank handler. */
 interface LlmGenerateFn {
   (system: string, user: string, maxNewTokens: number): Promise<{ text: string; ms: number; timedOut: boolean }>;
 }
@@ -21,19 +23,23 @@ interface SopPanelProps {
   issueTypeId: string;
   detailedIssueId: string;
   purchaseInfoId: string;
-  /** Called when the user hits "Use final note → AI rerank"; the panel
-   *  does NOT own the final-note generator itself because that already
-   *  lives in the page layer alongside the Hang-Up output. */
+  /** Called when the user hits the AI match button; the panel does NOT
+   *  own the final-note generator itself because that already lives in
+   *  the page layer alongside the Hang-Up output. */
   getFinalNote: () => string;
+  /** Cloud DeepSeek generate handle — when provided it's the PREFERRED
+   *  backend for the AI match button (default when VITE_DEEPSEEK_API_KEY
+   *  is set). The SOP panel uses the same prompt contract as the local
+   *  LLM and picks the LLM with the better backend. */
+  cloudGenerate?: LlmGenerateFn;
   /** The LLM worker handle — exposed from `useLlmParser().generate` */
   llmGenerate: LlmGenerateFn | null;
   /** Readiness + status labels from the parser so we can show "Loading
    *  local LLM…" progress copy instead of a dead button. */
   llmStatus?: 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
   llmIsReady?: boolean;
-  /** Trigger the parser load if not already warmed up — the "Ask AI"
-   *  button calls this so the first-click doesn't silently queue on
-   *  download. Returns a ready-or-not boolean. */
+  /** Trigger the local parser load if not warmed up (only used when
+   *  `cloudGenerate` is unavailable). */
   warmLlm?: () => Promise<unknown>;
 }
 
@@ -196,6 +202,7 @@ export default function SopPanel({
   detailedIssueId,
   purchaseInfoId,
   getFinalNote,
+  cloudGenerate,
   llmGenerate,
   llmStatus = 'disabled',
   llmIsReady = false,
@@ -264,22 +271,45 @@ export default function SopPanel({
 
   const runLlmRerank = useCallback(async () => {
     setLlmError(null);
-    if (!llmGenerate) {
-      setLlmError('Local LLM worker is not available yet.');
+
+    // Priority of LLM backends for SOP heading match:
+    //   1. `cloudGenerate` — DeepSeek via env secret (the default backend).
+    //      Warm-up is instant (no model download) so we call it directly.
+    //   2. `llmGenerate` — the on-device local WASM LLM, which may still
+    //      be downloading; we warm it up and check readiness first.
+    let generator: LlmGenerateFn;
+    if (cloudGenerate) {
+      generator = cloudGenerate;
+    } else if (llmGenerate) {
+      if (warmLlm) {
+        await warmLlm();
+        if (!llmIsReady) {
+          setLlmError(
+            llmStatus === 'disabled'
+              ? 'Local LLM is disabled — enable it in the transcript panel engine settings, or set VITE_DEEPSEEK_API_KEY for cloud matching.'
+              : 'Local LLM is still loading. Wait ~30s and try again, or use the keyword picks below.'
+          );
+          return;
+        }
+      }
+      generator = llmGenerate;
+    } else {
+      setLlmError(
+        'No AI backend is available yet. Set VITE_DEEPSEEK_API_KEY for cloud matching, or enable a local LLM build in settings.'
+      );
       return;
     }
-    if (warmLlm) {
-      await warmLlm();
-      if (!llmIsReady) {
-        setLlmError(
-          llmStatus === 'disabled'
-            ? 'Local LLM is disabled — enable it in the transcript panel engine settings.'
-            : 'Local LLM is still loading. Wait ~30s and try again, or use the keyword picks below.'
-        );
-        return;
-      }
-    }
+
+    // Ticket-context fields sent explicitly to the LLM along with the
+    // SOP candidate titles (buildSopRerankPrompt includes them as the
+    // primary context, with the formatted note only a disambiguation tie
+    // breaker).
     const finalNote = getFinalNote().trim();
+    const fieldSummary = [
+      issueType && `Issue: ${issueType}`,
+      detailedIssue && `Details: ${detailedIssue.slice(0, 220)}`,
+      purchaseInfo && `Purchase: ${purchaseInfo}`,
+    ].filter(Boolean).join(' · ');
 
     // Pick candidate pool: top CANDIDATE_TOP_N keywords, plus the currently
     // active section if it's not already in there. Gives the LLM a short,
@@ -314,10 +344,14 @@ export default function SopPanel({
           snippet: s.bodyLines.slice(0, 8).join(' ').slice(0, 220),
         })),
       });
-      const reply = await llmGenerate(system, user, 256);
+      const reply = await generator(system, user, 256);
       const cleaned = reply.text.trim();
       if (!cleaned || reply.timedOut) {
-        setLlmError(reply.timedOut ? 'LLM timed out — try again. (WASM generation can take a minute on CPU.)' : 'LLM returned an empty reply.');
+        setLlmError(
+          reply.timedOut
+            ? 'AI call failed or timed out. (For the on-device local LLM, WASM generation can take a minute on CPU.)'
+            : 'AI returned an empty reply.'
+        );
         return;
       }
       const json = extractJsonLoose(cleaned) as unknown;
@@ -330,20 +364,20 @@ export default function SopPanel({
           ? String((json as { reason?: unknown }).reason ?? '')
           : '';
       if (!json || bestIdRaw === '') {
-        setLlmError(`Couldn't parse LLM reply as valid JSON. Raw (${cleaned.length} chars): ${cleaned.slice(0, 180)}${cleaned.length > 180 ? '…' : ''}`);
+        setLlmError(`Couldn't parse AI reply as valid JSON. Raw (${cleaned.length} chars): ${cleaned.slice(0, 180)}${cleaned.length > 180 ? '…' : ''}`);
         return;
       }
       const bestId = bestIdRaw === '__NONE__' ? pool[0].id : bestIdRaw;
       if (!byId.has(bestId)) {
-        setLlmError(`LLM picked unknown section id "${bestId}" — falling back to keyword top pick.`);
+        setLlmError(`AI picked unknown section id "${bestId}" — falling back to keyword top pick.`);
         // Fall through to keyword #1 anyway, don't hard-break.
         const fallbackId = pool[0].id;
-        setLlmResult({ bestId: fallbackId, reason: reasonRaw + ' (fallback: LLM id unknown)', notePreview: finalNote.slice(0, 120) });
+        setLlmResult({ bestId: fallbackId, reason: reasonRaw + ' (fallback: AI id unknown)', notePreview: fieldSummary.slice(0, 140) || finalNote.slice(0, 120) });
         setPinned(true);
         setActiveId(fallbackId);
         return;
       }
-      setLlmResult({ bestId, reason: reasonRaw, notePreview: finalNote.slice(0, 120) });
+      setLlmResult({ bestId, reason: reasonRaw, notePreview: fieldSummary.slice(0, 140) || finalNote.slice(0, 120) });
       setPinned(true);
       setActiveId(bestId);
     } catch (e) {
@@ -352,9 +386,11 @@ export default function SopPanel({
       setLlmLoading(false);
     }
   }, [
+    cloudGenerate,
     llmGenerate,
     warmLlm,
     llmStatus,
+    llmIsReady,
     getFinalNote,
     keyword,
     activeSection,
@@ -396,20 +432,22 @@ export default function SopPanel({
           <button
             type="button"
             onClick={runLlmRerank}
-            disabled={llmLoading || !llmGenerate}
+            disabled={llmLoading || (!cloudGenerate && !llmGenerate)}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold transition-all',
               'border border-primary/40 bg-primary/15 text-primary hover:bg-primary/25',
-              (llmLoading || !llmGenerate) && 'opacity-60 cursor-not-allowed'
+              (llmLoading || (!cloudGenerate && !llmGenerate)) && 'opacity-60 cursor-not-allowed'
             )}
             title={
-              llmStatus === 'loading'
-                ? 'Local LLM is still downloading / warming up…'
-                : 'Run the on-device LLM over the formatted final-note and pick the single most relevant SOP heading. Uses the current top keyword matches as its candidate shortlist.'
+              cloudGenerate
+                ? 'Use AI to match ticket fields against the indexed SOP heading titles and return the best relevant section. Backed by DeepSeek (env secret).'
+                : llmStatus === 'loading'
+                  ? 'Local LLM is still downloading / warming up…'
+                  : 'Use the on-device LLM to match ticket fields against the indexed SOP heading titles and return the best relevant section.'
             }
           >
             {llmLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-            {llmLoading ? 'AI reranking…' : 'AI match from note'}
+            {llmLoading ? 'AI matching…' : 'SOP AI Match'}
           </button>
         </div>
       </div>

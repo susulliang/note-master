@@ -29,6 +29,7 @@ import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { useLlmParser } from '@/hooks/use-llm-parser';
 import { useCloudParser } from '@/hooks/use-cloud-parser';
+import { generateWithDeepseek } from '@/lib/cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import {
@@ -885,6 +886,21 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   //  provisional regex fill. Needs the agent's API key (stored locally).
   // ---------------------------------------------------------------------
   const cloudParser = useCloudParser();
+  // Stable SOP-cloud-AI generate handle. Wraps the raw DeepSeek chat
+  // completion into the LlmGenerateFn shape the SopPanel consumes.
+  // Only enabled when an effective DeepSeek key is present (env secret
+  // priority, localStorage fallback) so that SopPanel falls back to the
+  // local WASM LLM when the remote key is absent.
+  const sopCloudGenerate = useCallback<(
+    system: string,
+    user: string,
+    maxNewTokens?: number
+  ) => Promise<{ text: string; ms: number; timedOut: boolean }>>(
+    (system, user, maxNewTokens = 512) =>
+      generateWithDeepseek(system, user, maxNewTokens),
+    []
+  );
+  const sopCloudGenerateEnabled = cloudParser.hasKey;
 
   // ---------------------------------------------------------------------
   //  CCP tab-audio capture → local Whisper → auto-fill.
@@ -1162,6 +1178,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   detailedIssueId={NODE_IDS.DETAILED_ISSUE}
                   purchaseInfoId={NODE_IDS.PURCHASE_INFO}
                   getFinalNote={() => buildNoteText(formData)}
+                  cloudGenerate={sopCloudGenerateEnabled ? sopCloudGenerate : undefined}
                   llmGenerate={llmParser.enabled ? llmParser.generate : null}
                   llmStatus={llmParser.status}
                   llmIsReady={llmParser.isReady}
