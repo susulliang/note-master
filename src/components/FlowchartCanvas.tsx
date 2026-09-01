@@ -121,6 +121,11 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
     // Label row + wrapper padding + header (40) + paste area (88) + ~6 rows
     return 440;
   }
+  if (node.type === 'sop') {
+    // Label + inner padding + status bar + candidate chips + heading
+    // picker + markdown viewer ~460px, then viewer scrolls internally.
+    return 460;
+  }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
       // label + textarea rows + quick insert block

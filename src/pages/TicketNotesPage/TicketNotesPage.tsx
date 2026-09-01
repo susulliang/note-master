@@ -21,6 +21,7 @@ import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
+import SopPanel from '@/components/SopPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -232,6 +233,12 @@ const NODES: NodeConfig[] = [
     type: 'ticketTracker',
     label: '24H Ticket Tracker',
     width: 380,
+  },
+  {
+    id: NODE_IDS.SOP_PANEL,
+    type: 'sop',
+    label: 'SOP · Standard Operating Procedure Match',
+    width: 760,
   },
 ];
 
@@ -1145,6 +1152,19 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                 />
               ),
               trackerContent: <TicketTrackerPanel />,
+              sopContent: (
+                <SopPanel
+                  formData={formData}
+                  issueTypeId={NODE_IDS.ISSUE_TYPE}
+                  detailedIssueId={NODE_IDS.DETAILED_ISSUE}
+                  purchaseInfoId={NODE_IDS.PURCHASE_INFO}
+                  getFinalNote={() => buildNoteText(formData)}
+                  llmGenerate={llmParser.enabled ? llmParser.generate : null}
+                  llmStatus={llmParser.status}
+                  llmIsReady={llmParser.isReady}
+                  warmLlm={llmParser.load}
+                />
+              ),
             }}
           >
             <FlowchartCanvas

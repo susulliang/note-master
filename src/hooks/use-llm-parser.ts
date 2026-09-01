@@ -682,6 +682,11 @@ export function useLlmParser() {
     parse,
     /** Condense verbatim vernacular clauses into concise note style */
     paraphrase,
+    /** One raw generation round-trip — for SOP heading ranking and any
+     *  other free-form prompts. Returns empty text when the worker is
+     *  disabled / not yet loaded; timedOut=true signals the generation
+     *  was killed by the safety timeout. */
+    generate: generateReply,
     /** Selectable model names for the settings UI */
     models: LLM_MODELS,
   };

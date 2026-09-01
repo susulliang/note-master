@@ -1124,6 +1124,7 @@ export const NODE_IDS = {
   HANG_UP: 'hangUp',
   TRANSCRIPT_PANEL: 'transcriptPanel',
   TICKET_TRACKER: 'ticketTracker',
+  SOP_PANEL: 'sopPanel',
 } as const;
 
 export interface NoteHistoryEntry {
@@ -1155,6 +1156,10 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // Side tool panels: live transcript + 24h ticket tracker. Both draggable
   // boxes on the canvas so the agent can reposition them around the flow.
   [NODE_IDS.TRANSCRIPT_PANEL, NODE_IDS.TICKET_TRACKER],
+  // SOP reference panel — index of SOP/SOP.md headings, auto-matched by
+  // issue details (keyword) then reranked by the local LLM against the
+  // formatted final note. Own wide row because it renders long MD bodies.
+  [NODE_IDS.SOP_PANEL],
   [NODE_IDS.HANG_UP],
 ];
 
@@ -1181,4 +1186,11 @@ export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
   { from: NODE_IDS.SHIPPING_ADDRESS, to: NODE_IDS.ADDITIONAL_NOTES },
   { from: NODE_IDS.RESOLUTION_SUMMARY, to: NODE_IDS.ADDITIONAL_NOTES },
   { from: NODE_IDS.ADDITIONAL_NOTES, to: NODE_IDS.HANG_UP },
+  // SOP reader: driven by issue inputs + issue description + purchase
+  // channel/date, and it also feeds Hang Up as a last-step reference.
+  { from: NODE_IDS.ISSUE_TYPE, to: NODE_IDS.SOP_PANEL },
+  { from: NODE_IDS.DETAILED_ISSUE, to: NODE_IDS.SOP_PANEL },
+  { from: NODE_IDS.PURCHASE_INFO, to: NODE_IDS.SOP_PANEL },
+  { from: NODE_IDS.TRANSCRIPT_PANEL, to: NODE_IDS.SOP_PANEL },
+  { from: NODE_IDS.SOP_PANEL, to: NODE_IDS.HANG_UP },
 ];

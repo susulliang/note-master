@@ -41,6 +41,7 @@ import type { TemplateEntry } from '@/lib/amr-templates';
 export interface TicketPanelsContextShape {
   transcriptContent?: React.ReactNode;
   trackerContent?: React.ReactNode;
+  sopContent?: React.ReactNode;
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -55,7 +56,8 @@ export type NodeType =
   | 'hangup'
   | 'templates'
   | 'transcript'
-  | 'ticketTracker';
+  | 'ticketTracker'
+  | 'sop';
 
 export interface QuickTextGroup {
   label: string;
@@ -637,7 +639,7 @@ function FlowNodeComponent({
       );
     }
 
-    if (type === 'transcript' || type === 'ticketTracker') {
+    if (type === 'transcript' || type === 'ticketTracker' || type === 'sop') {
       // Pull the live content from context (captured at top of the function)
       // so the canvas memo stays clean while audio meters tick 10×/s. Wrap
       // with the same label row + inner padding used by every other gridbox
@@ -645,7 +647,9 @@ function FlowNodeComponent({
       const content =
         (type === 'transcript'
           ? panelsCtx?.transcriptContent
-          : panelsCtx?.trackerContent) ?? panelContent;
+          : type === 'ticketTracker'
+            ? panelsCtx?.trackerContent
+            : panelsCtx?.sopContent) ?? panelContent;
       return (
         <div className="px-2.5 py-1.5">
           {label && (
@@ -938,7 +942,7 @@ function FlowNodeComponent({
     );
   };
 
-  const isPanelNode = type === 'transcript' || type === 'ticketTracker';
+  const isPanelNode = type === 'transcript' || type === 'ticketTracker' || type === 'sop';
 
   return (
     <div
