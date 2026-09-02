@@ -1,4 +1,4 @@
-## X8 Pro OMNI
+# X8 Pro OMNI
 
 *Source: GBU (北美) · Sheet: X8 Pro OMNI · Rows×Cols: 142×5*
 

@@ -1,4 +1,4 @@
-## T30S PRO & T30S AI
+# T30S PRO & T30S AI
 
 *Source: GBU (北美) · Sheet: T30S PRO & T30S AI · Rows×Cols: 128×9*
 

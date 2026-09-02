@@ -1,4 +1,4 @@
-## T10 OMNI
+# T10 OMNI
 
 *Source: GBU (北美) · Sheet: T10 OMNI · Rows×Cols: 66×3*
 

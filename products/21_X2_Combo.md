@@ -1,4 +1,4 @@
-## X2 Combo
+# X2 Combo
 
 *Source: GBU (北美) · Sheet: X2 Combo · Rows×Cols: 105×7 · SPEC version V2.0 / SPEC version V2.0*
 

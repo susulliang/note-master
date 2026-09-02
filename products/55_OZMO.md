@@ -1,4 +1,4 @@
-## OZMO
+# OZMO
 
 *Source: GBU (北美) · Sheet: OZMO · Rows×Cols: 65×21*
 

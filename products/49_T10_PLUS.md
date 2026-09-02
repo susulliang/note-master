@@ -1,4 +1,4 @@
-## T10 PLUS
+# T10 PLUS
 
 *Source: GBU (北美) · Sheet: T10 PLUS · Rows×Cols: 64×3*
 

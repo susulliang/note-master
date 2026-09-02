@@ -1,4 +1,4 @@
-## T30S Combo
+# T30S Combo
 
 *Source: GBU (北美) · Sheet: T30S Combo · Rows×Cols: 127×9*
 

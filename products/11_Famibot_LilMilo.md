@@ -1,4 +1,4 @@
-## Famibot LilMilo
+# Famibot LilMilo
 
 *Source: GBU (北美) · Sheet: Famibot LilMilo · Rows×Cols: 91×7*
 

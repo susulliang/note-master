@@ -1,4 +1,4 @@
-## X2 OMNI
+# X2 OMNI
 
 *Source: GBU (北美) · Sheet: X2 OMNI · Rows×Cols: 87×4*
 

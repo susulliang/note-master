@@ -1,4 +1,4 @@
-## GOAT O Series
+# GOAT O Series
 
 *Source: GBU (北美) · Sheet: GOAT O Series · Rows×Cols: 54×7*
 

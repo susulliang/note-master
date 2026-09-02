@@ -1,4 +1,4 @@
-## W3 OMNI
+# W3 OMNI
 
 *Source: GBU (北美) · Sheet: W3 OMNI · Rows×Cols: 115×8*
 

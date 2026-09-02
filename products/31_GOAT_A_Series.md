@@ -1,4 +1,4 @@
-## GOAT A Series
+# GOAT A Series
 
 *Source: GBU (北美) · Sheet: GOAT A Series · Rows×Cols: 52×6*
 

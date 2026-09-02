@@ -1,4 +1,4 @@
-## X11 Series
+# X11 Series
 
 *Source: GBU (北美) · Sheet: X11 Series · Rows×Cols: 149×5*
 

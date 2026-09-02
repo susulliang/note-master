@@ -1,4 +1,4 @@
-## Winbot MINI 2
+# Winbot MINI 2
 
 *Source: GBU (北美) · Sheet: Winbot MINI 2 · Rows×Cols: 92×7*
 

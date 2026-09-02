@@ -1,4 +1,4 @@
-## W2 Pro OMNI
+# W2 Pro OMNI
 
 *Source: GBU (北美) · Sheet: W2 Pro OMNI · Rows×Cols: 102×10*
 

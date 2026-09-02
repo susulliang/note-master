@@ -1,4 +1,4 @@
-## X1 OMNI&TURBO
+# X1 OMNI&TURBO
 
 *Source: GBU (北美) · Sheet: X1 OMNI&TURBO · Rows×Cols: 69×5*
 

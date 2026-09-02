@@ -1,4 +1,4 @@
-## Deebot
+# Deebot
 
 *Source: GBU (北美) · Sheet: Deebot · Rows×Cols: 62×25*
 

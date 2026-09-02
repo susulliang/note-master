@@ -1,4 +1,4 @@
-## T20 OMNI
+# T20 OMNI
 
 *Source: GBU (北美) · Sheet: T20 OMNI · Rows×Cols: 68×3*
 

@@ -1,4 +1,4 @@
-## T8&T8AiVi&U2&U2 PRO
+# T8&T8AiVi&U2&U2 PRO
 
 *Source: GBU (北美) · Sheet: T8&T8AiVi&U2&U2 PRO · Rows×Cols: 80×7 · Product Spec*
 

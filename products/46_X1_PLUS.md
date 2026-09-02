@@ -1,4 +1,4 @@
-## X1 PLUS
+# X1 PLUS
 
 *Source: GBU (北美) · Sheet: X1 PLUS · Rows×Cols: 66×3*
 

@@ -1,4 +1,4 @@
-## N30 Pro OMNI
+# N30 Pro OMNI
 
 *Source: GBU (北美) · Sheet: N30 Pro OMNI · Rows×Cols: 116×13 · 【CDCP阶段】OMNI sku SPEC(空白内容为TBD项/Blank content is TBD)*
 

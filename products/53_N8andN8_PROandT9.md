@@ -1,4 +1,4 @@
-## N8&N8 PRO&T9
+# N8&N8 PRO&T9
 
 *Source: GBU (北美) · Sheet: N8&N8 PRO&T9 · Rows×Cols: 79×11 · Product Spec*
 

@@ -1,4 +1,4 @@
-## X11S Series
+# X11S Series
 
 *Source: GBU (北美) · Sheet: X11S Series · Rows×Cols: 154×5*
 

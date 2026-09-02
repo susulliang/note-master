@@ -151,7 +151,7 @@ def process_sheet(idx, name, ws):
     if not model_cols:
         return None
 
-    md = [f"## {name}", ""]
+    md = [f"# {name}", ""]
     meta = [f"Source: GBU (北美)", f"Sheet: {name}", f"Rows×Cols: {last_r}×{len(cols)}"] + super_titles
     md.append("*" + " · ".join(meta) + "*")
     md.append("")

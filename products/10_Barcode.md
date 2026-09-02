@@ -1,4 +1,4 @@
-## Barcode
+# Barcode
 
 *Source: GBU (北美) · Sheet: Barcode · Rows×Cols: 145×11*
 

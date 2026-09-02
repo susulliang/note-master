@@ -1,4 +1,4 @@
-## X9S PRO OMNI
+# X9S PRO OMNI
 
 *Source: GBU (北美) · Sheet: X9S PRO OMNI · Rows×Cols: 152×8*
 

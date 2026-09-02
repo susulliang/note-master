@@ -113,12 +113,21 @@ export function normalizeTokens(input: string): Set<string> {
   for (const p of parts) {
     if (STOP_WORDS.has(p)) continue;
     if (p.length === 0) continue;
-    // drop pure-digit segments unless they're a 3+ digit model#
+    // drop pure-digit segments unless they're a 2+ digit model# / year / error code
     if (/^\d+$/.test(p) && p.length < 2) continue;
     out.add(p);
-    // also register numeric chunks like "t30" as "30" for cross-match
+    // Split letter+digit+letter-suffix combos so "t30s" also emits "t30" and queries
+    // for "T30 Omni" can still match the "… PRO OMNI" GBU sheet header.
+    const m = p.match(/^([a-z]{1,4})(\d{1,4})([a-z]{1,3})$/);
+    if (m) {
+      out.add(m[1] + m[2]);                 // t30s → t30 / w2pro invalid anyway
+      if (/^e$/i.test(m[1])) out.add(m[2]); // e601 → 601 (stronger: pure code)
+    }
+    const m2 = p.match(/^([a-z]{1,4})(\d{1,4})$/);
+    if (m2 && /^e$/i.test(m2[1])) out.add(m2[2]); // e601 w/o suffix still → 601
+    // also register the pure numeric chunk so "30" matches across suffixes
     const numOnly = p.replace(/[a-z]/g, '');
-    if (numOnly && numOnly.length >= 2 && numOnly.length <= 4) out.add(numOnly);
+    if (numOnly && numOnly.length >= 2 && numOnly.length <= 6) out.add(numOnly);
   }
   return out;
 }
@@ -211,8 +220,11 @@ interface ComparisonIndex {
 }
 
 function parseSheetTitle(md: string): string {
-  const m = md.match(/^#\s+(.+)$/m);
-  return m ? m[1].trim() : 'Product Sheet';
+  const h1 = md.match(/^#\s+(.+)$/m);
+  if (h1) return h1[1].trim();
+  const h2 = md.match(/^##\s+(.+)$/m);
+  if (h2) return h2[1].trim();
+  return 'Product Sheet';
 }
 
 /**
@@ -233,7 +245,8 @@ function shortenModelHeader(colHeader: string): string {
   return parts[parts.length - 1];
 }
 
-function parseComparisonSheet(sheetId: string, md: string): ComparisonIndex {
+/** @internal exposed to test harness; not a public API */
+export function parseComparisonSheet(sheetId: string, md: string): ComparisonIndex {
   const sectionBlocks = md.split(/^###\s+/m).slice(1); // drop preamble (title, > meta)
   const sheetTitle = parseSheetTitle(md);
 
@@ -245,20 +258,12 @@ function parseComparisonSheet(sheetId: string, md: string): ComparisonIndex {
   let sheetHeaders: string[] | null = null;
   let sheetModelLabels: string[] | null = null;
 
-  for (const block of sectionBlocks) {
-    const [heading, rest] = splitFirstLine(block);
-    const sectionName = heading.trim();
-    // First GFM table inside the section
-    const tableMatch = rest.match(/(^|\n)(\|[\s\S]*?)(?=\n###\s|\n#\s|$)/);
-    if (!tableMatch) continue;
-    const parsed = parseGfmTable(tableMatch[2]);
-    if (!parsed) continue;
-
-    // Memorize the shared column header from the very first section we meet
+  const processTable = (sectionName: string, body: string) => {
+    const parsed = parseGfmTable(body);
+    if (!parsed) return;
     if (!sheetHeaders) {
       sheetHeaders = parsed.headers;
       sheetModelLabels = sheetHeaders.map((h) => shortenModelHeader(h));
-      // register models for cols 2..N (col 1 is spec name)
       for (let i = 1; i < sheetModelLabels.length; i++) {
         const label = sheetModelLabels[i];
         if (/^col-\d+$/.test(label)) continue;
@@ -268,8 +273,7 @@ function parseComparisonSheet(sheetId: string, md: string): ComparisonIndex {
         }
       }
     }
-    if (!sheetHeaders || !sheetModelLabels) continue;
-
+    if (!sheetHeaders || !sheetModelLabels) return;
     const sectionMap: Record<string, Record<string, string>> = {};
     for (const row of parsed.rows) {
       const specName = row[0] ?? '';
@@ -286,6 +290,21 @@ function parseComparisonSheet(sheetId: string, md: string): ComparisonIndex {
       }
     }
     sections[sectionName] = sectionMap;
+  };
+
+  if (sectionBlocks.length > 0) {
+    for (const block of sectionBlocks) {
+      const [heading, rest] = splitFirstLine(block);
+      const sectionName = heading.trim();
+      const tableMatch = rest.match(/(^|\n)(\|[\s\S]*?)(?=\n###\s|\n#\s|$)/);
+      if (tableMatch) processTable(sectionName, tableMatch[2]);
+    }
+  } else {
+    // No `### Section` headings present: treat the entire body (after title
+    // + metadata lines) as one big table. This covers sheet04 WINBOT, sheet09
+    // TechParams and other head-to-tail comparison sheets.
+    const preambleEnd = md.search(/^\|/m);
+    if (preambleEnd !== -1) processTable('Specifications', md.slice(preambleEnd));
   }
 
   return { sheetId, sheetTitle, models, modelTokens, sections, flatSpecs };
@@ -308,7 +327,8 @@ export interface GoatErrorCode {
   raw: string;
 }
 
-function parseGoatErrorCodes(md: string): GoatErrorCode[] {
+/** @internal exposed to test harness */
+export function parseGoatErrorCodes(md: string): GoatErrorCode[] {
   // Find the only big table in the sheet
   const tableMatch = md.match(/(^|\n)(\|[\s\S]*)$/);
   if (!tableMatch) return [];
@@ -338,7 +358,8 @@ function parseGoatErrorCodes(md: string): GoatErrorCode[] {
 /*                            05 Scientist Code Map                           */
 /* -------------------------------------------------------------------------- */
 
-function parseScientistCodes(md: string): Array<{ model: string; tokens: Set<string>; category: string; scientist: string }> {
+/** @internal exposed to test harness */
+export function parseScientistCodes(md: string): Array<{ model: string; tokens: Set<string>; category: string; scientist: string }> {
   const tableMatch = md.match(/(^|\n)(\|[\s\S]*)$/);
   if (!tableMatch) return [];
   const parsed = parseGfmTable(tableMatch[2]);
@@ -397,7 +418,8 @@ export interface SellingPoint {
   pitch: string;
 }
 
-function parseSellingPoints(md: string): SellingPoint[] {
+/** @internal exposed to test harness */
+export function parseSellingPoints(md: string): SellingPoint[] {
   const tableMatch = md.match(/(^|\n)(\|[\s\S]*)$/);
   if (!tableMatch) return [];
   const parsed = parseGfmTable(tableMatch[2]);
@@ -438,7 +460,8 @@ interface FreeTextRecord {
   body: string;
 }
 
-function parseFreeTextSheet(sheetId: string, md: string): FreeTextRecord[] {
+/** @internal exposed to test harness */
+export function parseFreeTextSheet(sheetId: string, md: string): FreeTextRecord[] {
   const title = parseSheetTitle(md);
   const sectionBlocks = md.split(/^###\s+/m).slice(1);
   if (sectionBlocks.length === 0) {

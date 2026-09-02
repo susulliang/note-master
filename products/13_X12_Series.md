@@ -1,4 +1,4 @@
-## X12 Series
+# X12 Series
 
 *Source: GBU (北美) · Sheet: X12 Series · Rows×Cols: 153×6*
 
