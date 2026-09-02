@@ -9,7 +9,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Plus, X, ChevronDown, Check, PhoneOff } from 'lucide-react';
+import { Plus, X, ChevronDown, Check, PhoneOff, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -131,6 +131,12 @@ export interface FlowNodeProps {
    * coding them in the FlowNode switch statement.
    */
   panelContent?: React.ReactNode;
+  /**
+   * Disables the Hang Up & Generate Note button and replaces its icon
+   * with a spinner. Prevents the "press twice just to see output" UX by
+   * giving the agent visual feedback while capture / LLM drain runs.
+   */
+  hangUpLoading?: boolean;
 }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -376,6 +382,7 @@ function FlowNodeComponent({
   parsedSource = null,
   enablePinBubble = false,
   panelContent,
+  hangUpLoading = false,
 }: FlowNodeProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -574,7 +581,9 @@ function FlowNodeComponent({
         <div className="px-2.5 py-2">
           <button
             type="button"
+            disabled={hangUpLoading}
             onClick={() => {
+              if (hangUpLoading) return;
               // Swallow the click that follows a drag (mouseup on the button)
               if (suppressClickRef.current) {
                 suppressClickRef.current = false;
@@ -582,10 +591,17 @@ function FlowNodeComponent({
               }
               onChange('hangup');
             }}
-            className="glass-btn glass-btn-destructive group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-semibold text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              'glass-btn glass-btn-destructive group flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-semibold text-destructive-foreground transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              hangUpLoading && 'pointer-events-none opacity-80 ring-2 ring-destructive/50'
+            )}
           >
-            <PhoneOff className="size-4 shrink-0 transition-transform duration-200 group-hover:rotate-12" />
-            Hang Up &amp; Generate Note
+            {hangUpLoading ? (
+              <Loader2 className="size-4 shrink-0 animate-spin" />
+            ) : (
+              <PhoneOff className="size-4 shrink-0 transition-transform duration-200 group-hover:rotate-12" />
+            )}
+            {hangUpLoading ? 'Wrapping up…' : 'Hang Up & Generate Note'}
           </button>
         </div>
       );

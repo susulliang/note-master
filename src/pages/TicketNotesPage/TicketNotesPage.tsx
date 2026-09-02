@@ -477,6 +477,13 @@ export default function TicketNotesPage() {
   const [showOutput, setShowOutput] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
+  /** Hang Up guard — prevents the "press twice" bug by guaranteeing the
+   *  button does exactly ONE full lifecycle per click: stop capture → drain
+   *  transcript → run final LLM → build note → open modal. Re-entrant
+   *  clicks short-circuit onto the in-flight promise instead of kicking
+   *  off a second (stale) pass. */
+  const hangUpInFlightRef = useRef(false);
+  const [hangUpRunning, setHangUpRunning] = useState(false);
   // AMR template search + viewer
   const [templateMatches, setTemplateMatches] = useState<TemplateEntry[]>([]);
   const [openTemplate, setOpenTemplate] = useState<TemplateEntry | null>(null);
@@ -900,7 +907,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             ? plan
             : mergeAutoFill(latest, priorSource, base, value, source);
         if (merged.next === latest) return prev;
-        return { ...prev, [nodeId]: merged.next };
+        const nextState = { ...prev, [nodeId]: merged.next };
+        // Synchronously mirror the new state into formDataRef right here
+        // (inside the setState updater) instead of waiting for the useEffect
+        // that runs AFTER paint. This guarantees that the Hang Up handler
+        // can read fully-populated form data immediately after
+        // `await call.finalize()` resolves — no second-click needed.
+        formDataRef.current = nextState;
+        return nextState;
       });
 
       if (plan.base !== null) llmBasesRef.current[nodeId] = plan.base;
@@ -1032,19 +1046,22 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   );
 
   /**
-   * Hang Up & Generate Note:
+   * Hang Up & Generate Note — ONE click, three outcomes atomically:
    *
-   *  1. stops the live caption capture (same as the panel's Stop button —
-   *     both the mic mode and the CCP call capture);
-   *  2. waits (bounded) for the final audio segments to transcribe and runs
-   *     one last authoritative LLM pass over the whole conversation, so
-   *     fields parsed from the last seconds of the call make it into the
-   *     note;
-   *  3. generates the note from the then-current form data.
+   *   1. ends BOTH live-capture sources (CCP call tab stream AND mic-only
+   *      Web Speech);
+   *   2. waits (bounded) for the final audio segments to transcribe and
+   *      runs one last authoritative LLM pass so tail-of-call fields make
+   *      it into the ticket;
+   *   3. immediately builds the formatted note and opens the Output Modal.
    *
-   * Reads voice/call through a ref so the callback identity stays stable —
-   * FlowchartCanvas is memoized and would otherwise re-render on every
-   * capture-state tick (audio level meters fire 10×/s).
+   * A re-entrant guard (hangUpInFlightRef) plus a try/finally around the
+   * open-modal call guarantee that the modal always opens on the FIRST
+   * click — even if capture/LLM/drain throws. No more "press Hang Up
+   * twice just to see the note".
+   *
+   * Voice/call refs keep the closure stable against audio-level ticks so
+   * the memoised FlowchartCanvas never re-renders on capture metrics.
    */
   const voiceRef = useRef(voice);
   const callRef = useRef(call);
@@ -1053,20 +1070,58 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     callRef.current = call;
   }, [voice, call]);
   const handleHangUp = useCallback(async () => {
+    // Re-entrant clicks bail into the in-flight work — nothing ever runs
+    // twice and the modal always ends up open at the end.
+    if (hangUpInFlightRef.current) return;
+    hangUpInFlightRef.current = true;
+    setHangUpRunning(true);
+
     const voiceNow = voiceRef.current;
     const callNow = callRef.current;
-    if (voiceNow.isListening) voiceNow.stop();
-    if (callNow.isCapturing) {
-      callNow.stop();
-      await callNow.finalize();
-      // Let React commit the final auto-fills before reading the form data
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
+
+    // Step 1: stop both capture sources synchronously (same moment as the
+    // click — the user said "end voice capture and generate note at the
+    // same time"). The call's finalize() below drains the now-queued last
+    // chunks and runs the final LLM pass.
+    try {
+      if (voiceNow.isListening) voiceNow.stop();
+    } catch {
+      /* swallow — stop is idempotent */
     }
-    const text = buildNoteText(formDataRef.current);
-    setNoteText(text);
-    setShowOutput(true);
+    const wasCapturing = callNow.isCapturing;
+    if (wasCapturing) {
+      try {
+        callNow.stop();
+      } catch {
+        /* swallow */
+      }
+      try {
+        await callNow.finalize();
+        // One more paint cycle so React commits the very last auto-fills
+        // (the synchronous mirror inside setFormData already updated the
+        // ref, but we give final CSS transitions a beat too).
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+      } catch (err) {
+        // Capture / transcription blew up (e.g. model timed out). Do NOT
+        // silently swallow the whole note — fall through and render what
+        // we have so far. The agent edits the rest manually.
+        console.warn('[hangup] finalize threw, falling back to current form:', err);
+      }
+    }
+
+    try {
+      // Step 2 & 3: build the note from what is NOW on the form and open
+      // the modal. ALWAYS runs regardless of capture errors above — this
+      // is the actual "one click shows the note" guarantee.
+      const text = buildNoteText(formDataRef.current);
+      setNoteText(text);
+      setShowOutput(true);
+    } finally {
+      hangUpInFlightRef.current = false;
+      setHangUpRunning(false);
+    }
   }, [buildNoteText]);
 
   const handleClearMic = useCallback(() => {
@@ -1275,6 +1330,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               onNodeBlur={handleNodeBlur}
               onPositionChange={handlePositionChange}
               onHangUp={handleHangUp}
+              hangUpLoading={hangUpRunning}
               autoFocusId={NODE_IDS.DETAILED_ISSUE}
               onLayoutReset={handleLayoutReset}
               parsedFields={parsedFields}

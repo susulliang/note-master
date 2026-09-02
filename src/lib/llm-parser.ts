@@ -482,10 +482,10 @@ export function buildParsePrompt(
       'skuNumber: <SKU as spoken, or empty>',
       'serialNumber: <serial as spoken, or empty>',
       'purchaseInfo: <store + when, e.g. "Amazon · March 2025", or empty>',
-      'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>',
+      'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the MOST IMPORTANT customer complaint points (root-cause symptoms, safety concerns, high-severity failures, expensive part damage, strongly-worded customer requests) in **double asterisks** so they render as bold. Markdown only, no other formatting. At least the key clause gets bolded — if the list has several points, highlight the top 2–4 that capture "what went wrong" without overmarking.',
       'issueType: <"Category::Item" or short phrase, or empty>',
-      'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>',
-      'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them.',
+      'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the EFFECTIVE / CONFIRMED resolution actions in **double asterisks** bold. Bold the steps that actually resolved the issue (e.g. "**replaced the mainboard**", "**performed hard reset and customer confirmed it works**") vs. purely diagnostic questions leave un-bolded. If the resolution was a clear successful fix — bold that success phrase prominently.',
+      'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.',
       ...(strict
         ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
         : []),
@@ -503,17 +503,17 @@ export function buildParsePrompt(
 
   const system = [
     'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
-    'Reply with ONE JSON object only — no markdown, no explanations. Every value in condensed note style, "" when unknown, never invented.',
+    'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. purchaseInfo: where + when the unit was acquired — store/site first (Amazon, Best Buy, eBay, Target, Walmart, Costco, Home Depot, ecovacs.com / official store, ...), then when ("Amazon · March 2025", "Ecovacs official store · ~1 year ago").',
-    '5. issueDescription: recall over brevity — EVERY distinct point the CUSTOMER makes, each condensed into its own short clause (a few words) and joined with "; ": symptoms and their history (when it started, what changed, what they already tried), context (age, purchase, usage), requests (order/replace a part or accessory, a missing or misplaced item, how-to), plus problem details the agent states. NEVER omit a point to stay short — a human deletes irrelevant clauses later. When given a description already on the ticket, keep every clause of it and append the NEW points.',
+    '5. issueDescription: recall over brevity — EVERY distinct point the CUSTOMER makes, each condensed into its own short clause (a few words) and joined with "; ": symptoms and their history (when it started, what changed, what they already tried), context (age, purchase, usage), requests (order/replace a part or accessory, a missing or misplaced item, how-to), plus problem details the agent states. NEVER omit a point to stay short — a human deletes irrelevant clauses later. RICH TEXT RULE for this field value ONLY: wrap the MOST IMPORTANT complaint clauses (top 2–4: root-cause symptoms, safety issues, high-severity failures, strongly-worded requests) in **bold markdown** using literal **…** inside the JSON string. Keep all clauses even the un-bolded ones.',
     '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "Aftersale-Service inquiry::Accessory Purchase", "How to use::App connection").',
-    '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones.',
+    '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
     ...(strict
       ? [
-          'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it.',
+          'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it. Preserve literal **double-asterisk** bold markers inside string values exactly as written by the model.',
         ]
       : []),
   ].join('\n');
@@ -574,15 +574,16 @@ export function buildParaphrasePrompt(input: ParaphraseInput): {
   const system = [
     'You polish the notes for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
     'The input is VERBATIM fragments a pattern engine lifted from a machine-transcribed support call: the customer\'s vernacular complaint clauses and the agent\'s troubleshooting advice, with filler words, repetition, back-channel noise and transcription errors.',
-    'Rewrite each fragment list into the concise, professional style of a support-ticket note.',
-    'Reply with ONE JSON object and nothing else. No markdown, no explanations.',
+    'Rewrite each fragment list into the concise, professional style of a support-ticket note. VALUES MAY USE markdown **double asterisks** to add bold formatting INSIDE strings — you MUST write the bold markers as literal ** characters inside the JSON strings. Do not strip them.',
+    'Reply with ONE JSON object and nothing else. No explanations.',
     'Rules:',
-    '1. issueDescription: recall over brevity — EVERY distinct point from the customer fragments, each condensed into its own short clause (a few words) and joined with "; ". Merge related clauses, drop only pure filler, repetition and back-channel noise. NEVER omit a point to stay short — a human deletes irrelevant clauses later.',
-    '2. resolutionSummary: EVERY distinct step, recommendation, option or question the agent gave, in order. Advice condenses to a short imperative phrase starting with a verb (3-10 words); questions condense to terse past-tense checks ("checked power state?", "wifi changed recently?"). Join the phrases with " -> ". NEVER drop a step — a missing step is a missing ticket entry.',
+    '1. issueDescription: recall over brevity — EVERY distinct point from the customer fragments, each condensed into its own short clause and joined with "; ". Merge related clauses, drop only pure filler, repetition and back-channel noise. NEVER omit a point. RICH TEXT: wrap the TOP 2–4 most important clauses (worst symptoms / safety items / strong customer requests) in **markdown bold** inside the output string. Keep even the un-bolded clauses in full.',
+    '2. resolutionSummary: EVERY distinct step, recommendation, option or question the agent gave, in order. Advice condenses to a short imperative phrase starting with a verb; questions condense to terse past-tense checks ("checked power state?", "wifi changed recently?"). Join with " -> ". NEVER drop a step. RICH TEXT: wrap the CONFIRMED-EFFECTIVE final steps and any stated success (e.g. "**replaced the dustbin filter — suction OK now**") in **markdown bold** inside the string. Diagnostic-only checks remain un-bolded.',
     '3. Fix obvious transcription errors from context (e.g. "econovac" → "ecovacs", "goat leave as 1000" → "GOAT lawn mower", "RTK/RDK" is the positioning module).',
     '4. Copy "" for a field whose input is empty. NEVER invent facts, steps, prices, dates or values that are not in the input.',
+    '5. Do NOT escape or remove the ** double-asterisk markers you write inside the string values — they are intentional markdown for the final note viewer. The consumer of this JSON will render it through a markdown renderer that turns **…** into visual bold.',
     'Example — input issueDescription fragments: "it just would, it would go down and back three or four times and stop; have this blinking system of a 1 and then a dash across the top and then a 1 and go around and around and then it would time out"',
-    '→ issueDescription: "Mower stops after a few passes and shows a repeating 1-1 error code, then times out"',
+    '→ issueDescription: "Mower stops after a few passes and **displays flashing 1-1 error code followed by timeout**"',
   ].join('\n');
 
   const userLines = ['Verbatim transcript fragments to condense:'];
@@ -626,6 +627,12 @@ export function validateParaphraseReply(raw: Record<string, unknown>): Extracted
  *  recall-first (every customer point as its own clause) and a human
  *  trims later — a tight cap here would silently delete exactly the
  *  information this stage exists to catch. */
+/** Field-specific caps so a rambling model cannot flood the form. The
+ *  issueDescription / resolutionSummary caps were bumped when rich-text
+ *  **bold** markers were added — each bolded clause adds 4 characters of
+ *  markup overhead, and the note viewer renders the raw string through a
+ *  markdown renderer, so the cap must cover both the recall-first content
+ *  AND its markup. */
 const FIELD_VALUE_CAPS: Record<string, number> = {
   customerName: 60,
   contactNumber: 24,
@@ -635,8 +642,8 @@ const FIELD_VALUE_CAPS: Record<string, number> = {
   serialNumber: 40,
   purchaseInfo: 120,
   issueType: 80,
-  issueDescription: 1000,
-  resolutionSummary: 600,
+  issueDescription: 2000,
+  resolutionSummary: 1200,
 };
 
 /** Pull the first balanced JSON object out of a raw LLM reply */

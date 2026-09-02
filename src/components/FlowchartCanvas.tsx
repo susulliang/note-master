@@ -42,6 +42,9 @@ interface FlowchartCanvasProps {
   onNodeBlur: () => void;
   onPositionChange: (id: string, pos: { x: number; y: number }) => void;
   onHangUp: () => void;
+  /** When true, the Hang Up button renders as a disabled spinner. Prevents
+   *  the double-click bug visually AND mechanically while capture drains. */
+  hangUpLoading?: boolean;
   /** Node whose input receives focus on page load */
   autoFocusId?: string;
   /** Called on a genuine canvas resize so drag overrides are cleared and the grid re-aligns */
@@ -316,6 +319,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   onNodeBlur,
   onPositionChange,
   onHangUp,
+  hangUpLoading = false,
   autoFocusId,
   onLayoutReset,
   parsedFields,
@@ -638,6 +642,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             parsedSource={parsedFields?.[node.id] ?? null}
             enablePinBubble={node.pinFromValue}
             panelContent={node.panelContent}
+            hangUpLoading={node.type === 'hangup' ? hangUpLoading : undefined}
           />
         ))}
       </div>
