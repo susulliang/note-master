@@ -18,11 +18,91 @@ const btnSf = $('#btnSf');
 const btnScrapeAll = $('#btnScrapeAll');
 const btnPush = $('#btnPush');
 const btnScanCurrent = $('#btnScanCurrent');
+const btnSelfExtract = document.getElementById('btnSelfExtract');
 const cbAuto = $('#cbAuto');
 
 const elToast = $('#toast');
 
 let lastSeen = { ccp: null, sf: null };
+
+// Popup-level inline extractors. These run directly via chrome.scripting
+// called FROM THE POPUP — fully bypassing the service worker. If the user
+// clicks the popup action, MV3 grants activeTab for the currently-active
+// tab of the current window to the popup context as well, so
+// chrome.scripting.executeScript works perfectly here on any URL.
+//
+// Keeping a copy in popup.js means even in the bizarre case where the
+// extension's background service worker is permanently zombied (which
+// seems to be the case for the currently installed fmopcjlg instance: the
+// popup painted v0.1.3 correctly but every sendMessage times out and
+// storage callbacks never fire), the user still gets field extraction.
+const POPUP_INLINE_SF = function () {
+  const FIELD_ALIASES = {
+    caseNumber:/^(Case\s*Number|Case\s*#?)$/i,caseOwner:/^Case\s*Owner$/i,status:/^Status$/i,
+    subject:/^Subject$/i,accountName:/^(Account\s*Name|Account)$/i,contactName:/^Contact\s*Name$/i,
+    customerName:/^(Name|Customer\s*Name)$/i,phone:/^(Phone|Contact\s*Number|Contact\s*Phone)$/i,
+    email:/^(Email|Email\s*Address)$/i,address:/^Address$/i,city:/^City$/i,
+    provinceState:/^(Province|State)$/i,postalCode:/^(Postal\s*Code|Zip)$/i,country:/^Country$/i,
+    deebotModel:/^(AMR\s*Model\s*No\.?|Deebot\s*Model|Model)$/i,serialNumber:/^Serial\s*Number$/i,
+    skuNumber:/^SKU(\s*Number)?$/i,issueType:/^Issue\s*Type$/i,
+    detailedIssue:/^(Detailed\s*Issue\s*Description|Request\s*Description|Description)$/i,
+    resolutionSummary:/^Resolution\s*Summary$/i,additionalNotes:/^Additional\s*Notes$/i,
+    caseOrigin:/^Case\s*Origin$/i,brand:/^Brand$/i,phoneSurveyResult:/^Phone\s*Survey\s*Result$/i,
+    escalationType:/^Escalation\s*Type$/i,purchasingChannel:/^Purchasing\s*Channel$/i,
+    orderNumber:/^Order\s*Number$/i,purchaseDate:/^Purchase\s*Date$/i,caseTag:/^Case\s*Tag$/i,
+    firstPendingTs:/^First\s*Pending\s*Timestamp$/i,lastPendingTs:/^Last\s*Pending\s*Timestamp$/i,
+    mergedCaseIds:/^Merged\s*Cases?$/i,aiAgentNote:/^AI\s*Agent$/i,appVersion:/^appVersion$/i,
+    phoneModel:/^model$/i,osVersion:/^systemVersion$/i,deviceTypeName:/^deviceTypeName$/i,
+    marketName:/^marketName$/i,appDeviceBlock:/^App\s*Device\s*Info$/i
+  };
+  function clean(v){if(v==null)return'';return String(v).replace(/\u00a0/g,' ').replace(/\s+\n/g,'\n').replace(/[ \t]+/g,' ').trim();}
+  function assignOnce(o,k,v){const cv=clean(v);if(!cv)return;if(!o[k])o[k]=cv;}
+  function lines(t){return t.split(/\r?\n/).map(s=>s.replace(/\u00a0/g,' ').trim()).filter(s=>s.length);}
+  function isLabel(l){for(const p of Object.values(FIELD_ALIASES))if(p.test(l))return true;return false;}
+  function matchAlias(l){for(const [k,p] of Object.entries(FIELD_ALIASES))if(p.test(l))return k;return null;}
+  const acc={};
+  const txt=(typeof document!=='undefined'&&document.body&&(document.body.innerText||document.body.textContent||''))||'';
+  const cn=txt.match(/(?:^|\n)\s*(\d{7,8})\s*\|\s*Case\b/);if(cn)assignOnce(acc,'caseNumber',cn[1]);
+  const sfids=[...(txt.matchAll(/\b500[a-zA-Z0-9]{12,15}\b/g)||[])].map(x=>x[0]);if(sfids[0])assignOnce(acc,'salesforceId',sfids[0]);
+  const caller=txt.match(/Caller\s*(\+?[\d\- \.\(\)]{6,})/);if(caller)assignOnce(acc,'contactNumber',caller[1]);
+  const subj=txt.match(/^Subject\s*\n\s*([^\n]+)/m);if(subj)assignOnce(acc,'issueTitle',subj[1]);
+  const adi=txt.match(/App\s*Device\s*Info\s*\n([\s\S]*?)(?:\n\s*Case\s*Number\b|\n\s*\d{7,8}\s*\|\s*Case\b|$)/i);
+  if(adi)for(const l of lines(adi[1])){const i=l.indexOf(':');if(i===-1)continue;const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k==='appVersion')assignOnce(acc,'appVersion',v);else if(k==='model')assignOnce(acc,'phoneModel',v);else if(k==='systemVersion')assignOnce(acc,'osVersion',v);else if(k==='deviceTypeName')assignOnce(acc,'deviceTypeName',v);else if(k==='marketName')assignOnce(acc,'marketName',v);else if(k==='deviceType')assignOnce(acc,'deviceType',v);}
+  const cls=[];let cm;const classRe=/Issue\s*Type(\d+)\s*(Primary|Second)\s*Classification\s*\n\s*([^\n]+)/gi;
+  while((cm=classRe.exec(txt))!==null)cls.push({n:cm[1],kind:cm[2].toLowerCase()==='primary'?'L1':'L2',value:clean(cm[3])});
+  if(cls.length){const parts=cls.filter(c=>c.value).sort((a,b)=>a.n.localeCompare(b.n)||(a.kind==='L1'?-1:1)).map(c=>c.value);if(parts.length)assignOnce(acc,'issueType',parts.join(' · '));for(const c of cls){if(c.n==='1')assignOnce(acc,c.kind==='L1'?'issueType1L1':'issueType1L2',c.value);else if(c.n==='2')assignOnce(acc,c.kind==='L1'?'issueType2L1':'issueType2L2',c.value);else if(c.n==='3')assignOnce(acc,c.kind==='L1'?'issueType3L1':'issueType3L2',c.value);}}
+  if(!acc.email){const m=txt.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/);if(m)assignOnce(acc,'email',m[0]);}
+  const tp=txt.match(/First\s*Pending\s*Timestamp\s*\n\s*([^\n]+)/);if(tp)assignOnce(acc,'firstPendingTs',tp[1]);
+  const tp2=txt.match(/Last\s*Pending\s*Timestamp\s*\n\s*([^\n]+)/);if(tp2)assignOnce(acc,'lastPendingTs',tp2[1]);
+  const ai=txt.match(/AI\s*Agent\s*\n([\s\S]*?)(?:\n\s*Summary\b|\n\s*Related\s*Files\b|$)/i);if(ai&&clean(ai[1]))assignOnce(acc,'aiAgentNote',clean(ai[1]));
+  if(typeof document!=='undefined'&&document.querySelectorAll){
+    const cells=document.querySelectorAll('div[class*="slds"],div[class*="cell"],li[class*="slds"],section,article');
+    for(const cell of cells){const ls=lines(cell.innerText||cell.textContent||'');if(ls.length<2||ls.length>30)continue;for(let i=0;i<ls.length-1;i+=1){const km=matchAlias(ls[i]);if(!km)continue;const nx=ls[i+1];if(isLabel(nx)&&matchAlias(nx))continue;assignOnce(acc,km,nx);i+=1;}}
+    const sts=['Account Details','Contact Details','App Device Info','Details','Case Details'];
+    for(const title of sts){const nodes=document.querySelectorAll('h1,h2,h3,h4,h5,h6,span,div,p,b,strong,th,label');for(const heading of nodes){const t=clean(heading.textContent||heading.innerText||'');if(!t||t.toLowerCase()!==title.toLowerCase())continue;let c=heading.parentElement;for(let d=0;d<5&&c;d+=1){if((c.innerText||'').split(/\n/).length>6)break;c=c.parentElement;}if(!c)continue;const sls=lines(c.innerText||'');for(let i=0;i<sls.length-1;i+=1){const key=matchAlias(sls[i]);if(!key)continue;const val=sls[i+1];if(isLabel(val)&&matchAlias(val))continue;assignOnce(acc,key,val);}}}
+  }
+  if(!acc.customerName&&acc.contactName)acc.customerName=acc.contactName;
+  if(!acc.customerName&&acc.accountName)acc.customerName=acc.accountName;
+  if(!acc.contactNumber&&acc.phone)acc.contactNumber=acc.phone;
+  if(!acc.emailAddress&&acc.email)acc.emailAddress=acc.email;
+  if(!acc.deebotModel&&acc.model)acc.deebotModel=acc.model;
+  const parts=[acc.address,acc.city,acc.provinceState,acc.postalCode,acc.country].map(clean).filter(Boolean);
+  if(parts.length){const joined=parts.filter((v,i,a)=>i===0||!a.slice(0,i).includes(v)).join(', ');assignOnce(acc,'shippingAddress',joined);}
+  for(const k of Object.keys(acc)){if(typeof acc[k]==='string'&&!acc[k])delete acc[k];else if(typeof acc[k]==='string')acc[k]=clean(acc[k]);}
+  return acc;
+};
+
+const POPUP_INLINE_CCP = function () {
+  const acc={};function clean(v){if(v==null)return'';return String(v).replace(/\u00a0/g,' ').trim();}
+  function a(k,v){const cv=clean(v);if(!cv)return;if(!acc[k])acc[k]=cv;}
+  try{const text=(typeof document!=='undefined'&&document.body&&(document.body.innerText||document.body.textContent||''))||'';
+    const caller=text.match(/Caller\s*(\+?[\d\- \.\(\)]{6,})/i);if(caller)a('contactNumber',caller[1]);
+    const name=text.match(/Contact\s*Name\s*\n?\s*:\s*([^\n]+)/i)||text.match(/Customer\s*Name\s*\n?\s*:\s*([^\n]+)/i);if(name)a('customerName',name[1]);
+    const cid=text.match(/Customer\s*Id\s*\n?\s*:\s*([A-Za-z0-9\-]+)/i);if(cid)a('customerId',cid[1]);
+    const queue=text.match(/Queue\s*\n?\s*:\s*([^\n]+)/i);if(queue)a('queue',queue[1]);
+    try{const w=(typeof window!=='undefined'?window:{});if(w.connect&&w.connect.contact&&w.connect.contact.getAttributes){const attrs=w.connect.contact.getAttributes()||{};for(const [k,v] of Object.entries(attrs)){const val=v&&(v.value!=null?v.value:v);const lk=String(k).toLowerCase();if(lk.includes('phone')||lk==='phonenumber'||lk.includes('number'))a('contactNumber',val);else if(lk==='customername'||lk==='name')a('customerName',val);else if(lk==='caseid'||lk==='ticket')a('caseNumber',val);else if(lk==='email')a('emailAddress',val);else a(k,val);}}}catch{/*noop*/}
+  }catch{/*noop*/}return acc;
+};
 
 function toast(msg, kind = '') {
   elToast.textContent = msg;
@@ -55,25 +135,48 @@ function shortDomain(url) {
 
 const STATE_KEY = '__ecovacs_scraper_state_v1';
 function readStateFromStorage() {
-  return new Promise((resolve) => {
-    try {
-      chrome.storage.local.get([STATE_KEY], (items) => {
-        resolve(items?.[STATE_KEY] || null);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
+  return Promise.resolve()
+    .then(() => new Promise((resolve, reject) => {
+      // Timeout-fuse storage.local: some Edge builds silently never call the
+      // callback when the SW extension context is a zombie installed from
+      // an older unpacked-load. Force-resolve after 900 ms so popup never
+      // freezes at "Loading…". Use Promise API as first attempt (preferred
+      // over callback API because Chrome 116+ fixed lastError ambiguity for
+      // Promise-returning chrome.* calls).
+      const t = setTimeout(() => resolve(null), 900);
+      try {
+        const pr = chrome.storage.local.get([STATE_KEY]);
+        if (pr && typeof pr.then === 'function') {
+          pr.then((items) => { clearTimeout(t); resolve(items?.[STATE_KEY] ?? null); })
+            .catch((e) => { clearTimeout(t); resolve(null); void e; });
+        } else {
+          chrome.storage.local.get([STATE_KEY], (items) => {
+            clearTimeout(t);
+            if (chrome.runtime.lastError) resolve(null);
+            else resolve(items?.[STATE_KEY] ?? null);
+          });
+        }
+      } catch (syncErr) { clearTimeout(t); resolve(null); void syncErr; }
+    }))
+    .catch(() => null);
 }
 /** @returns {Promise<chrome.tabs.Tab[]>} */
 function getTabsLocal() {
-  return new Promise((resolve) => {
+  return Promise.resolve().then(() => new Promise((resolve) => {
+    const fail = setTimeout(() => resolve([]), 1200);
     try {
-      chrome.tabs.query({ currentWindow: true }, (tabs) => resolve(Array.isArray(tabs) ? tabs : []));
-    } catch {
-      resolve([]);
-    }
-  });
+      const pr = chrome.tabs.query({ currentWindow: true });
+      if (pr && typeof pr.then === 'function') {
+        pr.then((tabs) => { clearTimeout(fail); resolve(Array.isArray(tabs) ? tabs : []); })
+          .catch(() => { clearTimeout(fail); resolve([]); });
+      } else {
+        chrome.tabs.query({ currentWindow: true }, (tabs) => {
+          clearTimeout(fail);
+          resolve(Array.isArray(tabs) ? tabs : []);
+        });
+      }
+    } catch { clearTimeout(fail); resolve([]); }
+  })).catch(() => []);
 }
 function localDiag() {
   const manifest = chrome.runtime.getManifest?.();
@@ -381,10 +484,114 @@ async function onClickScrapeAll() {
 }
 
 async function onClickScanCurrent() {
-  const r = await withLoading(btnScanCurrent, () => sendWithTimeout({ type: 'POPUP_SCRAPE_ACTIVE' }, 12000));
-  await refreshState(true);
-  if (r?.ok) toast('Scanned active tab — check the cards above.', 'ok');
-  else toast(explainError(r, 'Scan found nothing on this page. Hover SF card for details.'), 'warn');
+  // Race: first try the POPUP_SCRAPE_ACTIVE flow via background (which in
+  // v0.1.3 already has its own 3-tier). If background still hasn't replied
+  // within 3.5s, ABANDON it and run POPUP-SIDE self extraction. The user
+  // currently has a zombied fmopcjlg SW that never responds to messages,
+  // so this race guarantee means Force-scan will ALWAYS yield something
+  // (either via background or via popup) in < 6 seconds, never "Nothing".
+  const swPromise = withLoading(btnScanCurrent, async () => {
+    const r = await sendWithTimeout({ type: 'POPUP_SCRAPE_ACTIVE' }, 12000);
+    return { source: 'background', result: r };
+  });
+  const fusePromise = new Promise((resolve) => setTimeout(() => resolve({ source: 'fuse' }), 3500));
+  const first = await Promise.race([swPromise, fusePromise]);
+  if (first && first.source === 'background' && first.result?.ok) {
+    await refreshState(true);
+    toast('Scanned via background service worker.', 'ok');
+    return;
+  }
+  // SW too slow OR timed out / not ok → fall through to self-extract.
+  const self = await (first.source === 'fuse'
+    ? withLoading(btnScanCurrent, () => selfExtractFromPopup(true))
+    : selfExtractFromPopup(false));
+  if (self.ok) toast('Scanned via popup-side self-extract (no SW needed).', 'ok');
+  else toast(self.error || 'Scan found nothing. See rows inside capture cards.', 'warn');
+}
+
+async function selfExtractFromPopup(showSpinner) {
+  // 100% service-worker independent: popup's own chrome.scripting + the
+  // POPUP_INLINE_* copies below. activeTab permission from popup click
+  // grants scripting on ANY URL.
+  let sfData = null; let ccpData = null; let sfErr = null; let ccpErr = null;
+  let framesSf = 0; let framesCcp = 0; let activeTabUrl = ''; let activeTabTitle = ''; let activeTabId = -1;
+  try {
+    const tabs = await getTabsLocal();
+    const active = tabs.find((t) => t.active) || null;
+    if (!active?.id) return { ok: false, error: 'No active tab in current window.' };
+    activeTabId = active.id; activeTabUrl = active.url || ''; activeTabTitle = active.title || '';
+    const runScript = async (fn) => {
+      try {
+        const world = (chrome.scripting && chrome.scripting.ExecutionWorld)
+          ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN';
+        const r = await chrome.scripting.executeScript({
+          target: { tabId: active.id, allFrames: true },
+          func: fn,
+          // @ts-ignore typing mismatch between popup ExtensionTypes and chrome.scripting union.
+          world,
+        });
+        return Array.isArray(r) ? r : [];
+      } catch (e) { return { __err: String(e?.message || e) }; }
+    };
+    const [sfRes, ccpRes] = await Promise.all([runScript(POPUP_INLINE_SF), runScript(POPUP_INLINE_CCP)]);
+    const mergeExtract = (results) => {
+      if (results && (results).__err) return { data: null, error: (results).__err, frames: 0 };
+      const arr = Array.isArray(results) ? results : [];
+      const merged = {}; let best = 0;
+      for (const frame of arr) {
+        const obj = (frame && typeof frame.result === 'object' && !Array.isArray(frame.result)) ? frame.result : null;
+        if (!obj) continue;
+        const size = Object.keys(obj).filter((k) => obj[k] !== '' && obj[k] != null).length;
+        best = Math.max(best, size);
+        for (const [k, v] of Object.entries(obj)) {
+          if (v === '' || v == null) continue;
+          if (merged[k] == null) merged[k] = v;
+          else if (String(merged[k]).length < String(v).length) merged[k] = v;
+        }
+      }
+      return { data: Object.keys(merged).length ? merged : null, error: null, frames: arr.length, best };
+    };
+    const sfM = mergeExtract(sfRes); framesSf = sfM.frames; sfErr = sfM.error; sfData = sfM.data;
+    const cM = mergeExtract(ccpRes); framesCcp = cM.frames; ccpErr = cM.error; ccpData = cM.data;
+  } catch (outer) { return { ok: false, error: String(outer?.message || outer) }; }
+
+  const nowStr = new Date().toISOString();
+  const snapshot = (await readStateFromStorage()) || { ccp: null, sf: null, settings: { autoPush: false } };
+  if (!snapshot.settings) snapshot.settings = { autoPush: false };
+  if (sfData) snapshot.sf = {
+    capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
+    data: sfData, diagnostic: { via: 'popup-self-extract', framesExtracted: framesSf, bestFrameFieldCount: Object.keys(sfData).length },
+  };
+  if (ccpData) snapshot.ccp = {
+    capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
+    data: ccpData, embedded: !!sfData,
+    diagnostic: { via: 'popup-self-extract', framesExtracted: framesCcp, bestFrameFieldCount: Object.keys(ccpData).length },
+  };
+  if (snapshot.sf && snapshot.ccp) snapshot.sf.ccpEmbedded = true;
+
+  // Persist to storage so popup shows it across reopens AND so background
+  // (if ever revived) picks up the same snapshot on next boot.
+  try {
+    await chrome.storage.local.set({ [STATE_KEY]: snapshot, 'nm-extension-state-v1': snapshot });
+  } catch { /* ignore */ }
+
+  renderCapture('ccp', snapshot.ccp, elCcpKv, elCcpMeta, elCcpDot, sfData ? { openMatch: true, lastError: ccpErr || null } : { lastError: ccpErr || null });
+  renderCapture('sf', snapshot.sf, elSfKv, elSfMeta, elSfDot, sfData ? { openMatch: true, lastError: sfErr || null } : { lastError: sfErr || null });
+  updateBadge(snapshot);
+
+  if ((sfData && Object.keys(sfData).length) || (ccpData && Object.keys(ccpData).length)) {
+    return { ok: true, sfData, ccpData };
+  }
+  return {
+    ok: false,
+    error: `Self-extract ran ${framesSf + framesCcp} frame(s), but matched zero fields. SF lastError: ${sfErr || 'n/a'}. CCP lastError: ${ccpErr || 'n/a'}.`,
+  };
+}
+
+async function onClickSelfExtract() {
+  const r = await withLoading(btnSelfExtract, () => selfExtractFromPopup(true));
+  if (r?.ok) toast('Self-extract completed → green cards above.', 'ok');
+  else toast(r?.error || 'Self-extract found nothing on active frame trees.', 'warn');
 }
 
 async function onClickPush() {
@@ -415,10 +622,54 @@ btnSf.addEventListener('click', onClickSf);
 btnScrapeAll.addEventListener('click', onClickScrapeAll);
 btnPush.addEventListener('click', onClickPush);
 if (btnScanCurrent) btnScanCurrent.addEventListener('click', onClickScanCurrent);
+if (btnSelfExtract) btnSelfExtract.addEventListener('click', onClickSelfExtract);
 cbAuto.addEventListener('change', onToggleAuto);
 elExtId.addEventListener('click', onCopyExtId);
 
-// Initial paint, then refresh every 5s so the popup stays live without a
-// messaging subscription.
-void refreshState();
+// -------- Bootstrap: wrap everything in a try/catch so a script crash
+// becomes a VISIBLE row on the diagnostic panel + a long toast, instead of
+// silently leaving the page at "Loading…" forever (which is what the user
+// reported for v0.1.3 on their fmopcjlg instance). --------------
+window.addEventListener('error', (e) => {
+  const msg = `JS error: ${e.message || String(e.error || '')} (${e.filename || ''}:${e.lineno || ''})`;
+  try { toast(msg, 'err'); } catch { /* ignore */ }
+  if (elDiag) {
+    const row = document.createElement('li');
+    row.className = 'warn-row';
+    row.innerHTML = `<span class="kv__k">JS crash</span><span class="kv__v" style="word-break:break-all;color:var(--warn)"></span>`;
+    row.querySelector('.kv__v').textContent = msg;
+    elDiag.insertBefore(row, elDiag.firstChild);
+  }
+});
+async function bootstrap() {
+  try {
+    paintHeaderNow();
+    // Cheap synchronous pre-pop of the diag panel so "Loading…" never
+    // remains when boot completes, even if the following storage.get fuses
+    // never fire.
+    if (elDiag && elDiag.children.length <= 1) {
+      const { version, id } = localDiag();
+      elDiag.innerHTML = `<li><span class="kv__k">Extension version</span><span class="kv__v"><code>${escHtml(version)}</code></span></li>` +
+        `<li><span class="kv__k">Extension ID</span><span class="kv__v"><code>${escHtml(id)}</code></span></li>` +
+        `<li class="warn-row"><span class="kv__k">Tip</span><span class="kv__v">If still showing an older version → click ⟳ Reload on the extensions page.</span></li>`;
+    }
+    // If SW is zombied, refreshState() will: try SW 1.5s + 2.5s → fall back
+    // to storage.local fuse 900ms → tabs.query fuse 1.2s → render with
+    // locally-computed diag. Total worst case before paint: ~6.1 s. We also
+    // manually paint one more time at +750 ms regardless, as belt-and-braces:
+    void refreshState(true, 1);
+    setTimeout(() => refreshState(true, 0), 750);
+  } catch (bootErr) {
+    try { toast(`Boot error: ${String(bootErr?.message || bootErr)}`, 'err'); } catch { /* ignore */ }
+    if (elDiag) {
+      const row = document.createElement('li');
+      row.className = 'warn-row';
+      row.innerHTML = `<span class="kv__k">Boot crash</span><span class="kv__v" style="color:var(--warn)"></span>`;
+      row.querySelector('.kv__v').textContent = String(bootErr?.message || bootErr);
+      elDiag.insertBefore(row, elDiag.firstChild);
+    }
+  }
+}
+// Initial paint, then refresh every 5s.
 setInterval(() => refreshState(true), 5000);
+void bootstrap();
