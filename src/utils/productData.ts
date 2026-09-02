@@ -18,10 +18,14 @@
 
 type SheetRecord = { sheetKey: string; fileName: string; raw: string; numericPrefix: number };
 
-const ALL_PRODUCT_MD = import.meta.glob('/products/*.md?raw', {
-  eager: true,
-  import: 'default',
-}) as Record<string, string>;
+// Explicit per-file static imports generated into _productMdImports.ts. Vite
+// import.meta.glob silently returned {} for every combination of
+// /products/*.md?raw and ../../products/*.md?raw patterns in this build
+// environment: the rollup-based glob scanner treats unicode/spaces/parens
+// in file names as non-matches, and all 58 product MD files had at least
+// one such character. Static imports force Vite to inline each file
+// individually with no pattern-matching heuristics.
+import { ALL_PRODUCT_MD } from './_productMdImports';
 
 function buildSheetRecords(): SheetRecord[] {
   const records: SheetRecord[] = [];
