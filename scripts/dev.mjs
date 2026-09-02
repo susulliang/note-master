@@ -33,19 +33,44 @@ function log(msg) {
   try { process.stdout.write(line); } catch {}
 }
 
-/** 清理端口占用：lsof -ti:<port> | kill -9 */
+/** 清理端口占用：Unix lsof / Windows netstat+taskkill */
 function killOrphansByPort(port) {
+  const isWin = process.platform === 'win32';
   try {
-    const out = execSync(`lsof -ti:${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString()
-      .trim();
-    if (!out) return [];
-    const pids = out.split('\n').filter(Boolean);
-    for (const pid of pids) {
-      try {
-        process.kill(Number(pid), 'SIGKILL');
-        log(`killed orphan pid=${pid} on :${port}`);
-      } catch {}
+    let pids = [];
+    if (isWin) {
+      const out = execSync(
+        `netstat -ano | findstr :${port}`,
+        { stdio: ['ignore', 'pipe', 'ignore'] },
+      )
+        .toString()
+        .trim();
+      if (out) {
+        const seen = new Set();
+        for (const line of out.split('\n')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && !seen.has(pid)) { seen.add(pid); pids.push(pid); }
+        }
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' });
+          log(`killed orphan pid=${pid} on :${port}`);
+        } catch {}
+      }
+    } else {
+      const out = execSync(`lsof -ti:${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+      if (!out) return [];
+      pids = out.split('\n').filter(Boolean);
+      for (const pid of pids) {
+        try {
+          process.kill(Number(pid), 'SIGKILL');
+          log(`killed orphan pid=${pid} on :${port}`);
+        } catch {}
+      }
     }
     return pids;
   } catch {
@@ -60,12 +85,13 @@ function startProcess({ name, command, args, logFileName }) {
     ? fs.openSync(path.join(LOG_DIR, logFileName), 'a')
     : null;
 
+  const isWin = process.platform === 'win32';
   const child = spawn(command, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    shell: false,
+    shell: isWin,
     cwd: ROOT,
     env: process.env,
-    detached: true,
+    detached: !isWin,
   });
 
   const pipeLines = (stream) => {
@@ -87,10 +113,13 @@ function startProcess({ name, command, args, logFileName }) {
 
 killOrphansByPort(CLIENT_DEV_PORT);
 
+// Cross-platform vite launch: bypass npx (unreliable on some Windows Node installs)
+// by invoking vite's bin script directly via node.
+const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
 startProcess({
   name: 'client',
-  command: 'npx',
-  args: ['vite', '--port', CLIENT_DEV_PORT, '--host', '0.0.0.0'],
+  command: process.execPath,
+  args: [viteBin, '--port', CLIENT_DEV_PORT, '--host', '0.0.0.0'],
   logFileName: 'client.std.log',
 });
 
@@ -100,14 +129,27 @@ function cleanup(signal) {
   stopping = true;
   log(`cleanup triggered by ${signal}`);
 
+  const isWin = process.platform === 'win32';
   for (const { child } of managed) {
     if (!child.pid) continue;
-    try { process.kill(-child.pid, signal || 'SIGTERM'); } catch {}
+    try {
+      if (isWin) {
+        execSync(`taskkill /F /PID ${child.pid} /T`, { stdio: 'ignore' });
+      } else {
+        process.kill(-child.pid, signal || 'SIGTERM');
+      }
+    } catch {}
   }
   setTimeout(() => {
     for (const { child } of managed) {
       if (!child.pid) continue;
-      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+      try {
+        if (isWin) {
+          execSync(`taskkill /F /PID ${child.pid} /T`, { stdio: 'ignore' });
+        } else {
+          process.kill(-child.pid, 'SIGKILL');
+        }
+      } catch {}
     }
     killOrphansByPort(CLIENT_DEV_PORT);
     process.exit(0);
@@ -118,7 +160,9 @@ process.on('SIGINT', () => cleanup('SIGTERM'));
 process.on('SIGTERM', () => cleanup('SIGTERM'));
 // pkill 杀父 npm 后会收 SIGHUP（controlling tty 关闭）；
 // Node 默认直接退出不跑 handler，注册 handler 触发 cleanup
-process.on('SIGHUP', () => cleanup('SIGTERM'));
+if (process.platform !== 'win32') {
+  process.on('SIGHUP', () => cleanup('SIGTERM'));
+}
 
 Promise.race(
   managed.map(({ child }) => new Promise((r) => child.on('exit', r))),

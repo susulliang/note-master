@@ -1157,13 +1157,15 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // Side tool panels: live transcript + 24h ticket tracker. Both draggable
   // boxes on the canvas so the agent can reposition them around the flow.
   [NODE_IDS.TRANSCRIPT_PANEL, NODE_IDS.TICKET_TRACKER],
+  // Product lookup — DEEBOT/GOAT/WINBOT specs + error codes + FAQ tab +
+  // selling points, auto-fuzzy-matched from model dropdown + live issue text.
+  // Moved ABOVE SOP per user request (product data is referenced earlier in
+  // the call flow than SOP confirmation).
+  [NODE_IDS.PRODUCT_LOOKUP],
   // SOP reference panel — index of SOP/SOP.md headings, auto-matched by
   // issue details (keyword) then reranked by the local LLM against the
   // formatted final note. Own wide row because it renders long MD bodies.
   [NODE_IDS.SOP_PANEL],
-  // Product lookup — DEEBOT/GOAT/WINBOT specs + error codes + selling points,
-  // auto-fuzzy-matched from the Robot Model dropdown and live-issue text.
-  [NODE_IDS.PRODUCT_LOOKUP],
   [NODE_IDS.HANG_UP],
 ];
 

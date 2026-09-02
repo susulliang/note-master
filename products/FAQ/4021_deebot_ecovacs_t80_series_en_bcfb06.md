@@ -1,0 +1,27 @@
+---
+category: DEEBOT
+model: FAQ 2.0】ECOVACS T80 Series（YEEDI M14 Plus）
+model_slug: ecovacs_t80_series
+lang: en
+source: FAQ/DEEBOT/【FAQ 2.0】ECOVACS T80 Series（YEEDI M14 Plus）.xlsx
+source_sheet: YEEDI-EN
+kind: faq
+version: 1
+---
+
+# Alarm: Difficulty running, check drive wheels
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+Alarm: Difficulty running, check drive wheels
+
+## 答案 / Answer
+
+Warm tips:
+During cleaning process, the robot alarms running difficulties or slippery, etc., you can try as follows:
+1. Remove the top cover of Robot, toggle the power switch to "O", remove the dirty water box and turn the robot over;
+2. Press and turn the drive wheels to clear any tangles;
+3. Wipe with a dampened and wrung out cloth or use a brush to remove surface stains.

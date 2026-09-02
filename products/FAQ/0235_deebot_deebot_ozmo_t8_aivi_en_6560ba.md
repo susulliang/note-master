@@ -1,0 +1,33 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT OZMO T8 AIVI
+model_slug: deebot_ozmo_t8_aivi
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT OZMO T8 AIVI.xls
+source_sheet: IT
+kind: faq
+version: 1
+---
+
+# DEEBOT può eliminare l'acqua dal pavimento della cucina o del bagno?
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+DEEBOT può eliminare l'acqua dal pavimento della cucina o del bagno?
+
+## 答案 / Answer
+
+D20019
+
+Enable
+
+Usage advice
+
+Non utilizzare DEEBOT per rimuovere l'acqua. Il liquido può penetrare nel dispositivo e danneggiare DEEBOT.
+
+45
+
+it

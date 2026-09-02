@@ -13,11 +13,15 @@ import {
   Info,
   Lightbulb,
   Loader2,
+  HelpCircle,
+  Languages,
 } from 'lucide-react';
 import {
   findModels,
   freeSearch,
   getProductIndex,
+  searchFaqs,
+  type FaqSearchHit,
   type FreeSearchHit,
   type GoatErrorCode,
   type ModelMatch,
@@ -37,7 +41,7 @@ interface ProductLookupPanelProps {
   issueType?: string;
 }
 
-type TabKind = 'specs' | 'errors' | 'selling' | 'scientist' | 'free';
+type TabKind = 'specs' | 'errors' | 'faq' | 'scientist' | 'free' | 'selling';
 
 interface Tab {
   kind: TabKind;
@@ -49,9 +53,11 @@ interface Tab {
 const TABS_META: Array<Omit<Tab, 'count'>> = [
   { kind: 'specs', label: 'Specs', icon: Cpu },
   { kind: 'errors', label: 'Error Codes', icon: AlertTriangle },
-  { kind: 'selling', label: '卖点 · Pitch', icon: Sparkles },
+  // FAQ tab inserted here (after Errors). Selling/Pitch moved to last (pitch demoted).
+  { kind: 'faq', label: 'FAQ', icon: HelpCircle },
   { kind: 'scientist', label: '代号 · Scientist', icon: Tag },
   { kind: 'free', label: 'All Search', icon: Search },
+  { kind: 'selling', label: '卖点 · Pitch', icon: Sparkles },
 ];
 
 /**
@@ -226,21 +232,41 @@ export default function ProductLookupPanel({
     [index, manualQueryDebounced, robotModel, issueType, issueDescription]
   );
 
+  // --- FAQ search hits --------------------------------------------------------
+  const faqHits: FaqSearchHit[] = useMemo(() => {
+    const activeModel = pinnedModel ?? robotModel;
+    const query = manualQueryDebounced || `${issueType} ${issueDescription}`;
+    if (!activeModel && !query.trim()) {
+      // Browse case: show 15 newest/most relevant FAQs across the index
+      return index.faqs && index.faqs.length
+        ? index.faqs
+            .slice()
+            .sort((a, b) => b.version - a.version)
+            .slice(0, 15)
+            .map((f) => ({ ...f, score: 0.05, modelMatchScore: 0 }))
+        : [];
+    }
+    return searchFaqs(index, { model: activeModel, query, limit: 25 });
+  }, [index, pinnedModel, robotModel, manualQueryDebounced, issueType, issueDescription]);
+
   const counts = useMemo<Record<TabKind, number>>(
     () => ({
       specs: specSections.reduce((sum, s) => sum + s.rows.length, 0),
       errors: errorCodeHits.length,
+      faq: faqHits.length,
       selling: sellingHits.length,
       scientist: scientistHits.length,
       free: freeHits.length,
     }),
-    [specSections, errorCodeHits, sellingHits, scientistHits, freeHits]
+    [specSections, errorCodeHits, faqHits, sellingHits, scientistHits, freeHits]
   );
 
   // Auto-switch to the tab with the most useful content
   useEffect(() => {
     if (errorCodeHits.length > 0) setActiveTab((prev) => (prev === 'specs' ? 'errors' : prev));
-  }, [errorCodeHits.length]);
+    else if (faqHits.length > 0 && manualQueryDebounced.trim().length >= 3)
+      setActiveTab((prev) => (prev === 'specs' || prev === 'errors' ? 'faq' : prev));
+  }, [errorCodeHits.length, faqHits.length, manualQueryDebounced]);
 
   const tabs: Tab[] = TABS_META.map((t) => ({ ...t, count: counts[t.kind] }));
 
@@ -356,6 +382,7 @@ export default function ProductLookupPanel({
       <div className="custom-scrollbar -mr-1 max-h-[340px] overflow-y-auto pr-1 text-[11px]">
         {activeTab === 'specs' && <SpecsTab sections={specSections} modelName={selectedModelName} />}
         {activeTab === 'errors' && <ErrorCodesTab rows={errorCodeHits} />}
+        {activeTab === 'faq' && <FaqTab hits={faqHits} />}
         {activeTab === 'selling' && <SellingTab rows={sellingHits} />}
         {activeTab === 'scientist' && <ScientistTab rows={scientistHits} />}
         {activeTab === 'free' && <FreeTab hits={freeHits} />}
@@ -470,6 +497,116 @@ function ErrorCodesTab({ rows }: { rows: GoatErrorCode[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function FaqBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded bg-warning/25 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-warning',
+        className,
+      )}
+    >
+      <HelpCircle className="size-2.5" />
+      FAQ
+    </span>
+  );
+}
+
+function FaqTab({ hits }: { hits: FaqSearchHit[] }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  if (hits.length === 0) {
+    return (
+      <EmptyState
+        icon={HelpCircle}
+        text="No FAQ matches yet. Select a model or type a question keyword (e.g. 噪音 / wifi / red light blinking)."
+      />
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {hits.map((f) => {
+        const isOpen = openId === f.id;
+        return (
+          <div
+            key={f.id}
+            className={cn(
+              'overflow-hidden rounded-md border transition-all',
+              'border-warning/20 bg-warning/[0.03] hover:bg-warning/[0.05]',
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setOpenId(isOpen ? null : f.id)}
+              className="flex w-full items-start gap-2 border-b border-warning/15 bg-warning/10 px-2 py-1 text-left"
+            >
+              <div className="mt-0.5 shrink-0">
+                <FaqBadge />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 text-[11px] font-bold leading-snug text-foreground/90">
+                  {f.title.length > 110 ? f.title.slice(0, 110) + '…' : f.title}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground">
+                  {f.category && (
+                    <span className="rounded bg-foreground/10 px-1 font-bold uppercase tracking-wider">{f.category}</span>
+                  )}
+                  {f.model && f.modelSlug && f.model !== f.modelSlug && (
+                    <span className="truncate rounded bg-foreground/10 px-1">{f.model}</span>
+                  )}
+                  {f.lang && (
+                    <span className="inline-flex items-center gap-0.5 rounded bg-foreground/10 px-1">
+                      <Languages className="size-2" /> {f.lang}
+                    </span>
+                  )}
+                  {f.modelMatchScore > 0 && (
+                    <span className="rounded bg-success/15 px-1 font-bold text-success/80">
+                      model {Math.round(f.modelMatchScore * 100)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <span className="rounded bg-foreground/10 px-1 text-[9px] font-bold text-muted-foreground">
+                  {Math.round(f.score * 100)}
+                </span>
+                <ChevronRight
+                  className={cn('size-3 text-muted-foreground transition-transform', isOpen && 'rotate-90')}
+                />
+              </div>
+            </button>
+            {isOpen && (
+              <div className="space-y-2 px-2 py-1.5">
+                {f.question && f.question !== f.title && (
+                  <div>
+                    <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <HelpCircle className="size-3" />
+                      问题 / Question
+                    </div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-foreground/85">{f.question}</div>
+                  </div>
+                )}
+                {f.answer && (
+                  <div>
+                    <div className="mb-0.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <Lightbulb className="size-3" />
+                      答案 / Answer
+                    </div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-foreground/85">{f.answer}</div>
+                  </div>
+                )}
+                {f.sourceSheet && (
+                  <div className="text-[9px] text-muted-foreground/70">
+                    来源：{f.source} · Sheet: {f.sourceSheet}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

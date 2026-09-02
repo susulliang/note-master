@@ -623,10 +623,20 @@ function FlowNodeComponent({
                       tpl.kind === 'amr' && 'bg-accent/20 text-accent',
                       tpl.kind === 'tbs' && 'bg-primary/20 text-primary',
                       tpl.kind === 'err' && 'bg-destructive/25 text-destructive',
+                      tpl.kind === 'macro' &&
+                        'bg-emerald-500/25 text-emerald-600 dark:text-emerald-300',
                       tpl.kind === 'faq' && 'bg-warning/25 text-warning'
                     )}
                   >
-                    {tpl.kind === 'amr' ? 'AMR' : tpl.kind === 'tbs' ? 'TBS' : tpl.kind === 'err' ? 'ERR' : 'FAQ'}
+                    {tpl.kind === 'amr'
+                      ? 'AMR'
+                      : tpl.kind === 'tbs'
+                        ? 'TBS'
+                        : tpl.kind === 'err'
+                          ? 'ERR'
+                          : tpl.kind === 'macro'
+                            ? 'MACRO'
+                            : 'FAQ'}
                   </span>
                   {tpl.name}
                 </button>
@@ -634,7 +644,7 @@ function FlowNodeComponent({
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground/80">
-              No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, and FAQs.
+              No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, MACRO shortcuts, and real FAQs.
             </p>
           )}
         </div>

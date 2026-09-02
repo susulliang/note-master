@@ -407,12 +407,14 @@ export default function TicketNotesPage() {
       { id: NODE_IDS.SHIPPING_ADDRESS, label: 'Shipping address' },
       { id: NODE_IDS.TRANSCRIPT_PANEL, label: 'Call Transcript' },
       { id: NODE_IDS.TICKET_TRACKER, label: '24H tracker' },
-      { id: NODE_IDS.SOP_PANEL, label: 'SOP box' },
       { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
       { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
       { id: NODE_IDS.TEMPLATE_MATCHES, label: 'Matching template' },
+      // Product lookup moved above SOP in the canvas → toggles follow the
+      // same visual order.
       { id: NODE_IDS.PRODUCT_LOOKUP, label: 'Product lookup' },
+      { id: NODE_IDS.SOP_PANEL, label: 'SOP box' },
     ],
     []
   );

@@ -1,0 +1,30 @@
+---
+category: DEEBOT
+model: FAQ 2.0】X11S（莎士比亚MIX）
+model_slug: x11s
+lang: zh
+source: FAQ/DEEBOT/【FAQ 2.0】X11S（莎士比亚MIX）.xlsx
+source_sheet: 中文-CN
+kind: faq
+version: 1
+---
+
+# 如何更换集尘袋/机器提示尘袋已满如何处理？ / X12
+
+> **产品线**：DEEBOT　**语言**：zh
+>
+
+## 问题 / Question
+
+如何更换集尘袋/机器提示尘袋已满如何处理？ / X12
+
+## 答案 / Answer
+
+当机器出现“尘袋已满提示”时，您可以按如下步骤进行操作尝试：
+1. 请从两侧取下集尘仓盖；
+2. 取出尘袋并丢弃；
+3. 用干抹布擦拭集尘仓，安装新尘袋；
+4. 关闭集尘仓盖；
+5.请在APP里面点击“耗材与部件”＞“尘袋”＞“我已更换”
+
+X12

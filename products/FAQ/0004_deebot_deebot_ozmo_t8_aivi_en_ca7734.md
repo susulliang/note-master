@@ -1,0 +1,23 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT OZMO T8 AIVI
+model_slug: deebot_ozmo_t8_aivi
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT OZMO T8 AIVI.xls
+source_sheet: Q Classification
+kind: faq
+version: 1
+---
+
+# FAQ Q Classification #3
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+—
+
+## 答案 / Answer
+
+Answer ID:

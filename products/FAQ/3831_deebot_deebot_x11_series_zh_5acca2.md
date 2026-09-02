@@ -1,0 +1,38 @@
+---
+category: DEEBOT
+model: FAQ 2.0】DEEBOT X11 SERIES 中英文
+model_slug: deebot_x11_series
+lang: zh
+source: FAQ/DEEBOT/【FAQ 2.0】DEEBOT X11 SERIES 中英文.xlsx
+source_sheet: 中英文版
+kind: faq
+version: 1
+---
+
+# 尘盒拆卸清理安装指导 / Dustbin Removal, Cleaning, and Reinstallation Guide
+
+> **产品线**：DEEBOT　**语言**：zh
+>
+
+## 问题 / Question
+
+尘盒拆卸清理安装指导 / Dustbin Removal, Cleaning, and Reinstallation Guide
+
+## 答案 / Answer
+
+温馨提示：
+当您的机器人使用一段时间后，若您发现尘盒已满或吸尘效果不理想时等，您可以按如下步骤进行相关操作尝试：
+1.取下主机面盖，拨动电源开关至“O”关机，按压尘盒卡扣释放键并取出尘盒。
+2.轻按尘盒侧边的卡扣，取下尘盒上盖，将内部垃圾倾倒出来。
+3.从尘盒上盖中取出初级滤网及滤芯（温馨提示：若尘盒较脏，可用水冲洗尘盒、滤芯）
+4.清理完成后，请先将滤芯重新安装到初级过滤网上，随后将过滤网对准上盖卡扣位置放回，按压听到“咔哒”一声表示安装到位。
+5.请将尘盒上盖重新安装至尘盒上。接着，将尘盒放入主机内，按压听到“咔哒”一声表示安装到位；最后将主机的面盖装回原位。
+注：可用水冲洗，冲洗后请务必晾干使用
+
+Friendly Reminder:
+ If you notice reduced suction power or a full dustbin after extended use, follow these steps:
+ 1.Power off the robot by switching the toggle to "O", then press the dustbin release latch and remove the dustbin.
+ 2.Gently press the side latch to open the dustbin lid, then empty the contents into a trash bin.
+ 3.Remove the filter (Tip: Rinse the dustbin and filter with water if heavily soiled).
+ 4.After cleaning, reinstall the filter and close the dustbin lid firmly until a "click" confirms proper closure.
+ 5.Place the dustbin back into the robot and reattach the top cover.                                                         Key Notes: Water rinsing is allowed, but ensure full drying before reuse to prevent moisture damage.

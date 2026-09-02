@@ -1,0 +1,23 @@
+---
+category: DEEBOT
+model: FAQ2.0】DEEBOT T30C
+model_slug: deebot_t30c
+lang: en
+source: FAQ/DEEBOT/【FAQ2.0】DEEBOT T30C.xlsx
+source_sheet: 使用
+kind: faq
+version: 1
+---
+
+# 三.使用篇
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+三.使用篇
+
+## 答案 / Answer
+
+大幅字幕：使用篇

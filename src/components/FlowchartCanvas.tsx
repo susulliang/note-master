@@ -192,11 +192,12 @@ function computeDefaultLayout(
   // Three reference panels that live in the left-side column on WIDE
   // screens. On narrow screens they stay in their original semantic rows.
   // Ordered top → bottom as they appear stacked under the Transcript.
+  // Product box sits above SOP per user request (referenced earlier in calls).
   const LEFT_COL_IDS: Array<string> = [
     NODE_IDS.TRANSCRIPT_PANEL,
     NODE_IDS.TEMPLATE_MATCHES,
-    NODE_IDS.SOP_PANEL,
     NODE_IDS.PRODUCT_LOOKUP,
+    NODE_IDS.SOP_PANEL,
   ];
   const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
     .map((id) => (!hiddenNodes?.has(id) ? nodeById.get(id) ?? null : null))
@@ -394,8 +395,34 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   const effectivePositions = useMemo(() => {
     const out: Record<string, { x: number; y: number }> = {};
+
+    // Sanitize user-saved drag overrides: PRODUCT_LOOKUP and SOP_PANEL are
+    // both 760px wide ~460px tall. Older sessions may have overlapping
+    // positions after the layout swap above; auto-clear overrides for only
+    // these two ids when they visibly overlap. Any other user drags are
+    // preserved untouched.
+    const SOP = NODE_IDS.SOP_PANEL;
+    const PROD = NODE_IDS.PRODUCT_LOOKUP;
+    const sopW = effectiveNodes.find((n) => n.id === SOP)?.width ?? 760;
+    const prodW = effectiveNodes.find((n) => n.id === PROD)?.width ?? 760;
+    const sopH = effectiveNodes.find((n) => n.id === SOP) ? heightOf(effectiveNodes.find((n) => n.id === SOP)!) : 460;
+    const prodH = effectiveNodes.find((n) => n.id === PROD) ? heightOf(effectiveNodes.find((n) => n.id === PROD)!) : 460;
+    const sopPos = positions[SOP];
+    const prodPos = positions[PROD];
+    let clearPositions = false;
+    if (sopPos && prodPos) {
+      // Axis-aligned bounding box intersection test (with 10px tolerance for
+      // accidental small offsets).
+      const overlapX = !(sopPos.x + sopW <= prodPos.x + 10 || prodPos.x + prodW <= sopPos.x + 10);
+      const overlapY = !(sopPos.y + sopH <= prodPos.y + 10 || prodPos.y + prodH <= sopPos.y + 10);
+      clearPositions = overlapX && overlapY;
+    }
+    const overrides = clearPositions
+      ? Object.fromEntries(Object.entries(positions).filter(([id]) => id !== SOP && id !== PROD))
+      : positions;
+
     for (const n of effectiveNodes) {
-      out[n.id] = positions[n.id] ?? defaultLayout[n.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
+      out[n.id] = overrides[n.id] ?? defaultLayout[n.id] ?? { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
     }
     return out;
   }, [effectiveNodes, positions, defaultLayout]);
@@ -540,7 +567,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         className="relative"
         style={{ width: canvasWidth, height: canvasHeight }}
       >
-        {/* SVG layer for connections */}
+        {/* SVG connector layer: intentionally EMPTY.
+
+          Connection lines (Bezier curves between nodes) have been removed per
+          user request to declutter the canvas. The `defs > #glow` block is kept
+          so future re-enabling only requires adding the render call back.
+          NODE_CONNECTIONS and renderConnections() function itself are kept
+          intact in this file for reference / easy rollback. */}
         <svg
           className="pointer-events-none absolute inset-0"
           width={canvasWidth}
@@ -555,7 +588,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               </feMerge>
             </filter>
           </defs>
-          {renderConnections()}
         </svg>
 
         {/* Nodes layer */}

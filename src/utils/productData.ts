@@ -16,7 +16,14 @@
  * Everything is pre-indexed eagerly at module load time (~900KB MD total).
  */
 
-type SheetRecord = { sheetKey: string; fileName: string; raw: string; numericPrefix: number };
+type SheetRecord = {
+  sheetKey: string;
+  fileName: string;
+  raw: string;
+  numericPrefix: number;
+  /** true if stored under /products/FAQ/ (real FAQ Q&A entries). */
+  isFaq: boolean;
+};
 
 // Explicit per-file static imports generated into _productMdImports.ts. Vite
 // import.meta.glob silently returned {} for every combination of
@@ -33,9 +40,24 @@ function buildSheetRecords(): SheetRecord[] {
     const fileName = fullPath.split('/').pop() ?? '';
     if (!fileName || fileName === 'README.md') continue;
     const stem = fileName.replace(/\.md$/i, '');
-    const prefixMatch = stem.match(/^(\d{1,2})[_\-]/);
-    const numericPrefix = prefixMatch ? parseInt(prefixMatch[1], 10) : 999;
-    records.push({ sheetKey: stem, fileName, raw, numericPrefix });
+    const isFaq = fullPath.startsWith('FAQ/');
+    let numericPrefix: number;
+    if (isFaq) {
+      // Keep FAQ records AFTER core numbered sheets (1..58) so pickByPrefix(1..9)
+      // never accidentally returns an FAQ markdown.
+      numericPrefix = 998;
+    } else {
+      const prefixMatch = stem.match(/^(\d{1,2})[_\-]/);
+      numericPrefix = prefixMatch ? parseInt(prefixMatch[1], 10) : 999;
+    }
+    // sheetKey keeps the "FAQ/" prefix for FAQs to stay unique and traceable.
+    records.push({
+      sheetKey: isFaq ? fullPath.replace(/\.md$/i, '') : stem,
+      fileName,
+      raw,
+      numericPrefix,
+      isFaq,
+    });
   }
   records.sort((a, b) => a.numericPrefix - b.numericPrefix || a.sheetKey.localeCompare(b.sheetKey));
   return records;
@@ -495,6 +517,107 @@ export function parseFreeTextSheet(sheetId: string, md: string): FreeTextRecord[
 }
 
 /* -------------------------------------------------------------------------- */
+/*                            09 FAQ Q&A Entries                              */
+/* -------------------------------------------------------------------------- */
+
+export interface FaqEntry {
+  id: string;              // sheetKey (unique)
+  category: string;        // DEEBOT / GOAT / WINBOT / ULTRAMARINE
+  model: string;           // source model name (as-written in Excel)
+  modelSlug: string;       // ASCII slug for fast match/comparison (x12, t50, etc.)
+  lang: string;            // zh / en / multi / bilingual
+  source: string;          // source xlsx/docx/pdf relative path
+  sourceSheet: string;     // sheet name for xlsx
+  title: string;           // FAQ question heading (H1)
+  question: string;        // ## 问题 / Question section
+  answer: string;          // ## 答案 / Answer section
+  /** Token set built from title + question + model for fast fuzzy scoring. */
+  tokens: Set<string>;
+  /** Full body for text overlap ranking (question + answer). */
+  fullText: string;
+  version: number;
+}
+
+/** @internal exposed to test harness; tolerant of malformed docs */
+export function parseFaqMd(sheetKey: string, md: string): FaqEntry | null {
+  if (!md || md.trim().length < 5) return null;
+
+  // --- parse YAML frontmatter
+  const fmMatch = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  let category = '';
+  let model = '';
+  let modelSlug = '';
+  let lang = '';
+  let source = '';
+  let sourceSheet = '';
+  let version = 1;
+  if (fmMatch) {
+    for (const raw of fmMatch[1].split(/\r?\n/)) {
+      const idx = raw.indexOf(':');
+      if (idx <= 0) continue;
+      const k = raw.slice(0, idx).trim();
+      const v = raw.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+      switch (k) {
+        case 'category': category = v; break;
+        case 'model': model = v; break;
+        case 'model_slug': modelSlug = v; break;
+        case 'lang': lang = v; break;
+        case 'source': source = v; break;
+        case 'source_sheet': sourceSheet = v; break;
+        case 'version': version = parseFloat(v) || 1; break;
+      }
+    }
+  }
+
+  const body = fmMatch ? md.slice(fmMatch[0].length) : md;
+
+  // --- extract headings: # Title, ## 问题, ## 答案
+  const h1Match = body.match(/^#\s+(.+)$/m);
+  const title = (h1Match?.[1] ?? model || 'FAQ').trim();
+
+  const qSection = extractSection(body, /^##\s*(问题\s*\/\s*Question|问题|Question|Q\b)/im);
+  const aSection = extractSection(body, /^##\s*(答案\s*\/\s*Answer|答案|Answer|A\b)/im);
+
+  const question = qSection || title;
+  const answer = aSection || body;
+  const fullText = `${title}\n${question}\n${answer}\n${model} ${modelSlug} ${sourceSheet}`.trim();
+
+  return {
+    id: sheetKey,
+    category,
+    model,
+    modelSlug,
+    lang,
+    source,
+    sourceSheet,
+    title,
+    question: question.trim(),
+    answer: answer.trim(),
+    tokens: normalizeTokens(fullText),
+    fullText,
+    version,
+  };
+}
+
+/** Extract content between heading "name" (exclusive) and the next ## heading or EOF. */
+function extractSection(body: string, headingRe: RegExp): string {
+  const lines = body.split(/\r?\n/);
+  let startIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (headingRe.test(lines[i].trim())) { startIdx = i + 1; break; }
+  }
+  if (startIdx === -1) return '';
+  const collected: string[] = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    if (/^##\s+\S/.test(lines[i].trim())) break; // stop at next ## heading
+    // Also stop at next top-level heading to avoid capturing unrelated content
+    if (i !== startIdx && /^#\s+\S/.test(lines[i].trim())) break;
+    collected.push(lines[i]);
+  }
+  return collected.join('\n').trim();
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                Public Index                                */
 /* -------------------------------------------------------------------------- */
 
@@ -504,6 +627,7 @@ export interface ProductIndex {
   scientistCodes: ReturnType<typeof parseScientistCodes>;
   sellingPoints: SellingPoint[];
   freeText: FreeTextRecord[];
+  faqs: FaqEntry[];
   /** Flat list of all model display names and their token sets for fuzzy match. */
   allModels: Array<{ name: string; tokens: Set<string>; origin: string }>;
 }
@@ -529,7 +653,14 @@ export function getProductIndex(): ProductIndex {
   // Extract the H2 title / sheet heading from the raw MD as a display label,
   // fall back to the file stem if missing.
   const gbuComparisons: ComparisonIndex[] = [];
+  // FAQ entries come from records where isFaq === true (products/FAQ/*.md)
+  const faqs: FaqEntry[] = [];
   for (const rec of SHEET_RECORDS) {
+    if (rec.isFaq) {
+      const e = parseFaqMd(rec.sheetKey, rec.raw);
+      if (e) faqs.push(e);
+      continue;
+    }
     if (rec.numericPrefix < 10) continue;
     const heading =
       rec.raw.match(/^##\s+(.+)$/m)?.[1]?.trim() ||
@@ -547,6 +678,7 @@ export function getProductIndex(): ProductIndex {
   const push = (name: string, tokens: Set<string>, origin: string) => {
     const key = `${origin}:${name}`;
     if (seen.has(key)) return;
+    if (!name) return;
     seen.add(key);
     allModels.push({ name, tokens, origin });
   };
@@ -555,6 +687,16 @@ export function getProductIndex(): ProductIndex {
   }
   for (const s of sellingPoints) push(s.model, s.tokens, '卖点');
   for (const s of scientistCodes) push(s.model, s.tokens, '科学家代号');
+  // FAQ models: deduplicate by category+modelSlug combo to avoid blowing up list
+  const faqModelSeen = new Set<string>();
+  for (const f of faqs) {
+    const k = `${f.category}:${f.modelSlug}`;
+    if (faqModelSeen.has(k)) continue;
+    faqModelSeen.add(k);
+    const modelLabel = f.model?.trim() || f.modelSlug?.toUpperCase() || f.category;
+    const tokens = normalizeTokens(`${f.category} ${modelLabel} ${f.modelSlug}`);
+    push(modelLabel, tokens, `FAQ · ${f.category}`);
+  }
 
   _index = {
     comparisons,
@@ -562,6 +704,7 @@ export function getProductIndex(): ProductIndex {
     scientistCodes,
     sellingPoints,
     freeText,
+    faqs,
     allModels,
   };
   return _index;
@@ -627,9 +770,85 @@ export function findModels(index: ProductIndex, query: string, topN = 8): ModelM
   return Array.from(dedup.values()).sort((a, b) => b.score - a.score).slice(0, topN);
 }
 
+/* --------------------------- FAQ dedicated search -------------------------- */
+
+export interface FaqSearchHit extends FaqEntry {
+  score: number;
+  /** Strength of the model match (0..1). FAQ entries whose model explicitly
+   *  matches the active model are boosted. */
+  modelMatchScore: number;
+}
+
+/**
+ * Dedicated FAQ search. Ranks FAQ entries by:
+ *   1. modelMatchScore — how close the active / user-supplied model is to the
+ *      FAQ's model slug (higher = more relevant)
+ *   2. query overlap — token Jaccard between query and FAQ title/question/answer
+ *
+ * Pass an empty or empty-ish model to search across all FAQ entries.
+ */
+export function searchFaqs(
+  index: ProductIndex,
+  {
+    model,
+    query,
+    category,
+    limit = 20,
+  }: { model?: string; query?: string; category?: string; limit?: number },
+): FaqSearchHit[] {
+  if (!index.faqs || index.faqs.length === 0) return [];
+  const qTrim = (query ?? '').trim();
+  const qTokens = qTrim ? normalizeTokens(qTrim) : new Set<string>();
+  const mTrim = (model ?? '').trim();
+  const mTokens = mTrim ? normalizeTokens(mTrim) : new Set<string>();
+  const catLower = category?.trim().toUpperCase();
+
+  const hits: FaqSearchHit[] = [];
+  for (const f of index.faqs) {
+    if (catLower && f.category && f.category.toUpperCase() !== catLower) continue;
+
+    // Model score: exact modelSlug substring → 1.0; token jaccard between
+    // model label+slug and input model; or 0.1 if no model filter at all.
+    let modelScore = 0;
+    if (mTrim) {
+      if (f.modelSlug && mTrim.toLowerCase().includes(f.modelSlug.toLowerCase())) modelScore = 1;
+      else if (f.modelSlug) modelScore = Math.max(modelScore, tokenJaccard(mTokens, normalizeTokens(f.modelSlug)));
+      if (f.model) modelScore = Math.max(modelScore, tokenJaccard(mTokens, normalizeTokens(f.model)));
+    } else {
+      modelScore = 0.1; // no model filter: mild penalty vs explicitly model-matched
+    }
+
+    let queryScore = 0;
+    if (qTrim) {
+      queryScore = textTokenOverlap(f.fullText, qTrim);
+      // Exact question-title or heading substring bonus
+      if (
+        qTrim.length >= 3 &&
+        (f.title.toLowerCase().includes(qTrim.toLowerCase()) || f.question.toLowerCase().includes(qTrim.toLowerCase()))
+      ) {
+        queryScore = Math.min(1.0, queryScore + 0.3);
+      }
+    } else {
+      queryScore = 0.05; // no query, but user wants all FAQs (browse case)
+    }
+
+    if (modelScore <= 0 && queryScore <= 0) continue;
+    const score = modelScore * 0.4 + queryScore * 0.6;
+    hits.push({ ...f, score, modelMatchScore: modelScore });
+  }
+
+  hits.sort((a, b) => {
+    // Higher score first; tiebreak by version (newest FAQ win) then model match strength
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.version !== a.version) return b.version - a.version;
+    return b.modelMatchScore - a.modelMatchScore;
+  });
+  return hits.slice(0, limit);
+}
+
 /**
  * Generic full-text search across selling points + troubleshooting +
- * navigation sheets. Used when the user types a manual query that isn't
+ * navigation sheets + FAQ Q&A. Used when the user types a manual query that isn't
  * a model match (e.g. "suction power" "tank size" "warranty").
  */
 export interface FreeSearchHit {
@@ -702,6 +921,25 @@ export function freeSearch(index: ProductIndex, query: string, topN = 8): FreeSe
     const score = textTokenOverlap(r.body, query);
     if (score <= 0) continue;
     rawHits.push({ sheetId: r.sheetId, title: r.title, body: r.body, score });
+  }
+
+  // 5. FAQ Q&A entries — show as a FAQ hit with the FAQ badge
+  if (index.faqs?.length) {
+    for (const f of index.faqs) {
+      const hay = `${f.category} ${f.model} ${f.title} ${f.question} ${f.answer}`;
+      const score = textTokenOverlap(hay, query);
+      if (score <= 0) continue;
+      // Substring question bonus
+      const bonus = query.trim().length >= 3 && f.question.toLowerCase().includes(query.toLowerCase().trim()) ? 0.3 : 0;
+      const snippet = (f.answer.length > 320 ? f.answer.slice(0, 320) + '…' : f.answer) || f.title;
+      const badge = `【FAQ · ${f.category || 'FAQ'}】`;
+      rawHits.push({
+        sheetId: `${badge}${f.id}`,
+        title: `${f.model || f.category} · ${f.title || '常见问题'}`,
+        body: `## 问题\n${f.question}\n\n## 答案\n${snippet}`,
+        score: score + bonus,
+      });
+    }
   }
 
   rawHits.sort((a, b) => b.score - a.score);

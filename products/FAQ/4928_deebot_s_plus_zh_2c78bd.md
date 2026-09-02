@@ -1,0 +1,23 @@
+---
+category: DEEBOT
+model: 普朗克S PLUS（X12S Series）FAQ2.0
+model_slug: s_plus
+lang: zh
+source: FAQ/DEEBOT/普朗克S PLUS（X12S Series）FAQ2.0.xlsx
+source_sheet: CN
+kind: faq
+version: 1
+---
+
+# 机器人语音提示“集尘袋安装异常”时，应如何处理？
+
+> **产品线**：DEEBOT　**语言**：zh
+>
+
+## 问题 / Question
+
+机器人语音提示“集尘袋安装异常”时，应如何处理？
+
+## 答案 / Answer
+
+DEEBOT X12S PRO OMNI/DEEBOT X12S PRO,DEEBOT X12S PRO with Auto Refill And Drain/DEEBOT X12S PRO 上下水款

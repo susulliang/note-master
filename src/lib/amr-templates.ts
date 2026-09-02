@@ -3,7 +3,8 @@
  * - AMR email/TBS templates from /AMR_Templates (HTML)
  * - Macro TBS steps from /Macro/split (Markdown)
  * - GOAT error codes from /QNA/GOAT_Error_Codes (Markdown)
- * - Product FAQs from /QNA/FAQ (Markdown)
+ * - Legacy /QNA/FAQ (Markdown) → badge: MACRO (old library, not real FAQ)
+ * - Real product FAQs from /products/FAQ/** (Markdown) → badge: FAQ
  * Filenames are the search index ("026_Driving_Wheel_Stuck.html" →
  * "driving wheel stuck"); content is parsed on demand for the viewer panel.
  */
@@ -21,8 +22,8 @@ export interface TemplateEntry {
   nameStem: string;
   /** Raw content: HTML for AMR templates, Markdown otherwise */
   raw: string;
-  /** Where the template came from */
-  kind: 'amr' | 'tbs' | 'err' | 'faq';
+  /** Where the template came from — `macro` = old QNA/FAQ (MACRO badge); `faq` = real products/FAQ (FAQ badge) */
+  kind: 'amr' | 'tbs' | 'err' | 'faq' | 'macro';
   /** Grouping label, e.g. "AMR Email" / "TBS · General" */
   category: string;
 }
@@ -45,7 +46,17 @@ const goatErrorModules = import.meta.glob('/QNA/GOAT_Error_Codes/*.md', {
   eager: true,
 }) as Record<string, string>;
 
-const faqModules = import.meta.glob('/QNA/FAQ/*.md', {
+// OLD legacy QNA/FAQ/*.md — previously rendered as FAQ badge. Per user request
+// these are demoted to MACRO badge; the real FAQ badge lives on /products/FAQ/**.md
+const legacyQnaFaqModules = import.meta.glob('/QNA/FAQ/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+// REAL FAQ content (generated from Excel sheets via scripts/build-faq-md.mjs).
+// Using **/*.md because they live in /products/FAQ/ (ASCII filenames — no glob bug).
+const productFaqModules = import.meta.glob('/products/FAQ/**/*.md', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -121,7 +132,7 @@ function makeEntry(
   };
 }
 
-/** All searchable templates: AMR emails, macro TBS steps, error codes, FAQs */
+/** All searchable templates: AMR emails, macro TBS steps, error codes, legacy macros + real FAQs */
 export const ALL_TEMPLATES: TemplateEntry[] = [
   ...Object.entries(rawModules).map(([path, raw]) =>
     makeEntry(path, raw, 'amr', 'AMR Email')
@@ -142,9 +153,25 @@ export const ALL_TEMPLATES: TemplateEntry[] = [
       }
       return entry;
     }),
-  ...Object.entries(faqModules)
+  // OLD QNA/FAQ/*.md → MACRO badge (user explicitly demoted these)
+  ...Object.entries(legacyQnaFaqModules)
     .filter(([path]) => !/(INDEX|FAQ_\d+)/i.test(path) || /FAQ_by_Product/i.test(path))
-    .map(([path, raw]) => makeEntry(path, raw, 'faq', 'FAQ')),
+    .map(([path, raw]) => makeEntry(path, raw, 'macro', 'FAQ Legacy · MACRO')),
+  // REAL products/FAQ/**/*.md → FAQ badge (new real FAQ)
+  ...Object.entries(productFaqModules)
+    .map(([path, raw]) => {
+      // FAQ MD has frontmatter with category + model + heading; try to extract
+      // richer display name from the `# heading` and frontmatter, but fall back
+      // to slug if absent.
+      const fmCat = raw.match(/^category:\s*(.+)\s*$/m)?.[1]?.trim() || 'FAQ';
+      const fmModel = raw.match(/^model:\s*(.+)\s*$/m)?.[1]?.trim() || '';
+      const h1 = raw.match(/^#\s+(.+)$/m)?.[1]?.trim() || fileNameToName(path.split('/').pop() ?? path);
+      const display =
+        (fmModel && h1 && fmModel.toLowerCase().includes(h1.toLowerCase().slice(0, 10)) === false)
+          ? `${fmCat} · ${fmModel || h1} — ${h1.length > 90 ? h1.slice(0, 90) + '…' : h1}`
+          : `${fmCat} · ${h1.length > 100 ? h1.slice(0, 100) + '…' : h1}`;
+      return makeEntry(path, raw, 'faq', `FAQ · ${fmCat}`, display);
+    }),
 ].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 
 // ---------------------------------------------------------------------

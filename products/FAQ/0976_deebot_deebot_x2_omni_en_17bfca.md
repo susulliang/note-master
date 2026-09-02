@@ -1,0 +1,33 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT X2 OMNI
+model_slug: deebot_x2_omni
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT X2 OMNI.XLSX
+source_sheet: FR
+kind: faq
+version: 1
+---
+
+# L'assistant vocal YIKO ne fonctionne pas ou il y a un délai de réponse après l'activation via « OK YIKO ».
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+L'assistant vocal YIKO ne fonctionne pas ou il y a un délai de réponse après l'activation via « OK YIKO ».
+
+## 答案 / Answer
+
+D20439
+
+YIKO
+
+1. S'assurer que le DEEBOT est connecté à l'application ECOVACS HOME et que l'assistant vocal YIKO est activé dans l'application.
+2. Dire « OK YIKO » au DEEBOT avec une voix plus standard pour que YIKO puisse comprendre. Vous pouvez suivre les instructions de l'assistant vocal dans l'application.
+3. Si l'environnement est trop bruyant ou si le DEEBOT est loin, YIKO risque de ne pas reconnaître les commandes vocales.
+4. S'assurer que le signal Wi-Fi du domicile est bon et que les versions de l'application ECOVACS HOME et du micrologiciel DEEBOT sont les plus récentes.
+
+Remarque : l'assistant vocal YIKO ne fonctionne pas pendant un appel vocal vidéo.
+Si le problème persiste, réinitialiser le DEEBOT et réessayer.
