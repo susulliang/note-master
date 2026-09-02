@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -126,6 +126,89 @@ function contentTypeFor(filePath: string): string {
 }
 
 /**
+ * Takes over every `*.md?raw` static import issued from
+ * `src/utils/_productMdImports.ts` (8198 imports).
+ *
+ * Why this is needed (as of Vite 8.1.4 / rolldown builtin bundler on Vercel):
+ *
+ *   1. rolldown fails `[UNRESOLVED_IMPORT]` for any import specifier that
+ *      contains CJK characters, spaces or parentheses (even though the files
+ *      exist on disk). ~9 of our 59 core products/*.md files have Chinese
+ *      filenames with spaces.
+ *   2. The `?raw` Vite suffix must live INSIDE the quoted module specifier
+ *      (we already fixed the generator for that), but rolldown's native
+ *      resolver runs BEFORE the builtin `?raw` transform and tries to find
+ *      a file on disk whose name literally ends with `.md?raw` — that file
+ *      obviously doesn't exist, so it reports UNRESOLVED_IMPORT for
+ *      EVERY SINGLE static ?raw import (8198 total, including the 8139 FAQ
+ *      files whose names are pure ASCII).
+ *
+ * This plugin short-circuits rolldown's resolver for every .md?raw import
+ * by:
+ *   a) resolving the specifier (including any ?raw suffix) to an absolute
+ *      disk path relative to the importer file, and
+ *   b) emitting a virtual module (`\0` prefix so rolldown skips fs resolve)
+ *      whose code is `export default "<file content as JSON string>"` —
+ *      exactly equivalent to Vite's own ?raw semantics.
+ */
+function mdRawStaticImportResolverPlugin(): Plugin {
+  const VIRTUAL_PREFIX = '\0ecovacs-md-raw:';
+  // Warm cache — 8198 files read many times in dev HMR cycles, so skip
+  // redundant FS calls on the same path.
+  const fileContentCache = new Map<string, string>();
+
+  return {
+    name: 'ecovacs-md-raw-resolver',
+    enforce: 'pre', // intercept BEFORE rolldown builtin resolver / vite ?raw
+    resolveId(id: string, importer?: string) {
+      // Short-circuit only the pattern we own: "<anything>.md?raw",
+      // issued from our static imports file.
+      if (!id.endsWith('.md?raw')) return null;
+      if (importer && !importer.includes('_productMdImports')) return null;
+
+      // Strip ?raw suffix robustly (no off-by-one on CJK string lengths).
+      const mdRel = id.replace(/\?raw$/, '');
+      if (!importer) return null;
+
+      // Resolve the relative path against the importer file's directory.
+      // IMPORTANT: The import in _productMdImports.ts is "../../products/X.md"
+      // (two levels up from src/utils/ → repo root). We also keep a fallback
+      // path against process.cwd() (known repo root) in case a future change
+      // relocates the importer file or adjusts the relative prefix.
+      const relativeToImporter = path.resolve(path.dirname(importer), mdRel);
+      if (existsSync(relativeToImporter)) {
+        return VIRTUAL_PREFIX + relativeToImporter;
+      }
+      // Fallback: strip leading "../" segments and resolve against cwd.
+      const stripped = mdRel.replace(/^(\.\.\/)+/, '');
+      const relativeToCwd = path.resolve(process.cwd(), stripped);
+      if (existsSync(relativeToCwd)) {
+        return VIRTUAL_PREFIX + relativeToCwd;
+      }
+      // Return null to let the default resolver emit a proper error for
+      // genuinely-missing files (we've done everything we reasonably can).
+      return null;
+    },
+    load(id: string) {
+      if (!id.startsWith(VIRTUAL_PREFIX)) return null;
+      const absPath = id.slice(VIRTUAL_PREFIX.length);
+      const cached = fileContentCache.get(absPath);
+      if (cached !== undefined) return cached;
+      let raw: string;
+      try {
+        raw = readFileSync(absPath, 'utf8');
+      } catch (e) {
+        this.error(`ecovacs-md-raw: cannot read ${absPath} (${String(e)})`);
+        return null;
+      }
+      const out = `export default ${JSON.stringify(raw)};`;
+      fileContentCache.set(absPath, out);
+      return out;
+    },
+  };
+}
+
+/**
  * Canonical Vite config — used by both `vite` (dev) and `vite build` (prod).
  *
  * Previously this project consumed `@lark-apaas/coding-preset-vite-react`,
@@ -153,6 +236,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       react(),
       sopFolderPlugin(),
+      mdRawStaticImportResolverPlugin(),
       {
         name: 'ecovacs-capabilities-stub',
         resolveId(id) {

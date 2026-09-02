@@ -45,12 +45,15 @@ const recordEntries = [];
 
 allMd.forEach((rel, i) => {
   const ident = `md_${i.toString().padStart(5, '0')}`;
-  // IMPORTANT: ?raw suffix must live INSIDE the quoted module specifier string
-  // (before JSON.stringify), not appended after the closing quote. Rolldown in
-  // Vite 7 rejects extra tokens after the import specifier, and `?raw` is only
-  // recognized by Vite's import transform when it's part of the path string.
-  const importSpecifier = JSON.stringify(`../products/${rel}?raw`);
+  // _productMdImports.ts lives in src/utils/. From that location to repo-root /products/
+  // is two levels up → ../../products/<rel>. The ?raw Vite suffix is part of the
+  // quoted module specifier (Vite's ?raw transform + our custom resolver plugin
+  // both expect it INSIDE the closing quote / path string).
+  const importSpecifier = JSON.stringify(`../../products/${rel}?raw`);
   imports.push(`import ${ident} from ${importSpecifier};`);
+  // In-memory record key uses the bare relative path (no ../ prefix, no ?raw)
+  // because productData.ts indexes ALL_PRODUCT_MD with the stable sheet/file
+  // name as it was produced by the FAQ converter.
   recordEntries.push(`  ${JSON.stringify(rel)}: ${ident}`);
 });
 
