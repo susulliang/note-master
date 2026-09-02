@@ -1029,21 +1029,27 @@ function FlowNodeComponent({
               ? 'border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300'
               : parsedSource === 'paraphrase'
                 ? 'border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300'
-                : 'border-sky-400/40 bg-sky-400/15 text-sky-600 dark:text-sky-300'
+                : parsedSource === 'dom-ext'
+                  ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-700 dark:text-emerald-300'
+                  : 'border-sky-400/40 bg-sky-400/15 text-sky-600 dark:text-sky-300'
           )}
           title={
             parsedSource === 'llm'
               ? 'Filled by the on-device AI parser from the whole conversation — please verify'
               : parsedSource === 'paraphrase'
                 ? 'AI-polished condensation of the transcript — please verify'
-                : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
+                : parsedSource === 'dom-ext'
+                  ? 'Filled directly from the CCP / Salesforce tab DOM via the browser extension — trust level highest'
+                  : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
           }
         >
           {parsedSource === 'llm'
             ? 'AI parsed'
             : parsedSource === 'paraphrase'
               ? 'AI polished'
-              : 'auto parsed'}
+              : parsedSource === 'dom-ext'
+                ? 'Extension DOM'
+                : 'auto parsed'}
         </span>
       )}
       {renderContent()}

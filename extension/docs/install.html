@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ecovacs CCP Scraper — Install Guide</title>
+    <style>
+      :root {
+        --bg: #0d1117; --card: #161b22; --border: #30363d;
+        --fg: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+        --primary: #2ea043; --warn: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 40px 24px;
+        background: var(--bg); color: var(--fg);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "JetBrains Mono", monospace;
+        font-size: 14px; line-height: 1.6;
+        max-width: 880px; margin-inline: auto;
+      }
+      a { color: var(--accent); }
+      h1 { font-size: 22px; margin: 0 0 6px; }
+      h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-top: 36px; border-left: 3px solid var(--primary); padding-left: 10px; }
+      h3 { font-size: 14px; margin-top: 22px; color: var(--fg); }
+      p.sub { margin: 0 0 18px; color: var(--muted); }
+      ol, ul { padding-left: 20px; }
+      li { margin: 6px 0; }
+      code, pre { font-family: inherit; background: var(--card); border: 1px solid var(--border); border-radius: 6px; }
+      code { padding: 1px 6px; font-size: 12.5px; color: var(--accent); }
+      pre { padding: 12px; overflow-x: auto; font-size: 12px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-left: 8px; }
+      .badge.ok { color: var(--primary); border: 1px solid var(--primary); background: rgba(46,160,67,.12); }
+      .badge.warn { color: var(--warn); border: 1px solid var(--warn); background: rgba(210,153,34,.12); }
+      kbd { background: #21262d; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font-size: 11.5px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Ecovacs Ticket DOM Scraper · Install Guide</h1>
+    <p class="sub">Manifest V3 browser extension. Loaded as an unpacked extension in Chrome and Edge (one procedure, both browsers). <span class="badge ok">Tier-2 MV3</span></p>
+
+    <div class="card">
+      <strong>What it does.</strong> Scrapes the live DOM of two open browser tabs every ~15s:
+      <ul>
+        <li>your CCaaS softphone (Amazon Connect CCP, Five9, Genesys, Zendesk, Talkdesk, Freshdesk)</li>
+        <li>your Salesforce Case / Contact / Console tab (Lightning, Classic, Visualforce).</li>
+      </ul>
+      Each scrape is pushed to the open Ticket Notes web-app tab on <code>localhost</code> or <code>*.vercel.app</code>, and auto-fills matching form fields (customer name, phone, email, serial, model, case number, …). Nothing is uploaded anywhere.
+    </div>
+
+    <h2>1 · Install (Chrome &amp; Microsoft Edge)</h2>
+    <ol>
+      <li>Open the extension management page:
+        <div class="grid">
+          <div class="card"><strong>Chrome:</strong> navigate to <code>chrome://extensions</code>.</div>
+          <div class="card"><strong>Edge:</strong> navigate to <code>edge://extensions</code>.</div>
+        </div>
+      </li>
+      <li>In the top-right corner, turn on the <strong>Developer mode</strong> toggle.</li>
+      <li>Click <strong>Load unpacked</strong> (Chrome) or <strong>Load unpacked extension</strong> (Edge, in the top toolbar that appeared after turning Developer mode on).</li>
+      <li>Select the <strong><code>extension/</code></strong> folder inside this repo. Confirm the folder contains <code>manifest.json</code>.</li>
+      <li>Done. A new green phone-and-ticket icon appears in the browser toolbar. Pin it for fast access.</li>
+      <li><em>(Optional)</em> Open the popup once, then click the <strong>Extension ID</strong> at the bottom to copy it. Paste this ID into <code>extensionId</code> field in the Ticket Notes settings if you want it to skip the fallback bridge.</li>
+    </ol>
+
+    <h2>2 · How to use</h2>
+    <ol>
+      <li>Open three browser tabs in the same profile:
+        <ul>
+          <li><strong>CCP tab</strong> — your Amazon Connect CCP or equivalent softphone; answer calls as normal.</li>
+          <li><strong>Salesforce tab</strong> — open the Case/Contact you are working on. Make sure it's visible so the scraper can read labelled fields.</li>
+          <li><strong>Ticket Notes tab</strong> — the note-master app (localhost / Vercel). Keep it open in the same profile.</li>
+        </ul>
+      </li>
+      <li>Start the call as usual. Whenever the CCP loads a contact, or whenever Salesforce finishes loading the Case record, the extension auto-captures the DOM within ~3 seconds and merges the fields.</li>
+      <li>Click the extension icon (popup) to:
+        <ul>
+          <li>See the latest captured CCP + Salesforce fields.</li>
+          <li>Force a <strong>Re-scrape both tabs</strong>.</li>
+          <li>Force <strong>Push to open Ticket Notes</strong> (happens automatically if Auto-push is ON).</li>
+          <li>Toggle Auto-push on/off.</li>
+        </ul>
+      </li>
+      <li>Back in the Ticket Notes page, each pushed field gets a <em>"Extension DOM"</em> yellow source badge, exactly like regex/LLM fields. Bold-highlighted notes and Hang Up continue to work on top.</li>
+    </ol>
+
+    <h2>3 · Which fields are captured?</h2>
+    <table>
+      <thead>
+        <tr><th>Field id</th><th>Labeled as (in CCP / SF)</th><th>Source</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>customerName</code></td><td>customer / contact / full name</td><td>CCP + SF</td></tr>
+        <tr><td><code>contactNumber</code></td><td>phone / mobile / ANI / callback</td><td>CCP + SF</td></tr>
+        <tr><td><code>emailAddress</code></td><td>email</td><td>CCP + SF</td></tr>
+        <tr><td><code>shippingAddress</code></td><td>address / street / city / state / zip</td><td>SF</td></tr>
+        <tr><td><code>serialNumber</code></td><td>serial number / s/n</td><td>CCP attrs + SF</td></tr>
+        <tr><td><code>skuNumber</code></td><td>SKU / part number / product code</td><td>SF</td></tr>
+        <tr><td><code>deebotModel</code></td><td>model / product / robot / device</td><td>CCP attrs + SF</td></tr>
+        <tr><td><code>purchaseInfo</code></td><td>purchase date / store / retailer</td><td>SF</td></tr>
+        <tr><td><code>caseNumber</code></td><td>case # / ticket id / SF Id prefix 500</td><td>CCP attrs + SF</td></tr>
+        <tr><td><code>issueType</code></td><td>case type / category / queue</td><td>CCP queue + SF</td></tr>
+        <tr><td><code>issueTitle</code></td><td>subject / ticket title</td><td>SF</td></tr>
+        <tr><td><code>detailedIssue</code></td><td>description / case description</td><td>SF</td></tr>
+        <tr><td><code>resolutionSummary</code></td><td>resolution / workaround</td><td>SF</td></tr>
+        <tr><td><code>caseOwner</code>, <code>caseStatus</code></td><td>owner / assigned agent / status</td><td>SF</td></tr>
+      </tbody>
+    </table>
+    <p>Plus, for Amazon Connect specifically — if the CCP is running the official <code>connect-streams</code> SDK (almost always true), the scraper reads directly from <code>window.connect.agent.getContacts()</code> instead of the DOM, so contact attributes, initial contact id, queue name and ANI are 100% accurate even after re-skins.</p>
+
+    <h2>4 · Permissions requested</h2>
+    <table>
+      <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><code>storage</code></td><td>Remember auto-push setting and persist scraped snapshots across service-worker sleep/wake.</td></tr>
+        <tr><td><code>tabs</code></td><td>Find the open CCP / Salesforce / Ticket Notes tabs by URL pattern.</td></tr>
+        <tr><td><code>scripting</code></td><td>Reserved for a future "run on-demand" command; currently unused.</td></tr>
+        <tr><td><code>activeTab</code></td><td>Allows the popup's "Refresh" button to work on newly shared tabs without re-requesting host permissions.</td></tr>
+        <tr><td><code>host_permissions</code> (CCP, Salesforce, localhost, Vercel)</td><td>Injects the content scripts that scrape DOM and bridges pushes to the Ticket Notes tab.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>5 · Troubleshooting</h2>
+    <ul>
+      <li><strong>No CCP tab found.</strong> Confirm your softphone URL matches one in <code>manifest.json</code> → <code>content_scripts[0].matches</code>. If you use a branded domain, add it in <code>manifest.json</code> and reload the extension (button on <code>chrome://extensions</code> card).</li>
+      <li><strong>Salesforce fields are empty.</strong> Salesforce lazy-loads details panels; click the "Re-scrape both tabs" button in the popup once the Case layout is fully rendered, or wait 7 seconds — the scraper fires twice on load with a delay.</li>
+      <li><strong>Push to Ticket Notes says "no open tab".</strong> The Ticket Notes tab must be in the same browser profile, and running on <code>localhost</code>, <code>127.0.0.1</code>, or <code>*.vercel.app</code>. For a custom domain, add it to both <code>host_permissions</code> and the <code>bridge.js</code> content-script <code>matches</code> in <code>manifest.json</code>.</li>
+      <li><strong>Amazon Connect contact attributes missing.</strong> Make sure the <code>connect-streams</code> library is loaded in the CCP (it usually is — the Connect CCP bootstraps it). The DOM fallback will still fill basic fields if it's not.</li>
+      <li><strong>Edge popup shows "Could not reach extension background".</strong> First click of the session can race with service worker wake; click any button once and it will recover.</li>
+    </ul>
+
+    <h2>6 · Uninstall</h2>
+    <ol>
+      <li>Open <code>chrome://extensions</code> or <code>edge://extensions</code>.</li>
+      <li>Find the <strong>Ecovacs Ticket DOM Scraper</strong> card.</li>
+      <li>Click <strong>Remove</strong> and confirm.</li>
+    </ol>
+
+    <h2>7 · Packaging for self-distribution (optional)</h2>
+    <p>To distribute the `.crx` / `.nex` internally (instead of "Load unpacked"):</p>
+    <pre><code># Chrome: chrome://extensions → Pack extension → select extension/ folder.
+# Edge:   edge://extensions  → Pack extension → select extension/ folder.
+# Both browsers produce a signed .crx / .nex plus a .pem key file (keep safe for updates).</code></pre>
+    <p>For enterprise rollout via Chrome Web Store / Edge Add-ons, the manifest already carries the required <code>minimum_chrome_version: 114</code> and MV3 shape; zip the <code>extension/</code> folder and upload to the respective developer dashboards.</p>
+  </body>
+</html>

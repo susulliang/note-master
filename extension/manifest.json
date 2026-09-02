@@ -1,0 +1,106 @@
+{
+  "manifest_version": 3,
+  "name": "Ecovacs Ticket DOM Scraper",
+  "short_name": "CCP Scraper",
+  "version": "0.1.0",
+  "description": "Tier-2 browser extension: scrapes the current CCP (Amazon Connect / Five9 / Genesys) tab and the Salesforce Case / Ticket tab, then pushes customer / case fields straight into the Ticket Notes web app.",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Ecovacs Ticket DOM Scraper",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://*.my.connect.aws/*",
+    "https://*.connect.aws.a2z.com/*",
+    "https://*.awsapps.com/connect/*",
+    "https://*.cc.amazonaws.com/*",
+    "https://*.lightning.force.com/*",
+    "https://*.my.salesforce.com/*",
+    "https://*.salesforce.com/*",
+    "https://*.visual.force.com/*",
+    "https://*.cloudfront.net/*",
+    "https://*.vercel.app/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "externally_connectable": {
+    "ids": [],
+    "matches": [
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*",
+      "https://*.vercel.app/*",
+      "https://note-master.vercel.app/*"
+    ],
+    "accepts_tls_channel_id": false
+  },
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.my.connect.aws/*",
+        "https://*.connect.aws.a2z.com/*",
+        "https://*.awsapps.com/connect/*",
+        "https://*.cc.amazonaws.com/*",
+        "https://*.five9.com/*",
+        "https://*.genesys.com/*",
+        "https://*.genesyscloud.com/*",
+        "https://*.talkdesk.com/*",
+        "https://*.zendesk.com/*",
+        "https://*.freshdesk.com/*"
+      ],
+      "js": ["content/content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.lightning.force.com/*",
+        "https://*.my.salesforce.com/*",
+        "https://*.salesforce.com/*",
+        "https://*.visual.force.com/*",
+        "https://*.force.com/*"
+      ],
+      "js": ["content/salesforce.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*.vercel.app/*",
+        "https://note-master.vercel.app/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["bridge.js", "content/*", "popup/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'"
+  }
+}

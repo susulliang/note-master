@@ -64,7 +64,7 @@ export interface ExtractedField {
  *                   conversation; authoritative over everything except
  *                   human-typed text (which it appends to).
  */
-export type AutoFillSource = 'regex' | 'regex-grow' | 'paraphrase' | 'llm';
+export type AutoFillSource = 'regex' | 'regex-grow' | 'paraphrase' | 'llm' | 'dom-ext';
 
 /**
  * Which speech a field may be parsed from. The agent works FOR Ecovacs and

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ecovacs Ticket DOM Scraper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="h">
+      <img src="../icons/icon-32.png" alt="Ecovacs" class="h__icon" />
+      <div>
+        <h1>Ticket DOM Scraper</h1>
+        <p class="h__sub" id="ver">v0.1.0 · warming up…</p>
+      </div>
+      <span class="badge" id="badgeConnect">—</span>
+    </header>
+
+    <section class="row">
+      <div class="card ccp">
+        <div class="card__head">
+          <span class="dot"></span>
+          <h2>CCP tab</h2>
+          <button class="btn btn-ghost" id="btnCcp" title="Re-scrape CCP tab now">Refresh</button>
+        </div>
+        <p class="card__meta" id="ccpMeta">Not captured yet.</p>
+        <ul class="kv" id="ccpKv"></ul>
+      </div>
+      <div class="card sf">
+        <div class="card__head">
+          <span class="dot"></span>
+          <h2>Salesforce tab</h2>
+          <button class="btn btn-ghost" id="btnSf" title="Re-scrape Salesforce Case tab now">Refresh</button>
+        </div>
+        <p class="card__meta" id="sfMeta">Not captured yet.</p>
+        <ul class="kv" id="sfKv"></ul>
+      </div>
+    </section>
+
+    <section class="row">
+      <button class="btn btn-primary" id="btnScrapeAll">Re-scrape both tabs</button>
+      <button class="btn btn-accent" id="btnPush">Push to open Ticket Notes</button>
+    </section>
+
+    <section class="row row--settings">
+      <label class="toggle">
+        <input type="checkbox" id="cbAuto" />
+        <span>Auto-push new scrapes to the Ticket Notes tab.</span>
+      </label>
+    </section>
+
+    <footer class="f">
+      <div>
+        Extension ID:
+        <code id="extId" title="Click to copy">…</code>
+      </div>
+      <a id="docsLink" href="../docs/install.html" target="_blank" rel="noreferrer">Install guide</a>
+    </footer>
+
+    <div class="toast" id="toast" aria-live="polite"></div>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

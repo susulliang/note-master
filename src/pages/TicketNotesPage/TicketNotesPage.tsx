@@ -31,6 +31,7 @@ import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { useLlmParser } from '@/hooks/use-llm-parser';
 import { useCloudParser } from '@/hooks/use-cloud-parser';
+import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
 import { generateWithDeepseek } from '@/lib/cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
@@ -941,6 +942,17 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     [formData, setFormData, pushUndo, parsedFields]
   );
 
+  /** Stable forwarder for useCcpExtensionBridge: defined HERE immediately
+   *  after handleAutoFill so the useCcpExtensionBridge call (appearing a
+   *  few lines below, after useVoiceTranscription) can forward into it
+   *  without a temporal-dead-zone TypeScript/JS error. */
+  const autoFillRef = useRef<(fieldId: string, value: string, source: AutoFillSource) => void>(
+    handleAutoFill
+  );
+  useEffect(() => {
+    autoFillRef.current = handleAutoFill;
+  }, [handleAutoFill]);
+
   const voice = useVoiceTranscription(handleAutoFill);
 
   // ---------------------------------------------------------------------
@@ -988,6 +1000,44 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
   const call = useCallCapture(handleAutoFill, localWhisper, llmParser, cloudParser);
+
+  // -------------------------------------------------------------------------
+  //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
+  //  The hook has already converted extension flat-keys into form node ids
+  //  via EXT_TO_NODE_ID, so we write straight to handleAutoFill using a
+  //  stable ref (handleAutoFill is declared later in the component body).
+  //  dom-ext source is treated by mergeAutoFill at the same precedence tier
+  //  as the main LLM parser — i.e. it overrides regex/paraphrase drafts but
+  //  never overwrites a field the human has proofread.
+  // -------------------------------------------------------------------------
+  useCcpExtensionBridge({
+    source: 'dom-ext',
+    onApply: (mapped, _meta, _raw) => {
+      const applied: Array<{ fieldId: string; value: string }> = [];
+      for (const [nodeId, value] of Object.entries(mapped)) {
+        if (!value) continue;
+        try {
+          // Prefer FIELD_TO_NODE lookups (handleAutoFill signature). The
+          // hook already translated extension keys to canvas node ids, so
+          // for fields where FIELD_TO_NODE entry does not use the same id,
+          // we fall back to treating the `nodeId` as the raw form key by
+          // also writing it through setFormData directly when needed.
+          const knownFieldKey =
+            (Object.entries(FIELD_TO_NODE).find(([, v]) => v === nodeId)?.[0] as string | undefined) ?? nodeId;
+          // handleAutoFill path: merges multi-sentence textareas, skips
+          // proofread fields, marks parsedFields badge, etc.
+          autoFillRef.current(knownFieldKey, value, 'dom-ext');
+          applied.push({ fieldId: nodeId, value });
+        } catch {
+          // Field-level failures shouldn't drop the whole payload.
+        }
+      }
+      if (applied.length > 0) {
+        toast.success(`Extension DOM filled ${applied.length} field${applied.length === 1 ? '' : 's'}.`);
+      }
+      return applied;
+    },
+  });
 
   /** Panel mic-mode toggle (no longer in the toolbar — call capture covers
    *  both speakers with the same Mic icon) */
