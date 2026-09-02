@@ -68,20 +68,22 @@ const CANVAS_MARGIN = 16;
 const ROW_GAP = 32;
 /** Gap between wrapped lines inside one semantic row */
 const LINE_GAP = 20;
+/** Vertical gap between stacked panels inside the left-side column */
+const LEFT_COL_STACK_GAP = 20;
 const MIN_COL_GAP = 16;
 const MAX_COL_GAP = 28;
 const FALLBACK_CONTAINER_WIDTH = 900;
-/** Above this canvas width the Transcript panel pins itself as a left-side
- *  column outside the main flow grid, vertically anchored at the top so it
- *  visually sits "left of (and a bit above) the top-left START node". On
- *  narrower screens it flows above the opening row as the first element at
- *  the very top of the canvas so the transcript never pushes the flow
- *  horizontally out of view. */
+/** Above this canvas width the three reference panels (Transcript, Matching
+ *  Templates, SOP) stack into a dedicated left-side column pinned at the
+ *  top-left of the canvas. The main ticket flow grid then flows in the
+ *  pane to the right of that column. On narrower screens all three panels
+ *  stay in their original semantic rows inside NODE_LAYOUT_ROWS so nothing
+ *  is horizontally pushed off-screen. */
 const WIDE_SCREEN_CANVAS_WIDTH = 1320;
-/** Fixed left-column width used for the Transcript panel on wide screens.
- *  Must be at least the transcript node's width; extra space is pure gutter
- *  so the main flow's START node is visually offset right of the transcript. */
-const TRANSCRIPT_LEFT_COLUMN_WIDTH = 700;
+/** Minimum width reserved for the left-side column (px). It must be wide
+ *  enough for the Transcript panel; SOP + Matching Template are sized to
+ *  fit in the same column so they align cleanly underneath it. */
+const LEFT_COLUMN_WIDTH = 700;
 
 // Approximate node dimensions for connection point + layout calculations
 const NODE_VERTICAL_PADDING = 6; // py-1.5 x2
@@ -181,27 +183,33 @@ function computeDefaultLayout(
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
 
+  // Three reference panels that live in the left-side column on WIDE
+  // screens. On narrow screens they stay in their original semantic rows.
+  // Ordered top → bottom as they appear stacked under the Transcript.
+  const LEFT_COL_IDS: Array<string> = [
+    NODE_IDS.TRANSCRIPT_PANEL,
+    NODE_IDS.TEMPLATE_MATCHES,
+    NODE_IDS.SOP_PANEL,
+  ];
+  const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
+    .map((id) => (!hiddenNodes?.has(id) ? nodeById.get(id) ?? null : null))
+    .filter((n): n is NodeConfig => Boolean(n));
+
   // WIDE vs NARROW layout split:
-  //   WIDE (canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH):
-  //     Transcript panel pins to the LEFT as a dedicated side column at the
-  //     top of the canvas. The main flow grid then runs inside a reduced
-  //     "right pane" that starts at CANVAS_MARGIN + TRANSCRIPT_LEFT_COLUMN_WIDTH
-  //     + colGap, so the opening row (START / Customer / Contact / Transition)
-  //     sits visually *to the right* of the transcript.
+  //   WIDE (canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH and at least one
+  //     left-column panel is visible and the remaining right pane has room
+  //     for the ticket flow):
+  //       Transcript / Templates / SOP stack into a dedicated left column
+  //       top-aligned at (CANVAS_MARGIN, CANVAS_MARGIN). The main ticket
+  //       flow grid runs in the pane to their right so the opening START
+  //       row sits visually *to the right* of the Transcript panel.
   //   NARROW:
-  //     Transcript panel goes ABOVE the opening row as the very first block
-  //     at the top of the canvas so no node content is pushed off-screen.
-  //
-  // When the Transcript panel itself is hidden via the BOXES toggle both
-  // layouts collapse to the classic single-grid flow (no reserved column,
-  // no extra top space).
-  const TRANSCRIPT_ID = NODE_IDS.TRANSCRIPT_PANEL;
-  const transcriptNode = !hiddenNodes?.has(TRANSCRIPT_ID) ? nodeById.get(TRANSCRIPT_ID) ?? null : null;
-  // Breakpoint: wide if the canvas is big enough AND the transcript (if
-  // visible) has enough room to sit left-of the flow without cramming it.
-  const flowPaneCandidateLeft = CANVAS_MARGIN + TRANSCRIPT_LEFT_COLUMN_WIDTH + MIN_COL_GAP;
+  //       All three panels stay in their NODE_LAYOUT_ROWS rows and the
+  //       grid is the classic single-pane layout.
+  const anyLeftColVisible = leftColNodesVisible.length > 0;
+  const flowPaneCandidateLeft = CANVAS_MARGIN + LEFT_COLUMN_WIDTH + MIN_COL_GAP;
   const isWide = Boolean(
-    transcriptNode &&
+    anyLeftColVisible &&
       canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
       canvasWidth - CANVAS_MARGIN - flowPaneCandidateLeft >= 360
   );
@@ -211,34 +219,30 @@ function computeDefaultLayout(
   if (isWide) mainAvailLeft = flowPaneCandidateLeft;
   const flowAvailWidth = Math.max(160, mainMaxRight - mainAvailLeft);
 
-  // 1) Position the Transcript panel first.
+  // 1) WIDE: stack the three reference panels top → bottom in the left col.
   let yCursor = CANVAS_MARGIN;
-  if (transcriptNode) {
-    if (isWide) {
-      // LEFT COLUMN, top-aligned: at CANVAS_MARGIN, y = CANVAS_MARGIN
-      positions[TRANSCRIPT_ID] = { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
-      // The main flow also starts at y = CANVAS_MARGIN so the START node
-      // sits at roughly the same visual top as the transcript (giving the
-      // "transcript is left of top-left of canvas" effect the user asked
-      // for). No vertical space consumed from the flow's yCursor.
-    } else {
-      // NARROW: Transcript stacked at the very TOP of the canvas, full
-      // flow width. After placing it, yCursor advances past the panel so
-      // the opening row appears directly underneath.
-      const tx = Math.max(CANVAS_MARGIN, (canvasWidth - (transcriptNode.width ?? 640)) / 2);
-      positions[TRANSCRIPT_ID] = { x: tx, y: yCursor };
-      yCursor += heightOf(transcriptNode) + ROW_GAP;
+  if (isWide) {
+    let leftY = CANVAS_MARGIN;
+    for (const n of leftColNodesVisible) {
+      positions[n.id] = { x: CANVAS_MARGIN, y: leftY };
+      leftY += heightOf(n) + LEFT_COL_STACK_GAP;
     }
+    // Main flow y starts at CANVAS_MARGIN (same top as the Transcript),
+    // regardless of how tall the left column stacks, so the START node
+    // stays visually aligned with the top of the page — the left column
+    // can freely grow below without pushing the flow down.
+    yCursor = CANVAS_MARGIN;
   }
+
+  const leftColSetWide = isWide ? new Set(LEFT_COL_IDS) : new Set<string>();
 
   let y = yCursor;
   for (const row of NODE_LAYOUT_ROWS) {
     const rowNodes = row
       .map((id) => nodeById.get(id))
       .filter((n): n is NodeConfig => Boolean(n))
-      // Transcript already placed (wide) or placed as top block (narrow).
-      // Either way don't include it again here in the semantic row pass.
-      .filter((n) => n.id !== TRANSCRIPT_ID)
+      // On WIDE screens the left-column panels were already placed.
+      .filter((n) => !leftColSetWide.has(n.id))
       .filter((n) => !hiddenNodes?.has(n.id));
     if (rowNodes.length === 0) continue;
 
