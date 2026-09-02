@@ -66,7 +66,7 @@ export default function OutputModal({
   noteText,
   onSaveToHistory,
 }: OutputModalProps) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<null | 'rich' | 'plain'>(null);
   const [editableText, setEditableText] = useState(noteText);
 
   // Parse contact fields out of the (possibly edited) note text.
@@ -95,14 +95,18 @@ export default function OutputModal({
   }, []);
 
   // Re-sync local editable text whenever the modal opens or noteText changes.
-  // Auto-copy on open — write BOTH the markdown source (text/plain, default
-  // paste) and a rendered HTML flavour so pasting into Confluence / Zendesk
-  // / Gmail preserves the bold highlights.
+  //
+  // USER RULE (this ticket): on-note-generation auto-copy MUST only put the
+  // RICH-TEXT payload onto the clipboard (text/html flavour — the rendered
+  // bold version agents paste into Confluence/Zendesk/Gmail). The raw
+  // markdown/plain-text flavour is intentionally NOT auto-copied here; it
+  // is only written when the agent explicitly clicks the "Copy Plain"
+  // button below.
   useEffect(() => {
     if (open) {
       setEditableText(noteText);
-      writeClipboardDual(noteText).then(
-        () => toast.success('Ticket note auto-copied (rich text ready).'),
+      writeClipboardRichOnly(noteText).then(
+        () => toast.success('Rich-text note auto-copied (bold preserved).'),
         () => {
           /* Clipboard unavailable — manual Copy stays available */
         }
@@ -110,36 +114,66 @@ export default function OutputModal({
     }
   }, [open, noteText]);
 
-  /** Write BOTH plain text (markdown source) and HTML flavours to the
-   *  clipboard. Apps that ask for text/html get the bold-rendered version;
-   *  plain text editors get the raw **…** source. */
-  const writeClipboardDual = useCallback(async (text: string): Promise<void> => {
+  /** Auto-copy path: writes ONLY the text/html (rendered bold) flavour.
+   *  Apps that accept HTML (Confluence, Zendesk, Gmail, Notion) get the
+   *  fully styled note; if the target app has no HTML reader we fall back
+   *  to the HTML-source string (still contains the <strong> tags so the
+   *  emphasis is recoverable) rather than writing a second plain flavour. */
+  const writeClipboardRichOnly = useCallback(async (text: string): Promise<void> => {
     const html = markdownToHtml(text);
     if (window.ClipboardItem) {
       try {
         const item = new ClipboardItem({
-          'text/plain': new Blob([text], { type: 'text/plain' }),
           'text/html': new Blob([html], { type: 'text/html' }),
         });
         await navigator.clipboard.write([item]);
         return;
       } catch {
-        /* fall back to plain-text copy below */
+        /* fall back below */
       }
     }
-    await navigator.clipboard.writeText(text);
+    // Old Safari / odd permission paths: still paste the HTML string, not
+    // the raw markdown. This preserves the agent's "auto copy = bold"
+    // expectation instead of silently handing back plain text.
+    await navigator.clipboard.writeText(html);
   }, []);
 
-  const handleCopy = useCallback(async () => {
+  /** Explicit RICH copy button: writes the text/html flavour exactly like
+   *  the auto-copy, but also includes a text/plain fallback so plain-text
+   *  editors don't paste HTML source. */
+  const handleCopyRich = useCallback(async () => {
     try {
-      await writeClipboardDual(editableText);
-      setCopied(true);
-      toast.success('Ticket note copied (with rich-text bold)!');
-      setTimeout(() => setCopied(false), 2000);
+      const html = markdownToHtml(editableText);
+      if (window.ClipboardItem) {
+        const item = new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([html], { type: 'text/plain' }),
+        });
+        await navigator.clipboard.write([item]);
+      } else {
+        await navigator.clipboard.writeText(html);
+      }
+      setCopied('rich');
+      toast.success('Rich-text note copied!');
+      setTimeout(() => setCopied(null), 2000);
     } catch {
       toast.error('Failed to copy. Please select and copy manually.');
     }
-  }, [editableText, writeClipboardDual]);
+  }, [editableText]);
+
+  /** Explicit PLAIN copy button: writes ONLY the raw markdown string as
+   *  text/plain. No HTML flavour — exactly what the user asked for:
+   *  "only copy the plain text field on user clicking the plain text field". */
+  const handleCopyPlain = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(editableText);
+      setCopied('plain');
+      toast.success('Plain-text note copied (raw markdown).');
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      toast.error('Failed to copy. Please select and copy manually.');
+    }
+  }, [editableText]);
 
   // Save the edited note to history once when the modal closes
   const handleOpenChange = useCallback(
@@ -248,8 +282,7 @@ export default function OutputModal({
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
           <div className="text-xs text-muted-foreground">
-            Copy writes <span className="font-mono text-accent">text/html</span> (bold) and{' '}
-            <span className="font-mono text-accent">text/plain</span> (markdown) simultaneously.
+            Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => handleOpenChange(false)} className="gap-1.5">
@@ -264,16 +297,29 @@ export default function OutputModal({
             >
               Reset to original
             </Button>
-            <Button onClick={handleCopy} className="gap-1.5">
-              {copied ? (
+            <Button variant="outline" onClick={handleCopyPlain} className="gap-1.5">
+              {copied === 'plain' ? (
                 <>
                   <Check className="size-4" />
-                  Copied!
+                  Plain Copied
+                </>
+              ) : (
+                <>
+                  <Code2 className="size-4" />
+                  Copy Plain
+                </>
+              )}
+            </Button>
+            <Button onClick={handleCopyRich} className="gap-1.5">
+              {copied === 'rich' ? (
+                <>
+                  <Check className="size-4" />
+                  Rich Copied
                 </>
               ) : (
                 <>
                   <Copy className="size-4" />
-                  Copy Rich + Plain
+                  Copy Rich
                 </>
               )}
             </Button>
