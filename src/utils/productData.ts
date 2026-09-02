@@ -1,40 +1,62 @@
 /**
  * Product data indexer. Parses the Markdown files generated from the
- * 科沃斯 products XLSX (under /workspace/products/*.md) into in-memory
+ * product XLSXs (under /workspace/products/*.md) into in-memory
  * searchable indexes.
  *
  * Sheets are grouped into four kinds:
  *   1. Comparison tables      — 01 DEEBOT, 02 GOAT, 04 WINBOT, 09 核心技术参数
+ *                               + every GBU sheet 10..58 (series spec sheets,
+ *                               legacy Deebot / OZMO / EOL / AES / Barcode)
  *                               ### Section → GFM table with models as cols 2..N
  *   2. Row-keyed lookup      — 03 GOAT Error Codes (key: error code number)
  *                               05 机型与科学家代号 (key: model)
  *   3. Model selling points  — 08 核心卖点 (cols: 系列 / 子系列 / 型号 · 卖点 · 话术)
  *   4. Free-text reference   — 06 全品类故障问题快查, 07 导航窗口
  *
- * Everything is pre-indexed eagerly at module load time (total ~2MB of MD).
+ * Everything is pre-indexed eagerly at module load time (~900KB MD total).
  */
 
-import sheet01 from '../../products/01-DEEBOT 北美在售地宝型号对比.md?raw';
-import sheet02 from '../../products/02-GOAT 北美在售割草机型号对比.md?raw';
-import sheet03 from '../../products/03-GOAT 割草机错误代码对照.md?raw';
-import sheet04 from '../../products/04-WINBOT 北美在售窗宝型号对比.md?raw';
-import sheet05 from '../../products/05-机型与科学家代号 (仅内部).md?raw';
-import sheet06 from '../../products/06-全品类故障问题快查.md?raw';
-import sheet07 from '../../products/07-导航窗口.md?raw';
-import sheet08 from '../../products/08-核心卖点.md?raw';
-import sheet09 from '../../products/09-核心技术参数.md?raw';
+type SheetRecord = { sheetKey: string; fileName: string; raw: string; numericPrefix: number };
 
-export const PRODUCT_SHEETS_RAW: Record<string, string> = {
-  '01-DEEBOT': sheet01,
-  '02-GOAT': sheet02,
-  '03-GOAT-Error-Codes': sheet03,
-  '04-WINBOT': sheet04,
-  '05-Scientist-Codes': sheet05,
-  '06-Troubleshooting': sheet06,
-  '07-Navigation': sheet07,
-  '08-Selling-Points': sheet08,
-  '09-Tech-Specs': sheet09,
-};
+const ALL_PRODUCT_MD = import.meta.glob('/products/*.md?raw', {
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+function buildSheetRecords(): SheetRecord[] {
+  const records: SheetRecord[] = [];
+  for (const [fullPath, raw] of Object.entries(ALL_PRODUCT_MD)) {
+    const fileName = fullPath.split('/').pop() ?? '';
+    if (!fileName || fileName === 'README.md') continue;
+    const stem = fileName.replace(/\.md$/i, '');
+    const prefixMatch = stem.match(/^(\d{1,2})[_\-]/);
+    const numericPrefix = prefixMatch ? parseInt(prefixMatch[1], 10) : 999;
+    records.push({ sheetKey: stem, fileName, raw, numericPrefix });
+  }
+  records.sort((a, b) => a.numericPrefix - b.numericPrefix || a.sheetKey.localeCompare(b.sheetKey));
+  return records;
+}
+
+export const SHEET_RECORDS: SheetRecord[] = buildSheetRecords();
+
+/** Convenience helper kept for backwards compatibility / tests. */
+export const PRODUCT_SHEETS_RAW: Record<string, string> = Object.fromEntries(
+  SHEET_RECORDS.map((s) => [s.sheetKey, s.raw])
+);
+
+function pickByPrefix(prefix: number): string | undefined {
+  return SHEET_RECORDS.find((s) => s.numericPrefix === prefix)?.raw;
+}
+
+const sheet01: string = pickByPrefix(1) ?? '';
+const sheet02: string = pickByPrefix(2) ?? '';
+const sheet03: string = pickByPrefix(3) ?? '';
+const sheet04: string = pickByPrefix(4) ?? '';
+const sheet05: string = pickByPrefix(5) ?? '';
+const sheet06: string = pickByPrefix(6) ?? '';
+const sheet07: string = pickByPrefix(7) ?? '';
+const sheet08: string = pickByPrefix(8) ?? '';
+const sheet09: string = pickByPrefix(9) ?? '';
 
 /* -------------------------------------------------------------------------- */
 /*                               Token Utilities                              */
@@ -476,6 +498,23 @@ export function getProductIndex(): ProductIndex {
     ...parseFreeTextSheet('Navigation', sheet07),
   ];
 
+  // All GBU sheets (numeric prefix >= 10) are comparison-style tables.
+  // Extract the H2 title / sheet heading from the raw MD as a display label,
+  // fall back to the file stem if missing.
+  const gbuComparisons: ComparisonIndex[] = [];
+  for (const rec of SHEET_RECORDS) {
+    if (rec.numericPrefix < 10) continue;
+    const heading =
+      rec.raw.match(/^##\s+(.+)$/m)?.[1]?.trim() ||
+      rec.sheetKey.replace(/^\d+[_\-]/, '').replace(/_/g, ' ');
+    const parsed = parseComparisonSheet(heading, rec.raw);
+    // Skip sheets that failed to yield any model columns and no sections.
+    if (parsed.models.length === 0 && Object.keys(parsed.sections).length === 0) continue;
+    gbuComparisons.push(parsed);
+  }
+
+  const comparisons: ComparisonIndex[] = [deebot, goat, winbot, techSpecs, ...gbuComparisons];
+
   const allModels: Array<{ name: string; tokens: Set<string>; origin: string }> = [];
   const seen = new Set<string>();
   const push = (name: string, tokens: Set<string>, origin: string) => {
@@ -484,14 +523,14 @@ export function getProductIndex(): ProductIndex {
     seen.add(key);
     allModels.push({ name, tokens, origin });
   };
-  for (const c of [deebot, goat, winbot, techSpecs]) {
+  for (const c of comparisons) {
     for (const m of c.models) push(m, c.modelTokens.get(m) ?? normalizeTokens(m), c.sheetTitle);
   }
   for (const s of sellingPoints) push(s.model, s.tokens, '卖点');
   for (const s of scientistCodes) push(s.model, s.tokens, '科学家代号');
 
   _index = {
-    comparisons: [deebot, goat, winbot, techSpecs],
+    comparisons,
     goatErrorCodes: goatErrors,
     scientistCodes,
     sellingPoints,
