@@ -115,16 +115,38 @@ async function sendToTab(tabId, payload) {
   }
 }
 
-async function scrapeCcpTab() {
-  const tab = await findTab(CCP_PATTERNS);
-  if (!tab) return { ok: false, error: 'No CCP tab found. Open Amazon Connect / Five9 / Genesys / Zendesk CCP in any tab.' };
-  const reply = await sendToTab(tab.id, { type: 'SCRAPE_CCP' });
-  if (reply?.ok) {
-    state.ccp = { capturedAt: nowISO(), url: tab.url, title: tab.title, tabId: tab.id, data: reply.data };
-    await saveState();
-    return { ok: true, payload: state.ccp };
+async function scrapeCcpTab(tabHint) {
+  // Optional tabHint = a known tab to probe first (e.g. the Salesforce tab
+  // that wraps the Connect utility bar at the bottom). Allows scraping the
+  // embedded CCP even when no standalone *.my.connect.aws tab is open.
+  const tabList = tabHint ? [tabHint] : [];
+  if (!tabHint) {
+    const t = await findTab(CCP_PATTERNS);
+    if (t) tabList.push(t);
   }
-  return { ok: false, error: reply?.error || 'CCP content script did not reply.' };
+  // Probe each tab (usually 1 except in the embedded-SF pass, where the SF
+  // tab might have a connect iframe inside: content script matches via
+  // all_frames: true → we'll either get a SCRAPE_CCP reply from the
+  // iframe, or the content script is simply not present there).
+  let lastError = 'No CCP tab found. Open Amazon Connect / Five9 / Genesys / Zendesk CCP (standalone or in Salesforce utility bar).';
+  for (const tab of tabList) {
+    const reply = await sendToTab(tab.id, { type: 'SCRAPE_CCP' });
+    if (reply?.ok) {
+      const entry = {
+        capturedAt: nowISO(),
+        url: tab.url,
+        title: tab.title,
+        tabId: tab.id,
+        data: reply.data || {},
+        embedded: !!tabHint,
+      };
+      state.ccp = entry;
+      await saveState();
+      return { ok: true, payload: entry };
+    }
+    if (reply?.error) lastError = reply.error;
+  }
+  return { ok: false, error: lastError };
 }
 
 async function scrapeSalesforceTab() {
@@ -134,9 +156,56 @@ async function scrapeSalesforceTab() {
   if (reply?.ok) {
     state.sf = { capturedAt: nowISO(), url: tab.url, title: tab.title, tabId: tab.id, data: reply.data };
     await saveState();
+    // Embedded CCP probe: the same Salesforce tab often hosts the Amazon
+    // Connect CCP in a utility-bar iframe. Because the SF content script
+    // already captured the subject line ("Connected Phone Call from:
+    // Caller +1xxxx"), we usually have enough. But when the contact
+    // attributes / Streams API are available inside the iframe they carry
+    // serial + model, so we do *one* extra SCRAPE_CCP into this tab's
+    // frame tree (all_frames:true + CCP content script matches Connect
+    // origins and will answer).
+    const embedded = await scrapeCcpTab(tab);
+    // Set a marker on the sf snapshot so the popup and web app know the
+    // CCP on this snapshot came from the *same tab tree* (display badge
+    // "CCP: embedded in SF tab" instead of "not captured").
+    if (embedded?.ok) {
+      state.sf.ccpEmbedded = true;
+      await saveState();
+    }
     return { ok: true, payload: state.sf };
   }
   return { ok: false, error: reply?.error || 'Salesforce content script did not reply.' };
+}
+
+/** POPUP_SCRAPE_ACTIVE_TAB fallback — blindly runs BOTH SCRAPE_SF and
+ *  SCRAPE_CCP against whatever tab the agent is currently viewing, and
+ *  merges non-empty results into the current snapshot. Used for branded
+ *  CCaaS consoles / weird tab types where the URL match lists above miss. */
+async function scrapeActiveTab() {
+  const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!current?.id) return { ok: false, error: 'No active tab.' };
+  const [sfReply, ccpReply] = await Promise.all([
+    sendToTab(current.id, { type: 'SCRAPE_SF' }),
+    sendToTab(current.id, { type: 'SCRAPE_CCP' }),
+  ]);
+  let updated = false;
+  if (sfReply?.ok && Object.keys(sfReply.data || {}).length > 0) {
+    state.sf = { capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id, data: sfReply.data };
+    updated = true;
+  }
+  if (ccpReply?.ok && Object.keys(ccpReply.data || {}).length > 0) {
+    state.ccp = { capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id, data: ccpReply.data };
+    updated = true;
+  }
+  if (updated) {
+    await saveState();
+    if (state.settings.autoPush) void pushToTicketApp(false);
+    return { ok: true, sf: state.sf, ccp: state.ccp };
+  }
+  return {
+    ok: false,
+    error: 'This tab has no matching content script loaded. If it is Connect/SF, refresh the page or ensure its URL matches one in manifest host_permissions.',
+  };
 }
 
 async function scrapeAll() {
@@ -260,6 +329,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (t === 'POPUP_SCRAPE_CCP') { (async () => sendResponse(await scrapeCcpTab()))(); return true; }
   if (t === 'POPUP_SCRAPE_SF')  { (async () => sendResponse(await scrapeSalesforceTab()))(); return true; }
   if (t === 'POPUP_SCRAPE_ALL') { (async () => sendResponse(await scrapeAll()))(); return true; }
+  if (t === 'POPUP_SCRAPE_ACTIVE') { (async () => sendResponse(await scrapeActiveTab()))(); return true; }
   if (t === 'POPUP_PUSH')       { (async () => sendResponse(await pushToTicketApp(true)))(); return true; }
   if (t === 'POPUP_UPDATE_SETTINGS') {
     (async () => {
