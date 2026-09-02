@@ -149,6 +149,12 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
     // picker + markdown viewer ~460px, then viewer scrolls internally.
     return 460;
   }
+  if (node.type === 'productLookup') {
+    // Label row + search bar row ~44 + model chips ~34 + tabs ~32 +
+    // scrollable tab body ~360 = same footprint as SOP so the left column
+    // stays balanced when both panels are stacked.
+    return 480;
+  }
   if (node.type === 'input') {
     if (node.inputType === 'textarea') {
       // label + textarea rows + quick insert block
@@ -190,6 +196,7 @@ function computeDefaultLayout(
     NODE_IDS.TRANSCRIPT_PANEL,
     NODE_IDS.TEMPLATE_MATCHES,
     NODE_IDS.SOP_PANEL,
+    NODE_IDS.PRODUCT_LOOKUP,
   ];
   const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
     .map((id) => (!hiddenNodes?.has(id) ? nodeById.get(id) ?? null : null))

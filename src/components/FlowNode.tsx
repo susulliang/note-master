@@ -42,6 +42,7 @@ export interface TicketPanelsContextShape {
   transcriptContent?: React.ReactNode;
   trackerContent?: React.ReactNode;
   sopContent?: React.ReactNode;
+  productContent?: React.ReactNode;
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -57,7 +58,8 @@ export type NodeType =
   | 'templates'
   | 'transcript'
   | 'ticketTracker'
-  | 'sop';
+  | 'sop'
+  | 'productLookup';
 
 export interface QuickTextGroup {
   label: string;
@@ -639,7 +641,12 @@ function FlowNodeComponent({
       );
     }
 
-    if (type === 'transcript' || type === 'ticketTracker' || type === 'sop') {
+    if (
+      type === 'transcript' ||
+      type === 'ticketTracker' ||
+      type === 'sop' ||
+      type === 'productLookup'
+    ) {
       // Pull the live content from context (captured at top of the function)
       // so the canvas memo stays clean while audio meters tick 10×/s. Wrap
       // with the same label row + inner padding used by every other gridbox
@@ -649,7 +656,9 @@ function FlowNodeComponent({
           ? panelsCtx?.transcriptContent
           : type === 'ticketTracker'
             ? panelsCtx?.trackerContent
-            : panelsCtx?.sopContent) ?? panelContent;
+            : type === 'sop'
+              ? panelsCtx?.sopContent
+              : panelsCtx?.productContent) ?? panelContent;
       return (
         <div className="px-2.5 py-1.5">
           {label && (
@@ -942,7 +951,11 @@ function FlowNodeComponent({
     );
   };
 
-  const isPanelNode = type === 'transcript' || type === 'ticketTracker' || type === 'sop';
+  const isPanelNode =
+    type === 'transcript' ||
+    type === 'ticketTracker' ||
+    type === 'sop' ||
+    type === 'productLookup';
 
   return (
     <div

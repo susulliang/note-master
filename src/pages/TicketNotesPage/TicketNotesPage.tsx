@@ -14,6 +14,7 @@ import {
   StickyNote,
   ShoppingBag,
   FileSearch,
+  Package,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import FloatingControls from '@/components/FloatingControls';
@@ -22,6 +23,7 @@ import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import SopPanel from '@/components/SopPanel';
+import ProductLookupPanel from '@/components/ProductLookupPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -241,6 +243,12 @@ const NODES: NodeConfig[] = [
     label: 'SOP · Standard Operating Procedure Match',
     width: 760,
   },
+  {
+    id: NODE_IDS.PRODUCT_LOOKUP,
+    type: 'productLookup',
+    label: 'Product · Specs / Error Codes / Selling Points',
+    width: 760,
+  },
 ];
 
 const INITIAL_FORM_DATA: Record<string, string | string[]> = {
@@ -404,6 +412,7 @@ export default function TicketNotesPage() {
       { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
       { id: NODE_IDS.TEMPLATE_MATCHES, label: 'Matching template' },
+      { id: NODE_IDS.PRODUCT_LOOKUP, label: 'Product lookup' },
     ],
     []
   );
@@ -1243,6 +1252,13 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   llmStatus={llmParser.status}
                   llmIsReady={llmParser.isReady}
                   warmLlm={llmParser.load}
+                />
+              ),
+              productContent: (
+                <ProductLookupPanel
+                  robotModel={String(formData[NODE_IDS.DEEBOT_MODEL] ?? '')}
+                  issueDescription={String(formData[NODE_IDS.DETAILED_ISSUE] ?? '')}
+                  issueType={String(formData[NODE_IDS.ISSUE_TYPE] ?? '')}
                 />
               ),
             }}

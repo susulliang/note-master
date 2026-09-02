@@ -1125,6 +1125,7 @@ export const NODE_IDS = {
   TRANSCRIPT_PANEL: 'transcriptPanel',
   TICKET_TRACKER: 'ticketTracker',
   SOP_PANEL: 'sopPanel',
+  PRODUCT_LOOKUP: 'productLookup',
 } as const;
 
 export interface NoteHistoryEntry {
@@ -1160,6 +1161,9 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // issue details (keyword) then reranked by the local LLM against the
   // formatted final note. Own wide row because it renders long MD bodies.
   [NODE_IDS.SOP_PANEL],
+  // Product lookup — DEEBOT/GOAT/WINBOT specs + error codes + selling points,
+  // auto-fuzzy-matched from the Robot Model dropdown and live-issue text.
+  [NODE_IDS.PRODUCT_LOOKUP],
   [NODE_IDS.HANG_UP],
 ];
 
@@ -1193,4 +1197,12 @@ export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
   { from: NODE_IDS.PURCHASE_INFO, to: NODE_IDS.SOP_PANEL },
   { from: NODE_IDS.TRANSCRIPT_PANEL, to: NODE_IDS.SOP_PANEL },
   { from: NODE_IDS.SOP_PANEL, to: NODE_IDS.HANG_UP },
+  // Product lookup: fed by model selection, identifiers, and issue fields so it
+  // can auto-fuzzy-match specs, error codes, selling points, and scientist codes.
+  { from: NODE_IDS.DEEBOT_MODEL, to: NODE_IDS.PRODUCT_LOOKUP },
+  { from: NODE_IDS.SKU_NUMBER, to: NODE_IDS.PRODUCT_LOOKUP },
+  { from: NODE_IDS.SERIAL_NUMBER, to: NODE_IDS.PRODUCT_LOOKUP },
+  { from: NODE_IDS.ISSUE_TYPE, to: NODE_IDS.PRODUCT_LOOKUP },
+  { from: NODE_IDS.DETAILED_ISSUE, to: NODE_IDS.PRODUCT_LOOKUP },
+  { from: NODE_IDS.PRODUCT_LOOKUP, to: NODE_IDS.HANG_UP },
 ];
