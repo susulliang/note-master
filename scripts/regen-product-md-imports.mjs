@@ -45,8 +45,12 @@ const recordEntries = [];
 
 allMd.forEach((rel, i) => {
   const ident = `md_${i.toString().padStart(5, '0')}`;
-  const escaped = JSON.stringify(`../products/${rel}`);
-  imports.push(`import ${ident} from ${escaped}?raw;`);
+  // IMPORTANT: ?raw suffix must live INSIDE the quoted module specifier string
+  // (before JSON.stringify), not appended after the closing quote. Rolldown in
+  // Vite 7 rejects extra tokens after the import specifier, and `?raw` is only
+  // recognized by Vite's import transform when it's part of the path string.
+  const importSpecifier = JSON.stringify(`../products/${rel}?raw`);
+  imports.push(`import ${ident} from ${importSpecifier};`);
   recordEntries.push(`  ${JSON.stringify(rel)}: ${ident}`);
 });
 
