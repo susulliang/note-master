@@ -391,10 +391,9 @@ export default function TicketNotesPage() {
     () => new Set(hiddenNodeIds),
     [hiddenNodeIds]
   );
-  /** The 7 gridboxes the user asked for toggle controls for — a stable
+  /** The gridboxes the user asked for toggle controls for — a stable
    *  ordered list we render in the BOXES dropdown. Labels match their
-   *  request exactly: Shipping address, Call Transcript, 24H tracker,
-   *  SOP box, SKU box, SERIAL Number box, additional note box. */
+   *  request exactly plus the matching-template panel added later. */
   const GRIDBOX_VISIBILITY_TOGGLES = useMemo(
     () => [
       { id: NODE_IDS.SHIPPING_ADDRESS, label: 'Shipping address' },
@@ -404,6 +403,7 @@ export default function TicketNotesPage() {
       { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
       { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
+      { id: NODE_IDS.TEMPLATE_MATCHES, label: 'Matching template' },
     ],
     []
   );

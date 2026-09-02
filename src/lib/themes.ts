@@ -1,11 +1,19 @@
-import { Sun, Sunrise, CloudSun, Sunset, Moon } from 'lucide-react';
+import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
- * Theme scale — 5 steps from bright to dark, suitable for any work time of
- * the day. The toggle button cycles through them in this order.
+ * Theme scale — 8 total: 5 time-of-day (legacy) + 3 neutral grey shades
+ * inserted at light / mid / dark stops so agents can pick low-color UI.
  */
-export type ThemeId = 'daylight' | 'morning' | 'afternoon' | 'evening' | 'midnight';
+export type ThemeId =
+  | 'daylight'
+  | 'morning'
+  | 'afternoon'
+  | 'slate-light'
+  | 'neutral'
+  | 'evening'
+  | 'midnight'
+  | 'zinc-dark';
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -19,8 +27,11 @@ export const THEMES: ThemeMeta[] = [
   { id: 'daylight', label: 'Daylight', icon: Sun, toaster: 'light' },
   { id: 'morning', label: 'Morning', icon: Sunrise, toaster: 'light' },
   { id: 'afternoon', label: 'Afternoon', icon: CloudSun, toaster: 'light' },
+  { id: 'slate-light', label: 'Slate (Light)', icon: CloudFog, toaster: 'light' },
+  { id: 'neutral', label: 'Neutral Grey', icon: Cloud, toaster: 'light' },
   { id: 'evening', label: 'Evening', icon: Sunset, toaster: 'dark' },
   { id: 'midnight', label: 'Midnight', icon: Moon, toaster: 'dark' },
+  { id: 'zinc-dark', label: 'Zinc (Dark)', icon: CloudMoon, toaster: 'dark' },
 ];
 
 /** Accepts raw persisted values (incl. legacy 'dark'/'light') and returns a valid ThemeId */

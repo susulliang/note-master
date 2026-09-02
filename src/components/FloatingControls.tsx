@@ -343,7 +343,7 @@ export default function FloatingControls({
                   boxesOpen && 'bg-foreground/10 text-foreground'
                 )}
                 aria-label="Toggle gridboxes"
-                title="Gridboxes — show / hide Shipping address, Transcript, 24h tracker, SOP, SKU, Serial, Additional notes"
+                title="Gridboxes — show / hide Shipping address, Transcript, 24h tracker, SOP, SKU, Serial, Additional notes, Matching template"
               >
                 <Boxes className="size-4" />
                 {/* If any toggle is currently turned OFF, show a small amber

@@ -199,6 +199,73 @@
   --scrollbar-thumb-hover: hsl(215 10% 58%);
 }
 
+/* Slate (Light) — cool pale slate grey, very slightly desaturated.
+   Between Daylight (0% 98%) and Afternoon (12% 86%) on the HSL scale. */
+:root[data-theme="slate-light"] {
+  color-scheme: light;
+  --background: hsl(210 14% 94%);
+  --foreground: hsl(215 14% 18%);
+  --card: hsl(210 12% 97%);
+  --card-foreground: hsl(215 14% 18%);
+  --popover: hsl(210 12% 97%);
+  --popover-foreground: hsl(215 14% 18%);
+  --primary: hsl(137 52% 31%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 46%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(210 10% 90%);
+  --muted-foreground: hsl(215 10% 42%);
+  --accent: hsl(212 85% 46%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 78% 48%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 76% 50%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 52% 38%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 46%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(210 11% 85%);
+  --input: hsl(210 10% 90%);
+  --ring: hsl(137 52% 31%);
+  --scrollbar-track: hsl(210 10% 90%);
+  --scrollbar-thumb: hsl(210 10% 78%);
+  --scrollbar-thumb-hover: hsl(210 10% 66%);
+}
+
+/* Neutral Grey — achromatic middle grey, no cool/warm cast. */
+:root[data-theme="neutral"] {
+  color-scheme: light;
+  --background: hsl(0 0% 70%);
+  --foreground: hsl(0 0% 12%);
+  --card: hsl(0 0% 78%);
+  --card-foreground: hsl(0 0% 12%);
+  --popover: hsl(0 0% 78%);
+  --popover-foreground: hsl(0 0% 12%);
+  --primary: hsl(137 52% 28%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 42%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(0 0% 63%);
+  --muted-foreground: hsl(0 0% 28%);
+  --accent: hsl(212 85% 42%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 78% 44%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 44%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 34%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 42%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(0 0% 55%);
+  --input: hsl(0 0% 63%);
+  --ring: hsl(137 52% 28%);
+  --scrollbar-track: hsl(0 0% 63%);
+  --scrollbar-thumb: hsl(0 0% 50%);
+  --scrollbar-thumb-hover: hsl(0 0% 38%);
+}
+
 /* Evening — dim dark (dusk) */
 :root[data-theme="evening"] {
   color-scheme: dark;
@@ -233,6 +300,40 @@
 }
 
 /* Midnight = :root defaults above (deepest dark) */
+
+/* Zinc (Dark) — warm-neutral near-black (zinc hue, 240° 4% sat).
+   Slightly lighter than Midnight so subtle typography still reads. */
+:root[data-theme="zinc-dark"] {
+  color-scheme: dark;
+  --background: hsl(240 4% 12%);
+  --foreground: hsl(60 2% 82%);
+  --card: hsl(240 4% 16%);
+  --card-foreground: hsl(60 2% 82%);
+  --popover: hsl(240 4% 16%);
+  --popover-foreground: hsl(60 2% 82%);
+  --primary: hsl(137 48% 42%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 82% 62%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(240 4% 18%);
+  --muted-foreground: hsl(60 3% 64%);
+  --accent: hsl(212 82% 62%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 76% 60%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 76% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 47%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 54%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(240 4% 26%);
+  --input: hsl(240 4% 18%);
+  --ring: hsl(137 48% 42%);
+  --scrollbar-track: hsl(240 4% 18%);
+  --scrollbar-thumb: hsl(240 4% 30%);
+  --scrollbar-thumb-hover: hsl(240 4% 40%);
+}
 
 /* ------------------------------------------------------------------ */
 /*  UI scale ("old people mode") — zoom the whole app 1.25x.           */
@@ -440,6 +541,39 @@ body[data-ui-scale="small"] {
   }
   :root[data-theme="afternoon"] .glass-orb-3 {
     background: radial-gradient(circle, hsl(200 25% 80% / 0.4), transparent 65%);
+  }
+
+  /* Slate (Light): muted cool slate gradients, almost no chroma */
+  :root[data-theme="slate-light"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(212 25% 86% / 0.55), transparent 65%);
+  }
+  :root[data-theme="slate-light"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(215 20% 88% / 0.5), transparent 65%);
+  }
+  :root[data-theme="slate-light"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(205 18% 86% / 0.45), transparent 65%);
+  }
+
+  /* Neutral Grey: fully achromatic greyscales */
+  :root[data-theme="neutral"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(0 0% 82% / 0.55), transparent 65%);
+  }
+  :root[data-theme="neutral"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(0 0% 86% / 0.5), transparent 65%);
+  }
+  :root[data-theme="neutral"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(0 0% 90% / 0.45), transparent 65%);
+  }
+
+  /* Zinc (Dark): subtle low-light grey halos, pure-neutral */
+  :root[data-theme="zinc-dark"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(240 4% 30% / 0.5), transparent 65%);
+  }
+  :root[data-theme="zinc-dark"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(240 4% 26% / 0.45), transparent 65%);
+  }
+  :root[data-theme="zinc-dark"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(240 4% 22% / 0.4), transparent 65%);
   }
 
   @media (prefers-reduced-motion: reduce) {

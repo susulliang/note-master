@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic, Sparkles, Trash2 } from 'lucide-react';
+import { Loader2, Mic, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -395,16 +395,6 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
               Parse
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={activeSource === 'call' ? call.onClear : mic.onClear}
-            className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
-            aria-label="Clear transcript"
-            title="Clear transcript"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
         </div>
 
         {/* Cloud parse status: failures and the last round-trip timing */}

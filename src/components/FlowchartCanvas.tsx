@@ -1,7 +1,7 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
-import { NODE_CONNECTIONS, NODE_LAYOUT_ROWS } from '@/data/ticket';
+import { NODE_CONNECTIONS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import type { AutoFillSource } from '@/lib/field-extraction';
 
@@ -71,6 +71,17 @@ const LINE_GAP = 20;
 const MIN_COL_GAP = 16;
 const MAX_COL_GAP = 28;
 const FALLBACK_CONTAINER_WIDTH = 900;
+/** Above this canvas width the Transcript panel pins itself as a left-side
+ *  column outside the main flow grid, vertically anchored at the top so it
+ *  visually sits "left of (and a bit above) the top-left START node". On
+ *  narrower screens it flows above the opening row as the first element at
+ *  the very top of the canvas so the transcript never pushes the flow
+ *  horizontally out of view. */
+const WIDE_SCREEN_CANVAS_WIDTH = 1320;
+/** Fixed left-column width used for the Transcript panel on wide screens.
+ *  Must be at least the transcript node's width; extra space is pure gutter
+ *  so the main flow's START node is visually offset right of the transcript. */
+const TRANSCRIPT_LEFT_COLUMN_WIDTH = 700;
 
 // Approximate node dimensions for connection point + layout calculations
 const NODE_VERTICAL_PADDING = 6; // py-1.5 x2
@@ -169,26 +180,76 @@ function computeDefaultLayout(
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
-  const availWidth = canvasWidth - CANVAS_MARGIN * 2;
 
-  let y = CANVAS_MARGIN;
+  // WIDE vs NARROW layout split:
+  //   WIDE (canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH):
+  //     Transcript panel pins to the LEFT as a dedicated side column at the
+  //     top of the canvas. The main flow grid then runs inside a reduced
+  //     "right pane" that starts at CANVAS_MARGIN + TRANSCRIPT_LEFT_COLUMN_WIDTH
+  //     + colGap, so the opening row (START / Customer / Contact / Transition)
+  //     sits visually *to the right* of the transcript.
+  //   NARROW:
+  //     Transcript panel goes ABOVE the opening row as the very first block
+  //     at the top of the canvas so no node content is pushed off-screen.
+  //
+  // When the Transcript panel itself is hidden via the BOXES toggle both
+  // layouts collapse to the classic single-grid flow (no reserved column,
+  // no extra top space).
+  const TRANSCRIPT_ID = NODE_IDS.TRANSCRIPT_PANEL;
+  const transcriptNode = !hiddenNodes?.has(TRANSCRIPT_ID) ? nodeById.get(TRANSCRIPT_ID) ?? null : null;
+  // Breakpoint: wide if the canvas is big enough AND the transcript (if
+  // visible) has enough room to sit left-of the flow without cramming it.
+  const flowPaneCandidateLeft = CANVAS_MARGIN + TRANSCRIPT_LEFT_COLUMN_WIDTH + MIN_COL_GAP;
+  const isWide = Boolean(
+    transcriptNode &&
+      canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
+      canvasWidth - CANVAS_MARGIN - flowPaneCandidateLeft >= 360
+  );
+
+  let mainAvailLeft = CANVAS_MARGIN;
+  const mainMaxRight = canvasWidth - CANVAS_MARGIN;
+  if (isWide) mainAvailLeft = flowPaneCandidateLeft;
+  const flowAvailWidth = Math.max(160, mainMaxRight - mainAvailLeft);
+
+  // 1) Position the Transcript panel first.
+  let yCursor = CANVAS_MARGIN;
+  if (transcriptNode) {
+    if (isWide) {
+      // LEFT COLUMN, top-aligned: at CANVAS_MARGIN, y = CANVAS_MARGIN
+      positions[TRANSCRIPT_ID] = { x: CANVAS_MARGIN, y: CANVAS_MARGIN };
+      // The main flow also starts at y = CANVAS_MARGIN so the START node
+      // sits at roughly the same visual top as the transcript (giving the
+      // "transcript is left of top-left of canvas" effect the user asked
+      // for). No vertical space consumed from the flow's yCursor.
+    } else {
+      // NARROW: Transcript stacked at the very TOP of the canvas, full
+      // flow width. After placing it, yCursor advances past the panel so
+      // the opening row appears directly underneath.
+      const tx = Math.max(CANVAS_MARGIN, (canvasWidth - (transcriptNode.width ?? 640)) / 2);
+      positions[TRANSCRIPT_ID] = { x: tx, y: yCursor };
+      yCursor += heightOf(transcriptNode) + ROW_GAP;
+    }
+  }
+
+  let y = yCursor;
   for (const row of NODE_LAYOUT_ROWS) {
     const rowNodes = row
       .map((id) => nodeById.get(id))
       .filter((n): n is NodeConfig => Boolean(n))
-      // Hidden nodes are skipped by the layout entirely — they leave no
-      // gap so neighbours slide up/left to take their place.
+      // Transcript already placed (wide) or placed as top block (narrow).
+      // Either way don't include it again here in the semantic row pass.
+      .filter((n) => n.id !== TRANSCRIPT_ID)
       .filter((n) => !hiddenNodes?.has(n.id));
     if (rowNodes.length === 0) continue;
 
-    // Greedy packing: fill each line with as many nodes as fit
+    // Greedy packing inside the flow pane's horizontal width.
     const lines: NodeConfig[][] = [];
     let line: NodeConfig[] = [];
     let lineWidth = 0;
     for (const n of rowNodes) {
       const w = n.width ?? 240;
       const gap = line.length === 0 ? 0 : MIN_COL_GAP;
-      if (line.length > 0 && lineWidth + gap + w > availWidth) {
+      if (line.length > 0 && lineWidth + gap + w > flowAvailWidth) {
         lines.push(line);
         line = [n];
         lineWidth = w;
@@ -206,11 +267,13 @@ function computeDefaultLayout(
       if (gaps > 0) {
         colGap = Math.min(
           MAX_COL_GAP,
-          Math.max(MIN_COL_GAP, (availWidth - sumWidth) / gaps)
+          Math.max(MIN_COL_GAP, (flowAvailWidth - sumWidth) / gaps)
         );
       }
       const totalWidth = sumWidth + colGap * gaps;
-      let x = Math.max(CANVAS_MARGIN, (canvasWidth - totalWidth) / 2);
+      // Center within the FLOW pane, not the full canvas — so on wide
+      // screens the START node never collides with the transcript column.
+      let x = Math.max(mainAvailLeft, mainAvailLeft + (flowAvailWidth - totalWidth) / 2);
       let lineHeight = 0;
       for (const n of lineNodes) {
         positions[n.id] = { x, y };
@@ -219,7 +282,6 @@ function computeDefaultLayout(
       }
       y += lineHeight + LINE_GAP;
     }
-    // Extra breathing room between semantic rows
     y += ROW_GAP - LINE_GAP;
   }
   return positions;
