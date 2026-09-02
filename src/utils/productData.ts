@@ -573,7 +573,7 @@ export function parseFaqMd(sheetKey: string, md: string): FaqEntry | null {
 
   // --- extract headings: # Title, ## 问题, ## 答案
   const h1Match = body.match(/^#\s+(.+)$/m);
-  const title = (h1Match?.[1] ?? model || 'FAQ').trim();
+  const title = ((h1Match?.[1] ?? model) || 'FAQ').trim();
 
   const qSection = extractSection(body, /^##\s*(问题\s*\/\s*Question|问题|Question|Q\b)/im);
   const aSection = extractSection(body, /^##\s*(答案\s*\/\s*Answer|答案|Answer|A\b)/im);
