@@ -150,9 +150,255 @@ const INJECT_MAP = {
   SCRAPE_SF:  SF_INJECT_FILES,
 };
 
+// ---------------------------------------------------------------------------
+// Tier-3 inline extractors: these run via chrome.scripting.executeScript
+// ({func: ...}) in the target page's MAIN world. They are the last-resort
+// catch-all that NEVER needs a chrome.runtime.onMessage reply — MV3 returns
+// the function's return value as results directly.
+//
+// NOTE: Functions placed here are SERIALIZED and run inside the remote
+// browser tab. No outer-scope references work. Keep them self-contained.
+// ---------------------------------------------------------------------------
+
+/** Inline Salesforce extractor. Mirrors the 4-tier strategy in
+ *  content/salesforce.js but trimmed to the 22+ most valuable fields for
+ *  the Ecovacs Case Console. Run via executeScript func(). */
+// eslint-disable-next-line func-names
+const INLINE_SF_EXTRACT = function () {
+  const FIELD_ALIASES = {
+    caseNumber: /^(Case\s*Number|Case\s*#?)$/i,
+    caseOwner: /^Case\s*Owner$/i,
+    status: /^Status$/i,
+    subject: /^Subject$/i,
+    accountName: /^(Account\s*Name|Account)$/i,
+    contactName: /^Contact\s*Name$/i,
+    customerName: /^(Name|Customer\s*Name)$/i,
+    phone: /^(Phone|Contact\s*Number|Contact\s*Phone)$/i,
+    email: /^(Email|Email\s*Address)$/i,
+    address: /^Address$/i,
+    city: /^City$/i,
+    provinceState: /^(Province|State)$/i,
+    postalCode: /^(Postal\s*Code|Zip)$/i,
+    country: /^Country$/i,
+    deebotModel: /^(AMR\s*Model\s*No\.?|Deebot\s*Model|Model)$/i,
+    serialNumber: /^Serial\s*Number$/i,
+    skuNumber: /^SKU(\s*Number)?$/i,
+    issueType: /^Issue\s*Type$/i,
+    detailedIssue: /^(Detailed\s*Issue\s*Description|Request\s*Description|Description)$/i,
+    resolutionSummary: /^Resolution\s*Summary$/i,
+    additionalNotes: /^Additional\s*Notes$/i,
+    caseOrigin: /^Case\s*Origin$/i,
+    brand: /^Brand$/i,
+    phoneSurveyResult: /^Phone\s*Survey\s*Result$/i,
+    escalationType: /^Escalation\s*Type$/i,
+    purchasingChannel: /^Purchasing\s*Channel$/i,
+    orderNumber: /^Order\s*Number$/i,
+    purchaseDate: /^Purchase\s*Date$/i,
+    caseTag: /^Case\s*Tag$/i,
+    firstPendingTs: /^First\s*Pending\s*Timestamp$/i,
+    lastPendingTs: /^Last\s*Pending\s*Timestamp$/i,
+    mergedCaseIds: /^Merged\s*Cases?$/i,
+    aiAgentNote: /^AI\s*Agent$/i,
+    appVersion: /^appVersion$/i,
+    phoneModel: /^model$/i,
+    osVersion: /^systemVersion$/i,
+    deviceTypeName: /^deviceTypeName$/i,
+    marketName: /^marketName$/i,
+    appDeviceBlock: /^App\s*Device\s*Info$/i,
+  };
+  function clean(v) {
+    if (v == null) return '';
+    return String(v).replace(/\u00a0/g, ' ').replace(/\s+\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+  }
+  function assignOnce(obj, k, v) {
+    const cv = clean(v); if (!cv) return;
+    if (!obj[k]) obj[k] = cv;
+  }
+  function splitLines(text) {
+    return text.split(/\r?\n/).map((s) => s.replace(/\u00a0/g, ' ').trim()).filter((s) => s.length);
+  }
+  function isLabelLine(line) {
+    for (const pat of Object.values(FIELD_ALIASES)) if (pat.test(line)) return true;
+    return false;
+  }
+  function matchAlias(line) {
+    for (const [k, pat] of Object.entries(FIELD_ALIASES)) if (pat.test(line)) return k;
+    return null;
+  }
+
+  const acc = {};
+  const text = (typeof document !== 'undefined' && document.body && (document.body.innerText || document.body.textContent || '')) || '';
+
+  // (1) Full-text regex sweep
+  // Case 7-8 digit | Case in breadcrumb
+  const cnMatch = text.match(/(?:^|\n)\s*(\d{7,8})\s*\|\s*Case\b/);
+  if (cnMatch) assignOnce(acc, 'caseNumber', cnMatch[1]);
+  const sfids = [...(text.matchAll(/\b500[a-zA-Z0-9]{12,15}\b/g) || [])].map((x) => x[0]);
+  if (sfids[0]) assignOnce(acc, 'salesforceId', sfids[0]);
+  // Caller in Subject
+  const caller = text.match(/Caller\s*(\+?[\d\- \.\(\)]{6,})/);
+  if (caller) assignOnce(acc, 'contactNumber', caller[1]);
+  const subjectLine = text.match(/^Subject\s*\n\s*([^\n]+)/m);
+  if (subjectLine) assignOnce(acc, 'issueTitle', subjectLine[1]);
+  // App Device Info block
+  const adiMatch = text.match(/App\s*Device\s*Info\s*\n([\s\S]*?)(?:\n\s*Case\s*Number\b|\n\s*\d{7,8}\s*\|\s*Case\b|$)/i);
+  if (adiMatch) {
+    for (const line of splitLines(adiMatch[1])) {
+      const idx = line.indexOf(':'); if (idx === -1) continue;
+      const k = line.slice(0, idx).trim(); const v = line.slice(idx + 1).trim();
+      if (k === 'appVersion') assignOnce(acc, 'appVersion', v);
+      else if (k === 'model') assignOnce(acc, 'phoneModel', v);
+      else if (k === 'systemVersion') assignOnce(acc, 'osVersion', v);
+      else if (k === 'deviceTypeName') assignOnce(acc, 'deviceTypeName', v);
+      else if (k === 'marketName') assignOnce(acc, 'marketName', v);
+      else if (k === 'deviceType') assignOnce(acc, 'deviceType', v);
+    }
+  }
+  // Classification groups: Issue Type{N} (Primary|Second) Classification
+  const classes = [];
+  const classRe = /Issue\s*Type(\d+)\s*(Primary|Second)\s*Classification\s*\n\s*([^\n]+)/gi;
+  let cm;
+  while ((cm = classRe.exec(text)) !== null) {
+    classes.push({ n: cm[1], kind: cm[2].toLowerCase() === 'primary' ? 'L1' : 'L2', value: clean(cm[3]) });
+  }
+  if (classes.length) {
+    const parts = classes.filter((c) => c.value).sort((a, b) => a.n.localeCompare(b.n) || (a.kind === 'L1' ? -1 : 1)).map((c) => c.value);
+    if (parts.length) assignOnce(acc, 'issueType', parts.join(' · '));
+    for (const c of classes) {
+      if (c.n === '1') assignOnce(acc, c.kind === 'L1' ? 'issueType1L1' : 'issueType1L2', c.value);
+      else if (c.n === '2') assignOnce(acc, c.kind === 'L1' ? 'issueType2L1' : 'issueType2L2', c.value);
+      else if (c.n === '3') assignOnce(acc, c.kind === 'L1' ? 'issueType3L1' : 'issueType3L2', c.value);
+    }
+  }
+  // Loose Email
+  if (!acc.email) {
+    const m = text.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/);
+    if (m) assignOnce(acc, 'email', m[0]);
+  }
+  // Timestamp pairs
+  const tsm = text.match(/First\s*Pending\s*Timestamp\s*\n\s*([^\n]+)/);
+  if (tsm) assignOnce(acc, 'firstPendingTs', tsm[1]);
+  const tsm2 = text.match(/Last\s*Pending\s*Timestamp\s*\n\s*([^\n]+)/);
+  if (tsm2) assignOnce(acc, 'lastPendingTs', tsm2[1]);
+  // AI Agent note block up to the next bold-ish heading
+  const ai = text.match(/AI\s*Agent\s*\n([\s\S]*?)(?:\n\s*Summary\b|\n\s*Related\s*Files\b|$)/i);
+  if (ai && clean(ai[1])) assignOnce(acc, 'aiAgentNote', clean(ai[1]));
+
+  // (2) Stacked-label cell sweep across visible grid cells
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    const cells = document.querySelectorAll('div[class*="slds"], div[class*="cell"], li[class*="slds"], section, article');
+    for (const cell of cells) {
+      const lines = splitLines(cell.innerText || cell.textContent || '');
+      if (lines.length < 2) continue;
+      if (lines.length > 30) continue; // likely a whole-feed block, skip noise
+      for (let i = 0; i < lines.length - 1; i += 1) {
+        const labelMatch = matchAlias(lines[i]);
+        if (!labelMatch) continue;
+        const next = lines[i + 1];
+        if (isLabelLine(next) && matchAlias(next)) continue;
+        assignOnce(acc, labelMatch, next);
+        i += 1;
+      }
+    }
+    // (3) Section-scoped pass: "Account Details", "Contact Details",
+    // "App Device Info" headers.
+    const sectionTitles = ['Account Details', 'Contact Details', 'App Device Info', 'Details', 'Case Details'];
+    const xpath = document.evaluate;
+    if (xpath) {
+      for (const title of sectionTitles) {
+        const nodes = document.querySelectorAll('h1, h2, h3, h4, h5, h6, span, div, p, b, strong, th, label');
+        for (const heading of nodes) {
+          const t = clean(heading.textContent || heading.innerText || '');
+          if (!t || t.toLowerCase() !== title.toLowerCase()) continue;
+          let container = heading.parentElement;
+          for (let depth = 0; depth < 5 && container; depth += 1) {
+            if ((container.innerText || '').split(/\n/).length > 6) break;
+            container = container.parentElement;
+          }
+          if (!container) continue;
+          const sectionLines = splitLines(container.innerText || '');
+          for (let i = 0; i < sectionLines.length - 1; i += 1) {
+            const key = matchAlias(sectionLines[i]);
+            if (!key) continue;
+            const val = sectionLines[i + 1];
+            if (isLabelLine(val) && matchAlias(val)) continue;
+            assignOnce(acc, key, val);
+          }
+        }
+      }
+    }
+  }
+
+  // Name synthesis
+  if (!acc.customerName && (acc.contactName)) acc.customerName = acc.contactName;
+  if (!acc.customerName && acc.accountName) acc.customerName = acc.accountName;
+  if (!acc.contactNumber && acc.phone) acc.contactNumber = acc.phone;
+  if (!acc.emailAddress && acc.email) acc.emailAddress = acc.email;
+  if (!acc.deebotModel && acc.model) acc.deebotModel = acc.model;
+  // shippingAddress composite
+  const addressParts = [acc.address, acc.city, acc.provinceState, acc.postalCode, acc.country].map(clean).filter(Boolean);
+  if (addressParts.length) {
+    const joined = addressParts.filter((v, i, a) => i === 0 || !a.slice(0, i).includes(v)).join(', ');
+    assignOnce(acc, 'shippingAddress', joined);
+  }
+  // Drop empty strings, ensure clean strings
+  for (const k of Object.keys(acc)) {
+    if (typeof acc[k] === 'string' && !acc[k]) delete acc[k];
+    else if (typeof acc[k] === 'string') acc[k] = clean(acc[k]);
+  }
+  return acc;
+};
+
+/** Inline CCP extractor — lightweight version just in case the content
+ *  script is fenced inside Connect's Locker service worker. Uses the fact
+ *  that most Connect CCaaS surfaces expose window.connect.API / the same
+ *  contact attribute fields the full content script reads. */
+// eslint-disable-next-line func-names
+const INLINE_CCP_EXTRACT = function () {
+  const acc = {};
+  function clean(v) { if (v == null) return ''; return String(v).replace(/\u00a0/g, ' ').trim(); }
+  function assignOnce(k, v) { const cv = clean(v); if (!cv) return; if (!acc[k]) acc[k] = cv; }
+  try {
+    const text = (typeof document !== 'undefined' && document.body && (document.body.innerText || document.body.textContent || '')) || '';
+    const caller = text.match(/Caller\s*(\+?[\d\- \.\(\)]{6,})/i);
+    if (caller) assignOnce('contactNumber', caller[1]);
+    const name = text.match(/Contact\s*Name\s*\n?\s*:\s*([^\n]+)/i) || text.match(/Customer\s*Name\s*\n?\s*:\s*([^\n]+)/i);
+    if (name) assignOnce('customerName', name[1]);
+    const custId = text.match(/Customer\s*Id\s*\n?\s*:\s*([A-Za-z0-9\-]+)/i);
+    if (custId) assignOnce('customerId', custId[1]);
+    const queue = text.match(/Queue\s*\n?\s*:\s*([^\n]+)/i);
+    if (queue) assignOnce('queue', queue[1]);
+    // Common Amazon Connect contact attributes window exposure
+    try {
+      // eslint-disable-next-line no-undef
+      const w = typeof window !== 'undefined' ? window : {};
+      if (w.connect && w.connect.contact) {
+        const c = w.connect.contact;
+        if (c.getAttributes) {
+          const attrs = c.getAttributes() || {};
+          for (const [k, v] of Object.entries(attrs)) {
+            const val = v && (v.value != null ? v.value : v);
+            const lk = String(k).toLowerCase();
+            if (lk.includes('phone') || lk === 'phonenumber' || lk.includes('number')) assignOnce('contactNumber', val);
+            else if (lk === 'customername' || lk === 'name') assignOnce('customerName', val);
+            else if (lk === 'caseid' || lk === 'ticket') assignOnce('caseNumber', val);
+            else if (lk === 'email') assignOnce('emailAddress', val);
+            else assignOnce(k, val);
+          }
+        }
+      }
+    } catch { /* noop */ }
+  } catch { /* noop */ }
+  return acc;
+};
+
+const INLINE_EXTRACT_MAP = {
+  SCRAPE_SF: INLINE_SF_EXTRACT,
+  SCRAPE_CCP: INLINE_CCP_EXTRACT,
+};
+
 async function sendToTab(tabId, payload) {
-  // First try the manifest content script listener that Chrome should have
-  // injected on every matching frame.
+  // Tier 1: manifest content script listener
   let firstError = null;
   try {
     const r = await chrome.tabs.sendMessage(tabId, payload);
@@ -162,68 +408,117 @@ async function sendToTab(tabId, payload) {
     firstError = String(err?.message || err);
   }
 
-  // Typical MV3 failure modes that land here:
-  //   • Receiving end does not exist → tab predates extension load, or
-  //     content script never matched (the user has a custom Salesforce
-  //     domain like ecovacs--amr.force.com but the page is inside an
-  //     Experience Cloud that uses a branded URL).
-  //   • Could not establish connection → content script was evicted.
-  // Fallback: inject the matching content script immediately via the
-  // scripting API (permission already requested in manifest), then retry
-  // the message once. For the branded-domain case, the host permission
-  // might not match so we swallow scripting errors and report diagnostics.
   const files = INJECT_MAP[payload.type];
-  if (!files) {
-    return { ok: false, error: firstError || 'sendToTab failed', diagnostic: { injectSkipped: true } };
+  const inlineFunc = INLINE_EXTRACT_MAP[payload.type];
+
+  // Tier 2: chrome.scripting.executeScript {files} — drop the content script
+  // into every frame, then retry the message once.
+  let injectFileFrames = 0;
+  let injectFileError = null;
+  if (Array.isArray(files) && files.length > 0) {
+    try {
+      const r = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files,
+      });
+      injectFileFrames = Array.isArray(r) ? r.filter((x) => x.frameId != null).length : 0;
+    } catch (injErr) {
+      injectFileError = String(injErr?.message || injErr);
+    }
   }
 
-  let injectResult = null;
-  try {
-    // allFrames=true because embedded Connect lives in a utility bar iframe
-    // inside the Salesforce tab — we want both the SF content script (top
-    // frame) and the CCP content script (deep iframe) to land.
-    injectResult = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files,
-    });
-  } catch (injErr) {
-    const msg = String(injErr?.message || injErr);
-    // Permission blocked → tell the popup so it can advise the user to
-    // grant <all_urls> optional permission or open a known subdomain.
-    if (msg.includes('Cannot access') || msg.includes('permission') || msg.includes('host_permissions')) {
+  if (!injectFileError) {
+    try {
+      const retry = await chrome.tabs.sendMessage(tabId, payload);
+      if (retry) {
+        if (retry.diagnostic == null) {
+          retry.diagnostic = {
+            [retry.ok ? 'injectFallbackUsed' : 'injectedAfterFail']: !!firstError,
+            injectFrames: injectFileFrames,
+            firstError,
+          };
+        }
+        return retry;
+      }
+    } catch (err2) {
+      // Fall through to tier 3 instead of aborting here.
+      firstError = firstError || String(err2?.message || err2);
+    }
+  }
+
+  // Tier 3: absolute last resort — chrome.scripting.executeScript {func}
+  // runs the inline extractor directly and returns its return value as
+  // result[].result synchronously, with NO listener / sendMessage round
+  // trip. This ALWAYS works if chrome.scripting itself is allowed (which it
+  // always is from popup action's activeTab grant on ANY URL including
+  // branded Ecovacs domains not listed in manifest host_permissions).
+  if (typeof inlineFunc === 'function') {
+    let inlineDiag = { via: 'inline-executeScript', injectFileFrames, firstError, injectFileError };
+    try {
+      // world: MAIN lets us read window.connect contact attributes for CCP;
+      // world: ISOLATED default keeps tier-2 message-listeners in the
+      // isolated world that the popup onMessage listener expects. For the
+      // inline func() use MAIN because it's safer in Salesforce Locker +
+      // Connect fenced frames.
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: inlineFunc,
+        world: chrome.scripting.ExecutionWorld ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN',
+      });
+      const frames = Array.isArray(results) ? results : [];
+      // Merge all non-empty frame results. For SF tab this picks the top
+      // frame (with the biggest payload); for utility-bar embedded CCP
+      // this picks whichever Connect iframe returned fields.
+      const merged = {};
+      let n = 0;
+      const counts = [];
+      for (const frame of frames) {
+        const obj = (frame && typeof frame.result === 'object' && !Array.isArray(frame.result)) ? frame.result : null;
+        if (!obj) continue;
+        const size = Object.keys(obj).filter((k) => obj[k] !== '' && obj[k] != null).length;
+        counts.push(size);
+        n = Math.max(n, size);
+        for (const [k, v] of Object.entries(obj)) {
+          if (v === '' || v == null) continue;
+          if (merged[k] == null) merged[k] = v;
+          else if (Array.isArray(v)) merged[k] = `${merged[k]}\n${v.join(', ')}`;
+          else if (String(merged[k]).length < String(v).length) merged[k] = v;
+        }
+      }
+      inlineDiag.framesExtracted = frames.length;
+      inlineDiag.framesWithContent = counts.filter((c) => c > 0).length;
+      inlineDiag.bestFrameFieldCount = n;
+      if (Object.keys(merged).length > 0) {
+        return { ok: true, data: merged, diagnostic: inlineDiag, scraped: true };
+      }
       return {
         ok: false,
-        error: `${firstError || 'sendToTab failed'} — and host permission denied for scripting injection: ${msg}`,
-        diagnostic: { firstError, injectFailed: true, injectError: msg },
+        error: `No ${payload.type === 'SCRAPE_SF' ? 'Salesforce' : 'CCP'} fields matched on this page. ${injectFileError ? 'File-inject blocked: ' + injectFileError : ''}`,
+        diagnostic: { ...inlineDiag, injectFailed: !!injectFileError, injectError: injectFileError },
+      };
+    } catch (inlineErr) {
+      const msg = String(inlineErr?.message || inlineErr);
+      return {
+        ok: false,
+        error: msg,
+        diagnostic: { via: 'inline-executeScript', injectFileFrames, firstError, injectFileError, inlineFailed: true, inlineError: msg },
       };
     }
-    return {
-      ok: false,
-      error: `${firstError || 'sendToTab failed'} — inject fallback also failed: ${msg}`,
-      diagnostic: { firstError, injectFailed: true, injectError: msg },
-    };
   }
 
-  try {
-    const retry = await chrome.tabs.sendMessage(tabId, payload);
-    const frameCount = Array.isArray(injectResult)
-      ? injectResult.filter((x) => x.frameId != null).length
-      : 0;
-    if (retry && !retry.ok && retry.diagnostic == null) {
-      retry.diagnostic = { injectedAfterFail: true, injectFrames: frameCount, firstError };
-    }
-    if (retry && retry.ok && retry.diagnostic == null) {
-      retry.diagnostic = { injectFallbackUsed: !!firstError, injectFrames: frameCount, firstError };
-    }
-    return retry || { ok: false, error: 'Injected, but no reply yet.', diagnostic: { injectFrames: frameCount, firstError } };
-  } catch (err2) {
-    const frameCount = Array.isArray(injectResult) ? injectResult.length : 0;
+  // No inline extractor defined for this message type — return what we have.
+  if (injectFileError) {
     return {
       ok: false,
-      error: `After scripting.executeScript still no listener: ${String(err2?.message || err2)}`,
-      diagnostic: { firstError, injected: true, injectFrames: frameCount },
+      error: `${firstError || 'sendToTab failed'} — inject failed: ${injectFileError}`,
+      diagnostic: { firstError, injectFailed: true, injectError: injectFileError, injectFrames: injectFileFrames },
     };
   }
+  return {
+    ok: false,
+    error: firstError || 'Injected, but no reply.',
+    diagnostic: { injectFallbackUsed: true, injectFrames: injectFileFrames, firstError },
+  };
 }
 
 async function scrapeCcpTab(tabHint) {

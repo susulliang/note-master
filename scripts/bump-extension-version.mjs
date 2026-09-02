@@ -96,13 +96,19 @@ async function main() {
   writeFileSync(INSTALL, html, 'utf8');
 
   // 4. popup.html — append a tiny comment stamp so reload diffs catch it.
+  // Format of the marker line (kept as a pure HTML comment, never renders):
+  //   <!-- BUILD_STAMP>0.1.3@2026-09-03T00:00Z<END_BUILD_STAMP -->
+  // The leading `>` and trailing `<` intentionally sit INSIDE the comment
+  // so replaceBetween can overwrite just the content-within-comment while
+  // the wrapper `<!--  ... -->` stays unchanged.
   let popup = readFileSync(POPUP_HTML, 'utf8');
-  const marker = '<!-- BUILD_STAMP';
-  const endMarker = 'END_BUILD_STAMP -->';
+  const marker = '<!-- BUILD_STAMP>';
+  const endMarker = '<END_BUILD_STAMP -->';
+  const stampContent = `${next}@${stamp}`;
   if (popup.includes(marker)) {
-    popup = replaceBetween(popup, marker, endMarker, `BUILD_STAMP>${next}@${stamp}END_BUILD_STAMP -->`);
+    popup = replaceBetween(popup, marker, endMarker, stampContent);
   } else {
-    popup = popup.replace('</body>', `  ${marker}${next}@${stamp}${endMarker}\n</body>`);
+    popup = popup.replace('</body>', `  ${marker}${stampContent}${endMarker}\n</body>`);
   }
   writeFileSync(POPUP_HTML, popup, 'utf8');
 
