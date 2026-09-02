@@ -53,11 +53,56 @@ function shortDomain(url) {
   catch { return url?.slice(0, 50) || ''; }
 }
 
-const elDiag = document.getElementById('diagBox') || null;
-
-function escHtml(s) {
-  return String(s ?? '')
-    .replace(/[<>&"]/g, (ch) => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;' })[ch]);
+const STATE_KEY = '__ecovacs_scraper_state_v1';
+function readStateFromStorage() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STATE_KEY], (items) => {
+        resolve(items?.[STATE_KEY] || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+/** @returns {Promise<chrome.tabs.Tab[]>} */
+function getTabsLocal() {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ currentWindow: true }, (tabs) => resolve(Array.isArray(tabs) ? tabs : []));
+    } catch {
+      resolve([]);
+    }
+  });
+}
+function localDiag() {
+  const manifest = chrome.runtime.getManifest?.();
+  const version = manifest?.version || '?';
+  const id = chrome.runtime.id || '';
+  return { manifest, version, id };
+}
+function paintHeaderNow() {
+  // Synchronous, zero awaits: paint the version + extension ID before any
+  // promise settles. No "warming up…" screen ever again even when the SW
+  // is dead / messages are dropped / storage is empty.
+  const { version, id } = localDiag();
+  if (elVersion) elVersion.textContent = `v${version} · ${id ? id.slice(0, 8) + '…' : 'no-id'}`;
+  if (elExtId) elExtId.textContent = id || '(unknown — reload extension)';
+  if (elBadge) { elBadge.textContent = 'Off'; elBadge.className = 'badge'; }
+  // Seed diag panel with the same instant info so "Loading…" only flashes
+  // if storage/tabs reply immediately.
+  if (elDiag) {
+    elDiag.innerHTML = `<li><span class="kv__k">Extension version</span><span class="kv__v"><code>${escHtml(version)}</code></span></li>` +
+                       `<li><span class="kv__k">Extension ID</span><span class="kv__v"><code>${escHtml(id)}</code></span></li>` +
+                       `<li class="warn-row"><span class="kv__k">Tip</span><span class="kv__v">If still showing <code>v0.1.0</code>, go to <code>edge://extensions</code> / <code>chrome://extensions</code>, find this extension, and click ⟳ Reload.</span></li>`;
+  }
+}
+// Run BEFORE any other code — popup scripts execute in tag order, but
+// explicitly tie into DOMContentLoaded so early queries can't fail.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', paintHeaderNow, { once: true });
+} else {
+  paintHeaderNow();
 }
 
 function renderDiagnosticFooter(diag, state) {
@@ -158,69 +203,135 @@ function hasChanged(prev, next) {
   return JSON.stringify(prev ?? null) !== JSON.stringify(next ?? null);
 }
 
+const SEND_TIMED_OUT = Symbol('sendTimeout');
 async function sendWithTimeout(message, timeoutMs = 2500) {
   return new Promise((resolve) => {
     let done = false;
     const timer = setTimeout(() => {
       if (done) return;
       done = true;
-      resolve(null);
+      resolve(SEND_TIMED_OUT);
     }, timeoutMs);
     try {
       chrome.runtime.sendMessage(message, (reply) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        resolve(reply === undefined ? null : reply);
+        // MV3: when the listener doesn't exist chrome sets lastError and
+        // passes `undefined` as reply. We must read runtime.lastError via
+        // the chrome.runtime.lastError getter *inside this callback*.
+        let err = null;
+        try {
+          // eslint-disable-next-line no-unused-expressions
+          if (chrome.runtime.lastError) err = chrome.runtime.lastError.message || String(chrome.runtime.lastError);
+        } catch { /* getter not exposed */ }
+        if (reply === undefined && !err) err = 'Listener did not send a response.';
+        if (err) resolve({ ok: false, error: err });
+        else resolve(reply);
       });
-    } catch {
+    } catch (syncErr) {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve(null);
+      resolve({ ok: false, error: String(syncErr?.message || syncErr) });
     }
   });
 }
 
-async function refreshState(silent = false, retries = 2) {
-  // Paint extension-id / version synchronously before awaiting so the popup
-  // never remains stuck at "warming up…" when the service worker is asleep.
-  elVersion.textContent = `v${chrome.runtime.getManifest?.().version ?? '0.1.0'} · ${chrome.runtime.id.slice(0, 8)}…`;
-  elExtId.textContent = chrome.runtime.id;
+function defaultState() {
+  return { ccp: null, sf: null, settings: { autoPush: false } };
+}
+async function buildFallbackDiag(state, runtimeVersion) {
+  const tabs = await getTabsLocal();
+  const slim = tabs.map((t) => ({ id: t.id, active: !!t.active, title: (t.title || '').slice(0, 120), url: (t.url || '').slice(0, 200) }));
+  const sfRegexes = [
+    /lightning\.force\.com/i, /my\.salesforce\.com/i, /salesforce\.com/i,
+    /visual\.force\.com/i, /\.force\.com/i,
+  ];
+  const ccpRegexes = [
+    /\.my\.connect\.aws/i, /\.awsapps\.com\/connect/i, /\.connect\.aws\.a2z\.com/i,
+    /five9\.com/i, /genesys.*\.com/i, /zendesk\.com/i, /talkdesk\.com/i, /freshdesk\.com/i,
+  ];
+  return {
+    runtimeVersion,
+    openCount: slim.length,
+    activeTab: slim.find((t) => t.active) || null,
+    matchesSf: slim.filter((t) => sfRegexes.some((r) => r.test(t.url || ''))),
+    matchesCcp: slim.filter((t) => ccpRegexes.some((r) => r.test(t.url || ''))),
+    builtFrom: 'storage-local-fallback',
+    manifestSfPatterns: sfRegexes.map(String),
+    manifestCcpPatterns: ccpRegexes.map(String),
+  };
+}
 
+async function refreshState(silent = false, retries = 1) {
+  // ALWAYS refresh the header synchronously first.
+  paintHeaderNow();
+
+  // Tier 1: try to wake the SW via POPUP_GET_STATE. We only retries once
+  // since tier 2 fallback works immediately.
   let reply = null;
+  let swError = null;
   for (let i = 0; i <= retries; i += 1) {
-    // SW cold-wake path: a simple PING ping-pong wakes the SW on MV3.
-    if (i > 0) await new Promise((r) => setTimeout(r, 180 * i));
-    reply = await sendWithTimeout({ type: 'POPUP_GET_STATE' }, 2500 + i * 1500);
-    if (reply?.ok) break;
-  }
-  if (!reply?.ok) {
-    if (!silent) toast('Background waking up — click a button to force.', 'warn');
-    return null;
-  }
-  const { state, merged, extensionId, diag, runtimeVersion } = reply;
-  if (extensionId) {
-    elVersion.textContent = `v${runtimeVersion || chrome.runtime.getManifest?.().version ?? '0.1.0'} · ${extensionId.slice(0, 8)}…`;
-    elExtId.textContent = extensionId;
+    if (i > 0) await new Promise((r) => setTimeout(r, 220));
+    const result = await sendWithTimeout({ type: 'POPUP_GET_STATE' }, i === 0 ? 1500 : 2500);
+    if (result === SEND_TIMED_OUT) {
+      swError = `sendMessage timed out after ${i === 0 ? 1.5 : 2.5}s — SW not responding.`;
+      continue;
+    }
+    if (result?.ok) { reply = result; break; }
+    swError = result?.error || 'SW replied with error.';
   }
 
+  let state;
+  let diag;
+  let runtimeVersion = chrome.runtime.getManifest?.().version || null;
+  let merged = null;
+  if (reply?.ok) {
+    state = reply.state;
+    diag = reply.diag;
+    runtimeVersion = reply.runtimeVersion || runtimeVersion;
+    merged = reply.merged;
+  } else {
+    // Tier 2: do everything the popup can do on its own without the SW.
+    state = (await readStateFromStorage()) || defaultState();
+    if (!state.settings) state.settings = { autoPush: false };
+    diag = await buildFallbackDiag(state, runtimeVersion);
+    // We actually DO NOT have buildMergedFields in popup; set merged null.
+    // Capture cards are rendered from cc/sf anyway — merged only for toast.
+    if (!silent) {
+      // Distinct toast so the user knows we're running in offline mode and
+      // buttons still work (buttons call sendMessage -> get error).
+      toast('Service worker is offline — showing cached state. Click Force-scan / buttons to wake it.', 'warn');
+    }
+    // Attach swError to each card so the panel explains why the SW didn't
+    // answer — it's actionable feedback.
+    state._swError = swError;
+  }
+
+  // Re-paint version header with runtimeVersion from SW if available.
+  if (elVersion) elVersion.textContent = `v${runtimeVersion || localDiag().version} · ${(chrome.runtime.id || '').slice(0, 8)}…`;
+  if (elExtId) elExtId.textContent = chrome.runtime.id || localDiag().id;
+
+  const swExtra = state._swError ? { lastError: state._swError, diagnostic: { swOffline: true } } : {};
   renderCapture('ccp', state.ccp, elCcpKv, elCcpMeta, elCcpDot, {
     openMatch: !(diag && Array.isArray(diag.matchesCcp) && (state.ccp == null) && diag.matchesCcp.length === 0),
+    ...swExtra,
   });
   renderCapture('sf',  state.sf,  elSfKv,  elSfMeta,  elSfDot, {
     openMatch: !(diag && Array.isArray(diag.matchesSf) && (state.sf == null) && diag.matchesSf.length === 0),
+    ...swExtra,
   });
   renderDiagnosticFooter(diag || null, { runtimeVersion });
   updateBadge(state);
-  cbAuto.checked = !!state.settings.autoPush;
+  cbAuto.checked = !!state.settings?.autoPush;
 
   if (!silent && (hasChanged(lastSeen.ccp, state.ccp) || hasChanged(lastSeen.sf, state.sf))) {
     lastSeen = { ccp: state.ccp || null, sf: state.sf || null };
-    const n = (Object.keys(merged || {}).length);
+    const n = Object.keys(merged || {}).length;
     if (n > 0) toast(`Merged ${n} fields ready.`, 'ok');
   }
-  return reply;
+  return reply || { ok: !!state.ccp || !!state.sf, cached: true, state, diag };
 }
 
 async function withLoading(btn, fn) {
@@ -237,23 +348,32 @@ async function withLoading(btn, fn) {
   finally { btn.disabled = false; btn.innerHTML = oldHtml; }
 }
 
+function explainError(result, fallback) {
+  if (result === SEND_TIMED_OUT) {
+    return 'Background service worker did not reply within timeout. Reload the extension at edge://extensions (or chrome://extensions), then click the popup again.';
+  }
+  if (result?.error) return String(result.error);
+  return fallback;
+}
+
 async function onClickCcp() {
   const r = await withLoading(btnCcp, () => sendWithTimeout({ type: 'POPUP_SCRAPE_CCP' }, 12000));
   await refreshState(true);
-  if (!r?.ok) toast(r?.error || 'CCP scrape failed.', 'err');
+  if (!r?.ok) toast(explainError(r, 'CCP scrape failed.'), 'err');
   else toast('CCP tab re-scraped.', 'ok');
 }
 
 async function onClickSf() {
   const r = await withLoading(btnSf, () => sendWithTimeout({ type: 'POPUP_SCRAPE_SF' }, 12000));
   await refreshState(true);
-  if (!r?.ok) toast(r?.error || 'Salesforce scrape failed.', 'err');
+  if (!r?.ok) toast(explainError(r, 'Salesforce scrape failed.'), 'err');
   else toast('Salesforce tab re-scraped.', 'ok');
 }
 
 async function onClickScrapeAll() {
   const r = await withLoading(btnScrapeAll, () => sendWithTimeout({ type: 'POPUP_SCRAPE_ALL' }, 16000));
   await refreshState(true);
+  if (r === SEND_TIMED_OUT) { toast(explainError(r), 'err'); return; }
   const errors = [r?.ccp, r?.sf].filter((x) => x && x.ok === false).map((x) => x.error);
   if (errors.length === 2) toast(errors[0] || 'Nothing scraped.', 'warn');
   else if (errors.length === 1) toast(`Partial: ${errors[0]}`, 'warn');
@@ -261,24 +381,24 @@ async function onClickScrapeAll() {
 }
 
 async function onClickScanCurrent() {
-  const r = await withLoading(btnScanCurrent, () => sendWithTimeout({ type: 'POPUP_SCRAPE_ACTIVE' }, 10000));
+  const r = await withLoading(btnScanCurrent, () => sendWithTimeout({ type: 'POPUP_SCRAPE_ACTIVE' }, 12000));
   await refreshState(true);
   if (r?.ok) toast('Scanned active tab — check the cards above.', 'ok');
-  else toast(r?.error || 'Scan found nothing.', 'warn');
+  else toast(explainError(r, 'Scan found nothing on this page. Hover SF card for details.'), 'warn');
 }
 
 async function onClickPush() {
-  const r = await withLoading(btnPush, () => sendWithTimeout({ type: 'POPUP_PUSH' }, 8000));
+  const r = await withLoading(btnPush, () => sendWithTimeout({ type: 'POPUP_PUSH' }, 10000));
   if (r?.ok) toast('Pushed to Ticket Notes.', 'ok');
   else if (r?.skipped) toast(r.skipped, 'warn');
-  else toast(r?.error || 'Push failed.', 'err');
+  else toast(explainError(r, 'Push failed.'), 'err');
 }
 
 async function onToggleAuto(e) {
   const checked = e.target.checked;
   const r = await sendWithTimeout({ type: 'POPUP_UPDATE_SETTINGS', settings: { autoPush: checked } }, 4000);
   if (r?.ok) toast(checked ? 'Auto-push ON.' : 'Auto-push OFF.', 'ok');
-  else toast('Settings update failed.', 'warn');
+  else toast(explainError(r, 'Settings update failed — SW not reachable.'), 'warn');
 }
 
 function onCopyExtId() {

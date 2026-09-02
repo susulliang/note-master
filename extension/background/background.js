@@ -18,7 +18,30 @@
  */
 
 const STORAGE_KEY = 'nm-extension-state-v1';
+// Mirror copy that popup.js knows how to read directly from storage.local
+// without needing the SW to be awake. Updated on every saveState().
+const STATE_KEY_POPUP = '__ecovacs_scraper_state_v1';
 const EXT_ID_STORAGE_KEY = 'nm-extension-id-v1';
+
+// ---------------------------------------------------------------------------
+//  Worker lifecycle: force immediate upgrade so the user never sits on an
+//  old cached build after clicking reload on the extensions page.
+// ---------------------------------------------------------------------------
+try {
+  // `self` is the ServiceWorkerGlobalScope in MV3 service workers. Wrap in
+  // try/catch so the same file won't throw when accidentally imported in a
+  // non-SW context (e.g. a unit test or Node port).
+  self.addEventListener?.('install', () => { try { self.skipWaiting(); } catch { /* noop */ } });
+  self.addEventListener?.('activate', (event) => {
+    try {
+      event.waitUntil?.(
+        Promise.resolve()
+          .then(() => self.clients.claim?.())
+          .catch(() => null)
+      );
+    } catch { /* noop */ }
+  });
+} catch { /* noop */ }
 const TICKET_APP_HOST_PATTERNS = [
   /^https?:\/\/localhost(:\d+)?\/?$/i,
   /^https?:\/\/127\.0\.0\.1(:\d+)?\/?$/i,
@@ -43,28 +66,36 @@ const defaultState = () => ({
 let state = loadState();
 
 function loadState() {
+  // Service workers don't expose localStorage — we used to fall back via
+  // globalThis.localStorage.getItem which would throw on every read.
+  // Primary storage is chrome.storage.local. Additionally load the popup
+  // mirror key so a refreshed SW starts with whatever the popup's
+  // chrome.storage.local fallback wrote.
   try {
-    const raw = (globalThis.localStorage && localStorage.getItem(STORAGE_KEY)) ?? null;
-    if (raw) return { ...defaultState(), ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return defaultState();
+    return { ...defaultState() };
+  } catch { return defaultState(); }
 }
 
 async function saveState() {
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: state });
+    await chrome.storage.local.set({
+      [STORAGE_KEY]: state,
+      [STATE_KEY_POPUP]: state,
+    });
   } catch {
     // storage.local unavailable inside SW unit tests or early init — state
     // lives in memory for the lifetime of this worker wakeup instead.
   }
 }
 
-// Migrate away from pre-loaded localStorage-style value: MV3 SWs use
-// chrome.storage.local. Run once per worker boot.
-(async function init() {
+// Kick off async load of the real state as soon as the SW starts.
+// Popup will read the same storage.local key if we haven't warmed yet.
+(async function loadInitialState() {
   try {
-    const stored = await chrome.storage.local.get(STORAGE_KEY);
-    if (stored[STORAGE_KEY]) state = { ...defaultState(), ...stored[STORAGE_KEY] };
+    const result = await chrome.storage.local.get([STORAGE_KEY, STATE_KEY_POPUP]);
+    const pick = result?.[STORAGE_KEY] || result?.[STATE_KEY_POPUP];
+    if (pick && typeof pick === 'object') state = { ...defaultState(), ...pick };
+    await saveState();
   } catch { /* ignore */ }
 })();
 
