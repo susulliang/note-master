@@ -198,6 +198,14 @@ html, body {
   text-align: center;
   padding: 10px 0;
 }
+.kv .empty.tip { text-align: left; padding: 8px 4px; }
+.kv .warn-row, .kv .ok-row { grid-column: 1 / -1; display: grid; grid-template-columns: 96px 1fr; gap: 10px; border-top: 1px dashed var(--border); padding: 8px 0 0; }
+.kv .warn-row .kv__k { color: var(--warn); }
+.kv .ok-row   .kv__k { color: var(--primary); }
+
+.diag { margin-top: 2px; }
+.diag__card { background: linear-gradient(180deg, rgba(46,160,67,0.04), rgba(23,28,34,0)); }
+.diag .kv__k { max-width: 160px; }
 
 .toggle {
   display: flex;

@@ -98,6 +98,7 @@ const CCP_PATTERNS = [
   /^https:\/\/.*\.zendesk\.com\//i,
   /^https:\/\/.*\.freshdesk\.com\//i,
 ];
+const CCP_INJECT_FILES = ['content/ccp.js'];
 
 const SF_PATTERNS = [
   /^https:\/\/.*\.lightning\.force\.com\//i,
@@ -106,12 +107,91 @@ const SF_PATTERNS = [
   /^https:\/\/.*\.visual\.force\.com\//i,
   /^https:\/\/.*\.force\.com\//i,
 ];
+const SF_INJECT_FILES = ['content/salesforce.js'];
+
+// For "Force-scan the tab I'm viewing" and as fallback when the manifest
+// content script has no registered listener (tab already existed before the
+// extension was (re)loaded, or a branded subdomain that's not listed in
+// host_permissions hits activeTab from the popup's action), we need a map
+// of message type → which JS file to inject via chrome.scripting.
+const INJECT_MAP = {
+  SCRAPE_CCP: CCP_INJECT_FILES,
+  SCRAPE_SF:  SF_INJECT_FILES,
+};
 
 async function sendToTab(tabId, payload) {
+  // First try the manifest content script listener that Chrome should have
+  // injected on every matching frame.
+  let firstError = null;
   try {
-    return await chrome.tabs.sendMessage(tabId, payload);
+    const r = await chrome.tabs.sendMessage(tabId, payload);
+    if (r && (r.ok || r.scraped || r.diagnostic !== undefined)) return r;
+    firstError = r?.error || 'Content script replied without OK.';
   } catch (err) {
-    return { ok: false, error: String(err?.message || err) };
+    firstError = String(err?.message || err);
+  }
+
+  // Typical MV3 failure modes that land here:
+  //   • Receiving end does not exist → tab predates extension load, or
+  //     content script never matched (the user has a custom Salesforce
+  //     domain like ecovacs--amr.force.com but the page is inside an
+  //     Experience Cloud that uses a branded URL).
+  //   • Could not establish connection → content script was evicted.
+  // Fallback: inject the matching content script immediately via the
+  // scripting API (permission already requested in manifest), then retry
+  // the message once. For the branded-domain case, the host permission
+  // might not match so we swallow scripting errors and report diagnostics.
+  const files = INJECT_MAP[payload.type];
+  if (!files) {
+    return { ok: false, error: firstError || 'sendToTab failed', diagnostic: { injectSkipped: true } };
+  }
+
+  let injectResult = null;
+  try {
+    // allFrames=true because embedded Connect lives in a utility bar iframe
+    // inside the Salesforce tab — we want both the SF content script (top
+    // frame) and the CCP content script (deep iframe) to land.
+    injectResult = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files,
+    });
+  } catch (injErr) {
+    const msg = String(injErr?.message || injErr);
+    // Permission blocked → tell the popup so it can advise the user to
+    // grant <all_urls> optional permission or open a known subdomain.
+    if (msg.includes('Cannot access') || msg.includes('permission') || msg.includes('host_permissions')) {
+      return {
+        ok: false,
+        error: `${firstError || 'sendToTab failed'} — and host permission denied for scripting injection: ${msg}`,
+        diagnostic: { firstError, injectFailed: true, injectError: msg },
+      };
+    }
+    return {
+      ok: false,
+      error: `${firstError || 'sendToTab failed'} — inject fallback also failed: ${msg}`,
+      diagnostic: { firstError, injectFailed: true, injectError: msg },
+    };
+  }
+
+  try {
+    const retry = await chrome.tabs.sendMessage(tabId, payload);
+    const frameCount = Array.isArray(injectResult)
+      ? injectResult.filter((x) => x.frameId != null).length
+      : 0;
+    if (retry && !retry.ok && retry.diagnostic == null) {
+      retry.diagnostic = { injectedAfterFail: true, injectFrames: frameCount, firstError };
+    }
+    if (retry && retry.ok && retry.diagnostic == null) {
+      retry.diagnostic = { injectFallbackUsed: !!firstError, injectFrames: frameCount, firstError };
+    }
+    return retry || { ok: false, error: 'Injected, but no reply yet.', diagnostic: { injectFrames: frameCount, firstError } };
+  } catch (err2) {
+    const frameCount = Array.isArray(injectResult) ? injectResult.length : 0;
+    return {
+      ok: false,
+      error: `After scripting.executeScript still no listener: ${String(err2?.message || err2)}`,
+      diagnostic: { firstError, injected: true, injectFrames: frameCount },
+    };
   }
 }
 
@@ -177,24 +257,66 @@ async function scrapeSalesforceTab() {
   return { ok: false, error: reply?.error || 'Salesforce content script did not reply.' };
 }
 
-/** POPUP_SCRAPE_ACTIVE_TAB fallback — blindly runs BOTH SCRAPE_SF and
- *  SCRAPE_CCP against whatever tab the agent is currently viewing, and
- *  merges non-empty results into the current snapshot. Used for branded
- *  CCaaS consoles / weird tab types where the URL match lists above miss. */
+/** POPUP_SCRAPE_ACTIVE fallback — ALWAYS tries to inject BOTH scripts
+ *  into the currently active tab, regardless of URL match, then runs both
+ *  scrapers. Fixes two cases:
+ *    1. SF/Connect are on branded Ecovacs subdomains the patterns don't
+ *       know (e.g. ecovacs--amr.my.site.com).
+ *    2. Tab was already open when we installed / reloaded the extension
+ *       so the manifest content scripts never landed.
+ *  Because chrome.scripting via activeTab works on ANY tab when triggered
+ *  from the popup browser action, both inject scripts will attach even on
+ *  an unlisted host (so long as the user clicks the popup button — which
+ *  grants the one-shot activeTab permission automatically). */
 async function scrapeActiveTab() {
   const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!current?.id) return { ok: false, error: 'No active tab.' };
+  if (!current?.id) return { ok: false, error: 'No active tab found.' };
+  // Pre-inject both content scripts into every frame of the tab:
+  //   - top frame → salesforce.js
+  //   - any iframe inside (Connect utility bar, etc) → ccp.js
+  const preInjections = [];
+  try {
+    preInjections.push(...(await chrome.scripting.executeScript({
+      target: { tabId: current.id, allFrames: true },
+      files: ['content/salesforce.js'],
+    }) || []));
+  } catch (sfErr) { preInjections.push({ frameId: -1, result: { sfInjectError: String(sfErr?.message || sfErr) } }); }
+  try {
+    preInjections.push(...(await chrome.scripting.executeScript({
+      target: { tabId: current.id, allFrames: true },
+      files: ['content/ccp.js'],
+    }) || []));
+  } catch (ccpErr) { preInjections.push({ frameId: -1, result: { ccpInjectError: String(ccpErr?.message || ccpErr) } }); }
+
+  // Wait one tiny tick so the on-the-fly injected listeners are registered
+  // before we broadcast the scrape messages.
+  await new Promise((r) => setTimeout(r, 80));
+
   const [sfReply, ccpReply] = await Promise.all([
     sendToTab(current.id, { type: 'SCRAPE_SF' }),
     sendToTab(current.id, { type: 'SCRAPE_CCP' }),
   ]);
+
   let updated = false;
+  const sfDiag = sfReply?.diagnostic || {};
+  sfDiag.preInjectFrames = preInjections.filter((p) => p.frameId !== -1).length;
+  sfDiag.activeTabFallback = true;
+  if (sfReply?.diagnostic == null) sfReply.diagnostic = sfDiag;
+
   if (sfReply?.ok && Object.keys(sfReply.data || {}).length > 0) {
-    state.sf = { capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id, data: sfReply.data };
+    state.sf = { capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id, data: sfReply.data, diagnostic: sfReply.diagnostic };
     updated = true;
   }
+  const ccpDiag = ccpReply?.diagnostic || { activeTabFallback: true };
   if (ccpReply?.ok && Object.keys(ccpReply.data || {}).length > 0) {
-    state.ccp = { capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id, data: ccpReply.data };
+    // Same single tab as SF? mark it as embedded.
+    state.ccp = {
+      capturedAt: nowISO(), url: current.url, title: current.title, tabId: current.id,
+      data: ccpReply.data,
+      embedded: !!sfReply?.ok || sfReply?.tabId === current.id,
+      diagnostic: ccpDiag,
+    };
+    if (state.sf) { state.sf.ccpEmbedded = !!state.ccp?.capturedAt; }
     updated = true;
   }
   if (updated) {
@@ -202,9 +324,26 @@ async function scrapeActiveTab() {
     if (state.settings.autoPush) void pushToTicketApp(false);
     return { ok: true, sf: state.sf, ccp: state.ccp };
   }
+  // Build a mega-diagnostic for the popup to surface what failed.
+  const firstErrors = {
+    sf: sfReply?.diagnostic?.firstError || sfReply?.error,
+    ccp: ccpReply?.diagnostic?.firstError || ccpReply?.error,
+  };
+  const injectErrors = preInjections.filter((p) => p.result && (p.result.sfInjectError || p.result.ccpInjectError));
+  const sfMatched = sfReply?.data ? Object.keys(sfReply.data).length : 0;
+  const ccpMatched = ccpReply?.data ? Object.keys(ccpReply.data).length : 0;
   return {
     ok: false,
-    error: 'This tab has no matching content script loaded. If it is Connect/SF, refresh the page or ensure its URL matches one in manifest host_permissions.',
+    error: 'Force-scan was run, but the current page matched zero known Salesforce or Connect fields.',
+    diagnostic: {
+      activeTabUrl: current.url,
+      activeTabTitle: current.title,
+      framesPoked: preInjections.filter((p) => p.frameId !== -1).length,
+      injectErrors: injectErrors.map((p) => p.result),
+      firstErrors,
+      sfMatched,
+      ccpMatched,
+    },
   };
 }
 
@@ -317,11 +456,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const t = msg?.type;
   if (t === 'POPUP_GET_STATE') {
     (async () => {
+      // Attach a cheap diagnostic snapshot: what matching tabs are currently
+      // open in this browser window? Lets the popup tell the user instantly
+      // "SF tab was detected at X URL" vs "no tabs match — open Salesforce".
+      let open = [];
+      try {
+        open = (await chrome.tabs.query({ currentWindow: true })).map((t) => ({
+          id: t.id, active: !!t.active, title: (t.title || '').slice(0, 120), url: (t.url || '').slice(0, 160),
+        }));
+      } catch { /* ignore */ }
+      const matches = {
+        ccp: open.filter((t) => CCP_PATTERNS.some((p) => p.test(t.url || ''))),
+        sf:  open.filter((t) => SF_PATTERNS.some((p)  => p.test(t.url || ''))),
+      };
       sendResponse({
         ok: true,
         state,
         merged: buildMergedFields(),
         extensionId: chrome.runtime.id,
+        runtimeVersion: chrome.runtime.getManifest?.().version || null,
+        diag: {
+          openCount: open.length,
+          activeTab: open.find((t) => t.active) || null,
+          matchesCcp: matches.ccp,
+          matchesSf: matches.sf,
+          manifestCcpPatterns: CCP_PATTERNS.map((r) => String(r)),
+          manifestSfPatterns: SF_PATTERNS.map((r) => String(r)),
+        },
       });
     })();
     return true;

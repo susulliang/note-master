@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ecovacs Ticket DOM Scraper",
   "short_name": "CCP Scraper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tier-2 browser extension: scrapes the current CCP (Amazon Connect / Five9 / Genesys) tab and the Salesforce Case / Ticket tab, then pushes customer / case fields straight into the Ticket Notes web app.",
   "minimum_chrome_version": "114",
   "icons": {
@@ -20,7 +20,12 @@
       "48": "icons/icon-48.png"
     }
   },
-  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
   "host_permissions": [
     "https://*.my.connect.aws/*",
     "https://*.connect.aws.a2z.com/*",
@@ -66,7 +71,9 @@
         "https://*.zendesk.com/*",
         "https://*.freshdesk.com/*"
       ],
-      "js": ["content/content.js"],
+      "js": [
+        "content/content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     },
@@ -78,7 +85,9 @@
         "https://*.visual.force.com/*",
         "https://*.force.com/*"
       ],
-      "js": ["content/salesforce.js"],
+      "js": [
+        "content/salesforce.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     },
@@ -89,15 +98,23 @@
         "https://*.vercel.app/*",
         "https://note-master.vercel.app/*"
       ],
-      "js": ["bridge.js"],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["bridge.js", "content/*", "popup/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "bridge.js",
+        "content/*",
+        "popup/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_security_policy": {
