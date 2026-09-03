@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Mic, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -59,15 +59,21 @@ export interface EnginePanelState {
 }
 
 /**
- * On-demand cloud-parse state — the "Parse" button in the panel header.
- * One click sends the current transcript window to the remote backend and
- * returned fields overwrite every provisional regex fill.
+ * On-demand cloud-parse state — the "Parse" and "Concise Parse" buttons
+ * in the panel header.
+ *
+ * Parse (the primary green one) sends the FULL transcript window,
+ * keeping EVERY customer clause + EVERY agent step in the generated
+ * issue/resolution fields.  "Concise Parse" (secondary outline button)
+ * asks the same model for a TRIMMED version: only the 2–4 primary
+ * complaint clauses, only the 2–4 most impactful / confirmed fix steps,
+ * while still being 100% faithful to transcript wording.
  *
  * When `isDefault` is true (VITE_DEEPSEEK_API_KEY env secret set) the UI
  * drops the "DeepSeek" brand tag: the button reads generically as "Parse"
- * and there is no branded label in the status copy — this is just "the AI
- * parser" for the agent. The status label and the inline AI progress bar
- * still reflect the cloud parse's live streamed progress.
+ * / "Concise Parse" without a brand label. The status label and the
+ * inline AI progress bar still reflect the cloud parse's live streamed
+ * progress.
  */
 export interface CloudPanelState {
   /** True while the round-trip is in flight */
@@ -80,8 +86,12 @@ export interface CloudPanelState {
   error: string | null;
   /** Last successful round-trip, for the status readout */
   lastResult?: { ms: number; fields: ExtractedField[] } | null;
+  /** Mode of last successful parse (full vs concise) — status copy */
+  lastMode?: 'full' | 'concise' | null;
   /** Send the current transcript window and apply the fields */
   onParse: () => void;
+  /** Secondary button: trimmed 2–4 primary issue + 2–4 primary resolution */
+  onParseConcise: () => void;
 }
 
 /** On-device LLM parser state — the PRIMARY field parser */
@@ -364,36 +374,65 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             </span>
           )}
 
-          {/* Cloud / remote AI parse — the on-demand extraction trigger.
-              When cloud.isDefault the brand tag is hidden (just "Parse").
+          {/* Cloud / remote AI parse — the on-demand extraction triggers.
+              Primary: "Parse" = full recall. Secondary: "Concise Parse" =
+              2–4 primary issues + 2–4 primary fixes (drops tangents).
               Capture start/stop lives on the toolbar mic button. */}
           {cloud && (
-            <Button
-              variant="default"
-              size="sm"
-              disabled={cloud.isParsing || call.transcript.length === 0}
-              onClick={cloud.onParse}
-              className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
-              aria-label={
-                cloud.isDefault
-                  ? 'Parse the transcript with AI'
-                  : 'Parse the transcript with DeepSeek'
-              }
-              title={
-                call.transcript.length === 0
-                  ? 'Nothing to parse yet — the transcript is empty'
-                  : cloud.isDefault
-                    ? 'Send the current transcript window to the AI parser and fill every field (overwrites regex fills)'
-                    : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills)'
-              }
-            >
-              {cloud.isParsing ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Sparkles className="size-3" />
-              )}
-              Parse
-            </Button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={cloud.isParsing || call.transcript.length === 0}
+                onClick={cloud.onParseConcise}
+                className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+                aria-label={
+                  cloud.isDefault
+                    ? 'Concise Parse — trim issue + resolution to the 2–4 primary points each'
+                    : 'Concise Parse (DeepSeek) — trim issue + resolution to the 2–4 primary points each'
+                }
+                title={
+                  call.transcript.length === 0
+                    ? 'Nothing to parse yet — the transcript is empty'
+                    : cloud.isDefault
+                      ? 'Condensed AI parse: keep only the 2–4 PRIMARY customer complaints and 2–4 MOST CONFIRMED agent fix steps, accurate to transcript.'
+                      : 'Condensed DeepSeek parse: keep only the 2–4 PRIMARY customer complaints and 2–4 MOST CONFIRMED agent fix steps, accurate to transcript.'
+                }
+              >
+                {cloud.isParsing ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3 opacity-75" />
+                )}
+                Concise
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                disabled={cloud.isParsing || call.transcript.length === 0}
+                onClick={cloud.onParse}
+                className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+                aria-label={
+                  cloud.isDefault
+                    ? 'Parse the transcript with AI'
+                    : 'Parse the transcript with DeepSeek'
+                }
+                title={
+                  call.transcript.length === 0
+                    ? 'Nothing to parse yet — the transcript is empty'
+                    : cloud.isDefault
+                      ? 'Send the current transcript window to the AI parser and fill every field (overwrites regex fills). Keeps EVERY clause in issue + resolution.'
+                      : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills). Keeps EVERY clause in issue + resolution.'
+                }
+              >
+                {cloud.isParsing ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3" />
+                )}
+                Parse
+              </Button>
+            </div>
           )}
         </div>
 
@@ -408,8 +447,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
           >
             {cloud.error ??
               (cloud.isDefault
-                ? `AI: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`
-                : `DeepSeek: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`)}
+                ? `AI${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`
+                : `DeepSeek${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`)}
           </p>
         )}
 

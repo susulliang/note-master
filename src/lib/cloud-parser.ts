@@ -281,15 +281,29 @@ export async function parseWithDeepseek(
   apiKey: string,
   entries: TranscriptEntry[],
   prior?: PriorLlmValues,
-  onProgress?: (pct: number, stage: DeepseekProgressStage) => void
+  onProgress?: (pct: number, stage: DeepseekProgressStage) => void,
+  /** 'full' = every clause (default); 'concise' = drop tangents, keep 2–4
+   *  primary issues + 2–4 primary resolutions while preserving accuracy. */
+  mode: 'full' | 'concise' = 'full'
 ): Promise<{ result: CloudParseResult | null; error: string | null }> {
   const key = apiKey || getEffectiveApiKey();
   if (!key) return { result: null, error: 'No DeepSeek API key stored.' };
   if (entries.length === 0) return { result: null, error: 'Nothing to parse — the transcript is empty.' };
 
-  // Same prompt contract as the local parser. The window cap keeps parity
-  // with what the agent sees highlighted as "will be sent".
-  const { system, user } = buildParsePrompt(entries, [], prior);
+  // Same prompt contract as the local parser. Cloud models handle huge
+  // windows cheaply (V4 flash has 1M ctx, 128k output) but keep a generous
+  // 16k-char ceiling anyway — the agent never needs more than a couple
+  // hours of call text, and shorter prompts == better structured replies.
+  const CLOUD_MAX_CHARS = 16_000;
+  const { system, user } = buildParsePrompt(
+    entries,
+    [],
+    prior,
+    /* strict= */ false,
+    /* format= */ 'simple',
+    /* maxChars= */ CLOUD_MAX_CHARS,
+    mode
+  );
   const started = performance.now();
   onProgress?.(0, 'connecting');
 

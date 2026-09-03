@@ -64,7 +64,12 @@ export function useCloudParser() {
    * and resolve to [] so the caller's apply path is a no-op.
    */
   const parse = useCallback(
-    async (entries: TranscriptEntry[], prior?: PriorLlmValues): Promise<ExtractedField[]> => {
+    async (
+      entries: TranscriptEntry[],
+      prior?: PriorLlmValues,
+      /** 'full' = every clause (default); 'concise' = 2–4 primary issues + 2–4 main fix steps */
+      mode: 'full' | 'concise' = 'full'
+    ): Promise<ExtractedField[]> => {
       if (runningRef.current) return [];
       runningRef.current = true;
       setIsParsing(true);
@@ -79,7 +84,8 @@ export function useCloudParser() {
           localKey,
           entries,
           prior,
-          (pct) => setProgress(pct)
+          (pct) => setProgress(pct),
+          mode
         );
         if (error) {
           setError(error);

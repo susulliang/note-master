@@ -43,10 +43,16 @@ export interface CallCaptureLlmParser {
 
 /** Structural slice of useCloudParser() the capture hook needs */
 export interface CallCaptureCloudParser {
-  /** One DeepSeek extraction over the current window; never rejects */
+  /** One DeepSeek extraction over the current window; never rejects
+   *
+   * mode:
+   *  - 'full'    → every customer / agent clause (original parse button)
+   *  - 'concise' → 2–4 primary issues + 2–4 primary fix steps, drop tangents
+   */
   parse: (
     entries: TranscriptEntry[],
-    prior?: { resolutionSummary?: string; issueDescription?: string }
+    prior?: { resolutionSummary?: string; issueDescription?: string },
+    mode?: 'full' | 'concise'
   ) => Promise<ExtractedField[]>;
 }
 
@@ -218,6 +224,12 @@ export function useCallCapture(
   const cloudParserRef = useRef(cloudParser);
   /** True while the cloud parse round-trip is in flight (re-entry guard) */
   const cloudRunningRef = useRef(false);
+  /** Set whenever an *explicit* cloud parse (Parse / Concise Parse button, OR
+   *  the auto-full-parse at hangup) completes with non-empty fields.  Used by
+   *  Hang Up: "if the agent never clicked any Parse in this session, run a
+   *  FULL Parse on their behalf before generating the note."
+   *  mode: 'full' (default) | 'concise' depending on which button ran last. */
+  const lastCloudParseSuccessRef = useRef<{ at: number; mode: 'full' | 'concise' } | null>(null);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   /** Sequential transcription chain — keeps transcript ordering stable */
@@ -594,7 +606,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
   }, [applyLlmFields, armIdleParse, buildPriorValues]);
 
   /**
-   * On-demand DeepSeek cloud parse — the explicit "Cloud parse" button.
+   * On-demand DeepSeek cloud parse — the explicit "Cloud parse" buttons.
    *
    * Semantics differ from the local parser's append-guard on purpose:
    * the cloud model reads the CURRENT window with the prior cumulative
@@ -603,15 +615,21 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
    * (The local append-guard exists because a 0.5B model's re-read can
    * silently drop clauses; a frontier model handed the prior values is
    * trusted to restate them.)
+   *
+   * mode:
+   *  - 'full'    → keep EVERY clause (the original Parse button).
+   *  - 'concise' → drop tangents; keep 2–4 primary issues + 2–4 primary
+   *                fix steps, still faithful to transcript. Used by the
+   *                "Concise Parse" secondary button.
    */
-  const runCloudParse = useCallback(async (): Promise<void> => {
+  const runCloudParse = useCallback(async (mode: 'full' | 'concise' = 'full'): Promise<void> => {
     const cloud = cloudParserRef.current;
     if (!cloud || cloudRunningRef.current) return;
 
     cloudRunningRef.current = true;
     setIsCloudParsing(true);
     try {
-      const fields = await cloud.parse(entriesRef.current, buildPriorValues());
+      const fields = await cloud.parse(entriesRef.current, buildPriorValues(), mode);
       if (fields.length === 0) return;
       const applied: ExtractedField[] = [];
       for (const field of fields) {
@@ -626,6 +644,11 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
         for (const f of applied) map.set(f.fieldId, f);
         return [...map.values()];
       });
+      // Remember that at least one explicit parse happened this session.
+      // The Hang Up flow consults this: if the agent never clicked Parse
+      // before ending the call, we run a full parse FIRST, then build the
+      // note — so the final output always gets LLM-level structure.
+      lastCloudParseSuccessRef.current = { at: Date.now(), mode };
     } finally {
       cloudRunningRef.current = false;
       setIsCloudParsing(false);
@@ -1081,6 +1104,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     llmConfirmedRef.current = new Set();
     llmSuggestionsRef.current = new Map();
     lastLlmRunRef.current = 0;
+    lastCloudParseSuccessRef.current = null;
     paraphrasePendingRef.current = {};
     paraphrasedFromRef.current = {};
     paraphraseRunningRef.current = false;
@@ -1131,9 +1155,19 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     finalize,
     transcript,
     suggestions,
-    /** On-demand DeepSeek parse of the current window (the Cloud button) */
+    /** On-demand DeepSeek parse of the current window.
+     *  mode = 'full' (default) keeps ALL clauses;
+     *  mode = 'concise' keeps 2–4 primary issues + 2–4 main fix steps. */
     cloudParse: runCloudParse,
     isCloudParsing,
+    /** True once any `cloudParse('full'|'concise')` call completed with ≥1 field
+     *  applied this session, OR the hang-up auto-full-parse completed.
+     *  Reset when the agent calls clear() or the Reset page button wipes the
+     *  session (Reset clears transcript entirely, which wipes suggestions too). */
+    hasSuccessfulCloudParse: () => lastCloudParseSuccessRef.current !== null,
+    /** Last successful mode and wall-clock timestamp — for the caption panel
+     *  status line to show "Full parse · 2.1s" vs "Concise parse · 2.0s". */
+    lastCloudParse: () => lastCloudParseSuccessRef.current,
     segmentsSent,
     queued,
     isTranscribing,

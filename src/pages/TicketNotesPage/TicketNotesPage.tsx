@@ -1263,10 +1263,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
    */
   const voiceRef = useRef(voice);
   const callRef = useRef(call);
+  /** Cloud parser live ref — read inside `handleHangUp` closure which is
+   *  only declared once (callback stable across renders). */
+  const cloudParserRef = useRef(cloudParser);
   useEffect(() => {
     voiceRef.current = voice;
     callRef.current = call;
-  }, [voice, call]);
+    cloudParserRef.current = cloudParser;
+  }, [voice, call, cloudParser]);
   const handleHangUp = useCallback(async () => {
     // Re-entrant clicks bail into the in-flight work — nothing ever runs
     // twice and the modal always ends up open at the end.
@@ -1307,6 +1311,50 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         // we have so far. The agent edits the rest manually.
         console.warn('[hangup] finalize threw, falling back to current form:', err);
       }
+    }
+
+    // Step 1.5: Auto-FULL-Parse before generating the note.
+    //
+    // The user asked: "On end call and generate note, if no LLM parse is
+    // activated in this session, Parse first then generate note."
+    //
+    // Conditions:
+    //  - agent hasn't clicked Parse / Concise Parse in this session AND
+    //    the auto-full-parse we might run on a prior hangup attempt didn't
+    //    already land (call.hasSuccessfulCloudParse() == false)
+    //  - we actually have a backend to call: either env default or a local
+    //    key (cloudParser.hasKey)
+    //  - transcript has enough text to be worth an API call (≥400 chars)
+    //
+    // The parse we auto-run here is mode='full' (all clauses preserved in
+    // issue + resolution; the agent can click Concise afterwards if they
+    // want a trimmed ticket note).
+    try {
+      const transcriptChars = callNow.transcript.reduce((n, e) => n + e.text.length, 0);
+      const enoughChars = transcriptChars >= 400;
+      const noPriorCloudParse = !callNow.hasSuccessfulCloudParse();
+      const hasBackend = !!cloudParserRef.current && (cloudParserRef.current?.hasKey ?? false);
+      if (noPriorCloudParse && hasBackend && enoughChars) {
+        // Run with a bounded time-out so network hiccups can't hang the
+        // note modal forever. ~25s = 2x the normal V4 flash RTT, generous.
+        await Promise.race([
+          (async () => {
+            try {
+              await callNow.cloudParse('full');
+            } catch (err) {
+              console.warn('[hangup] auto cloud parse threw, falling back:', err);
+            }
+          })(),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 25000)),
+        ]);
+        // Give React + the autofill ref a frame to commit the newly-applied
+        // fields into formDataRef before we serialize the final note text.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+      }
+    } catch (err) {
+      console.warn('[hangup] auto cloud parse failed, continuing with form:', err);
     }
 
     try {
@@ -1490,7 +1538,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                     isDefault: cloudParser.isDefault,
                     error: cloudParser.error,
                     lastResult: cloudParser.lastResult,
-                    onParse: () => void call.cloudParse(),
+                    lastMode: call.lastCloudParse()?.mode ?? null,
+                    onParse: () => void call.cloudParse('full'),
+                    onParseConcise: () => void call.cloudParse('concise'),
                   }}
                 />
               ),

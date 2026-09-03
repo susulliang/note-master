@@ -441,7 +441,20 @@ export function buildParsePrompt(
    */
   format: 'simple' | 'json' = 'simple',
   /** Transcript-window cap — see getTranscriptCharCap (CPU gets a tighter tail) */
-  maxChars: number = MAX_TRANSCRIPT_CHARS
+  maxChars: number = MAX_TRANSCRIPT_CHARS,
+  /**
+   * 'full' (default): include EVERY customer point / EVERY agent step
+   * in issueDescription / resolutionSummary respectively (the original
+   * behavior, for max recall).
+   *
+   * 'concise': keep ONLY the 2-4 PRIMARY customer complaint clauses in
+   * issueDescription and ONLY the 2-4 MOST IMPACTFUL / CONFIRMED fix
+   * steps in resolutionSummary, still accurate to the transcript —
+   * drop purely diagnostic chatter, side questions, dead ends, trial
+   * steps that the customer immediately ruled out, etc. Used by the
+   * "Concise Parse" secondary button in the caption panel header.
+   */
+  mode: 'full' | 'concise' = 'full'
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -466,6 +479,13 @@ export function buildParsePrompt(
           : '',
     ])
   );
+  const concise = mode === 'concise';
+  const issueDescRule = concise
+    ? 'issueDescription: <ONLY the 2–4 MOST IMPORTANT customer complaint clauses, short phrases joined with "; ". EXCLUDE diagnostic tangents, side-topic small-talk, ruled-out possibilities, pure filler, and any minor detail not needed to understand what happened. RICH TEXT RULE: wrap the top 1–2 worst / most-confirmed clauses in **double asterisks** bold. Accuracy is non-negotiable — every clause you keep must be directly stated in the transcript; never invent or paraphrase beyond what the call supports.>'
+    : 'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the MOST IMPORTANT customer complaint points (root-cause symptoms, safety concerns, high-severity failures, expensive part damage, strongly-worded customer requests) in **double asterisks** so they render as bold. Markdown only, no other formatting. At least the key clause gets bolded — if the list has several points, highlight the top 2–4 that capture "what went wrong" without overmarking.';
+  const resolutionRule = concise
+    ? 'resolutionSummary: <ONLY the 2–4 AGENT STEPS that actually CHANGED THE OUTCOME or were CONFIRMED by the customer as valid fixes / next-actions, short phrases joined with " -> ". DROP every purely diagnostic dead-end question ("checked power state?" when nothing was found), side-suggestions the customer immediately said no to, all small-talk and off-topic chatter. RICH TEXT RULE: wrap the FINAL CONFIRMED fix / resolution step in **double asterisks** bold. Keep 2–4 bullets total — accuracy must stay 100% faithful to what the call contains, no invented wording.>'
+    : 'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the EFFECTIVE / CONFIRMED resolution actions in **double asterisks** bold. Bold the steps that actually resolved the issue (e.g. "**replaced the mainboard**", "**performed hard reset and customer confirmed it works**") vs. purely diagnostic questions leave un-bolded. If the resolution was a clear successful fix — bold that success phrase prominently.';
 
   // ---- SIMPLE format (PRIMARY): plain lines ------------------------------
   // Line labels cannot break structurally — each line stands alone, so a
@@ -473,7 +493,9 @@ export function buildParsePrompt(
   // starts without the model having to plan a punctuation-perfect object.
   if (format === 'simple') {
     const system = [
-      'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
+      concise
+        ? 'You write a CONDENSED ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS). Your output will go directly into the Issue Description and Resolution Summary boxes, so accuracy is critical but NON-ESSENTIAL details MUST be dropped.'
+        : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
       'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
       'customerName: <the customer\'s own name, or empty>',
       'contactNumber: <their phone number, or empty>',
@@ -482,10 +504,12 @@ export function buildParsePrompt(
       'skuNumber: <SKU as spoken, or empty>',
       'serialNumber: <serial as spoken, or empty>',
       'purchaseInfo: <store + when, e.g. "Amazon · March 2025", or empty>',
-      'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the MOST IMPORTANT customer complaint points (root-cause symptoms, safety concerns, high-severity failures, expensive part damage, strongly-worded customer requests) in **double asterisks** so they render as bold. Markdown only, no other formatting. At least the key clause gets bolded — if the list has several points, highlight the top 2–4 that capture "what went wrong" without overmarking.',
+      issueDescRule,
       'issueType: <"Category::Item" or short phrase, or empty>',
-      'resolutionSummary: <EVERY agent step/advice/question, short phrases joined with " -> ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the EFFECTIVE / CONFIRMED resolution actions in **double asterisks** bold. Bold the steps that actually resolved the issue (e.g. "**replaced the mainboard**", "**performed hard reset and customer confirmed it works**") vs. purely diagnostic questions leave un-bolded. If the resolution was a clear successful fix — bold that success phrase prominently.',
-      'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.',
+      resolutionRule,
+      concise
+        ? 'Rules: values in condensed note style, never invented. 100% ACCURATE: only keep clauses the transcript directly supports; DROP every clause that is minor, ruled-out, tangential, purely diagnostic without an outcome, or a dead-end suggestion. Keep the exact 2–4 main complaint sentences and 2–4 main resolution sentences, bold the pivotal ones. Do NOT restate or embellish. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.'
+        : 'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.',
       ...(strict
         ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
         : []),
@@ -493,24 +517,32 @@ export function buildParsePrompt(
     const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
     if (prior?.issueDescription) {
       userLines.push('', 'issueDescription currently:', prior.issueDescription);
+      if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary complaint clauses only.)');
     }
     if (prior?.resolutionSummary) {
       userLines.push('', 'resolutionSummary currently:', prior.resolutionSummary);
+      if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary fix / outcome steps only.)');
     }
-    userLines.push('', 'Reply with the eleven lines now, one per field.');
+    userLines.push('', `Reply with the eleven lines now, one per field.${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`);
     return { system, user: userLines.join('\n') };
   }
 
   const system = [
-    'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
+    concise
+      ? 'You write a CONDENSED ticket note for an Ecovacs robot support call. AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris). Output will land in the Issue Description and Resolution Summary boxes directly, so accuracy is mandatory but low-signal clauses MUST be removed.'
+      : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
     'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. purchaseInfo: where + when the unit was acquired — store/site first (Amazon, Best Buy, eBay, Target, Walmart, Costco, Home Depot, ecovacs.com / official store, ...), then when ("Amazon · March 2025", "Ecovacs official store · ~1 year ago").',
-    '5. issueDescription: recall over brevity — EVERY distinct point the CUSTOMER makes, each condensed into its own short clause (a few words) and joined with "; ": symptoms and their history (when it started, what changed, what they already tried), context (age, purchase, usage), requests (order/replace a part or accessory, a missing or misplaced item, how-to), plus problem details the agent states. NEVER omit a point to stay short — a human deletes irrelevant clauses later. RICH TEXT RULE for this field value ONLY: wrap the MOST IMPORTANT complaint clauses (top 2–4: root-cause symptoms, safety issues, high-severity failures, strongly-worded requests) in **bold markdown** using literal **…** inside the JSON string. Keep all clauses even the un-bolded ones.',
+    concise
+      ? '5. issueDescription (CONCISE MODE): ONLY the 2–4 PRIMARY customer complaint clauses — root-cause symptoms, the thing the customer is actually calling about. EXCLUDE all ruled-out possibilities, diagnostic detours, side-topics, small-talk and filler. Keep the final value 2–4 clauses total; join with "; ". RICH TEXT RULE: wrap the 1–2 most severe / confirmed clauses in **markdown double-asterisk bold** inside the JSON string. 100% faithful to transcript wording; do not invent details or paraphrase beyond what is stated.'
+      : '5. issueDescription: recall over brevity — EVERY distinct point the CUSTOMER makes, each condensed into its own short clause (a few words) and joined with "; ": symptoms and their history (when it started, what changed, what they already tried), context (age, purchase, usage), requests (order/replace a part or accessory, a missing or misplaced item, how-to), plus problem details the agent states. NEVER omit a point to stay short — a human deletes irrelevant clauses later. RICH TEXT RULE for this field value ONLY: wrap the MOST IMPORTANT complaint clauses (top 2–4: root-cause symptoms, safety issues, high-severity failures, strongly-worded requests) in **bold markdown** using literal **…** inside the JSON string. Keep all clauses even the un-bolded ones.',
     '6. issueType: the "Category::Item" matching the primary problem (e.g. "Failure::Unable to charge", "Product experience::Low suction power", "Aftersale-Service inquiry::Accessory Purchase", "How to use::App connection").',
-    '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
+    concise
+      ? '7. resolutionSummary (CONCISE MODE): ONLY the 2–4 AGENT actions that MATTERED — confirmed fix steps, accepted next actions, confirmed part orders / returns / replacement decisions, or the final failed-outcome step if the call ended without a resolution. EXCLUDE every purely diagnostic question ("checked power state?") that went nowhere, every suggestion the customer declined, all small-talk. Keep the output 2–4 short phrases joined with " -> ". RICH TEXT RULE: wrap the SINGLE confirmed effective step / final success sentence in **…** markdown bold inside the JSON string. 100% accurate to transcript; never invent step wording.'
+      : '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
     ...(strict
       ? [
           'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it. Preserve literal **double-asterisk** bold markers inside string values exactly as written by the model.',
@@ -522,14 +554,18 @@ export function buildParsePrompt(
   if (prior?.issueDescription) {
     userLines.push(
       '',
-      'Issue description clauses already on the ticket (keep EVERY one of them; append NEW points the customer describes or the agent confirms — never drop a clause):',
+      concise
+        ? 'Issue description already on the ticket (CONCISE MODE: you MAY REWRITE this draft down to 2–4 PRIMARY complaint clauses only — do NOT carry forward minor / ruled-out points):'
+        : 'Issue description clauses already on the ticket (keep EVERY one of them; append NEW points the customer describes or the agent confirms — never drop a clause):',
       prior.issueDescription
     );
   }
   if (prior?.resolutionSummary) {
     userLines.push(
       '',
-      'Steps already on the ticket (keep them unchanged and in order, then append any NEW steps after them):',
+      concise
+        ? 'Steps already on the ticket (CONCISE MODE: you MAY REWRITE this down to 2–4 PRIMARY fix/actions — drop diagnostic dead ends and declined suggestions):'
+        : 'Steps already on the ticket (keep them unchanged and in order, then append any NEW steps after them):',
       prior.resolutionSummary
     );
   }
