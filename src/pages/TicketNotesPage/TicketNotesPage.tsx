@@ -1614,12 +1614,46 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         </main>
       </div>
 
-      <OutputModal
-        open={showOutput}
-        onOpenChange={setShowOutput}
-        noteText={noteText}
-        onSaveToHistory={handleOutputClose}
-      />
+      {/* NOTE: OutputModal reads TicketPanelsContext.openCase / applyCaseFields /
+         extensionConnection to push notes to SF. In the 0.1.21 cycle we had it
+         OUTSIDE the Provider closing tag above, which silently made the
+         context null and produced "Diagnostics / Push — pressed, nothing" on
+         vercel.  To prevent that regression from ever coming back we keep a
+         hook-side fallback inside OutputModal itself AND re-declare the
+         provider wrapping all sibling modals here. */}
+      <TicketPanelsContext.Provider
+        value={{
+          openCase: async ({ caseNumber, directUrl, newTab }) => {
+            if (extensionBridge.connected) {
+              try { return await extensionBridge.openCase({ caseNumber, directUrl, newTab }); }
+              catch (e: any) {
+                return { ok: false, url: null, navigated: null, error: String(e?.message || e) };
+              }
+            }
+            if (directUrl) {
+              if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
+              else window.location.assign(directUrl);
+              return { ok: true, url: directUrl, navigated: 'new' as const };
+            }
+            return { ok: false, url: null, navigated: null, error: 'Extension not connected. Paste a full Lightning Case URL to open it directly, or reload the Ecovacs Note Helper extension.' };
+          },
+          applyCaseFields: extensionBridge.connected
+            ? extensionBridge.applyCaseFields.bind(extensionBridge)
+            : undefined,
+          extensionConnection: {
+            connected: extensionBridge.connected,
+            requestConnection: extensionBridge.requestConnection.bind(extensionBridge),
+            diagnostics: extensionBridge.connectionDiagnostics,
+          },
+        }}
+      >
+        <OutputModal
+          open={showOutput}
+          onOpenChange={setShowOutput}
+          noteText={noteText}
+          onSaveToHistory={handleOutputClose}
+        />
+      </TicketPanelsContext.Provider>
 
       <TemplatePanel
         template={openTemplate}

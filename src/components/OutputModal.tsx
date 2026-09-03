@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { TicketPanelsContext } from './FlowNode';
+import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
 import { cn } from '@/lib/utils';
 
 interface OutputModalProps {
@@ -72,8 +73,38 @@ export default function OutputModal({
   const [editableText, setEditableText] = useState(noteText);
   const [pushing, setPushing] = useState(false);
   const panelsCtx = useContext(TicketPanelsContext);
-  const applyCaseFields = panelsCtx?.applyCaseFields;
-  const extConn = panelsCtx?.extensionConnection;
+
+  // Defensive fallback: OutputModal was accidentally rendered outside
+  // TicketPanelsContext in 0.1.22, and the symptom was that diagnostics
+  // / Push buttons silently ran against a null context. To prevent this
+  // class of regression forever, instantiate the extension bridge hook
+  // directly here too and merge with the context: context wins if it
+  // carries real values, hook fills in anything missing.
+  const hookBridge = useCcpExtensionBridge({ onApply: () => [] });
+
+  type ExtensionConnectionShape = NonNullable<Required<import('@/components/FlowNode').TicketPanelsContextShape>['extensionConnection']>;
+
+  const applyCaseFields: ReturnType<typeof useCcpExtensionBridge>['applyCaseFields'] | undefined =
+    panelsCtx?.applyCaseFields ?? (hookBridge.connected ? hookBridge.applyCaseFields.bind(hookBridge) : undefined);
+
+  const openCaseFallback: NonNullable<ReturnType<typeof useCcpExtensionBridge>['openCase']> = async ({ caseNumber, directUrl, newTab }) => {
+    if (hookBridge.connected) { try { return await hookBridge.openCase({ caseNumber, directUrl, newTab }); } catch (e: any) { return { ok: false, url: null, navigated: null, error: String(e?.message || e) }; } }
+    if (directUrl) {
+      if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
+      else window.location.assign(directUrl);
+      return { ok: true, url: directUrl, navigated: 'new' as const };
+    }
+    return { ok: false, url: null, navigated: null, error: 'Extension not connected. Paste a full Lightning Case URL or reload the Ecovacs Note Helper extension.' };
+  };
+
+  void panelsCtx?.openCase; // silence unused
+  void openCaseFallback;
+
+  const extConn: ExtensionConnectionShape = panelsCtx?.extensionConnection ?? {
+    connected: hookBridge.connected,
+    requestConnection: hookBridge.requestConnection.bind(hookBridge),
+    diagnostics: hookBridge.connectionDiagnostics,
+  };
 
   // Parse extra fields for "Push to Salesforce Case" (beyond the 3 chip ones)
   //   - Deebot Model / Serial / SKU / Email / Shipping Address / Phone → for
@@ -315,9 +346,11 @@ export default function OutputModal({
       } else if (!pb?.ok && failed > 0 && good === 0) {
         toast.warning(`Push completed with ${failed} warning${failed === 1 ? '' : 's'}. (Fields were found but editing may require inline-edit permissions or different Case layout sections.)`);
       }
-      if (r.tab?.title || r.tab?.url) {
-        toast.message(`Pushed to tab: ${r.tab?.title || new URL(r.tab.url).origin}`, {
-          description: r.tab?.url ? new URL(r.tab.url).pathname : undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tab = (r as any).tab;
+      if (tab?.title || tab?.url) {
+        toast.message(`Pushed to tab: ${tab?.title || new URL(tab.url).origin}`, {
+          description: tab?.url ? new URL(tab.url).pathname : undefined,
         });
       }
     } catch (e: any) {
