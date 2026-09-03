@@ -43,6 +43,14 @@ export interface TicketPanelsContextShape {
   trackerContent?: React.ReactNode;
   sopContent?: React.ReactNode;
   productContent?: React.ReactNode;
+  /** Open / focus a Salesforce Console tab via the Ecovacs Note Helper
+   *  extension.  This is the action behind the "Open case in SF" buttons
+   *  in the 24h tracker rows.  Returns { ok, url } on success, or
+   *  { ok:false, error } when the extension is missing / can't find the
+   *  org (e.g. no Salesforce tab is open yet, caller should show a toast
+   *  asking to open ANY org tab first). */
+  openCase?: (opts: { caseNumber?: string; directUrl?: string; newTab?: boolean }) =>
+    Promise<{ ok: boolean; url?: string | null; navigated?: 'new' | 'reused' | null; error?: string | null }>;
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';

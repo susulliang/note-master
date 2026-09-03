@@ -949,6 +949,137 @@ async function refreshCcpTab() {
   return scrapeCcpTab();
 }
 
+// ---------------------------------------------------------------------------
+//  24h Tracker → Salesforce Console navigation.
+//
+//  The app's tracker only stores case numbers, but Salesforce Console deep-
+//  links always require the org-specific base URL plus either a record Id
+//  (500aV… long id) or a global-search query.  The helper below resolves
+//  the org base URL from whichever of these is available FIRST (priority
+//  order):
+//    1. msg.directUrl          — caller hands us the full lightning URL.
+//    2. state.sf.url           — most recent Salesforce scrape remembered
+//                                in local storage.
+//    3. findTab(SF_PATTERNS)   — any open Salesforce / Lightning tab in
+//                                this browser.
+//  With a base URL in hand, case-number navigation goes to the Console's
+//  global search page scoped to Case records: this reliably lands the
+//  agent on the searched case even as Console internals drift (SOSL
+//  accepts both the 8-digit display number and the 18-digit record Id).
+// ---------------------------------------------------------------------------
+
+async function resolveSalesforceBase(): Promise<string | null> {
+  const tryUrl = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    try {
+      const u = new URL(raw);
+      if (!/^https?:/i.test(u.protocol)) return null;
+      return `${u.origin}`;
+    } catch { return null; }
+  };
+  return tryUrl(state.sf?.url)
+    ?? tryUrl(state.ccp?.url)
+    ?? (async () => {
+      const tab = await findTab(SF_PATTERNS);
+      return tryUrl(tab?.url ?? null);
+    })();
+}
+
+/**
+ * Open (or focus) a Salesforce Console tab pointing to the target record.
+ *
+ * @param opts.caseNumber 8-digit display number → Console global search scoped to Case
+ * @param opts.directUrl  Exact `https://*.lightning.force.com/...` URL to open verbatim
+ * @param opts.newTab     true → always create a new tab (default: reuse most-recent SF tab if one exists)
+ * @returns info about which tab was navigated + final URL used.
+ */
+async function openCaseInSalesforce({
+  caseNumber,
+  directUrl,
+  newTab = false,
+}: { caseNumber?: string | null; directUrl?: string | null; newTab?: boolean } = {}) {
+  const cNum = (caseNumber || '').trim();
+  const dUrl = (directUrl || '').trim();
+  if (!cNum && !dUrl) {
+    return { ok: false, error: 'Provide either caseNumber or directUrl.' };
+  }
+
+  // 1) Direct URL — open exactly.
+  let finalUrl: string | null = null;
+  if (dUrl) {
+    try { const u = new URL(dUrl); if (/^https?:/i.test(u.protocol)) finalUrl = u.href; }
+    catch { /* ignore */ }
+    if (!finalUrl) return { ok: false, error: `directUrl is not a valid https URL: ${dUrl.slice(0, 120)}.` };
+  }
+
+  // 2) Case number — build Console global search URL.
+  if (!finalUrl && cNum) {
+    const base = await resolveSalesforceBase();
+    if (!base) {
+      return {
+        ok: false,
+        error: [
+          "We couldn't figure out which Salesforce org to open for case",
+          cNum + '.',
+          "Please open ANY Ecovacs Salesforce tab first (so the extension picks up the org URL),",
+          'or provide a full Lightning Case view URL via the directUrl option.',
+        ].join(' '),
+      };
+    }
+    // Lightning Console scoped global search → lands on the Case record
+    // when the number matches uniquely, or shows matching rows otherwise.
+    // Two variants: v1-style `_classic/search` (still widely supported in
+    // Spring/Summer '26 orgs) and v2 `lightning/search/SearchResults` — we
+    // use the legacy entry because it still works across all Console skins
+    // and the new URL would rewrite to it anyway on non-matching orgs.
+    finalUrl = `${base}/lightning/_classic/search/?#!/Case/search?q=${encodeURIComponent(cNum)}`;
+  }
+
+  if (!finalUrl) return { ok: false, error: 'Could not build a Salesforce URL.' };
+
+  // 3) Choose target tab:
+  //    - If the URL is already open anywhere → focus that exact tab.
+  //    - Else if newTab=false → reuse the most-recent/active Salesforce
+  //      Console tab (reuse is friendlier for the agent — fewer tabs).
+  //    - Otherwise → brand-new foreground tab.
+  let targetTab: { id: number; windowId?: number | undefined } | null = null;
+  try {
+    const matches = await chrome.tabs.query({ url: finalUrl });
+    const exact = (matches || []).sort((a, b) => Number(!!b.active) - Number(!!a.active))[0];
+    if (exact && exact.id != null) targetTab = { id: exact.id, windowId: exact.windowId };
+  } catch { /* ignore */ }
+  if (!targetTab && !newTab) {
+    const sfTab = await findTab(SF_PATTERNS);
+    if (sfTab && sfTab.id != null) targetTab = { id: sfTab.id, windowId: sfTab.windowId };
+  }
+
+  let tab: chrome.tabs.Tab | undefined;
+  if (targetTab) {
+    try {
+      tab = await chrome.tabs.update(targetTab.id, { url: finalUrl, active: true });
+      if (tab?.windowId != null) {
+        try { await chrome.windows.update(tab.windowId, { focused: true }); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      return { ok: false, error: `Failed to navigate existing tab: ${String((err as Error).message || err)}` };
+    }
+  } else {
+    try {
+      tab = await chrome.tabs.create({ url: finalUrl, active: true });
+    } catch (err) {
+      return { ok: false, error: `Failed to create tab: ${String((err as Error).message || err)}` };
+    }
+  }
+  return {
+    ok: true,
+    url: finalUrl,
+    tabId: tab?.id ?? null,
+    navigated: targetTab ? 'reused' : 'new',
+    caseNumber: cNum || null,
+    directUrl: dUrl || null,
+  };
+}
+
 /** The "merged" payload the Ticket Notes page actually consumes — a flat
  *  dictionary of field-id → string, matching the shape the app's LLM and
  *  regex engines already fill. */
@@ -1228,6 +1359,17 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
         // The web app confirms it received a prior push — nothing to do,
         // but keeping the hook lets us surface a "received" badge later.
         sendResponse({ ok: true });
+        return;
+      }
+      if (t === 'EXT_OPEN_CASE') {
+        // 24h Tracker → Salesforce Console tab navigation.
+        // Fields: { caseNumber?, directUrl?, newTab? }
+        const resp = await openCaseInSalesforce({
+          caseNumber: msg?.caseNumber ?? null,
+          directUrl:  msg?.directUrl  ?? null,
+          newTab:     Boolean(msg?.newTab ?? false),
+        });
+        sendResponse(resp);
         return;
       }
       sendResponse({ ok: false, error: `Unknown external type: ${t}` });

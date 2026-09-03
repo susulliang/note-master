@@ -1472,6 +1472,24 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           />
           <TicketPanelsContext.Provider
             value={{
+              openCase: async ({ caseNumber, directUrl, newTab }) => {
+                // Graceful fallback chain:
+                //   1. Extension bridge is connected → ask background SW.
+                //   2. Not connected + user gave a direct URL → open a plain
+                //      browser tab (no permissions required, always works).
+                //   3. Otherwise → return error, tracker will surface a toast
+                //      telling the agent to install / reload / open SF first.
+                if (extensionBridge.connected) {
+                  const r = await extensionBridge.openCase({ caseNumber, directUrl, newTab });
+                  return { ok: !!r.ok, url: r.url ?? null, navigated: r.navigated ?? null, error: r.error ?? null };
+                }
+                if (directUrl) {
+                  try { window.open(directUrl, newTab ? '_blank' : '_self', 'noopener,noreferrer'); }
+                  catch { /* ignore */ }
+                  return { ok: true, url: directUrl, navigated: 'new' as const };
+                }
+                return { ok: false, url: null, navigated: null, error: 'Extension not connected. Paste a full Lightning Case URL to open it directly, or reload the Ecovacs Note Helper extension.' };
+              },
               transcriptContent: (
                 <VoiceCaptionPanel
                   mic={{

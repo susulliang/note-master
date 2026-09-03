@@ -77,6 +77,16 @@ export interface CcpExtensionBridge {
   scrapeAll: () => Promise<{ ok: boolean; merged?: ExtensionFieldMap; error?: string }>;
   /** Fetch the current extension state + merged fields snapshot. */
   getSnapshot: () => Promise<{ ok: boolean; merged?: ExtensionFieldMap; state?: unknown }>;
+  /** Ask the extension to open (or focus) a Salesforce Console tab for
+   *  a given case number (global search scoped to Case records), OR to
+   *  a direct Lightning view URL when provided.  `newTab=true` forces a
+   *  brand new browser tab; false (default) reuses the most-recent SF
+   *  Console tab (or focuses an existing tab already showing that URL). */
+  openCase: (opts: {
+    caseNumber?: string;
+    directUrl?: string;
+    newTab?: boolean;
+  }) => Promise<{ ok: boolean; url?: string; navigated?: 'new' | 'reused' | null; error?: string }>;
 }
 
 /** Map the flat field shape produced by the background's
@@ -462,6 +472,25 @@ export function useCcpExtensionBridge({
     }
   }, [sendRequest]);
 
+  const openCase = useCallback(async (opts: {
+    caseNumber?: string;
+    directUrl?: string;
+    newTab?: boolean;
+  } = {}): Promise<{ ok: boolean; url?: string; navigated?: 'new' | 'reused' | null; error?: string }> => {
+    try {
+      const r = await sendRequest({
+        type: 'EXT_OPEN_CASE',
+        caseNumber: opts.caseNumber ?? null,
+        directUrl: opts.directUrl ?? null,
+        newTab: Boolean(opts.newTab ?? false),
+      });
+      if (r?.ok) return { ok: true, url: r.url ?? undefined, navigated: r.navigated ?? null };
+      return { ok: false, error: r?.error || 'Extension failed to open case.' };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  }, [sendRequest]);
+
   return {
     connected,
     extensionId,
@@ -473,6 +502,7 @@ export function useCcpExtensionBridge({
     dismissPendingPush,
     scrapeAll,
     getSnapshot,
+    openCase,
   };
 }
 
