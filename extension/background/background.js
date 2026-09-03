@@ -110,15 +110,57 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-/** Best-effort find ONE tab whose URL matches one of the patterns. */
+/** Best-effort find ONE tab whose URL matches one of the patterns.
+ *
+ *  Previously this took the first tab in `chrome.tabs.query({})` order —
+ *  Chrome's default order is roughly creation order, so the oldest tab that
+ *  matches a pattern always "won".  Result: when the user opened a new
+ *  Case tab and clicked Scan, the extension kept scraping their first
+ *  (stale) test page.
+ *
+ *  Fixed ordering (highest priority first):
+ *    1. Tab is currently active in the focused / current window.
+ *    2. Tab has the most-recent lastAccessed (Chrome populates this reliably
+ *       enough to distinguish "the tab I was just on" from a tab opened
+ *       three days ago). lastAccessed can be missing on older platforms;
+ *       missing entries sort last within their tier.
+ *    3. Within a window, smaller `index` (leftmost) wins.
+ *  This ensures "scrape" almost always targets the case the agent is
+ *  actually looking at. */
 async function findTab(patterns) {
   const all = await chrome.tabs.query({});
-  return (
-    all.find((t) => {
-      if (!t.url) return false;
-      return patterns.some((p) => p.test(t.url));
-    }) ?? null
-  );
+  const cw = (await chrome.windows.getCurrent({ populate: false }).catch(() => null));
+  const currentWindowId = cw?.id ?? null;
+  const scored = [];
+  for (const t of all) {
+    if (!t.url) continue;
+    if (!patterns.some((p) => p.test(t.url))) continue;
+    const activeNow = !!t.active && t.windowId === currentWindowId;
+    const la = (typeof t.lastAccessed === 'number') ? t.lastAccessed : -Infinity;
+    // Score tuple — bigger = worse.  Active tab → 0 / any 0 → -1, 0.
+    const keyActive = activeNow ? 0 : 1;
+    scored.push({
+      t,
+      sort: [
+        keyActive,
+        // lastAccessed desc: newer → smaller negative.
+        -la,
+        // index asc
+        typeof t.index === 'number' ? t.index : Number.MAX_SAFE_INTEGER,
+        // windowId asc (stable tie-break)
+        typeof t.windowId === 'number' ? t.windowId : Number.MAX_SAFE_INTEGER,
+      ],
+    });
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => {
+    for (let i = 0; i < a.sort.length; i += 1) {
+      if (a.sort[i] < b.sort[i]) return -1;
+      if (a.sort[i] > b.sort[i]) return 1;
+    }
+    return 0;
+  });
+  return scored[0].t;
 }
 
 const CCP_PATTERNS = [
@@ -676,9 +718,97 @@ async function scrapeActiveTab() {
   };
 }
 
+/** Smart "scan everything" flow.
+ *
+ *  Two phases:
+ *    PHASE 1 — scan the tab the user is *currently* looking at (active tab
+ *              in the current window), with full chrome.scripting pre-inject.
+ *              This GUARANTEES that the page right under the agent's cursor
+ *              is always re-scraped fresh — no more "it keeps using the
+ *              first test tab" even when the agent has a newer case open.
+ *              Works on branded subdomains too (no URL pattern match needed).
+ *
+ *    PHASE 2 — for whichever card (SF or CCP) phase 1 did NOT fill (e.g.
+ *              agent is looking at the Case tab but the CCP phone panel
+ *              lives in a different tab), do the classic findTab + scrape
+ *              to pull the other source. findTab() has itself been rewritten
+ *              to prefer active / most-recently-accessed tabs, so even this
+ *              fill-in phase prefers the tab the agent was just on.
+ *
+ *  The POPUP_SCRAPE_ALL message routes through here now. This is what the
+ *  unified "Scan Salesforce & CCP" button calls first. */
 async function scrapeAll() {
-  const [a, b] = await Promise.all([scrapeCcpTab(), scrapeSalesforceTab()]);
-  return { ok: true, ccp: a, sf: b };
+  // Phase 1 — active tab, force-scan, no URL gate.
+  const activeRes = await scrapeActiveTab();
+  const sfFromActive = !!(activeRes?.ok && activeRes?.sf?.capturedAt && Object.keys(activeRes.sf?.data || {}).length > 0);
+  const ccpFromActive = !!(activeRes?.ok && activeRes?.ccp?.capturedAt && Object.keys(activeRes.ccp?.data || {}).length > 0);
+
+  // Phase 2 — fill-in passes for the missing side.
+  let ccpFillIn = null;
+  let sfFillIn = null;
+  if (!ccpFromActive) {
+    try { ccpFillIn = await scrapeCcpTab(); } catch (e) { ccpFillIn = { ok: false, error: String(e?.message || e) }; }
+  }
+  if (!sfFromActive) {
+    try { sfFillIn = await scrapeSalesforceTab(); } catch (e) { sfFillIn = { ok: false, error: String(e?.message || e) }; }
+  }
+
+  // Summarize for the popup toast so the agent can see whether we scanned
+  // "the page under the cursor" or fell back to a background tab.
+  return {
+    ok: true,
+    ccp: ccpFromActive ? { ok: true, payload: state.ccp, viaActive: true } : ccpFillIn,
+    sf:  sfFromActive  ? { ok: true, payload: state.sf,  viaActive: true } : sfFillIn,
+    activeTab: activeRes?.ok
+      ? { scanned: true, sf: sfFromActive, ccp: ccpFromActive,
+           url: activeRes?.sf?.url || activeRes?.ccp?.url || null,
+           title: activeRes?.sf?.title || activeRes?.ccp?.title || null }
+      : { scanned: false, error: activeRes?.error, sf: false, ccp: false },
+    fillInCcp: !ccpFromActive,
+    fillInSf:  !sfFromActive,
+  };
+}
+
+/** Refresh helpers for per-card "Refresh" buttons.
+ *
+ *  The old Refresh buttons did `scrapeCcpTab()`/`scrapeSalesforceTab()`
+ *  which used findTab() → always picked the oldest matching tab.  Now,
+ *  if the tab the user is currently looking at matches the requested
+ *  card pattern, we inject+scan THAT specific tab with force-inject
+ *  (chrome.scripting pre-poke), which is what the user meant by
+ *  "Refresh the page I'm currently on." If not, fall back to the
+ *  findTab-based flow which still prefers most-recently used tabs. */
+async function refreshSalesforceTab() {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active?.url && SF_PATTERNS.some((p) => p.test(active.url))) {
+    const before = state.sf;
+    const res = await scrapeActiveTab();
+    const sfWrote = res?.ok && state.sf && Object.keys(state.sf.data || {}).length > 0;
+    if (sfWrote) return { ok: true, payload: state.sf, viaActive: true };
+    // Active tab matched by URL but inject didn't produce fields — fall back.
+    if (before !== state.sf && state.sf) return { ok: true, payload: state.sf, viaActive: true };
+  }
+  return scrapeSalesforceTab();
+}
+async function refreshCcpTab() {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active?.url && CCP_PATTERNS.some((p) => p.test(active.url))) {
+    const res = await scrapeActiveTab();
+    if (res?.ok && state.ccp && Object.keys(state.ccp.data || {}).length > 0) {
+      return { ok: true, payload: state.ccp, viaActive: true };
+    }
+  }
+  // For CCP, the active tab might be Salesforce which carries the embedded
+  // Connect utility bar.  If so, run scrapeSalesforceTab() — it already
+  // does a pass through scrapeCcpTab(tabHint=theSFtab) to fish for the
+  // embedded iframe.  Popup's CCP card will render with the embedded marker.
+  if (active?.url && SF_PATTERNS.some((p) => p.test(active.url))) {
+    await scrapeSalesforceTab();
+    if (state.ccp && Object.keys(state.ccp.data || {}).length > 0) {
+      return { ok: true, payload: state.ccp, viaActive: true, embedded: !!state.sf?.ccpEmbedded };
+    }
+  }
+  return scrapeCcpTab();
 }
 
 /** The "merged" payload the Ticket Notes page actually consumes — a flat
@@ -903,8 +1033,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
-  if (t === 'POPUP_SCRAPE_CCP') { (async () => sendResponse(await scrapeCcpTab()))(); return true; }
-  if (t === 'POPUP_SCRAPE_SF')  { (async () => sendResponse(await scrapeSalesforceTab()))(); return true; }
+  if (t === 'POPUP_SCRAPE_CCP') { (async () => sendResponse(await refreshCcpTab()))(); return true; }
+  if (t === 'POPUP_SCRAPE_SF')  { (async () => sendResponse(await refreshSalesforceTab()))(); return true; }
   if (t === 'POPUP_SCRAPE_ALL') { (async () => sendResponse(await scrapeAll()))(); return true; }
   if (t === 'POPUP_SCRAPE_ACTIVE') { (async () => sendResponse(await scrapeActiveTab()))(); return true; }
   if (t === 'POPUP_PUSH')       { (async () => sendResponse(await pushToTicketApp(true)))(); return true; }

@@ -512,14 +512,14 @@ async function onClickCcp() {
   const r = await withLoading(btnCcp, () => sendWithTimeout({ type: 'POPUP_SCRAPE_CCP' }, 12000));
   await refreshState(true);
   if (!r?.ok) toast(explainError(r, 'CCP scrape failed.'), 'err');
-  else toast('CCP tab re-scraped.', 'ok');
+  else toast(`CCP ${r?.viaActive ? 'current tab' : 'tab'} re-scraped${r?.embedded ? ' (embedded in SF tab)' : ''}.`, 'ok');
 }
 
 async function onClickSf() {
   const r = await withLoading(btnSf, () => sendWithTimeout({ type: 'POPUP_SCRAPE_SF' }, 12000));
   await refreshState(true);
   if (!r?.ok) toast(explainError(r, 'Salesforce scrape failed.'), 'err');
-  else toast('Salesforce tab re-scraped.', 'ok');
+  else toast(`Salesforce ${r?.viaActive ? 'current tab' : 'tab'} re-scraped.`, 'ok');
 }
 
 async function selfExtractFromPopup(showSpinner) {
@@ -640,9 +640,23 @@ async function onClickScan() {
       toast(`SW timeout — falling back to self-extract.`, 'warn');
     } else {
       const errors = [r?.ccp, r?.sf].filter((x) => x && x.ok === false).map((x) => x.error);
-      if (errors.length === 2) toast(errors[0] || 'Nothing scraped yet.', 'warn');
-      else if (errors.length === 1) toast(`Partial: ${errors[0]}`, 'warn');
-      else toast('Salesforce & CCP scanned via background.', 'ok');
+      // New scrapeAll() also returns an `activeTab` summary that tells us
+      // whether we did scan the tab the user was actually looking at.
+      // Surface this in the toast so the agent can confirm "yes, you did
+      // scrape THIS Salesforce/CCP page, not the stale one."
+      const at = r?.activeTab;
+      let via = '';
+      if (at?.scanned && (at.sf || at.ccp)) {
+        via = ' · current tab';
+        if (at.sf && at.ccp) via += ' (SF + CCP)';
+        else if (at.sf) via += ' (SF)';
+        else via += ' (CCP)';
+      } else if (r?.fillInSf === false || r?.fillInCcp === false) {
+        via = ' · current tab provided some data';
+      }
+      if (errors.length === 2) toast((errors[0] || 'Nothing scraped yet.') + via, 'warn');
+      else if (errors.length === 1) toast(`Partial: ${errors[0]}${via}`, 'warn');
+      else toast(`Scanned fresh${via}.`, 'ok');
       return;
     }
   }
