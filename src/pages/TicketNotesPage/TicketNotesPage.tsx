@@ -31,7 +31,7 @@ import { useCallCapture } from '@/hooks/use-call-capture';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { useLlmParser } from '@/hooks/use-llm-parser';
 import { useCloudParser } from '@/hooks/use-cloud-parser';
-import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
+import { useCcpExtensionBridge, type PendingExtensionPush } from '@/hooks/use-ccp-extension-bridge';
 import { generateWithDeepseek } from '@/lib/cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
@@ -368,6 +368,104 @@ export function mergeAutoFill(
   // Human-typed text — append, never overwrite
   const sep = curTrimmed.endsWith('->') ? ' ' : ' -> ';
   return { next: `${curTrimmed}${sep}${value}`, base: curTrimmed };
+}
+
+// ---------------------------------------------------------------------------
+//  Extension push confirm popup — bottom-right glass card shown when the
+//  extension auto-pushes the 4 identity fields. User clicks Apply/Dismiss.
+// ---------------------------------------------------------------------------
+
+function ExtensionPushConfirmPopup({
+  pending,
+  labels,
+  onApply,
+  onDismiss,
+}: {
+  pending: PendingExtensionPush;
+  labels: Record<string, string>;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  const fieldEntries = Object.entries(pending.fields).filter(([, v]) => Boolean(v));
+  const when = (() => {
+    try {
+      const d = new Date(pending.pushedAt);
+      if (Number.isNaN(d.getTime())) return '';
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `@${hh}:${mm}`;
+    } catch {
+      return '';
+    }
+  })();
+
+  return (
+    <div
+      className="fixed bottom-24 right-6 z-[70] w-[min(22rem,calc(100vw-3rem))]"
+      role="dialog"
+      aria-live="polite"
+      aria-label="Scrape data received"
+    >
+      <div className="glass-panel border border-border/80 rounded-lg shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-primary/15 text-primary text-xs font-semibold">
+              ⇩
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-foreground leading-tight truncate">
+                Scrape data received {when}
+              </div>
+              <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+                Parse these fields into the corresponding form fields?
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="text-muted-foreground hover:text-foreground hover:bg-card/60 rounded px-1.5 py-1 text-xs transition"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+
+        <dl className="px-4 py-3 space-y-2 max-h-64 overflow-y-auto">
+          {fieldEntries.length === 0 && (
+            <div className="text-xs text-muted-foreground italic py-2">No fields available.</div>
+          )}
+          {fieldEntries.map(([k, v]) => (
+            <div key={k} className="grid grid-cols-[7rem_1fr] gap-3 items-start">
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground pt-0.5">
+                {labels[k] || k}
+              </dt>
+              <dd className="text-sm text-foreground break-words font-medium leading-snug">
+                {String(v)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border/60 bg-card/40">
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 border border-border/60 transition"
+          >
+            Dismiss
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            className="px-3 py-1.5 rounded-md text-sm font-medium text-primary-foreground bg-primary hover:brightness-110 border border-primary/60 shadow-sm transition"
+          >
+            Apply to form
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function TicketNotesPage() {
@@ -859,6 +957,15 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     resolutionSummary: NODE_IDS.RESOLUTION_SUMMARY,
   };
 
+  /** Friendly display labels for the 4 identity fields the extension auto
+   *  pushes into the confirm popup bottom-right. */
+  const EXT_PUSH_FIELD_LABELS: Record<string, string> = {
+    customerName: 'Customer Name',
+    contactNumber: 'Contact Number',
+    deebotModel: 'Deebot Model',
+    serialNumber: 'Serial Number',
+  };
+
   /**
    * Layer auto-parse results into the form (see mergeAutoFill for the exact
    * semantics). The merge runs inside the setState updater as well, so a
@@ -1010,7 +1117,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   //  as the main LLM parser — i.e. it overrides regex/paraphrase drafts but
   //  never overwrites a field the human has proofread.
   // -------------------------------------------------------------------------
-  useCcpExtensionBridge({
+  const extensionBridge = useCcpExtensionBridge({
     source: 'dom-ext',
     onApply: (mapped, _meta, _raw) => {
       const applied: Array<{ fieldId: string; value: string }> = [];
@@ -1408,6 +1515,15 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         }
         onResolutionChange={handleResolutionChange}
       />
+
+      {extensionBridge.pendingPush && (
+        <ExtensionPushConfirmPopup
+          pending={extensionBridge.pendingPush}
+          labels={EXT_PUSH_FIELD_LABELS}
+          onApply={extensionBridge.acceptPendingPush}
+          onDismiss={extensionBridge.dismissPendingPush}
+        />
+      )}
 
       <Toaster
         position="bottom-right"

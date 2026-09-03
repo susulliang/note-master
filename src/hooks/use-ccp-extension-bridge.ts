@@ -41,6 +41,16 @@ export type ExtensionMeta = {
   pushedAt?: string;
 };
 
+export type PendingExtensionPush = {
+  /** EXT_TO_NODE_ID → value (already mapped) for only the 4 identity fields. */
+  mapped: Record<string, string>;
+  /** Extension metadata (which URLs/tabs this scrape came from). */
+  meta: ExtensionMeta | null;
+  /** Original filtered fields (extension keys) for display labels. */
+  fields: ExtensionFieldMap;
+  pushedAt: string;
+};
+
 export interface CcpExtensionBridge {
   connected: boolean;
   /** Extension runtime id, when known. */
@@ -50,6 +60,14 @@ export interface CcpExtensionBridge {
   /** Field mapping the extension wrote to the form most recently. */
   lastApplied: { fieldId: string; value: string }[];
   lastMeta: ExtensionMeta | null;
+  /** Current scrape-data popup waiting for user confirmation.
+   *  Non-null → caller should render the Apply/Dismiss popup card. */
+  pendingPush: PendingExtensionPush | null;
+  /** Accept the pending popup: apply its fields through the normal onApply
+   *  pipeline (same as the old auto-apply behavior). */
+  acceptPendingPush: () => void;
+  /** Dismiss the pending popup without touching form state. */
+  dismissPendingPush: () => void;
   /** Force a scrape of both the CCP tab and the SF tab now. Returns the
    *  merged result; does NOT re-apply automatically — caller handles it. */
   scrapeAll: () => Promise<{ ok: boolean; merged?: ExtensionFieldMap; error?: string }>;
@@ -75,6 +93,18 @@ export const EXT_TO_NODE_ID: Readonly<Record<string, string>> = {
   // caseNumber, caseOwner, caseStatus, issueTitle are rendered as chips /
   // Additional notes. We concatenate them into ADDITIONAL_NOTES with a
   // clear prefix so agents can still copy them out easily.
+};
+
+/** The 4 identity fields + aliases auto-pushed from the extension and shown
+ *  in the bottom-right confirm popup. Defensive mirror of background.js's
+ *  KEY_PUSH_FIELDS / KEY_PUSH_FALLBACKS so any older extension that still
+ *  pushes full fields still ends up showing only these 4. */
+const KEY_FIELD_KEYS = ['contactNumber', 'customerName', 'deebotModel', 'serialNumber'] as const;
+const KEY_FIELD_FALLBACKS: Readonly<Record<string, string[]>> = {
+  contactNumber: ['phone'],
+  customerName: ['accountName', 'contactName'],
+  deebotModel: [],
+  serialNumber: [],
 };
 /** Default extension ID the packaged build uses; users can override via
  *  localStorage key `nm-ext-id` when loading an unpacked build that gets a
@@ -113,6 +143,10 @@ export function useCcpExtensionBridge({
   const [version, setVersion] = useState<string | null>(null);
   const [lastApplied, setLastApplied] = useState<Array<{ fieldId: string; value: string }>>([]);
   const [lastMeta, setLastMeta] = useState<ExtensionMeta | null>(null);
+  const [pendingPush, setPendingPush] = useState<PendingExtensionPush | null>(null);
+  /** Non-state mirror of pendingPush so accept/dismiss never read stale closures
+   *  or call side-effects inside a state updater (StrictMode double-invoke). */
+  const pendingPushRef = useRef<PendingExtensionPush | null>(null);
 
   // Stable transport state across renders.
   const bridgeReadyRef = useRef(false);
@@ -159,7 +193,10 @@ export function useCcpExtensionBridge({
           if (r?.ok) {
             setVersion(r.version ?? null);
             if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
-              applyMerged(r.merged, r.state ?? null, true);
+              // Hello = already-scraped snapshot on nav; shows the confirm
+              // popup with only the 4 identity fields, consistent with the
+              // "user must confirm auto-fill" requirement.
+              queuePendingPush(r.merged, r.state ?? null);
             }
           }
         });
@@ -169,9 +206,16 @@ export function useCcpExtensionBridge({
         // Background service worker pushed merged fields via bridge.
         const payload = data.payload;
         if (payload?.fields && typeof payload.fields === 'object') {
-          setVersion((v) => v);
           setConnected(true);
-          applyMerged(payload.fields, payload.state ?? null, false);
+          const mode: unknown = payload.mode;
+          if (mode === 'manual') {
+            // "Push to open Ticket Notes" button = explicit user action.
+            applyMerged(payload.fields, payload.state ?? null, false);
+          } else {
+            // Auto push after scrape (mode 'auto', or undefined for older
+            // extensions) → show confirm popup, defensively filter to 4 fields.
+            queuePendingPush(payload.fields, payload.state ?? null, payload.pushedAt);
+          }
         }
         return;
       }
@@ -191,31 +235,19 @@ export function useCcpExtensionBridge({
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  /** Apply merged fields into the parent form via the user-provided
-   *  callback. Honors EXT_TO_NODE_ID for named fields; anything that
-   *  doesn't map (caseNumber, caseOwner, caseStatus, issueTitle) is
-   *  concatenated into ADDITIONAL_NOTES so nothing silently disappears.
-   *
-   *  The first `mapped` argument carries EXT_TO_NODE_ID nodeId keys so
-   *  the caller can directly hand them to the form's per-field handlers.
-   *  `rawFields` is the original flat shape for debugging / inspection. */
-  const applyMerged = useCallback((
-    fields: ExtensionFieldMap,
-    state: unknown,
-    _fromHello: boolean
-  ) => {
-    if (!fields) return;
-    const meta: ExtensionMeta | null = extractMeta(state);
+  /** Build the EXT_TO_NODE_ID-mapped nodeId → string dict that the form
+   *  handler understands. Anything unmapped spills into ADDITIONAL_NOTES.
+   *  Shared between immediate applyMerged (manual pushes / scrapeAll) and
+   *  the pending-confirm popup. */
+  const buildMapped = useCallback((fields: ExtensionFieldMap) => {
     const mapped: Record<string, string> = {};
     const extras: Array<{ key: string; value: string }> = [];
-    for (const [k, raw] of Object.entries(fields)) {
+    for (const [k, raw] of Object.entries(fields || {})) {
       if (raw === undefined || raw === null) continue;
       const value = Array.isArray(raw) ? raw.join(', ') : String(raw);
       if (!value) continue;
       const nodeId = EXT_TO_NODE_ID[k];
       if (nodeId) {
-        // Append / combine Additional Notes, don't overwrite the piece
-        // captured by other fill engines.
         if (nodeId === NODE_IDS.ADDITIONAL_NOTES && mapped[nodeId]) {
           mapped[nodeId] = `${mapped[nodeId]}\n${value}`;
         } else {
@@ -231,6 +263,85 @@ export function useCcpExtensionBridge({
       const prev = mapped[nodeId] ? `${mapped[nodeId]}\n` : '';
       mapped[nodeId] = prev + extras.map((x) => x.value).join('\n');
     }
+    return mapped;
+  }, []);
+
+  /** Defensive key-field picker: filters merged fields to the 4 identity
+   *  fields, resolving aliases. Mirrors background.js's buildKeyFields()
+   *  so older extensions that don't filter server-side still show only the
+   *  4 fields in the confirm popup. */
+  const pickKeyFields = useCallback((fields: ExtensionFieldMap): ExtensionFieldMap => {
+    const out: ExtensionFieldMap = {};
+    for (const k of KEY_FIELD_KEYS) {
+      let v = fields?.[k];
+      if (!v || (typeof v === 'string' && v.trim() === '')) {
+        for (const alias of KEY_FIELD_FALLBACKS[k] || []) {
+          const av = fields?.[alias];
+          if (av && (typeof av !== 'string' || av.trim() !== '')) { v = av; break; }
+        }
+      }
+      if (!v) continue;
+      const asStr = Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v);
+      if (asStr.trim() !== '') out[k] = asStr;
+    }
+    return out;
+  }, []);
+
+  /** Queue the 4 identity fields as a user-confirmable popup (bottom-right
+   *  glass card). Called on every auto push + hello snapshot. */
+  const queuePendingPush = useCallback((
+    rawFields: ExtensionFieldMap,
+    state: unknown,
+    pushedAt?: string
+  ) => {
+    const keyFields = pickKeyFields(rawFields);
+    if (Object.keys(keyFields).length === 0) return;
+    const mapped = buildMapped(keyFields);
+    if (Object.keys(mapped).length === 0) return;
+    const meta: ExtensionMeta | null = extractMeta(state);
+    const next: PendingExtensionPush = {
+      mapped,
+      meta,
+      fields: keyFields,
+      pushedAt: pushedAt || meta?.pushedAt || new Date().toISOString(),
+    };
+    pendingPushRef.current = next;
+    setPendingPush(next);
+  }, [buildMapped, pickKeyFields]);
+
+  const acceptPendingPush = useCallback(() => {
+    const pending = pendingPushRef.current;
+    if (!pending) return;
+    pendingPushRef.current = null;
+    setPendingPush(null);
+    const applied = onApplyRef.current(pending.mapped, pending.meta, pending.fields);
+    if (applied.length > 0) {
+      setLastApplied(applied.slice(0, 24));
+      if (pending.meta) setLastMeta(pending.meta);
+    }
+  }, []);
+
+  const dismissPendingPush = useCallback(() => {
+    pendingPushRef.current = null;
+    setPendingPush(null);
+  }, []);
+
+  /** Apply merged fields into the parent form via the user-provided
+   *  callback. Honors EXT_TO_NODE_ID for named fields; anything that
+   *  doesn't map (caseNumber, caseOwner, caseStatus, issueTitle) is
+   *  concatenated into ADDITIONAL_NOTES so nothing silently disappears.
+   *
+   *  The first `mapped` argument carries EXT_TO_NODE_ID nodeId keys so
+   *  the caller can directly hand them to the form's per-field handlers.
+   *  `rawFields` is the original flat shape for debugging / inspection. */
+  const applyMerged = useCallback((
+    fields: ExtensionFieldMap,
+    state: unknown,
+    _fromHello: boolean
+  ) => {
+    if (!fields) return;
+    const mapped = buildMapped(fields);
+    const meta: ExtensionMeta | null = extractMeta(state);
     const applied = onApplyRef.current(mapped, meta, fields);
     if (applied.length > 0) {
       setLastApplied(applied.slice(0, 24));
@@ -238,7 +349,7 @@ export function useCcpExtensionBridge({
     } else if (meta) {
       setLastMeta(meta);
     }
-  }, []);
+  }, [buildMapped]);
 
   // -------------------------------------------------------------------------
   //  Unified request layer: try chrome.runtime externals_connectable first,
@@ -320,6 +431,9 @@ export function useCcpExtensionBridge({
     version,
     lastApplied,
     lastMeta,
+    pendingPush,
+    acceptPendingPush,
+    dismissPendingPush,
     scrapeAll,
     getSnapshot,
   };

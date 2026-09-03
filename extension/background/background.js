@@ -61,6 +61,9 @@ const defaultState = () => ({
     extraTicketHosts: [],
     autoPush: true,
   },
+  /** Fingerprint of the 4 key fields last actually accepted by the web app.
+   *  Lets auto-push skip when the caller/device tuple hasn't changed. */
+  lastPushedKeyFields: {},
 });
 
 let state = loadState();
@@ -697,9 +700,54 @@ function buildMergedFields() {
   return out;
 }
 
+/** The 4 identity fields auto-pushed on every scrape (with dedupe). */
+const KEY_PUSH_FIELDS = ['contactNumber', 'customerName', 'deebotModel', 'serialNumber'];
+const KEY_PUSH_FALLBACKS = {
+  contactNumber: ['phone'],
+  customerName: ['accountName', 'contactName'],
+  deebotModel: [],
+  serialNumber: [],
+};
+
+/** Build the 4-field identity snapshot used for change detection + auto push.
+ *  Falls back to aliases scrapers sometimes produce, always returns strings. */
+function buildKeyFields(merged = buildMergedFields()) {
+  const out = {};
+  for (const k of KEY_PUSH_FIELDS) {
+    let v = merged[k];
+    if (!v || (typeof v === 'string' && v.trim() === '')) {
+      for (const alias of KEY_PUSH_FALLBACKS[k] || []) {
+        const av = merged[alias];
+        if (av && (typeof av !== 'string' || av.trim() !== '')) { v = av; break; }
+      }
+    }
+    if (!v) continue;
+    const asStr = Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v);
+    if (asStr.trim() !== '') out[k] = asStr;
+  }
+  return out;
+}
+
+/** Stable JSON comparison: empty objects never equal "just scraped". */
+function keyFieldsEqual(a, b) {
+  const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
+  if (keys.length === 0) return false;
+  return keys.every((k) => String((a || {})[k] ?? '') === String((b || {})[k] ?? ''));
+}
+
 /** Find the running Ticket Notes web-app tab and push merged fields to it.
  *  Used both by the popup's "Push to ticket" button and by autoPush after
- *  every content-script scrape event. */
+ *  every content-script scrape event.
+ *
+ *  force=false (auto push on scrape):
+ *    - sends only the 4 identity fields
+ *    - skips entirely if the 4 fields haven't changed since last successful push
+ *    - payload.mode = 'auto' (app shows confirm popup)
+ *
+ *  force=true (popup "Push to open Ticket Notes" button):
+ *    - sends full merged fields
+ *    - bypasses change detection
+ *    - payload.mode = 'manual' (app applies immediately, same as today) */
 async function pushToTicketApp(force = false) {
   if (!force && !state.settings.autoPush) return { ok: false, skipped: 'autoPush disabled' };
   const ticketTab = await findTab(TICKET_APP_HOST_PATTERNS.concat(
@@ -707,9 +755,28 @@ async function pushToTicketApp(force = false) {
   ));
   if (!ticketTab) return { ok: false, skipped: 'No open Ticket Notes web-app tab found.' };
 
+  let fields, mode;
+  let keyFields = null;
+  if (force) {
+    fields = buildMergedFields();
+    mode = 'manual';
+    keyFields = buildKeyFields(fields);
+  } else {
+    keyFields = buildKeyFields();
+    if (Object.keys(keyFields).length === 0) {
+      return { ok: false, skipped: 'No identity fields scraped yet.' };
+    }
+    if (keyFieldsEqual(state.lastPushedKeyFields || {}, keyFields)) {
+      return { ok: false, skipped: 'Key fields unchanged since last push.' };
+    }
+    fields = keyFields;
+    mode = 'auto';
+  }
+
   const payload = {
     type: 'TICKET_EXT_PUSH',
-    fields: buildMergedFields(),
+    mode,
+    fields,
     state: {
       ccp: state.ccp ? { capturedAt: state.ccp.capturedAt, url: state.ccp.url, title: state.ccp.title } : null,
       sf: state.sf ? { capturedAt: state.sf.capturedAt, url: state.sf.url, title: state.sf.title } : null,
@@ -717,17 +784,21 @@ async function pushToTicketApp(force = false) {
     pushedAt: nowISO(),
     source: 'ecovacs-ccp-scraper',
   };
-  // Prefer onMessageExternal if the caller is within externally_connectable
-  // — the app listens on that channel first. Otherwise fall back to
-  // tabs.sendMessage to the bridge content script injected on the ticket
-  // page, which window.postMessages it onward.
   let reply;
   try {
     reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
   } catch {
     reply = null;
   }
-  if (reply?.ok) return reply;
+  if (reply?.ok) {
+    // Only update the fingerprint after the app actually acked receipt,
+    // otherwise a closed tab / missing bridge would suppress future retries.
+    if (Object.keys(keyFields || {}).length > 0) {
+      state.lastPushedKeyFields = keyFields;
+      await saveState();
+    }
+    return reply;
+  }
   return { ok: false, error: 'Ticket app bridge did not reply.' };
 }
 
