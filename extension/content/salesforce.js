@@ -159,6 +159,21 @@
     else if (prior.includes(value) || value.includes(prior)) return;
     else acc[field] = `${prior}\n${value}`;
   }
+  // Value shape validation — kills garbage pairs from the real Console
+  // ("Phone" → "Minimize", "Purchasing Channel" → "Select Purchasing
+  // Channel" placeholder, an empty classification whose "value" is actually
+  // the next label).
+  function validValue(field, v) {
+    const s = clean(v);
+    if (!s) return false;
+    if (/^select\b/i.test(s)) return false; // picklist placeholder
+    if (/^(contact\s*taggings|is\s*un-?authorized\s*seller|merged\s*cases?\(?|help\s*contact\s*name)/i.test(s)) return false; // follow-on label / help icon of an empty field
+    if (/^edit\b/i.test(s)) return false; // hover "Edit …" button next to an empty field
+    if (/^issue\s*type\d/i.test(s) || matchAlias(s)) return false; // "value" is actually the next label
+    if (field === 'contactNumber' || field === 'caseNumber' || field === 'serialNumber') return /\d/.test(s);
+    if (field === 'emailAddress') return s.includes('@');
+    return true;
+  }
 
   // -------------------------------------------------------------------------
   //  Tier 1 — whole-document innerText regex sweeps
@@ -215,7 +230,10 @@
       const n = cm[1];
       const kind = cm[2].toLowerCase() === 'primary' ? 'L1' : 'L2';
       const value = clean(cm[3]);
-      if (value) classes.push({ n, kind, value });
+      // Empty classification → the captured "value" is actually the NEXT
+      // label line ("Issue Type3 Second Classification" / "AMR Model No.").
+      if (!value || /^issue\s*type\d/i.test(value) || matchAlias(value)) continue;
+      classes.push({ n, kind, value });
     }
     if (classes.length > 0) {
       // Build: issueType = "Failure / Roller extension / lift abnormally"
@@ -242,6 +260,27 @@
     // AI Agent note
     m = text.match(/AI\s*Agent\s*\n([\s\S]*?)(?:\n\s*\n|\n\s*Summary\s*\n)/i);
     if (m) appendText(acc, 'resolutionSummary', `AI Agent note: ${clean(m[1])}`);
+  }
+
+  // -------------------------------------------------------------------------
+  //  Tier 1b — whole-document line-pair sweep. body.innerText renders every
+  //  detail field as "Label\nValue" on adjacent lines on the 2026 Console
+  //  (verified against the Sep 2026 agent sample). Markup-agnostic: works
+  //  even when the DOM-cell tiers below can't find their class hooks.
+  // -------------------------------------------------------------------------
+  function sweepLinePairs(acc, text) {
+    if (!text) return;
+    const ls = text.split(/\r?\n/).map((s) => clean(s)).filter(Boolean);
+    for (let i = 0; i < ls.length - 1; i += 1) {
+      const alias = matchAlias(ls[i]);
+      if (!alias || alias.field === 'issueTypeClassifications') continue;
+      const val = ls[i + 1];
+      if (matchAlias(val)) continue; // value is actually the next label
+      if (!validValue(alias.field, val)) continue;
+      assignOnce(acc, alias.field, val);
+      const merged = mergeAddressFromGranular(alias.field, val);
+      if (merged) appendText(acc, 'shippingAddress', merged);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -322,6 +361,7 @@
       // Postal code, city, province, address, country get merged into the
       // shippingAddress composite (as well as retained as granular fields)
       const merged = mergeAddressFromGranular(alias.field, value);
+      if (!validValue(alias.field, value)) continue;
       assignOnce(acc, alias.field, value);
       if (merged) appendText(acc, 'shippingAddress', merged);
     }
@@ -394,6 +434,7 @@
         continue;
       }
       const val = lines.slice(1).length === 1 ? lines[1] : lines.slice(1).join('\n');
+      if (!validValue(alias.field, val)) continue;
       assignOnce(acc, alias.field, val);
     }
     return acc;
@@ -510,6 +551,7 @@
     const acc = {};
     const text = document.body.innerText || '';
     sweepFullText(acc, text);
+    sweepLinePairs(acc, text);
     sweepStackedCells(acc);
     sweepSectionHeadings(acc);
     legacyLightningLabels(acc);

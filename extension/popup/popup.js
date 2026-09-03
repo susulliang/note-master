@@ -12,6 +12,7 @@ const elCcpKv = $('#ccpKv');
 const elSfKv = $('#sfKv');
 const elCcpDot = document.querySelectorAll('.card.ccp .dot')[0];
 const elSfDot = document.querySelectorAll('.card.sf .dot')[0];
+const elDiag = $('#diagBox');
 
 const btnCcp = $('#btnCcp');
 const btnSf = $('#btnSf');
@@ -38,7 +39,7 @@ let lastSeen = { ccp: null, sf: null };
 // storage callbacks never fire), the user still gets field extraction.
 const POPUP_INLINE_SF = function () {
   const FIELD_ALIASES = {
-    caseNumber:/^(Case\s*Number|Case\s*#?)$/i,caseOwner:/^Case\s*Owner$/i,status:/^Status$/i,
+    caseNumber:/^(Case\s*Number|Case\s*#)$/i,caseOwner:/^Case\s*Owner$/i,status:/^Status$/i,
     subject:/^Subject$/i,accountName:/^(Account\s*Name|Account)$/i,contactName:/^Contact\s*Name$/i,
     customerName:/^(Name|Customer\s*Name)$/i,phone:/^(Phone|Contact\s*Number|Contact\s*Phone)$/i,
     email:/^(Email|Email\s*Address)$/i,address:/^Address$/i,city:/^City$/i,
@@ -60,8 +61,12 @@ const POPUP_INLINE_SF = function () {
   function lines(t){return t.split(/\r?\n/).map(s=>s.replace(/\u00a0/g,' ').trim()).filter(s=>s.length);}
   function isLabel(l){for(const p of Object.values(FIELD_ALIASES))if(p.test(l))return true;return false;}
   function matchAlias(l){for(const [k,p] of Object.entries(FIELD_ALIASES))if(p.test(l))return k;return null;}
+  function valid(k,v){const s=clean(v);if(!s)return false;if(/^select\b/i.test(s))return false;if(/^(contact\s*taggings|is\s*un-?authorized\s*seller|merged\s*cases?\(?|help\s*contact\s*name)/i.test(s))return false;if(/^edit\b/i.test(s))return false;if(k==='appDeviceBlock')return false;if(/^issue\s*type\d/i.test(s)||matchAlias(s))return false;if((k==='contactNumber'||k==='phone'||k==='caseNumber'||k==='serialNumber')&&!/\d/.test(s))return false;if((k==='email'||k==='emailAddress')&&!s.includes('@'))return false;return true;}
   const acc={};
   const txt=(typeof document!=='undefined'&&document.body&&(document.body.innerText||document.body.textContent||''))||'';
+  // (0) Whole-document line-pair sweep: body.innerText renders detail fields
+  // as "Label\nValue" adjacent lines — markup-agnostic, runs first.
+  {const ls=lines(txt);for(let i=0;i<ls.length-1;i+=1){const k=matchAlias(ls[i]);if(!k)continue;const nx=ls[i+1];if(isLabel(nx)&&matchAlias(nx))continue;if(!valid(k,nx))continue;assignOnce(acc,k,nx);}}
   const cn=txt.match(/(?:^|\n)\s*(\d{7,8})\s*\|\s*Case\b/);if(cn)assignOnce(acc,'caseNumber',cn[1]);
   const sfids=[...(txt.matchAll(/\b500[a-zA-Z0-9]{12,15}\b/g)||[])].map(x=>x[0]);if(sfids[0])assignOnce(acc,'salesforceId',sfids[0]);
   const caller=txt.match(/Caller\s*(\+?[\d\- \.\(\)]{6,})/);if(caller)assignOnce(acc,'contactNumber',caller[1]);
@@ -69,7 +74,7 @@ const POPUP_INLINE_SF = function () {
   const adi=txt.match(/App\s*Device\s*Info\s*\n([\s\S]*?)(?:\n\s*Case\s*Number\b|\n\s*\d{7,8}\s*\|\s*Case\b|$)/i);
   if(adi)for(const l of lines(adi[1])){const i=l.indexOf(':');if(i===-1)continue;const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k==='appVersion')assignOnce(acc,'appVersion',v);else if(k==='model')assignOnce(acc,'phoneModel',v);else if(k==='systemVersion')assignOnce(acc,'osVersion',v);else if(k==='deviceTypeName')assignOnce(acc,'deviceTypeName',v);else if(k==='marketName')assignOnce(acc,'marketName',v);else if(k==='deviceType')assignOnce(acc,'deviceType',v);}
   const cls=[];let cm;const classRe=/Issue\s*Type(\d+)\s*(Primary|Second)\s*Classification\s*\n\s*([^\n]+)/gi;
-  while((cm=classRe.exec(txt))!==null)cls.push({n:cm[1],kind:cm[2].toLowerCase()==='primary'?'L1':'L2',value:clean(cm[3])});
+  while((cm=classRe.exec(txt))!==null){const v=clean(cm[3]);if(!v||/^issue\s*type\d/i.test(v)||matchAlias(v))continue;cls.push({n:cm[1],kind:cm[2].toLowerCase()==='primary'?'L1':'L2',value:v});}
   if(cls.length){const parts=cls.filter(c=>c.value).sort((a,b)=>a.n.localeCompare(b.n)||(a.kind==='L1'?-1:1)).map(c=>c.value);if(parts.length)assignOnce(acc,'issueType',parts.join(' · '));for(const c of cls){if(c.n==='1')assignOnce(acc,c.kind==='L1'?'issueType1L1':'issueType1L2',c.value);else if(c.n==='2')assignOnce(acc,c.kind==='L1'?'issueType2L1':'issueType2L2',c.value);else if(c.n==='3')assignOnce(acc,c.kind==='L1'?'issueType3L1':'issueType3L2',c.value);}}
   if(!acc.email){const m=txt.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/);if(m)assignOnce(acc,'email',m[0]);}
   const tp=txt.match(/First\s*Pending\s*Timestamp\s*\n\s*([^\n]+)/);if(tp)assignOnce(acc,'firstPendingTs',tp[1]);
@@ -77,9 +82,9 @@ const POPUP_INLINE_SF = function () {
   const ai=txt.match(/AI\s*Agent\s*\n([\s\S]*?)(?:\n\s*Summary\b|\n\s*Related\s*Files\b|$)/i);if(ai&&clean(ai[1]))assignOnce(acc,'aiAgentNote',clean(ai[1]));
   if(typeof document!=='undefined'&&document.querySelectorAll){
     const cells=document.querySelectorAll('div[class*="slds"],div[class*="cell"],li[class*="slds"],section,article');
-    for(const cell of cells){const ls=lines(cell.innerText||cell.textContent||'');if(ls.length<2||ls.length>30)continue;for(let i=0;i<ls.length-1;i+=1){const km=matchAlias(ls[i]);if(!km)continue;const nx=ls[i+1];if(isLabel(nx)&&matchAlias(nx))continue;assignOnce(acc,km,nx);i+=1;}}
+    for(const cell of cells){const ls=lines(cell.innerText||cell.textContent||'');if(ls.length<2||ls.length>30)continue;for(let i=0;i<ls.length-1;i+=1){const km=matchAlias(ls[i]);if(!km)continue;const nx=ls[i+1];if(isLabel(nx)&&matchAlias(nx))continue;if(!valid(km,nx))continue;assignOnce(acc,km,nx);i+=1;}}
     const sts=['Account Details','Contact Details','App Device Info','Details','Case Details'];
-    for(const title of sts){const nodes=document.querySelectorAll('h1,h2,h3,h4,h5,h6,span,div,p,b,strong,th,label');for(const heading of nodes){const t=clean(heading.textContent||heading.innerText||'');if(!t||t.toLowerCase()!==title.toLowerCase())continue;let c=heading.parentElement;for(let d=0;d<5&&c;d+=1){if((c.innerText||'').split(/\n/).length>6)break;c=c.parentElement;}if(!c)continue;const sls=lines(c.innerText||'');for(let i=0;i<sls.length-1;i+=1){const key=matchAlias(sls[i]);if(!key)continue;const val=sls[i+1];if(isLabel(val)&&matchAlias(val))continue;assignOnce(acc,key,val);}}}
+    for(const title of sts){const nodes=document.querySelectorAll('h1,h2,h3,h4,h5,h6,span,div,p,b,strong,th,label');for(const heading of nodes){const t=clean(heading.textContent||heading.innerText||'');if(!t||t.toLowerCase()!==title.toLowerCase())continue;let c=heading.parentElement;for(let d=0;d<5&&c;d+=1){if((c.innerText||'').split(/\n/).length>6)break;c=c.parentElement;}if(!c)continue;const sls=lines(c.innerText||'');for(let i=0;i<sls.length-1;i+=1){const key=matchAlias(sls[i]);if(!key)continue;const val=sls[i+1];if(isLabel(val)&&matchAlias(val))continue;if(!valid(key,val))continue;assignOnce(acc,key,val);}}}
   }
   if(!acc.customerName&&acc.contactName)acc.customerName=acc.contactName;
   if(!acc.customerName&&acc.accountName)acc.customerName=acc.accountName;
@@ -100,9 +105,16 @@ const POPUP_INLINE_CCP = function () {
     const name=text.match(/Contact\s*Name\s*\n?\s*:\s*([^\n]+)/i)||text.match(/Customer\s*Name\s*\n?\s*:\s*([^\n]+)/i);if(name)a('customerName',name[1]);
     const cid=text.match(/Customer\s*Id\s*\n?\s*:\s*([A-Za-z0-9\-]+)/i);if(cid)a('customerId',cid[1]);
     const queue=text.match(/Queue\s*\n?\s*:\s*([^\n]+)/i);if(queue)a('queue',queue[1]);
+    if(/quick\s*connect/i.test(text)){const st=text.match(/\b(Offline|Available|Busy|Calling|In\s*contact|Connecting)\b/i);if(st)a('ccpStatus',st[1]);const pm=text.match(/\+?\d[\d\s\-().]{7,}\d/);if(pm)a('contactNumber',pm[0]);}
     try{const w=(typeof window!=='undefined'?window:{});if(w.connect&&w.connect.contact&&w.connect.contact.getAttributes){const attrs=w.connect.contact.getAttributes()||{};for(const [k,v] of Object.entries(attrs)){const val=v&&(v.value!=null?v.value:v);const lk=String(k).toLowerCase();if(lk.includes('phone')||lk==='phonenumber'||lk.includes('number'))a('contactNumber',val);else if(lk==='customername'||lk==='name')a('customerName',val);else if(lk==='caseid'||lk==='ticket')a('caseNumber',val);else if(lk==='email')a('emailAddress',val);else a(k,val);}}}catch{/*noop*/}
   }catch{/*noop*/}return acc;
 };
+
+function escHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
 
 function toast(msg, kind = '') {
   elToast.textContent = msg;
@@ -278,13 +290,17 @@ function renderCapture(card, data, elKv, elMeta, elDot, extra) {
       `<li class="empty tip"><em>Tip: ${card === 'ccp' ? 'Ensure the Connect CCP softphone is fully loaded (not just the Salesforce Console) — it renders as an iframe at the bottom. Embedded-CCP still shows Captured inside Salesforce utility bar on the SF card instead.' : 'Ensure you are on a Case detail page, not the home/feed. On brand domains use Force-scan.'}</em></li>`;
     return;
   }
-  elKv.innerHTML = entries
-    .slice(0, 24)
-    .map(([k, v]) => {
-      const valueText = Array.isArray(v) ? v.join(', ') : String(v);
-      const safe = valueText.replace(/[<>&"]/g, (ch) => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;' })[ch]);
-      return `<li><span class="kv__k" title="${k}">${k}</span><span class="kv__v">${safe.length > 160 ? safe.slice(0,157)+'…' : safe}</span></li>`;
-    }).join('');
+  // No 24-row cap — the .kv list is scrollable (max-height + overflow-y:
+  // auto), and the cap made alphabetically-late fields (phone, serialNumber,
+  // status, subject…) invisible, which looked like "not captured".
+  elKv.innerHTML =
+    `<li class="ok-row" style="color:var(--primary)"><span class="kv__k">Fields</span><span class="kv__v">${entries.length} captured · scroll ↓</span></li>` +
+    entries
+      .map(([k, v]) => {
+        const valueText = Array.isArray(v) ? v.join(', ') : String(v);
+        const safe = valueText.replace(/[<>&"]/g, (ch) => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;' })[ch]);
+        return `<li><span class="kv__k" title="${k}">${k}</span><span class="kv__v">${safe.length > 160 ? safe.slice(0,157)+'…' : safe}</span></li>`;
+      }).join('');
   // Also attach the diagnostic badge at the bottom of a successful capture
   // so you know when the inject fallback was used (useful to spot that a
   // tab was pre-existing vs freshly navigated).

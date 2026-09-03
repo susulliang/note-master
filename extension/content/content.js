@@ -52,7 +52,11 @@
   const PHONE_RE = /(?:\+?\d[\d\s\-().]{7,}\d)|(?:\(\d{3}\)\s*\d{3}[\- ]?\d{4})/;
   const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   const SF_ID_RE = /\b[0-9A-Za-z]{15,18}\b/;
-  const SERIAL_RE = /\b(?:[A-Za-z]{2,}[\- ]?[A-Za-z0-9]{4,}|[0-9]{8,})\b/;
+  // Serial numbers virtually always mix letters AND digits (e.g. "X2OMNI21",
+  // "DRH2S-2112"). Require at least one digit and one letter so ordinary
+  // words ("Salesforce", "to main") can never match. Pure-digit serials
+  // must be 10+ chars to avoid matching phone-ish / id-ish noise.
+  const SERIAL_RE = /\b(?=[A-Za-z0-9\-]*[0-9])(?=[A-Za-z0-9\-]*[A-Za-z])[A-Za-z][A-Za-z0-9\-]{5,}\b|\b[0-9]{10,}\b/;
   const CASE_TAG_RE = /\b(?:case|ticket|incident)\s*#?\s*([A-Za-z0-9\-]{6,})\b/i;
 
   // -------------------------------------------------------------------------
@@ -176,6 +180,26 @@
     return acc;
   }
 
+  /** Amazon Connect utility-bar phone popup (often embedded in the
+   *  Salesforce tab). Idle it reads "Offline / Quick connects / Phone number
+   *  or quick connect / No results found"; on an incoming call it displays
+   *  the caller's phone number. Capture both the panel status (so the popup
+   *  card shows the phone is being watched even when idle) and the caller
+   *  number once a call lands. */
+  function scrapeConnectPhonePanel(acc) {
+    const docText = (document.body && (document.body.innerText || '')) || '';
+    if (!/quick\s*connect/i.test(docText)) return acc; // not the phone panel
+    if (!acc.ccpStatus) {
+      const st = docText.match(/\b(Offline|Available|Busy|Calling|In\s*contact|Connecting)\b/i);
+      if (st) acc.ccpStatus = st[1];
+    }
+    if (!acc.contactNumber) {
+      const m = docText.match(PHONE_RE);
+      if (m) acc.contactNumber = m[0].trim();
+    }
+    return acc;
+  }
+
   /** Zendesk / Freshdesk / Genesys ticket panes — fallback heuristics. */
   function scrapeStaticTextHeuristics(acc) {
     // Whole-document-text regex sweeps; anchored to label text when possible.
@@ -190,11 +214,16 @@
     }
     if (!acc.caseNumber) {
       const m = docText.match(CASE_TAG_RE);
-      if (m) acc.caseNumber = m[1];
+      // SF case numbers / Connect contact IDs always contain digits. Words
+      // like "ROBOTICSSupport" (the SF username) must never pass.
+      if (m && /\d/.test(m[1])) acc.caseNumber = m[1];
       else {
         const sf = [...docText.matchAll(new RegExp(SF_ID_RE, 'g'))]
           .map((x) => x[0])
-          .filter((x) => /^[a-zA-Z0-9]{15,18}$/.test(x));
+          // 15-18 alphanumeric chars AND mixed letters+digits — a real
+          // Salesforce record id (e.g. 500aV00001CyNlVQAV). Plain words of
+          // that length ("ROBOTICSSupport") are usernames, not ids.
+          .filter((x) => /^[a-zA-Z0-9]{15,18}$/.test(x) && /\d/.test(x) && /[a-zA-Z]/.test(x));
         if (sf.length) acc.caseNumber = sf[0];
       }
     }
@@ -212,6 +241,7 @@
     const acc = {};
     scrapeInputs(acc);
     scrapeAmazonConnectSpecific(acc);
+    scrapeConnectPhonePanel(acc);
     scrapeStaticTextHeuristics(acc);
 
     // Merge first/last → customerName when the aggregate is missing.
