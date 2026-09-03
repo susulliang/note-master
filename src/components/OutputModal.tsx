@@ -106,99 +106,163 @@ export default function OutputModal({
     };
   }, [editableText]);
 
-  /** Build a multi-line diagnostics toast message describing *why* the
-   *  bridge isn't connected, and what the agent should do next.
-   *  Returns a shape we can format into a custom sonner toast renderer. */
+  /** Build a multi-line diagnostics text describing *why* the bridge isn't
+   *  connected, and what the agent should do next.
+   *  Text-first so we always have a fallback render path (window.alert)
+   *  even if <Toaster> isn't mounted or toast() throws. */
   const diagnoseText = useCallback((): string[] => {
     const lines: string[] = [];
-    const d = extConn?.diagnostics;
-    if (!d) return lines;
-    lines.push(`App origin: ${d.appOrigin || '(unknown)'}`);
+    const d = extConn?.diagnostics ?? null;
+    lines.push('── Extension bridge diagnostics ──');
+    const appOrigin = (d?.appOrigin) || (typeof location !== 'undefined' ? location.origin : '(unknown)');
+    lines.push(`App origin: ${appOrigin}`);
+    if (typeof location !== 'undefined') lines.push(`Full URL: ${location.href}`);
+    if (!d) {
+      lines.push('No diagnostics available — TicketPanelsContext.extensionConnection is missing from the page tree (OutputModal rendered outside the provider).');
+      return lines;
+    }
     lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'} (listening for bridge.js handshake posts)`);
+    lines.push(`Manifest bridge patterns: ${(d.manifestBridgePatterns || []).length === 0 ? '(unknown)' : d.manifestBridgePatterns.join(',  ')}`);
+    lines.push(`Manifest external patterns: ${(d.manifestExternalPatterns || []).length === 0 ? '(unknown)' : d.manifestExternalPatterns.join(',  ')}`);
+    lines.push(`Origin matched by bridge: ${d.originCoveredByBridge ? 'YES' : 'NO'}`);
+    lines.push(`Origin matched by externally_connectable: ${d.originCoveredByExternal ? 'YES' : 'NO'}`);
     if (d.bridgeInjected) {
       lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
+    } else if (d.originCoveredByBridge) {
+      lines.push('Patterns SHOULD match this origin — click "Try probing bridge again" below, or open chrome://extensions and click 🔄 Reload on Ecovacs Note Helper, then refresh THIS ticket notes tab.');
     } else {
-      lines.push(
-        d.originCoveredByBridge
-          ? 'Manifest patterns SHOULD match this origin — click "Try again" below to send a new handshake probe, or go to chrome://extensions and click the 🔄 Reload button on Ecovacs Note Helper.'
-          : `Your current URL is NOT matched by the ticket-app content-script pattern list.`
-      );
+      lines.push('Current URL is NOT covered by the extension manifest content-script list.');
     }
     if (d.suggestedPatternsToAdd.length > 0) {
-      lines.push('To make this deployment work, paste these lines into Ecovacs Note Helper/manifest.json:');
-      lines.push('  content_scripts [bridge.js] matches:');
+      lines.push('');
+      lines.push('▸ Paste these patterns into Ecovacs Note Helper/manifest.json then 🔄 reload the extension:');
+      lines.push('  content_scripts → bridge.js → matches:');
+      d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
+      lines.push('');
+      lines.push('  externally_connectable → matches:');
       d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
     }
-    if (d.lastExternalError) lines.push(`Chrome.runtime.sendMessage error: "${d.lastExternalError.slice(0, 180)}"`);
+    if (d.lastExternalError) lines.push(`\nChrome.runtime error: "${d.lastExternalError.slice(0, 220)}"`);
+    lines.push('');
+    lines.push('Checklist: (1) extension loaded & enabled  (2) origin matches manifest  (3) reloaded the extension  (4) refresh this tab.');
     return lines;
   }, [extConn]);
 
+  /** Always-works diagnostics renderer. Strategy:
+   *    1. try plain `toast.message(...)` with the most important line +
+   *       description (this always renders even without custom-toast JSX).
+   *    2. always throw a full-text `window.alert(...)` backup so the user
+   *       SEEs the info even if the Toaster region was never mounted or
+   *       is hidden beneath the modal.
+   *    3. also copy the manifest snippet (if any) + attach it to
+   *       window.__debug so we don't ask users to "read console".
+   *  No react-markdown / Button / sonner.custom inside this function
+   *  because those are the first things that fail silently when the tree
+   *  hasn't finished mounting its providers. */
   const showDiagnosticsToast = useCallback((): void => {
-    const d = extConn?.diagnostics;
-    const probe = extConn?.requestConnection;
-    if (!d) return;
-    const lines = diagnoseText();
-    // Try to copy suggested patterns as a side-effect so the agent can paste
-    // them into manifest quickly.
-    const copyableSnippet = d.suggestedPatternsToAdd.length > 0
-      ? `// manifest.json content_scripts bridge + externally_connectable:\n"matches": [\n${d.suggestedPatternsToAdd.map((p) => `  "${p}"`).join(',\n')}\n]`
-      : '';
-    if (copyableSnippet) {
-      try { void navigator.clipboard?.writeText(copyableSnippet).catch(() => { /* ignore */ }); }
-      catch { /* ignore */ }
+    try {
+      const d = extConn?.diagnostics ?? null;
+      const probe = extConn?.requestConnection;
+      const lines = diagnoseText();
+      const text = lines.join('\n');
+      // Try to copy suggested patterns as a side-effect so the agent can paste
+      // them into manifest quickly.
+      const copyableSnippet = d && d.suggestedPatternsToAdd.length > 0
+        ? `// manifest.json snippet:\n// content_scripts bridge.js matches + externally_connectable matches:\n"matches": [\n${d.suggestedPatternsToAdd.map((p) => `  "${p}"`).join(',\n')}\n]`
+        : '';
+      if (copyableSnippet) {
+        try {
+          void navigator.clipboard?.writeText(copyableSnippet).then(
+            () => { try { toast.success('Manifest snippet copied to clipboard.'); } catch { /* ignore */ } },
+            () => { /* ignore */ }
+          );
+        } catch { /* ignore */ }
+      }
+      // Stash under debug so anything short of full render failure still
+      // leaves clues in DevTools / window.__debug.lastDiag.
+      try {
+        (window as any).__debug = (window as any).__debug || {};
+        (window as any).__debug.lastDiag = { at: new Date().toISOString(), lines, extConn: extConn ?? null, copyableSnippet };
+      } catch { /* ignore */ }
+
+      // Short sonner toast first (safe subset API: message + description)
+      try {
+        const headline = lines[1] ?? 'Diagnostics collected.';
+        const sub = (d?.suggestedPatternsToAdd?.length ?? 0) > 0
+          ? `${(d as any).suggestedPatternsToAdd.length} manifest pattern${(d as any).suggestedPatternsToAdd.length === 1 ? '' : 's'} missing — full list in the alert dialog + copied to clipboard if allowed.`
+          : !d
+            ? 'TicketPanelsContext extensionConnection missing (provider not wired).'
+            : d.bridgeInjected
+              ? `Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'n/a'}`
+              : `Origin ${d.appOrigin} not covered. Click 🔁 probe below or reload the extension.`;
+        toast.message(headline, {
+          description: sub,
+          duration: 12_000,
+          action: probe
+            ? {
+                label: '🔁 Probe',
+                onClick: () => {
+                  try {
+                    probe();
+                    toast.success('Handshake probe sent — Push-to-SF should un-gray within ~2s.');
+                  } catch (e: any) { toast.error(`Probe failed: ${String(e?.message || e)}`); }
+                },
+              }
+            : undefined,
+        });
+      } catch { /* sonner may not be mounted; fall through to alert below */ }
+
+      // Always alert. This is the "no-op" insurance: even if every other
+      // path short-circuited the user gets visible output and a copy of
+      // the patterns they need to paste.
+      try {
+        const alt = copyableSnippet ? `${text}\n\n━━━━━━━━━━━━━━━━━━━━━━\nClipboard snippet:\n${copyableSnippet}` : text;
+        window.alert(alt);
+      } catch { /* extremely defensive */ }
+    } catch (e: any) {
+      try {
+        window.alert(`Diagnostics render crashed: ${String(e?.message || e)}\n\nTell devs to check window.__debug.lastDiagError.`);
+      } catch { /* ignore */ }
+      try {
+        (window as any).__debug = (window as any).__debug || {};
+        (window as any).__debug.lastDiagError = String(e?.stack || e?.message || e);
+      } catch { /* ignore */ }
     }
-    const infoMode = lines.includes('Content-script bridge injected: YES');
-    const render = (
-      <div className="flex flex-col gap-2 max-w-xl text-xs">
-        <div className="text-sm font-semibold text-foreground">Extension bridge diagnostics</div>
-        <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-          {lines.map((l, i) => <li key={i} className="leading-relaxed break-all">{l}</li>)}
-        </ul>
-        <div className="flex flex-wrap gap-2 pt-1">
-          {probe && (
-            <Button size="sm" variant="secondary" onClick={() => { probe(); toast.success('Sent handshake probe. Wait 1-2 s; if Push-to-SF button un-grays, bridge is now up.'); }}>
-              🔁 Try probing bridge again
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              toast.message('How to reload Ecovacs Note Helper:', {
-                description: 'Open chrome://extensions → find Ecovacs Note Helper → click 🔄 Reload. Then refresh THIS tab (the agent ticket notes page).',
-              });
-            }}
-          >
-            ℹ️ How to reload the extension
-          </Button>
-          {copyableSnippet && (
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => void (async () => { try { await navigator.clipboard.writeText(copyableSnippet); toast.success('Manifest pattern snippet copied to clipboard.'); } catch { toast.error('Clipboard unavailable.'); } })()}
-            >
-              📋 Copy manifest pattern snippet
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-    if (infoMode) toast(() => render, { duration: 18_000, className: 'bg-background/95 border-border backdrop-blur-md' });
-    else toast.custom(() => render, { duration: 18_000 });
   }, [diagnoseText, extConn]);
 
-  /** Run through the extension → SF Case tab. Each success/failure → toast. */
+  /** Run through the extension → SF Case tab. Each success/failure → toast.
+   *  Wrap every branch in try/catch + synchronous visible side-effects so
+   *  "silent nothing" can never happen: we always toast OR alert. */
   const handlePushToSalesforce = useCallback(async () => {
-    if (!applyCaseFields) {
-      // The user sees a disabled push button; if they somehow trigger this
-      // function anyway, show the detailed diagnostics instead of the old
-      // "bridge not connected" one-liner.
-      showDiagnosticsToast();
-      return;
-    }
-    setPushing(true);
     try {
+      if (!applyCaseFields) {
+        // Bridge not up (button was clickable via keyboard or stale prop)
+        // → surface diagnostics instead of generic gray text + toast.error
+        // fallback if even showDiagnosticsToast somehow failed silently.
+        try {
+          showDiagnosticsToast();
+        } catch (e: any) {
+          try { toast.error(`Push aborted: ${String(e?.message || e)}`); } catch { /* ignore */ }
+          try { window.alert(`Push aborted — extension not connected.\n\n${String(e?.message || e)}`); } catch { /* ignore */ }
+        }
+        return;
+      }
+      setPushing(true);
       const f = pushableFields;
+      // Small visible pre-side-effect: if the very first console write on
+      // click isn't seen we know click never fired (rare with native
+      // buttons, but keeps the observability habit from ExperienceRecall).
+      try {
+        (window as any).__debug = (window as any).__debug || {};
+        (window as any).__debug.lastPushAt = new Date().toISOString();
+        (window as any).__debug.lastPushFields = {
+          phone: f.contactPhone,
+          model: f.amrModelNo,
+          name: f.customerName,
+          account: f.accountName,
+          bodyLen: f.postBody?.length ?? 0,
+        };
+      } catch { /* ignore */ }
       const r = await applyCaseFields({
         fields: {
           postBody: f.postBody,
@@ -210,9 +274,9 @@ export default function OutputModal({
         },
       });
       if (!r.ok) {
-        toast.error(r.error || 'Push failed.', {
-          description: r.error ? 'Retry after opening any Lightning Case tab.' : undefined,
-        });
+        const msg = r.error || 'Push failed.';
+        try { toast.error(msg, { description: 'Retry after opening any Lightning Case tab.', duration: 10_000 }); } catch { /* ignore */ }
+        try { window.alert(`Push to Salesforce failed:\n\n${msg}\n\nOpen a Lightning Case tab, then try again.`); } catch { /* ignore */ }
         return;
       }
       // (1) Post body toast
@@ -236,9 +300,8 @@ export default function OutputModal({
         const s = fields[k];
         if (!s) continue;
         if (s.skipped) { skipped += 1; continue; }
-        if (s.ok) {
-          good += 1;
-        } else {
+        if (s.ok) good += 1;
+        else {
           failed += 1;
           toast.warning(`${labels[k]}: ${s.error || 'could not be written.'}`, {
             description: 'Field may be read-only, not on this layout, or the inline-edit button was not found.',
@@ -258,11 +321,13 @@ export default function OutputModal({
         });
       }
     } catch (e: any) {
-      toast.error(String(e?.message || e));
+      const msg = String(e?.message || e);
+      try { toast.error(msg); } catch { /* ignore */ }
+      try { window.alert(`Push to Salesforce crashed:\n\n${msg}\n\n${String(e?.stack || '')}`); } catch { /* ignore */ }
     } finally {
       setPushing(false);
     }
-  }, [applyCaseFields, pushableFields]);
+  }, [applyCaseFields, pushableFields, showDiagnosticsToast]);
 
   // Parse contact fields out of the (possibly edited) note text.
   // Chip values are shown & copied without the **…** bold markers that the
@@ -482,8 +547,8 @@ export default function OutputModal({
               variant="outline"
               size="sm"
               onClick={() => void handlePushToSalesforce()}
-              disabled={pushing}
-              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'opacity-80')}
+              aria-disabled={pushing}
+              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'text-foreground')}
               title={
                 applyCaseFields
                   ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit."
@@ -502,17 +567,30 @@ export default function OutputModal({
               {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
               {pushing ? 'Pushing to Salesforce…' : '📤 Push to Salesforce Case'}
             </Button>
-            {!applyCaseFields && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={showDiagnosticsToast}
-                className="gap-1.5"
-                title="Open a diagnostics toast that shows the ticket app origin, manifest coverage, suggested patterns to add, reload instructions, and a one-click probe."
-              >
-                🔎 Diagnostics
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                // Defensive: ensure user always gets visible feedback for
+                // this click even if showDiagnosticsToast short-circuits.
+                e.stopPropagation?.();
+                try {
+                  // eslint-disable-next-line no-console
+                  console.log('[OutputModal] Diagnostics clicked at', new Date().toISOString(), 'extConn=', extConn);
+                } catch { /* ignore */ }
+                try { (window as any).__debug = (window as any).__debug || {}; (window as any).__debug.lastDiagClick = new Date().toISOString(); } catch { /* ignore */ }
+                try {
+                  showDiagnosticsToast();
+                } catch (e: any) {
+                  try { toast.error(`Diagnostics failed: ${String(e?.message || e)}`); } catch { /* ignore */ }
+                  try { window.alert(`Diagnostics failed:\n\n${String(e?.message || e)}\n\n${String(e?.stack || '')}`); } catch { /* ignore */ }
+                }
+              }}
+              className="gap-1.5"
+              title="Open a diagnostics toast that shows the ticket app origin, manifest coverage, suggested patterns to add, reload instructions, and a one-click probe. Always shows a fallback alert so it never produces nothing."
+            >
+              🔎 Diagnostics
+            </Button>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => handleOpenChange(false)} className="gap-1.5">
