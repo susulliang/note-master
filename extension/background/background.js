@@ -718,54 +718,117 @@ async function scrapeActiveTab() {
   };
 }
 
-/** Smart "scan everything" flow.
+/** Purge a stored snapshot whose source tab has disappeared.
  *
- *  Two phases:
- *    PHASE 1 — scan the tab the user is *currently* looking at (active tab
- *              in the current window), with full chrome.scripting pre-inject.
- *              This GUARANTEES that the page right under the agent's cursor
- *              is always re-scraped fresh — no more "it keeps using the
- *              first test tab" even when the agent has a newer case open.
- *              Works on branded subdomains too (no URL pattern match needed).
+ *  The #1 user complaint was "I closed that Case tab ages ago, yet the
+ *  popup still shows fields captured from it."  Root cause: state.sf /
+ *  state.ccp live in storage.local forever.  Even when the user navigates
+ *  to a different page and force-scans it, if the force-scan yields zero
+ *  SF/CCP fields we *don't* overwrite the snapshot — so the old one
+ *  stays.
  *
- *    PHASE 2 — for whichever card (SF or CCP) phase 1 did NOT fill (e.g.
- *              agent is looking at the Case tab but the CCP phone panel
- *              lives in a different tab), do the classic findTab + scrape
- *              to pull the other source. findTab() has itself been rewritten
- *              to prefer active / most-recently-accessed tabs, so even this
- *              fill-in phase prefers the tab the agent was just on.
+ *  This helper inspects `snapshot.tabId`.  If we can enumerate the
+ *  browser's real tabs and that tabId is gone (or its URL has drifted
+ *  away from the source pattern — i.e. the agent navigated the same tab
+ *  to some non-Case page), return `true` so callers can null out the
+ *  stale snapshot before painting.
  *
- *  The POPUP_SCRAPE_ALL message routes through here now. This is what the
- *  unified "Scan Salesforce & CCP" button calls first. */
+ *  Safe: returns `false` (keep) if we can't enumerate tabs, or if the
+ *  tabId is missing (embedded/synthetic captures that never had a tab). */
+async function snapshotStale(snapshot, patterns) {
+  if (!snapshot) return false;
+  const tabId = snapshot.tabId;
+  const url = snapshot.url || null;
+  // Embedded / popup-self-extract writes tabId=-1 or absent; can't prove stale.
+  if (tabId == null || tabId < 0) return false;
+  try {
+    const real = await chrome.tabs.get(tabId).catch(() => null);
+    // Tab doesn't exist at all → definitely stale.
+    if (!real) return true;
+    // Tab exists but the stored URL points to *something the user already
+    // navigated away from* — also stale.
+    if (real.url && url && real.url.split('?')[0] !== url.split('?')[0]) {
+      // BUT: if new URL still matches one of our known SF/CCP patterns for
+      // this snapshot's kind, trust it (agent just navigated to another
+      // Case within the same tab; future scrape will update it).
+      if (patterns && patterns.some((p) => p.test(real.url || ''))) return false;
+      return true;
+    }
+  } catch { /* ignore — tabs API transient failure */ }
+  return false;
+}
+
+/** Write `null` into a stale snapshot when we've proven the source tab is
+ *  gone, or when a force-scan of the current tab explicitly didn't
+ *  produce data for that side (so stale values from another tab can't
+ *  hang around).  Always followed by saveState(). */
+function purgeSnapshots({ sf = false, ccp = false }) {
+  let did = false;
+  if (sf && state.sf) { state.sf = null; did = true; }
+  if (ccp && state.ccp) { state.ccp = null; did = true; }
+  return did;
+}
+
+/** Smart "scan everything" flow — but NOW biased TOWARD CURRENT TAB, no
+ *  matter what.
+ *
+ *  The user explicitly requested: "make the scan button force scrape
+ *  current tab".  Previous runs did a Phase 2 fill-in from any still-open
+ *  tab matching a URL pattern.  That caused the symptom "I closed the
+ *  first test tab but it keeps showing me data from it" because the
+ *  closed tab's snapshot lived in storage.local forever, and Phase 2
+ *  findTab would still find some *other* stale tab and write that back.
+ *
+ *  New semantics for the green Scan button:
+ *    1. Purge stale snapshots (tabId no longer exists or URL drifted).
+ *    2. FORCE-SCAN the tab the user is looking at RIGHT NOW —
+ *       chrome.scripting.executeScript with both scrapers injected,
+ *       on ANY URL, no pattern gate.
+ *    3. If force-scan produced SF fields → write state.sf, ELSE clear
+ *       any stale state.sf so the old closed tab's data can't linger.
+ *    4. Same for CCP.
+ *
+ *  So pressing Scan == "I want the page UNDER MY CURSOR to be the sole
+ *  source of truth for this extension.  Any old data is wrong."
+ *
+ *  Per-card Refresh buttons keep the old flexible findTab fallback, and
+ *  the popup's zombie-SW self-extract path still forces current-tab. */
 async function scrapeAll() {
-  // Phase 1 — active tab, force-scan, no URL gate.
-  const activeRes = await scrapeActiveTab();
-  const sfFromActive = !!(activeRes?.ok && activeRes?.sf?.capturedAt && Object.keys(activeRes.sf?.data || {}).length > 0);
+  // 0) Before anything else — evict snapshots from closed/drifted tabs.
+  let purged = 0;
+  if (await snapshotStale(state.sf, SF_PATTERNS))  { if (purgeSnapshots({ sf:  true })) purged += 1; }
+  if (await snapshotStale(state.ccp, CCP_PATTERNS)) { if (purgeSnapshots({ ccp: true })) purged += 1; }
+
+  // 1) Force-scan current tab only.  No pattern match.  No fallback.
+  const activeRes = await scrapeActiveTab({ clearStaleOnEmpty: true });
+  const sfFromActive  = !!(activeRes?.ok && activeRes?.sf?.capturedAt  && Object.keys(activeRes.sf?.data  || {}).length > 0);
   const ccpFromActive = !!(activeRes?.ok && activeRes?.ccp?.capturedAt && Object.keys(activeRes.ccp?.data || {}).length > 0);
 
-  // Phase 2 — fill-in passes for the missing side.
-  let ccpFillIn = null;
-  let sfFillIn = null;
-  if (!ccpFromActive) {
-    try { ccpFillIn = await scrapeCcpTab(); } catch (e) { ccpFillIn = { ok: false, error: String(e?.message || e) }; }
-  }
-  if (!sfFromActive) {
-    try { sfFillIn = await scrapeSalesforceTab(); } catch (e) { sfFillIn = { ok: false, error: String(e?.message || e) }; }
-  }
+  // 2) If force-scan didn't produce data for a side, that side is CLEARED
+  //    so a closed-tab snapshot can't still be shown on the card.  This
+  //    is the critical behavior change the user asked for — "force scrape
+  //    current tab" means current tab's result (even if empty) wins over
+  //    whatever was cached from a tab closed hours ago.
+  let cleared = 0;
+  if (!sfFromActive  && purgeSnapshots({ sf:  true })) cleared += 1;
+  if (!ccpFromActive && purgeSnapshots({ ccp: true })) cleared += 1;
+  if (purged || cleared) await saveState();
 
-  // Summarize for the popup toast so the agent can see whether we scanned
-  // "the page under the cursor" or fell back to a background tab.
   return {
     ok: true,
-    ccp: ccpFromActive ? { ok: true, payload: state.ccp, viaActive: true } : ccpFillIn,
-    sf:  sfFromActive  ? { ok: true, payload: state.sf,  viaActive: true } : sfFillIn,
-    activeTab: activeRes?.ok
+    ccp: ccpFromActive ? { ok: true, payload: state.ccp, viaActive: true } : { ok: false, error: 'Current tab did not yield CCP fields. Stale cache was cleared.' },
+    sf:  sfFromActive  ? { ok: true, payload: state.sf,  viaActive: true } : { ok: false, error: 'Current tab did not yield SF fields. Stale cache was cleared.' },
+    activeTab: activeRes?.sf?.url || activeRes?.ccp?.url
       ? { scanned: true, sf: sfFromActive, ccp: ccpFromActive,
            url: activeRes?.sf?.url || activeRes?.ccp?.url || null,
            title: activeRes?.sf?.title || activeRes?.ccp?.title || null }
-      : { scanned: false, error: activeRes?.error, sf: false, ccp: false },
-    fillInCcp: !ccpFromActive,
-    fillInSf:  !sfFromActive,
+      : { scanned: false,
+          error: activeRes?.error,
+          sf: false, ccp: false,
+          url: activeRes?.diagnostic?.activeTabUrl || null,
+          title: activeRes?.diagnostic?.activeTabTitle || null },
+    fillInSf: false, fillInCcp: false,   // Force-current mode: no fill-ins.
+    purgedStale: purged, clearedOnEmpty: cleared,
   };
 }
 
@@ -1042,6 +1105,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       state.settings = { ...state.settings, ...(msg.settings ?? {}) };
       await saveState();
+      sendResponse({ ok: true, state });
+    })();
+    return true;
+  }
+  if (t === 'POPUP_EVICT_STALE') {
+    (async () => {
+      // Popup did tabs.get(tabId) lookup and found one of our in-memory
+      // snapshots was sourced from a now-closed tab; it already wrote the
+      // cleaned snapshot to storage.local.  Re-sync our in-memory copy and
+      // run snapshotStale for belt-and-braces, then confirm back so popup
+      // knows the next POPUP_GET_STATE will be clean too.
+      let did = false;
+      if (await snapshotStale(state.sf, SF_PATTERNS))  { state.sf  = null; did = true; }
+      if (await snapshotStale(state.ccp, CCP_PATTERNS)) { state.ccp = null; did = true; }
+      if (did) await saveState();
       sendResponse({ ok: true, state });
     })();
     return true;

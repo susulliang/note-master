@@ -454,12 +454,40 @@ async function refreshState(silent = false, retries = 1) {
     if (!silent) {
       // Distinct toast so the user knows we're running in offline mode and
       // buttons still work (buttons call sendMessage -> get error).
-      toast('Service worker is offline — showing cached state. Click Force-scan / buttons to wake it.', 'warn');
+      toast('Service worker is offline — showing cached state. Click the green Scan button to force-scan current page.', 'warn');
     }
     // Attach swError to each card so the panel explains why the SW didn't
     // answer — it's actionable feedback.
     state._swError = swError;
   }
+
+  // ------------- Stale-snapshot eviction (paint-time) -------------------
+  //
+  // Even before the user clicks Scan, we don't want to paint a card with a
+  // "Cong Ta" account captured from a tab they closed 21 hours ago.  We
+  // look up each snapshot's tabId via chrome.tabs. If the tab no longer
+  // exists, we null the snapshot before renderCapture runs.
+  {
+    const stale = { sf: false, ccp: false };
+    try {
+      if (state.sf?.tabId != null && state.sf.tabId >= 0) {
+        try { await chrome.tabs.get(state.sf.tabId); } catch { stale.sf = true; }
+      }
+      if (state.ccp?.tabId != null && state.ccp.tabId >= 0) {
+        try { await chrome.tabs.get(state.ccp.tabId); } catch { stale.ccp = true; }
+      }
+    } catch { /* ignore — tabs API permission revoked */ }
+    if (stale.sf)  state.sf  = null;
+    if (stale.ccp) state.ccp = null;
+    // Persist eviction so a page that's truly closed disappears from the
+    // cards across popup re-opens (popup context is recreated every click).
+    if (stale.sf || stale.ccp) {
+      try { await chrome.storage.local.set({ [STATE_KEY]: state, 'nm-extension-state-v1': state }); } catch { /* ignore */ }
+      // Also poke background if it's alive to sync.
+      try { chrome.runtime.sendMessage({ type: 'POPUP_EVICT_STALE' }, () => { /* swallow lastError */ }); } catch { /* ignore */ }
+    }
+  }
+  // ---------------------------------------------------------------------
 
   // Re-paint version header with runtimeVersion from SW if available.
   if (elVersion) elVersion.textContent = `v${runtimeVersion || localDiag().version} · ${(chrome.runtime.id || '').slice(0, 8)}…`;
@@ -571,16 +599,31 @@ async function selfExtractFromPopup(showSpinner) {
   const nowStr = new Date().toISOString();
   const snapshot = (await readStateFromStorage()) || { ccp: null, sf: null, settings: { autoPush: false } };
   if (!snapshot.settings) snapshot.settings = { autoPush: false };
-  if (sfData) snapshot.sf = {
-    capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
-    data: sfData, diagnostic: { via: 'popup-self-extract', framesExtracted: framesSf, bestFrameFieldCount: Object.keys(sfData).length },
-  };
-  if (ccpData) snapshot.ccp = {
-    capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
-    data: ccpData, embedded: !!sfData,
-    diagnostic: { via: 'popup-self-extract', framesExtracted: framesCcp, bestFrameFieldCount: Object.keys(ccpData).length },
-  };
+  // IMPORTANT: when popup self-extract runs, it's the fallback for a dead
+  // service worker.  User intent is still "force-scan the current page"
+  // — so current-page result (even empty) must WIN over stale snapshots
+  // from closed tabs.  Without the explicit nulls below, the snapshot.sf
+  // / snapshot.ccp from a 24-hour-old closed tab would survive
+  // self-extract forever and paint the wrong fields on the cards.
+  if (sfData) {
+    snapshot.sf = {
+      capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
+      data: sfData, diagnostic: { via: 'popup-self-extract', framesExtracted: framesSf, bestFrameFieldCount: Object.keys(sfData).length },
+    };
+  } else {
+    snapshot.sf = null;
+  }
+  if (ccpData) {
+    snapshot.ccp = {
+      capturedAt: nowStr, url: activeTabUrl, title: activeTabTitle, tabId: activeTabId,
+      data: ccpData, embedded: !!sfData,
+      diagnostic: { via: 'popup-self-extract', framesExtracted: framesCcp, bestFrameFieldCount: Object.keys(ccpData).length },
+    };
+  } else {
+    snapshot.ccp = null;
+  }
   if (snapshot.sf && snapshot.ccp) snapshot.sf.ccpEmbedded = true;
+  else if (snapshot.sf) snapshot.sf.ccpEmbedded = false;
 
   // Persist to storage so popup shows it across reopens AND so background
   // (if ever revived) picks up the same snapshot on next boot.
