@@ -4,39 +4,63 @@
 # Guarantees every `git push` strictly increases the LAST digit of the shared
 # version number (package.json + extension/ + Engine Settings Panel footer).
 #
-# Flow:
-#   1. Run bump-version.mjs with --pre-push flag — script exits early if the
-#      current branch already carries a version newer than its upstream
-#      tracking ref (i.e. a prior commit / commit in this push already
-#      bumped). Exit code 0 with a "skipping" log in that case.
-#   2. If the script wrote changes, commit ONLY the five version-related
-#      files onto the local branch tip as a chore commit. Because we are in
-#      pre-push, git will then push this extra commit along with the rest.
+# Algorithm (critical edge: Git resolves the pushed-ref SHA BEFORE invoking
+# pre-push. A commit made INSIDE pre-push but AFTER ref resolution was
+# previously NOT uploaded — we saw exactly this in practice: our bump-
+# commit landed only on the local tip. Fix: when we do bump, we ABORT the
+# current push attempt (exit 1 from inside hook would print "pre-push
+# refused"), then RE-LAUNCH `git push …` ourselves from within the hook
+# with the ECOVACS_PRE_PUSH_BUMPED=1 sentinel so the nested call is a pure
+# pass-through and the brand-new tip (bump-commit on top) actually uploads.)
 #
-# Bypass the hook entirely with:   SKIP_GIT_HOOKS=1  git push …
+# Flow:
+#   1. Bypass: SKIP_GIT_HOOKS=1 → no-op.
+#   2. Re-entry sentinel: ECOVACS_PRE_PUSH_BUMPED=1 → no-op (nested call).
+#   3. Run bump-version.mjs --pre-push. It prints a "skipping auto bump"
+#      line if HEAD already carries a newer version than the upstream
+#      tracking ref (falls back to origin/main when the branch lacks @{u}).
+#   4. If the script actually wrote changes → stage 5 canonical version
+#      files → `git commit -m "chore(version): auto bump <ver>"`.
+#   5. If we made a bump commit → re-launch `git push <remote>` via
+#      exec(1) so the shell process becomes Git itself (pid reuse = clean).
+#      The nested call skips the bump due to the sentinel and uploads the
+#      new tip.
+#   6. Otherwise (no bump needed) → pass-through exit 0, Git proceeds.
+#
+# Bypass manually:   SKIP_GIT_HOOKS=1  git push …
 [ "$SKIP_GIT_HOOKS" = "1" ] && exit 0
-[ "$ECOVACS_PRE_PUSH_BUMPED" = "1" ] && exit 0
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
-# Run the bump script — reports whether it actually modified anything.
+# Sentinel for the self-relaunch below — must never nest.
+if [ "$ECOVACS_PRE_PUSH_BUMPED" = "1" ]; then
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 1 — run bump (may be a no-op). All stdout chatter goes to stderr so
+# Git doesn't close our output fd mid-hook (the "Bad file descriptor" we
+# saw in prior runs).
+# ---------------------------------------------------------------------------
 OUTPUT="$(node scripts/bump-version.mjs --pre-push 2>&1)"
 STATUS=$?
-echo "$OUTPUT"
+printf '%s\n' "$OUTPUT" >&2
 if [ "$STATUS" -ne 0 ]; then
   echo "✗ pre-push: version bump failed (see above)" >&2
   exit 1
 fi
 
-# Only proceed to git commit if the script actually bumped (skipped output line:
-# "already bumped vs upstream" message contains "— skipping auto bump.")
 case "$OUTPUT" in
-  *skipping*) exit 0 ;;
+  *skipping*)
+    # Local already has a bump vs upstream — pass-through.
+    exit 0
+    ;;
 esac
 
-# Stage only the 5 tracked files the bump script is allowed to write. If
-# nothing staged (no diff), nothing to commit → just proceed.
+# ---------------------------------------------------------------------------
+# Step 2 — stage exactly the 5 canonical version files + commit
+# ---------------------------------------------------------------------------
 git add \
   extension/version.json \
   extension/manifest.json \
@@ -45,13 +69,35 @@ git add \
   package.json \
   2>/dev/null
 
-if ! git diff --cached --quiet; then
-  export ECOVACS_PRE_PUSH_BUMPED=1
-  NEW_VER="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('extension/version.json','utf8')).version)}catch(e){process.exit(1)}" 2>/dev/null || echo "patch")"
-  if ! git commit -m "chore(version): auto bump $NEW_VER"; then
-    echo "✗ pre-push: could not commit the auto-bump. Stage+commit version files manually, then retry." >&2
-    exit 1
-  fi
+if git diff --cached --quiet; then
+  # Script reported a bump but no files staged — no-op.
+  exit 0
 fi
 
-exit 0
+NEW_VER="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('extension/version.json','utf8')).version)}catch(e){process.exit(1)}" 2>/dev/null || echo "patch")"
+if ! git commit -m "chore(version): auto bump $NEW_VER" >&2; then
+  echo "✗ pre-push: could not commit the auto-bump. Stage+commit version files manually, then retry." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Step 3 — re-launch `git push` with sentinel so the bump commit uploads.
+#
+# Git passes us: $1 = remote name (e.g. "origin"), $2 = remote url (empty if
+# Git resolved it from config). We forward the name; if a URL was given we
+# also forward the URL (so URL-override push calls still work).
+# ---------------------------------------------------------------------------
+REMOTE_NAME="${1:-origin}"
+REMOTE_URL="${2:-}"
+
+echo "" >&2
+echo "✓ Pre-push bumped to $NEW_VER — re-launching push with the new tip." >&2
+
+set --
+set -- "$REMOTE_NAME"
+if [ -n "${REMOTE_URL}" ]; then
+  set -- "$@" "$REMOTE_URL"
+fi
+
+export ECOVACS_PRE_PUSH_BUMPED=1
+exec git push "$@"
