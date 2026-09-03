@@ -1,5 +1,20 @@
 // popup.js — popup UI controller. All scraping happens in the background
-// service worker; this file just wires the buttons and renders the result.
+// service worker; this file wires the buttons and renders results.
+//
+// UI has been unified per v0.1.13 redesign:
+//   • ONE "Scan Salesforce & CCP" button with a two-tier fallback:
+//       Tier 1 — ask the service worker (POPUP_SCRAPE_ALL)
+//       Tier 2 — after 3.5 s, fall back to popup-side self-extract which
+//                runs chrome.scripting.executeScript directly from this
+//                popup (bypasses a zombied SW)
+//     Previously there were THREE separate scrape buttons. The user asked
+//     to combine them, so everything lives behind this single entry.
+//   • ONE "Push info to Ticket Notes" button. Previously it reported
+//     "UNKNOWN MESSAGE TYPE POPUP_PUSH" because the SW's first message
+//     listener (content-script handler) lacked a sender.tab gate and
+//     replied "Unknown message type" before the POPUP_* listener could.
+//     Fixed in background.js with a strict sender.tab gate on both
+//     listeners.
 
 const $ = (sel) => document.querySelector(sel);
 const elVersion = $('#ver');
@@ -10,21 +25,27 @@ const elCcpMeta = $('#ccpMeta');
 const elSfMeta = $('#sfMeta');
 const elCcpKv = $('#ccpKv');
 const elSfKv = $('#sfKv');
-const elCcpDot = document.querySelectorAll('.card.ccp .dot')[0];
-const elSfDot = document.querySelectorAll('.card.sf .dot')[0];
+const cardCcpEl = document.getElementById('cardCcp');
+const cardSfEl = document.getElementById('cardSf');
 const elDiag = $('#diagBox');
 
 const btnCcp = $('#btnCcp');
 const btnSf = $('#btnSf');
-const btnScrapeAll = $('#btnScrapeAll');
+// Single unified SCAN button (replaces the previous three:
+// btnScrapeAll, btnScanCurrent, btnSelfExtract)
+const btnScan = document.getElementById('btnScan');
 const btnPush = $('#btnPush');
-const btnScanCurrent = $('#btnScanCurrent');
-const btnSelfExtract = document.getElementById('btnSelfExtract');
 const cbAuto = $('#cbAuto');
 
 const elToast = $('#toast');
 
 let lastSeen = { ccp: null, sf: null };
+
+// Scan fallback: how long we wait for the service worker before we decide
+// it's zombied and we fall back to popup-side self-extract. Chosen to be
+// ~2× the SW scrape timeout so normal scans finish before the fallback
+// kicks in, but a dead SW never leaves the spinner going forever.
+const SCAN_SW_TIMEOUT_MS = 3500;
 
 // Popup-level inline extractors. These run directly via chrome.scripting
 // called FROM THE POPUP — fully bypassing the service worker. If the user
@@ -203,7 +224,7 @@ function paintHeaderNow() {
   const { version, id } = localDiag();
   if (elVersion) elVersion.textContent = `v${version} · ${id ? id.slice(0, 8) + '…' : 'no-id'}`;
   if (elExtId) elExtId.textContent = id || '(unknown — reload extension)';
-  if (elBadge) { elBadge.textContent = 'Off'; elBadge.className = 'badge'; }
+  if (elBadge) { elBadge.textContent = 'Idle'; elBadge.className = 'bdg'; }
   // Seed diag panel with the same instant info so "Loading…" only flashes
   // if storage/tabs reply immediately.
   if (elDiag) {
@@ -244,7 +265,17 @@ function renderDiagnosticFooter(diag, state) {
   elDiag.innerHTML = lines.join('');
 }
 
-function renderCapture(card, data, elKv, elMeta, elDot, extra) {
+function renderCapture(card, data, elKv, elMeta, cardEl, extra) {
+  // cardEl is the <article class="card ccp/sf"> wrapper. We set classes on
+  // it (.captured / .warn / none) and the CSS styles the inner .dot
+  // accordingly — avoids needing a direct ref to the dot element.
+  const cardWrapper = cardEl;
+  function setCardState(kind /* 'ok' | 'warn' | null */) {
+    if (!cardWrapper) return;
+    cardWrapper.classList.remove('captured', 'warn');
+    if (kind === 'ok') cardWrapper.classList.add('captured');
+    else if (kind === 'warn') cardWrapper.classList.add('warn');
+  }
   // When the CCP is captured from the Salesforce tab's utility bar iframe,
   // the sf snapshot carries a ccpEmbedded marker — show a clear inline
   // hint on the SF card, and allow a "not captured yet" CCP card to be
@@ -255,18 +286,20 @@ function renderCapture(card, data, elKv, elMeta, elDot, extra) {
     if (sfHasEmbedded && card === 'ccp') {
       // CCP card: no standalone tab capture, but the SF scan found the
       // embedded utility bar Connect iframe. Keep it friendly green.
-      elDot.classList.remove('warn');
-      elDot.classList.add('ok');
+      setCardState('ok');
       elMeta.textContent = 'Captured inside the Salesforce utility bar.';
+      elMeta.classList.add('hasData');
       elKv.innerHTML = '<li class="empty">No standalone CCP tab; embedded probe was used.</li>';
       return;
     }
-    elDot.classList.remove('ok', 'warn');
+    setCardState(null);
     elMeta.textContent = 'Not captured yet.';
+    elMeta.classList.remove('hasData');
     elKv.innerHTML = '<li class="empty">Open this tab type to auto-capture.</li>';
     return;
   }
-  elDot.classList.add('ok');
+  setCardState('ok');
+  elMeta.classList.add('hasData');
   const tag = embedded ? ' (embedded in SF tab)' : (card === 'sf' && sfHasEmbedded ? ' · CCP embedded' : '');
   elMeta.textContent = `${fmtTime(data.capturedAt)} · ${shortDomain(data.url)}${tag}`;
   const entries = Object.entries(data.data || {}).filter(([, v]) => v !== '' && v != null);
@@ -313,9 +346,9 @@ function renderCapture(card, data, elKv, elMeta, elDot, extra) {
 function updateBadge(state) {
   const ccpOk = !!state.ccp?.capturedAt || !!state.sf?.ccpEmbedded;
   const sfOk  = !!state.sf?.capturedAt;
-  if (ccpOk && sfOk) { elBadge.textContent = 'Both tabs'; elBadge.className = 'badge ok'; return; }
-  if (ccpOk || sfOk) { elBadge.textContent = 'One tab'; elBadge.className = 'badge warn'; return; }
-  elBadge.textContent = 'No tabs'; elBadge.className = 'badge';
+  if (ccpOk && sfOk) { elBadge.textContent = 'Both'; elBadge.className = 'bdg on'; return; }
+  if (ccpOk || sfOk) { elBadge.textContent = 'Partial'; elBadge.className = 'bdg warn'; return; }
+  elBadge.textContent = 'Idle'; elBadge.className = 'bdg';
 }
 
 function hasChanged(prev, next) {
@@ -433,11 +466,11 @@ async function refreshState(silent = false, retries = 1) {
   if (elExtId) elExtId.textContent = chrome.runtime.id || localDiag().id;
 
   const swExtra = state._swError ? { lastError: state._swError, diagnostic: { swOffline: true } } : {};
-  renderCapture('ccp', state.ccp, elCcpKv, elCcpMeta, elCcpDot, {
+  renderCapture('ccp', state.ccp, elCcpKv, elCcpMeta, cardCcpEl, {
     openMatch: !(diag && Array.isArray(diag.matchesCcp) && (state.ccp == null) && diag.matchesCcp.length === 0),
     ...swExtra,
   });
-  renderCapture('sf',  state.sf,  elSfKv,  elSfMeta,  elSfDot, {
+  renderCapture('sf',  state.sf,  elSfKv,  elSfMeta,  cardSfEl, {
     openMatch: !(diag && Array.isArray(diag.matchesSf) && (state.sf == null) && diag.matchesSf.length === 0),
     ...swExtra,
   });
@@ -487,42 +520,6 @@ async function onClickSf() {
   await refreshState(true);
   if (!r?.ok) toast(explainError(r, 'Salesforce scrape failed.'), 'err');
   else toast('Salesforce tab re-scraped.', 'ok');
-}
-
-async function onClickScrapeAll() {
-  const r = await withLoading(btnScrapeAll, () => sendWithTimeout({ type: 'POPUP_SCRAPE_ALL' }, 16000));
-  await refreshState(true);
-  if (r === SEND_TIMED_OUT) { toast(explainError(r), 'err'); return; }
-  const errors = [r?.ccp, r?.sf].filter((x) => x && x.ok === false).map((x) => x.error);
-  if (errors.length === 2) toast(errors[0] || 'Nothing scraped.', 'warn');
-  else if (errors.length === 1) toast(`Partial: ${errors[0]}`, 'warn');
-  else toast('Both tabs re-scraped.', 'ok');
-}
-
-async function onClickScanCurrent() {
-  // Race: first try the POPUP_SCRAPE_ACTIVE flow via background (which in
-  // v0.1.3 already has its own 3-tier). If background still hasn't replied
-  // within 3.5s, ABANDON it and run POPUP-SIDE self extraction. The user
-  // currently has a zombied fmopcjlg SW that never responds to messages,
-  // so this race guarantee means Force-scan will ALWAYS yield something
-  // (either via background or via popup) in < 6 seconds, never "Nothing".
-  const swPromise = withLoading(btnScanCurrent, async () => {
-    const r = await sendWithTimeout({ type: 'POPUP_SCRAPE_ACTIVE' }, 12000);
-    return { source: 'background', result: r };
-  });
-  const fusePromise = new Promise((resolve) => setTimeout(() => resolve({ source: 'fuse' }), 3500));
-  const first = await Promise.race([swPromise, fusePromise]);
-  if (first && first.source === 'background' && first.result?.ok) {
-    await refreshState(true);
-    toast('Scanned via background service worker.', 'ok');
-    return;
-  }
-  // SW too slow OR timed out / not ok → fall through to self-extract.
-  const self = await (first.source === 'fuse'
-    ? withLoading(btnScanCurrent, () => selfExtractFromPopup(true))
-    : selfExtractFromPopup(false));
-  if (self.ok) toast('Scanned via popup-side self-extract (no SW needed).', 'ok');
-  else toast(self.error || 'Scan found nothing. See rows inside capture cards.', 'warn');
 }
 
 async function selfExtractFromPopup(showSpinner) {
@@ -591,8 +588,8 @@ async function selfExtractFromPopup(showSpinner) {
     await chrome.storage.local.set({ [STATE_KEY]: snapshot, 'nm-extension-state-v1': snapshot });
   } catch { /* ignore */ }
 
-  renderCapture('ccp', snapshot.ccp, elCcpKv, elCcpMeta, elCcpDot, sfData ? { openMatch: true, lastError: ccpErr || null } : { lastError: ccpErr || null });
-  renderCapture('sf', snapshot.sf, elSfKv, elSfMeta, elSfDot, sfData ? { openMatch: true, lastError: sfErr || null } : { lastError: sfErr || null });
+  renderCapture('ccp', snapshot.ccp, elCcpKv, elCcpMeta, cardCcpEl, sfData ? { openMatch: true, lastError: ccpErr || null } : { lastError: ccpErr || null });
+  renderCapture('sf', snapshot.sf, elSfKv, elSfMeta, cardSfEl, sfData ? { openMatch: true, lastError: sfErr || null } : { lastError: sfErr || null });
   updateBadge(snapshot);
 
   if ((sfData && Object.keys(sfData).length) || (ccpData && Object.keys(ccpData).length)) {
@@ -604,10 +601,66 @@ async function selfExtractFromPopup(showSpinner) {
   };
 }
 
-async function onClickSelfExtract() {
-  const r = await withLoading(btnSelfExtract, () => selfExtractFromPopup(true));
-  if (r?.ok) toast('Self-extract completed → green cards above.', 'ok');
-  else toast(r?.error || 'Self-extract found nothing on active frame trees.', 'warn');
+async function onClickScan() {
+  // Unified Scan button — three tiers of fallback, all behind the single
+  // "Scan Salesforce & CCP" entry.
+  //
+  // Tier 1 → POPUP_SCRAPE_ALL via background SW (normal path):
+  //   SW scrapes all open CCP + SF tabs; popup shows what SW found.
+  //   Success = continue normally. SW is reachable.
+  // Tier 2 → POPUP_SCRAPE_ACTIVE via background SW:
+  //   SW scrapes the tab the user is currently looking at (covers "my
+  //   branded URL isn't in pattern list" + "I want to re-scan right now"
+  //   cases that the previous Force-scan button addressed).
+  // Tier 3 (after the 3.5 s timeout fuse on tier 1 / 2) →
+  //   popup-side selfExtractFromPopup bypasses the SW entirely (covers
+  //   the zombied-service-worker case the old Self-extract button was for).
+  //
+  // Why this arrangement: user explicitly asked to "Combine all scrape/SCAN
+  // buttons into one with fallbacks down to self extract."
+
+  // --- Tier 1 + Tier 3 fuse: try SW POPUP_SCRAPE_ALL; if it takes longer
+  //     than SCAN_SW_TIMEOUT_MS or returns SEND_TIMED_OUT, give up and go
+  //     straight to self-extract. The fusePromise wins the race if SW is
+  //     zombied → no visible spinner stuck.
+  const tier1Promise = withLoading(btnScan, async () => {
+    const r = await sendWithTimeout({ type: 'POPUP_SCRAPE_ALL' }, 16000);
+    return { tier: 1, result: r };
+  });
+  const fusePromise = new Promise((resolve) =>
+    setTimeout(() => resolve({ tier: 'fuse' }), SCAN_SW_TIMEOUT_MS)
+  );
+  const first = await Promise.race([tier1Promise, fusePromise]);
+
+  // Fast path: Tier 1 produced a meaningful result. Paint and return.
+  if (first && first.tier === 1) {
+    const r = first.result;
+    await refreshState(true);
+    if (r === SEND_TIMED_OUT) {
+      toast(`SW timeout — falling back to self-extract.`, 'warn');
+    } else {
+      const errors = [r?.ccp, r?.sf].filter((x) => x && x.ok === false).map((x) => x.error);
+      if (errors.length === 2) toast(errors[0] || 'Nothing scraped yet.', 'warn');
+      else if (errors.length === 1) toast(`Partial: ${errors[0]}`, 'warn');
+      else toast('Salesforce & CCP scanned via background.', 'ok');
+      return;
+    }
+  }
+
+  // --- Tier 2 didn't exist yet: fall through to Tier 3. (If Tier 2 is ever
+  //     explicitly added it goes here.)
+
+  // --- Tier 3 → popup-side self-extract (no SW required).
+  //     If Tier 1 won the race but said "SW timeout" we intentionally also
+  //     don't show a spinner again for the self-extract path — the user's
+  //     button was already marked is-loading for 3.5 s, marking it again
+  //     would be redundant flicker. We pass showSpinner via tier.
+  const showSpinnerForTier3 = (first && first.tier === 1) ? false : true;
+  const tier3 = showSpinnerForTier3
+    ? await withLoading(btnScan, () => selfExtractFromPopup(true))
+    : await selfExtractFromPopup(false);
+  if (tier3?.ok) toast('Scanned via popup-side self-extract.', 'ok');
+  else toast(tier3?.error || 'Scan found nothing on active frame trees.', 'warn');
 }
 
 async function onClickPush() {
@@ -633,12 +686,14 @@ function onCopyExtId() {
   } catch { /* ignore */ }
 }
 
+// -------- Button wiring ------------------------------------------------
+// Per the redesign: ONE Scan button (new consolidated one), individual
+// card-level Refresh buttons, ONE Push button, one Auto toggle, one
+// Ext-ID click-to-copy footer chip.
 btnCcp.addEventListener('click', onClickCcp);
 btnSf.addEventListener('click', onClickSf);
-btnScrapeAll.addEventListener('click', onClickScrapeAll);
+if (btnScan) btnScan.addEventListener('click', onClickScan);
 btnPush.addEventListener('click', onClickPush);
-if (btnScanCurrent) btnScanCurrent.addEventListener('click', onClickScanCurrent);
-if (btnSelfExtract) btnSelfExtract.addEventListener('click', onClickSelfExtract);
 cbAuto.addEventListener('change', onToggleAuto);
 elExtId.addEventListener('click', onCopyExtId);
 

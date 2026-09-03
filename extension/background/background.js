@@ -808,6 +808,17 @@ async function pushToTicketApp(force = false) {
 
 /** Messages from content scripts (CCP / SF) */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // IMPORTANT — gate strictly to messages coming FROM content scripts (i.e.
+  // a tab ran our injected scraper). Without this gate the popup's own
+  // messages (POPUP_PUSH, POPUP_SCRAPE_*) arrive here and hit the fallback
+  // "Unknown message type" reply before the POPUP_* listener below has a
+  // chance to respond. Because MV3 onMessage deliverers reply with the
+  // FIRST sendResponse() call, this bug looked like:
+  //
+  //   click "Push info to Ticket Notes" → toast: "Unknown message type: POPUP_PUSH"
+  //
+  // Gate fix: only process content-script messages here.
+  if (!sender || !sender.tab || typeof sender.tab.id !== 'number') return false;
   // wrap async so the handler can return true for async sendResponse
   (async () => {
     try {
@@ -847,9 +858,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // keep message channel open for async reply
 });
 
-/** Messages from the popup */
+/** Messages from the popup (and the internal app bridge which looks like an
+ *  "extension popup" to chrome.runtime.sendMessage — both originate from the
+ *  extension's own HTML views, i.e. NOT from a tab content script.)
+ *
+ *  We gate strictly to messages that DON'T come from a tab. This pairs with
+ *  the content-script listener above, which gates to messages FROM a tab.
+ *  Together the two gates ensure each message type is processed by exactly
+ *  one listener — never two "Unknown message type" races. */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
+  if (sender && sender.tab && typeof sender.tab.id === 'number') return false;
   const t = msg?.type;
   if (t === 'POPUP_GET_STATE') {
     (async () => {

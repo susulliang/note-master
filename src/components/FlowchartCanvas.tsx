@@ -76,17 +76,26 @@ const LEFT_COL_STACK_GAP = 20;
 const MIN_COL_GAP = 16;
 const MAX_COL_GAP = 28;
 const FALLBACK_CONTAINER_WIDTH = 900;
-/** Above this canvas width the three reference panels (Transcript, Matching
- *  Templates, SOP) stack into a dedicated left-side column pinned at the
- *  top-left of the canvas. The main ticket flow grid then flows in the
- *  pane to the right of that column. On narrower screens all three panels
- *  stay in their original semantic rows inside NODE_LAYOUT_ROWS so nothing
- *  is horizontally pushed off-screen. */
+/** Two-column layout only activates when the canvas scroll container is at
+ *  LEAST this wide (px total). Below this threshold everything collapses to
+ *  the classic single-column responsive grid so the panels never squeeze
+ *  into unreadable widths. The 3/7 + 4/7 split evaluated at exactly this
+ *  threshold yields ~506 px left / ~688 px right — enough for Transcript
+ *  and the START + form grid respectively. */
 const WIDE_SCREEN_CANVAS_WIDTH = 1320;
-/** Minimum width reserved for the left-side column (px). It must be wide
- *  enough for the Transcript panel; SOP + Matching Template are sized to
- *  fit in the same column so they align cleanly underneath it. */
-const LEFT_COLUMN_WIDTH = 700;
+/** Left column ratio out of 7 total parts (3 + 4). Left = 3/7 ≈ 42.9%,
+ *  Right = 4/7 ≈ 57.1%, matching the user-specified 3 : 4 ratio. */
+const LEFT_COL_RATIO_NUM = 3;
+const RIGHT_COL_RATIO_NUM = 4;
+const RATIO_DENOM = LEFT_COL_RATIO_NUM + RIGHT_COL_RATIO_NUM; // 7
+/** Guard rails so the left column never collapses on a zoomed 4K screen or
+ *  blows past a comfortable reading width. Applied after the ratio math. */
+const LEFT_COL_MIN_PX = 480;
+const LEFT_COL_MAX_PX = 900;
+/** Minimum flow-grid width required to consider the layout "wide". When a
+ *  tiny window is barely over WIDE_SCREEN_CANVAS_WIDTH but the remaining
+ *  right pane is under this threshold, fall back to narrow single-grid. */
+const RIGHT_COL_MIN_FLOW_PX = 360;
 
 // Approximate node dimensions for connection point + layout calculations
 const NODE_VERTICAL_PADDING = 6; // py-1.5 x2
@@ -187,50 +196,49 @@ function computeDefaultLayout(
   nodes: NodeConfig[],
   canvasWidth: number,
   heightOf: (n: NodeConfig) => number,
-  hiddenNodes: Set<string> | undefined
+  hiddenNodes: Set<string> | undefined,
+  widthOverrides: Record<string, number>
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
 
-  // Three reference panels that live in the left-side column on WIDE
-  // screens. On narrow screens they stay in their original semantic rows.
-  // Ordered top → bottom as they appear stacked under the Transcript.
-  // Product box sits above SOP per user request (referenced earlier in calls).
+  // -------------------------------------------------------------------------
+  // Left column identity — user explicitly requested:
+  //   Left  (3/7 width): Transcript | Matching Templates | Product lookup |
+  //                      SOP box  | 24H Ticket Tracker
+  //   Right (4/7 width): all other flowchart gridboxes + Hang Up button.
+  // Ordered top → bottom as they appear stacked under the Live Transcript.
+  // -------------------------------------------------------------------------
   const LEFT_COL_IDS: Array<string> = [
     NODE_IDS.TRANSCRIPT_PANEL,
     NODE_IDS.TEMPLATE_MATCHES,
     NODE_IDS.PRODUCT_LOOKUP,
     NODE_IDS.SOP_PANEL,
+    NODE_IDS.TICKET_TRACKER,
   ];
   const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
     .map((id) => (!hiddenNodes?.has(id) ? nodeById.get(id) ?? null : null))
     .filter((n): n is NodeConfig => Boolean(n));
 
-  // WIDE vs NARROW layout split:
-  //   WIDE (canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH and at least one
-  //     left-column panel is visible and the remaining right pane has room
-  //     for the ticket flow):
-  //       Transcript / Templates / SOP stack into a dedicated left column
-  //       top-aligned at (CANVAS_MARGIN, CANVAS_MARGIN). The main ticket
-  //       flow grid runs in the pane to their right so the opening START
-  //       row sits visually *to the right* of the Transcript panel.
-  //   NARROW:
-  //       All three panels stay in their NODE_LAYOUT_ROWS rows and the
-  //       grid is the classic single-pane layout.
+  // isWide is decided by the CALLER (canvas component) and reflected via
+  // a non-empty widthOverrides map (left-col entries present = wide mode).
+  // Mirrors the isWide boolean to avoid duplicating threshold math.
   const anyLeftColVisible = leftColNodesVisible.length > 0;
-  const flowPaneCandidateLeft = CANVAS_MARGIN + LEFT_COLUMN_WIDTH + MIN_COL_GAP;
-  const isWide = Boolean(
-    anyLeftColVisible &&
-      canvasWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
-      canvasWidth - CANVAS_MARGIN - flowPaneCandidateLeft >= 360
-  );
+  const isWide = anyLeftColVisible &&
+    LEFT_COL_IDS.every((id) => Object.prototype.hasOwnProperty.call(widthOverrides, id));
+
+  // Resolve width for node math inside the layout engine.
+  const nodeWidth = (n: NodeConfig): number => widthOverrides[n.id] ?? n.width ?? 240;
 
   let mainAvailLeft = CANVAS_MARGIN;
   const mainMaxRight = canvasWidth - CANVAS_MARGIN;
-  if (isWide) mainAvailLeft = flowPaneCandidateLeft;
+  if (isWide) {
+    const leftColPx = widthOverrides[LEFT_COL_IDS[0]] ?? 700;
+    mainAvailLeft = CANVAS_MARGIN + leftColPx + MIN_COL_GAP;
+  }
   const flowAvailWidth = Math.max(160, mainMaxRight - mainAvailLeft);
 
-  // 1) WIDE: stack the three reference panels top → bottom in the left col.
+  // 1) WIDE: stack the five reference panels top → bottom in the left col.
   let yCursor = CANVAS_MARGIN;
   if (isWide) {
     let leftY = CANVAS_MARGIN;
@@ -262,7 +270,7 @@ function computeDefaultLayout(
     let line: NodeConfig[] = [];
     let lineWidth = 0;
     for (const n of rowNodes) {
-      const w = n.width ?? 240;
+      const w = nodeWidth(n);
       const gap = line.length === 0 ? 0 : MIN_COL_GAP;
       if (line.length > 0 && lineWidth + gap + w > flowAvailWidth) {
         lines.push(line);
@@ -276,7 +284,7 @@ function computeDefaultLayout(
     if (line.length > 0) lines.push(line);
 
     for (const lineNodes of lines) {
-      const sumWidth = lineNodes.reduce((s, n) => s + (n.width ?? 240), 0);
+      const sumWidth = lineNodes.reduce((s, n) => s + nodeWidth(n), 0);
       const gaps = lineNodes.length - 1;
       let colGap = MIN_COL_GAP;
       if (gaps > 0) {
@@ -292,7 +300,7 @@ function computeDefaultLayout(
       let lineHeight = 0;
       for (const n of lineNodes) {
         positions[n.id] = { x, y };
-        x += (n.width ?? 240) + colGap;
+        x += nodeWidth(n) + colGap;
         lineHeight = Math.max(lineHeight, heightOf(n));
       }
       y += lineHeight + LINE_GAP;
@@ -372,18 +380,60 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     }
   }, [containerWidth, dragging, hasOverrides, onLayoutReset]);
 
+  // -------------------------------------------------------------------------
+  // Compute the 3 : 4 ratio wide-layout decision ONCE and share it across
+  // layout math + rendered node widths. Left column gets 3/7 of usable
+  // space (clamped to [LEFT_COL_MIN_PX, LEFT_COL_MAX_PX]); right column
+  // gets everything else. When wide layout is active, widthOverrides
+  // forces every LEFT_COL_ID node to render at the exact uniform column
+  // width (fulfilling "match all left boxes to the max column width").
+  // -------------------------------------------------------------------------
+  const LEFT_COL_IDS_WIDE: Array<string> = [
+    NODE_IDS.TRANSCRIPT_PANEL,
+    NODE_IDS.TEMPLATE_MATCHES,
+    NODE_IDS.PRODUCT_LOOKUP,
+    NODE_IDS.SOP_PANEL,
+    NODE_IDS.TICKET_TRACKER,
+  ];
+  const totalInset = CANVAS_MARGIN * 2 + MIN_COL_GAP;
+  const usableWidth = Math.max(0, containerWidth - totalInset);
+  const leftColumnWidthPxRaw = (usableWidth * LEFT_COL_RATIO_NUM) / RATIO_DENOM;
+  const leftColumnWidthPx = Math.max(
+    LEFT_COL_MIN_PX,
+    Math.min(LEFT_COL_MAX_PX, Math.round(leftColumnWidthPxRaw))
+  );
+  const flowPaneCandidateLeft = CANVAS_MARGIN + leftColumnWidthPx + MIN_COL_GAP;
+  const anyLeftColVisible = LEFT_COL_IDS_WIDE.some((id) => !hiddenNodes?.has(id) && nodes.some((n) => n.id === id));
+  const isWideLayout = Boolean(
+    anyLeftColVisible &&
+      containerWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
+      containerWidth - flowPaneCandidateLeft - CANVAS_MARGIN >= RIGHT_COL_MIN_FLOW_PX
+  );
+  const widthOverrides: Record<string, number> = useMemo(() => {
+    if (!isWideLayout) return {};
+    const out: Record<string, number> = {};
+    for (const id of LEFT_COL_IDS_WIDE) out[id] = leftColumnWidthPx;
+    return out;
+  }, [isWideLayout, leftColumnWidthPx]);
+
   // Clamp node widths to the available canvas width so the default layout
   // always fits — the horizontal scrollbar never appears (dragged nodes
-  // still extend the canvas on purpose)
+  // still extend the canvas on purpose). When a node has a layout-wide
+  // override, the OVERRIDE is the effective width (the layout engine is
+  // responsible for sizing it to still-fit within its column).
   const effectiveNodes = useMemo(() => {
     const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
     return nodes
       .filter((n) => !hiddenNodes?.has(n.id))
       .map((n) => {
-        const w = n.width ?? 240;
-        return w > avail ? { ...n, width: Math.floor(avail) } : n;
+        const rawW = widthOverrides[n.id] ?? n.width ?? 240;
+        const clampedMax = isWideLayout && LEFT_COL_IDS_WIDE.includes(n.id)
+          ? Math.max(LEFT_COL_MIN_PX, containerWidth - CANVAS_MARGIN)
+          : avail;
+        const w = Math.min(rawW, clampedMax);
+        return w !== n.width ? { ...n, width: w } : n;
       });
-  }, [nodes, containerWidth, hiddenNodes]);
+  }, [nodes, containerWidth, hiddenNodes, widthOverrides, isWideLayout]);
 
   // Measured height with estimate fallback
   const heightOf = useCallback(
@@ -393,8 +443,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf, hiddenNodes),
-    [effectiveNodes, containerWidth, heightOf, hiddenNodes]
+    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf, hiddenNodes, widthOverrides),
+    [effectiveNodes, containerWidth, heightOf, hiddenNodes, widthOverrides]
   );
 
   const effectivePositions = useMemo(() => {
@@ -436,7 +486,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     let w = containerWidth;
     for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
-      if (p) w = Math.max(w, p.x + (n.width ?? 240) + 80);
+      if (p) w = Math.max(w, p.x + n.width + 80);
     }
     return w;
   }, [effectiveNodes, effectivePositions, containerWidth]);
@@ -530,8 +580,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
       const fromHeight = heightOf(fromNode);
       const toHeight = heightOf(toNode);
-      const fromWidth = fromNode.width ?? 280;
-      const toWidth = toNode.width ?? 280;
+      // effectiveNodes already carries layout-wide overrides, so .width is
+      // safe to read directly (no per-node fallback needed here).
+      const fromWidth = fromNode.width;
+      const toWidth = toNode.width;
 
       // Start: bottom-center of from node
       const x1 = fromPos.x + fromWidth / 2;

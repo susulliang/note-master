@@ -1,7 +1,7 @@
 /**
  * useCcpExtensionBridge — connects the Ticket Notes React app to the
- * "Ecovacs Ticket DOM Scraper" Tier-2 browser extension living in
- * /extension of this repo.
+ * "Ecovacs Note Helper" Tier-2 browser extension living in
+ * /extension of this repo (previously known as "Ecovacs Ticket DOM Scraper").
  *
  * Two transport channels, tried in this order:
  *

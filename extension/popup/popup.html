@@ -3,76 +3,124 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ecovacs Ticket DOM Scraper</title>
+    <title>Ecovacs Note Helper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <header class="h">
-      <img src="../icons/icon-32.png" alt="Ecovacs" class="h__icon" />
-      <div>
-        <h1>Ticket DOM Scraper</h1>
-        <p class="h__sub" id="ver">v0.1.0 · warming up…</p>
+    <!-- =============================  HEADER  ============================= -->
+    <header class="hd">
+      <div class="hd__brand">
+        <img src="../icons/icon-32.png" alt="Ecovacs" class="hd__icon" />
+        <div class="hd__titles">
+          <h1 class="hd__title">Ecovacs Note Helper</h1>
+          <p class="hd__sub">
+            Scrapes Salesforce + CCP fields and pushes them to Ticket Notes.
+          </p>
+        </div>
       </div>
-      <span class="badge" id="badgeConnect">—</span>
+      <div class="hd__right">
+        <span class="bdg" id="badgeConnect">—</span>
+        <span class="hd__ver" id="ver">v0.1.0 · warming up…</span>
+      </div>
     </header>
 
-    <section class="row">
-      <div class="card ccp">
-        <div class="card__head">
+    <!-- ====================  CAPTURED-FIELD SUMMARIES  ==================== -->
+    <section class="row card-row">
+      <!-- CCP (phone popup) capture card -->
+      <article class="card ccp" id="cardCcp">
+        <header class="card__hd">
           <span class="dot"></span>
-          <h2>CCP tab</h2>
-          <button class="btn btn-ghost" id="btnCcp" title="Re-scrape CCP tab now">Refresh</button>
-        </div>
+          <h2 class="card__tl">CCP · Phone Panel</h2>
+          <button
+            class="btn btn-ghost"
+            id="btnCcp"
+            type="button"
+            title="Re-scrape the CCP / embedded phone panel tab(s)"
+          >
+            Refresh
+          </button>
+        </header>
         <p class="card__meta" id="ccpMeta">Not captured yet.</p>
         <ul class="kv" id="ccpKv"></ul>
-      </div>
-      <div class="card sf">
-        <div class="card__head">
+      </article>
+
+      <!-- Salesforce capture card -->
+      <article class="card sf" id="cardSf">
+        <header class="card__hd">
           <span class="dot"></span>
-          <h2>Salesforce tab</h2>
-          <button class="btn btn-ghost" id="btnSf" title="Re-scrape Salesforce Case tab now">Refresh</button>
-        </div>
+          <h2 class="card__tl">Salesforce · Case</h2>
+          <button
+            class="btn btn-ghost"
+            id="btnSf"
+            type="button"
+            title="Re-scrape the current Salesforce Case tab(s)"
+          >
+            Refresh
+          </button>
+        </header>
         <p class="card__meta" id="sfMeta">Not captured yet.</p>
         <ul class="kv" id="sfKv"></ul>
-      </div>
+      </article>
     </section>
 
-    <section class="row">
-      <button class="btn btn-primary" id="btnScrapeAll">Re-scrape both tabs</button>
-      <button class="btn btn-accent" id="btnPush">Push to open Ticket Notes</button>
-    </section>
-
-    <section class="row">
-      <button class="btn" id="btnScanCurrent" style="flex:1 1 100%;">
-        🔦 Force-scan the tab I'm currently viewing (fallback)
+    <!-- ========================  PRIMARY ACTIONS  ========================= -->
+    <section class="row action-row">
+      <!--
+        Single unified SCAN button.
+        Tiered fallback pipeline baked into onClickScan:
+          Tier 1 → SW sendMessage POPUP_SCRAPE_ALL
+          Tier 2 → After 3.5 s: fall back to popup-side Self-Extract (bypasses
+                     the SW entirely — for zombied SW scenarios we used to
+                     need a separate Self-Extract button.)
+          Tier 3 → Popup then shows the active-tab specific fallback under
+                     the hood — onClickScanActive's previous self-extract
+                     path covers the "I'm looking at the tab right now" case.
+        Why ONE button: user explicitly asked to combine all scrape/SCAN
+        buttons so the popup UI has a single "Scan Salesforce + CCP" entry
+        with automatic (invisible to user) fallbacks.
+      -->
+      <button class="btn btn-primary" id="btnScan" type="button">
+        <span class="btn__icon">🔦</span>
+        Scan Salesforce &amp; CCP
+      </button>
+      <!--
+        Push fields to Ticket Notes app. Renamed from "Push to open Ticket
+        Notes". "Push info to Ticket Notes" clearly describes what happens.
+      -->
+      <button class="btn btn-accent" id="btnPush" type="button">
+        <span class="btn__icon">📤</span>
+        Push info to Ticket Notes
       </button>
     </section>
 
-    <section class="row">
-      <button class="btn btn-accent" id="btnSelfExtract" style="flex:1 1 100%;">
-        🧬 Self-extract right now (bypasses the service worker)
-      </button>
-    </section>
-
+    <!-- ==========================  DIAGNOSTIC  ============================ -->
     <section class="diag">
-      <div class="card diag__card">
-        <div class="card__head">
+      <details class="card diag__card">
+        <summary class="card__hd">
           <span class="dot"></span>
-          <h2>Diagnostic · why it's not scraping</h2>
-        </div>
+          <h2 class="card__tl">Diagnostic · why it's not scraping</h2>
+        </summary>
         <ul class="kv" id="diagBox"><li class="empty">Loading…</li></ul>
-      </div>
+      </details>
     </section>
 
+    <!-- ============================  SETTINGS  ============================ -->
     <section class="row row--settings">
-      <label class="toggle">
+      <label class="tg">
         <input type="checkbox" id="cbAuto" />
-        <span>Auto-push new scrapes to the Ticket Notes tab.</span>
+        <span>Auto-push new scrapes to Ticket Notes.</span>
       </label>
     </section>
 
-    <footer class="f">
-      <div>
+    <!-- ==============================  FOOTER  =========================== -->
+    <footer class="ft">
+      <div class="ft__left">
         Extension ID:
         <code id="extId" title="Click to copy">…</code>
       </div>
@@ -82,5 +130,5 @@
     <div class="toast" id="toast" aria-live="polite"></div>
     <script src="popup.js" type="module"></script>
     <!-- BUILD_STAMP>0.1.13@2026-09-03T16:38Z<END_BUILD_STAMP -->
-</body>
+  </body>
 </html>

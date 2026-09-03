@@ -140,11 +140,11 @@ async function main() {
   //         visibly to the reader, followed by the static sub-header text.
   //         No markers inside the sub-header — simpler and can't grow tags.
   let html = readFileSync(INSTALL, 'utf8');
-  html = replaceBetween(html, '<title>Ecovacs CCP Scraper — Install Guide</title><!-- VERSION', '<END_VERSION -->',
+  html = replaceBetween(html, '<title>Ecovacs Note Helper — Install Guide</title><!-- VERSION', '<END_VERSION -->',
     ` v${next} — ${stamp}`);
-  const subReplacement =
-    `<p class="sub"><strong>Extension build ${next}</strong> · ${stamp}. Reload extension on <code>chrome://extensions</code> / <code>edge://extensions</code> after updating. &nbsp;·&nbsp; Manifest V3 browser extension. Loaded as an unpacked extension in Chrome and Edge (one procedure, both browsers). <span class="badge ok">Tier-2 MV3</span></p>`;
-  html = html.replace(/<p class="sub">[\s\S]*?<\/p>/, subReplacement);
+  const subLine =
+    `<p class="sub"><strong>Extension build ${next}</strong> · ${stamp}. Reload extension on <code>chrome://extensions</code> / <code>edge://extensions</code> after updating. &nbsp;·&nbsp; Manifest V3 browser extension for Ecovacs NA agents: scrapes the Salesforce Case tab (and embedded phone panel) and pushes fields to Ticket Notes. <span class="badge ok">Tier-2 MV3</span></p>`;
+  html = html.replace(/<p class="sub">[\s\S]*?<\/p>/, subLine);
   writeFileSync(INSTALL, html, 'utf8');
 
   // 4. popup.html build stamp — same sentinel close tag.
