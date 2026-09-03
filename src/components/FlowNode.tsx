@@ -76,6 +76,33 @@ export interface TicketPanelsContextShape {
     tab?: any;
     error?: string | null;
   }>;
+
+  /** Extension-connection diagnostics. Rendered by OutputModal + gridbox
+   *  status bar so disconnected states now show:
+   *    - current app origin
+   *    - is the manifest content-script pattern covering it
+   *    - is externally_connectable covering it
+   *    - if NO: exact patterns user must paste into manifest + reload hint
+   *    - last handshake time / errors from sendMessage path */
+  extensionConnection?: {
+    connected: boolean;
+    /** Ask bridge.js for another handshake probe → connected should flip
+     *  true quickly if the content script is actually injected. */
+    requestConnection: () => void;
+    diagnostics: {
+      appOrigin: string;
+      appHref: string;
+      bridgeInjected: boolean;
+      manifestBridgePatterns: string[];
+      manifestExternalPatterns: string[];
+      originCoveredByBridge: boolean;
+      originCoveredByExternal: boolean;
+      suggestedPatternsToAdd: string[];
+      lastHandshakeAt: string | null;
+      handshakeRequested: boolean;
+      lastExternalError: string | null;
+    };
+  };
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';

@@ -31,7 +31,7 @@
  * pipeline (marked as source 'dom-ext').
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NODE_IDS } from '@/data/ticket';
 
 export type ExtensionFieldMap = Partial<Record<string, string>>;
@@ -114,6 +114,48 @@ export interface CcpExtensionBridge {
     tab?: unknown;
     error?: string | null;
   }>;
+
+  /** Runtime diagnostics explaining why connected might be false.
+   *  Exposed so the UI can show a specific "paste this pattern into your
+   *  manifest and reload the extension" banner + toast instead of the
+   *  previous generic greyed-out message. */
+  connectionDiagnostics: {
+    /** Current ticket app origin. */
+    appOrigin: string;
+    /** Full URL of the ticket app. */
+    appHref: string;
+    /** True when we have received at least one postMessage from bridge.js
+     *  (i.e. bridge.js content script *was* injected for this origin). */
+    bridgeInjected: boolean;
+    /** Match patterns from the manifest bridge content-script block. */
+    manifestBridgePatterns: string[];
+    /** Match patterns from the manifest externally_connectable block. */
+    manifestExternalPatterns: string[];
+    /** True if the app origin is covered by manifestBridgePatterns. */
+    originCoveredByBridge: boolean;
+    /** True if the app origin is covered by manifestExternalPatterns. */
+    originCoveredByExternal: boolean;
+    /** If origin is NOT covered: a concrete pattern you should add to the
+     *  manifest (both content_scripts > bridge matches AND externally
+     *  connectable matches) to make this deployment work. */
+    suggestedPatternsToAdd: string[];
+    /** ISO timestamp of last handshake:ready or :diagnostics we received. */
+    lastHandshakeAt: string | null;
+    /** True when we've already issued `handshake_request` to probe for a
+     *  bridge that might have injected before we attached the listener. */
+    handshakeRequested: boolean;
+    /** If the externally_connectable path ever threw (e.g. unknown
+     *  extension id, or message blocked) we store the error string here
+     *  so the UI can surface "reload extension / confirm manifest
+     *  patterns". */
+    lastExternalError: string | null;
+  };
+
+  /** Probe the bridge right now. Useful when the UI shows "disconnected"
+   *  and the user just clicked "Reload extension" — triggers a new
+   *  handshake_request so the connected flag flips true immediately
+   *  instead of waiting for the next 10s heartbeat. */
+  requestConnection: () => void;
 }
 
 /** Map the flat field shape produced by the background's
@@ -189,6 +231,129 @@ export function useCcpExtensionBridge({
    *  or call side-effects inside a state updater (StrictMode double-invoke). */
   const pendingPushRef = useRef<PendingExtensionPush | null>(null);
 
+  // --- Diagnostics state (explains why `connected` might be false) -------
+  const appOrigin = typeof window !== 'undefined' ? (window.location?.origin ?? '') : '';
+  const appHref = typeof window !== 'undefined' ? (window.location?.href ?? '') : '';
+  const [bridgeInjected, setBridgeInjected] = useState(false);
+  const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([
+    '*://localhost:*/*',
+    '*://127.0.0.1:*/*',
+    'https://*.vercel.app/*',
+    'https://note-master.vercel.app/*',
+  ]);
+  const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([
+    'http://localhost:*/*',
+    'https://localhost:*/*',
+    'http://127.0.0.1:*/*',
+    'https://127.0.0.1:*/*',
+    'https://*.vercel.app/*',
+    'https://note-master.vercel.app/*',
+  ]);
+  const [lastHandshakeAt, setLastHandshakeAt] = useState<string | null>(null);
+  const [handshakeRequested, setHandshakeRequested] = useState(false);
+  const [lastExternalError, setLastExternalError] = useState<string | null>(null);
+
+  /** Chrome/Chromium match-pattern matcher (simplified, covers the patterns
+   *  we actually emit: * (any path), <scheme>://<host with wildcards>:<port>/*.
+   *  Good enough to answer "is my current origin covered by manifest?". */
+  const matchPattern = useCallback((url: string, pattern: string): boolean => {
+    try {
+      // Scheme: <scheme> | *
+      // Host: *.foo.com | foo.bar.com | *
+      // Port: * | number
+      // Path: /* | /anything/with*wildcards
+      const p = pattern.trim();
+      const schemeMatch = p.match(/^(\*|https?|file|http|ftp):\/\//i);
+      if (!schemeMatch) return false;
+      const scheme = schemeMatch[1].toLowerCase();
+      const rest = p.slice(schemeMatch[0].length); // host[:port]/path
+      const slashIdx = rest.indexOf('/');
+      const hostPort = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+      const pathPattern = slashIdx === -1 ? '/*' : rest.slice(slashIdx);
+      const hostPattern = (() => {
+        const colonIdx = hostPort.lastIndexOf(':');
+        return colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx);
+      })();
+      const portPattern = (() => {
+        const colonIdx = hostPort.lastIndexOf(':');
+        if (colonIdx === -1) return '*';
+        return hostPort.slice(colonIdx + 1);
+      })();
+      // Glob match using a tiny glob → regex helper.
+      const globToRegex = (g: string): RegExp => {
+        let out = '^';
+        for (let i = 0; i < g.length; i += 1) {
+          const c = g[i];
+          if (c === '*') out += '.*';
+          else if (/[.+?^${}()|[\]\\]/.test(c)) out += '\\' + c;
+          else out += c;
+        }
+        out += '$';
+        return new RegExp(out, 'i');
+      };
+      const u = new URL(url);
+      // 1) scheme
+      if (scheme !== '*' && u.protocol.slice(0, -1).toLowerCase() !== scheme) return false;
+      // 2) host
+      if (hostPattern && hostPattern !== '*') {
+        if (!globToRegex(hostPattern).test(u.hostname)) return false;
+      }
+      // 3) port
+      if (portPattern !== '*' && portPattern !== '') {
+        const uPort = u.port || (u.protocol === 'https:' ? '443' : '80');
+        if (String(portPattern) !== String(uPort)) return false;
+      }
+      // 4) path
+      if (!globToRegex(pathPattern).test(u.pathname + (u.search || ''))) return false;
+      return true;
+    } catch { return false; }
+  }, []);
+
+  const originCoveredByBridge = manifestBridgePatterns.length > 0 && manifestBridgePatterns.some((p) => matchPattern(appHref || appOrigin + '/', p));
+  const originCoveredByExternal = manifestExternalPatterns.length > 0 && manifestExternalPatterns.some((p) => matchPattern(appHref || appOrigin + '/', p));
+
+  /** When origin is NOT covered, build the TWO exact patterns the user
+   *  should paste into manifest.json: (1) content_scripts bridge match →
+   *  uses scheme wildcard + port wildcard, path wildcard; (2) externally
+   *  connectable → MV3 doesn't allow scheme:* so we emit one match per
+   *  scheme (http + https) with port wildcard. */
+  const suggestedPatternsToAdd = useMemo((): string[] => {
+    if (originCoveredByBridge && originCoveredByExternal) return [];
+    try {
+      const u = new URL(appHref || appOrigin + '/');
+      const host = u.hostname;
+      const hostIsLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(host);
+      if (hostIsLocal) {
+        const add: string[] = [];
+        if (!originCoveredByBridge) add.push(`*://${host}:*/*`);
+        if (!originCoveredByExternal) {
+          add.push(`${u.protocol}//${host}:*/*`);
+          // If protocol is http → also add https just in case agent uses https
+          add.push(`${u.protocol === 'http:' ? 'https:' : 'http:'}//${host}:*/*`);
+        }
+        return Array.from(new Set(add));
+      }
+      // Non-local host (vercel.app, custom domain, etc.).  Emit one
+      // `<scheme>://*.${domain}/*` pattern so subdomains are covered.
+      const parts = host.split('.').filter(Boolean);
+      const apex = parts.length >= 2 ? parts.slice(-2).join('.') : host;
+      const add: string[] = [];
+      if (!originCoveredByBridge) add.push(`https://*.${apex}/*`);
+      if (!originCoveredByExternal) add.push(`https://*.${apex}/*`);
+      // Also an exact-host pattern as fallback (in case apex match seems too broad).
+      if (!originCoveredByBridge) add.push(`*://${host}:*/*`);
+      if (!originCoveredByExternal) add.push(`${u.protocol}//${host}:*/*`);
+      return Array.from(new Set(add));
+    } catch { return []; }
+  }, [appHref, appOrigin, originCoveredByBridge, originCoveredByExternal]);
+
+  const requestConnection = useCallback(() => {
+    setHandshakeRequested(true);
+    try {
+      window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
+    } catch { /* ignore */ }
+  }, []);
+
   // Stable transport state across renders.
   const bridgeReadyRef = useRef(false);
   const extIdRef = useRef<string>('');
@@ -218,29 +383,50 @@ export function useCcpExtensionBridge({
       const data = ev.data;
       if (!data || typeof data !== 'object') return;
       const src = data.source;
-      if (src === 'ecovacs-ccp-extension:ready') {
-        // bridge.js pings at least once on load.
+      if (src === 'ecovacs-ccp-extension:ready' || src === 'ecovacs-ccp-extension:handshake_reply') {
+        // bridge.js pings at least once on load OR replies to our
+        // proactive handshake_request.
         bridgeReadyRef.current = true;
+        setBridgeInjected(true);
+        setLastHandshakeAt(new Date().toISOString());
         const id: string | undefined = data.extensionId;
         if (id) {
           extIdRef.current = id;
           setExtensionId(id);
           try { localStorage.setItem(EXT_ID_LS_KEY, id); } catch { /* ignore */ }
         }
-        setConnected(true);
-        // Ask background for a hello snapshot so the page picks up any
-        // already-scraped CCP/SF data immediately on navigation.
-        void sendRequest({ type: 'EXT_HELLO' }).then((r) => {
-          if (r?.ok) {
-            setVersion(r.version ?? null);
-            if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
-              // Hello = already-scraped snapshot on nav; shows the confirm
-              // popup with only the 4 identity fields, consistent with the
-              // "user must confirm auto-fill" requirement.
-              queuePendingPush(r.merged, r.state ?? null);
+        if (!connected) {
+          setConnected(true);
+          // Ask background for a hello snapshot so the page picks up any
+          // already-scraped CCP/SF data immediately on navigation.
+          void sendRequest({ type: 'EXT_HELLO' }).then((r) => {
+            if (r?.ok) {
+              setVersion(r.version ?? null);
+              if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
+                queuePendingPush(r.merged, r.state ?? null);
+              }
             }
-          }
-        });
+          });
+        }
+        return;
+      }
+      if (src === 'ecovacs-ccp-extension:diagnostics') {
+        // Broadcast from bridge.js — carries the "true" manifest pattern
+        // lists that are baked into the installed extension, so our
+        // UI-side "default pattern" assumptions don't drift when the user
+        // upgrades without also upgrading the ticket app source.
+        setBridgeInjected(true);
+        setLastHandshakeAt(new Date().toISOString());
+        if (Array.isArray(data.ticketAppPatterns) && data.ticketAppPatterns.length > 0) {
+          setManifestBridgePatterns(data.ticketAppPatterns);
+        }
+        if (Array.isArray(data.externalConnectablePatterns) && data.externalConnectablePatterns.length > 0) {
+          setManifestExternalPatterns(data.externalConnectablePatterns);
+        }
+        if (typeof data.extensionId === 'string' && data.extensionId) {
+          extIdRef.current = data.extensionId;
+          setExtensionId(data.extensionId);
+        }
         return;
       }
       if (src === 'ecovacs-ccp-extension:push') {
@@ -276,8 +462,20 @@ export function useCcpExtensionBridge({
     };
 
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
+    // Probe for bridge right after mounting. This resolves the
+    // classic "bridge broadcast happened BEFORE React attached the
+    // listener" race: requestConnection → bridge.js echoes back :ready
+    // + :diagnostics synchronously → connected flips true.
+    const t1 = window.setTimeout(requestConnection, 30);
+    const t2 = window.setTimeout(requestConnection, 400);
+    const t3 = window.setTimeout(requestConnection, 1800);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [requestConnection, connected]);
 
   /** Build the EXT_TO_NODE_ID-mapped nodeId → string dict that the form
    *  handler understands. Anything unmapped spills into ADDITIONAL_NOTES.
@@ -442,7 +640,11 @@ export function useCcpExtensionBridge({
             else resolve(reply);
           });
         });
-      } catch {
+      } catch (e: any) {
+        // Remember the external-path error for diagnostics. It usually
+        // means either the extension id guessed is wrong, or the app
+        // origin isn't listed in manifest.externally_connectable.
+        setLastExternalError(String(e?.message || e));
         // Fall through to the bridge path.
       }
     }
@@ -465,6 +667,7 @@ export function useCcpExtensionBridge({
         }, '*');
       });
     }
+    setLastExternalError('No bridge channel available.');
     return { ok: false, error: 'Extension bridge unavailable.' };
   }, []);
 
@@ -561,6 +764,20 @@ export function useCcpExtensionBridge({
     getSnapshot,
     openCase,
     applyCaseFields,
+    connectionDiagnostics: {
+      appOrigin,
+      appHref,
+      bridgeInjected,
+      manifestBridgePatterns,
+      manifestExternalPatterns,
+      originCoveredByBridge,
+      originCoveredByExternal,
+      suggestedPatternsToAdd,
+      lastHandshakeAt,
+      handshakeRequested,
+      lastExternalError,
+    },
+    requestConnection,
   };
 }
 

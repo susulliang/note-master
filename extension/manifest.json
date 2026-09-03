@@ -47,7 +47,9 @@
     "ids": [],
     "matches": [
       "http://localhost:*/*",
+      "https://localhost:*/*",
       "http://127.0.0.1:*/*",
+      "https://127.0.0.1:*/*",
       "https://*.vercel.app/*",
       "https://note-master.vercel.app/*"
     ],
@@ -93,8 +95,8 @@
     },
     {
       "matches": [
-        "http://localhost/*",
-        "http://127.0.0.1/*",
+        "*://localhost:*/*",
+        "*://127.0.0.1:*/*",
         "https://*.vercel.app/*",
         "https://note-master.vercel.app/*"
       ],

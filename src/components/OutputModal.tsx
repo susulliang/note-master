@@ -73,6 +73,7 @@ export default function OutputModal({
   const [pushing, setPushing] = useState(false);
   const panelsCtx = useContext(TicketPanelsContext);
   const applyCaseFields = panelsCtx?.applyCaseFields;
+  const extConn = panelsCtx?.extensionConnection;
 
   // Parse extra fields for "Push to Salesforce Case" (beyond the 3 chip ones)
   //   - Deebot Model / Serial / SKU / Email / Shipping Address / Phone → for
@@ -93,7 +94,6 @@ export default function OutputModal({
       return stripMarkdownBold(m?.[1] ?? '').trim() || undefined;
     };
     const phone = oneLine('Contact number') || oneLine('Contact Number') || oneLine('Phone');
-    const email = oneLine('Email address') || oneLine('Email Address');
     const name = oneLine('Customer Name');
     const model = oneLine('Deebot Model') || oneLine('Robot Model') || oneLine('Model') || oneLine('Product Model') || oneLine('AMR Model No.');
     const accountName = oneLine('Account Name') || name;
@@ -103,15 +103,97 @@ export default function OutputModal({
       customerName: name,
       accountName,
       contactPhone: phone,
-      // eslint-disable-next-line no-console
-      ...(email ? {} : {}),
     };
   }, [editableText]);
+
+  /** Build a multi-line diagnostics toast message describing *why* the
+   *  bridge isn't connected, and what the agent should do next.
+   *  Returns a shape we can format into a custom sonner toast renderer. */
+  const diagnoseText = useCallback((): string[] => {
+    const lines: string[] = [];
+    const d = extConn?.diagnostics;
+    if (!d) return lines;
+    lines.push(`App origin: ${d.appOrigin || '(unknown)'}`);
+    lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'} (listening for bridge.js handshake posts)`);
+    if (d.bridgeInjected) {
+      lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
+    } else {
+      lines.push(
+        d.originCoveredByBridge
+          ? 'Manifest patterns SHOULD match this origin — click "Try again" below to send a new handshake probe, or go to chrome://extensions and click the 🔄 Reload button on Ecovacs Note Helper.'
+          : `Your current URL is NOT matched by the ticket-app content-script pattern list.`
+      );
+    }
+    if (d.suggestedPatternsToAdd.length > 0) {
+      lines.push('To make this deployment work, paste these lines into Ecovacs Note Helper/manifest.json:');
+      lines.push('  content_scripts [bridge.js] matches:');
+      d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
+    }
+    if (d.lastExternalError) lines.push(`Chrome.runtime.sendMessage error: "${d.lastExternalError.slice(0, 180)}"`);
+    return lines;
+  }, [extConn]);
+
+  const showDiagnosticsToast = useCallback((): void => {
+    const d = extConn?.diagnostics;
+    const probe = extConn?.requestConnection;
+    if (!d) return;
+    const lines = diagnoseText();
+    // Try to copy suggested patterns as a side-effect so the agent can paste
+    // them into manifest quickly.
+    const copyableSnippet = d.suggestedPatternsToAdd.length > 0
+      ? `// manifest.json content_scripts bridge + externally_connectable:\n"matches": [\n${d.suggestedPatternsToAdd.map((p) => `  "${p}"`).join(',\n')}\n]`
+      : '';
+    if (copyableSnippet) {
+      try { void navigator.clipboard?.writeText(copyableSnippet).catch(() => { /* ignore */ }); }
+      catch { /* ignore */ }
+    }
+    const infoMode = lines.includes('Content-script bridge injected: YES');
+    const render = (
+      <div className="flex flex-col gap-2 max-w-xl text-xs">
+        <div className="text-sm font-semibold text-foreground">Extension bridge diagnostics</div>
+        <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+          {lines.map((l, i) => <li key={i} className="leading-relaxed break-all">{l}</li>)}
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {probe && (
+            <Button size="sm" variant="secondary" onClick={() => { probe(); toast.success('Sent handshake probe. Wait 1-2 s; if Push-to-SF button un-grays, bridge is now up.'); }}>
+              🔁 Try probing bridge again
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              toast.message('How to reload Ecovacs Note Helper:', {
+                description: 'Open chrome://extensions → find Ecovacs Note Helper → click 🔄 Reload. Then refresh THIS tab (the agent ticket notes page).',
+              });
+            }}
+          >
+            ℹ️ How to reload the extension
+          </Button>
+          {copyableSnippet && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => void (async () => { try { await navigator.clipboard.writeText(copyableSnippet); toast.success('Manifest pattern snippet copied to clipboard.'); } catch { toast.error('Clipboard unavailable.'); } })()}
+            >
+              📋 Copy manifest pattern snippet
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+    if (infoMode) toast(() => render, { duration: 18_000, className: 'bg-background/95 border-border backdrop-blur-md' });
+    else toast.custom(() => render, { duration: 18_000 });
+  }, [diagnoseText, extConn]);
 
   /** Run through the extension → SF Case tab. Each success/failure → toast. */
   const handlePushToSalesforce = useCallback(async () => {
     if (!applyCaseFields) {
-      toast.error("Extension bridge isn't connected. Reload the Ecovacs Note Helper extension, or make sure the app is running on an allowed host (localhost/Vercel).");
+      // The user sees a disabled push button; if they somehow trigger this
+      // function anyway, show the detailed diagnostics instead of the old
+      // "bridge not connected" one-liner.
+      showDiagnosticsToast();
       return;
     }
     setPushing(true);
@@ -394,19 +476,43 @@ export default function OutputModal({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
             <Button
               variant="outline"
               size="sm"
               onClick={() => void handlePushToSalesforce()}
               disabled={pushing}
-              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'opacity-70')}
-              title={applyCaseFields ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit." : 'Extension bridge must be connected first (Ecovacs Note Helper extension + allowed origin).'}
+              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'opacity-80')}
+              title={
+                applyCaseFields
+                  ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit."
+                  : extConn?.diagnostics
+                    ? [
+                        'Extension bridge not connected yet.',
+                        extConn.diagnostics.bridgeInjected
+                          ? 'Handshake received but waiting for external path.'
+                          : extConn.diagnostics.originCoveredByBridge
+                            ? 'Origin should match → try probing first.'
+                            : `Origin ${extConn.diagnostics.appOrigin} is not matched by the extension manifest — click 🔎 Diagnostics for patterns to add.`,
+                      ].join(' ')
+                    : 'Extension bridge must be connected first (Ecovacs Note Helper extension + allowed origin).'
+              }
             >
               {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
               {pushing ? 'Pushing to Salesforce…' : '📤 Push to Salesforce Case'}
             </Button>
+            {!applyCaseFields && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={showDiagnosticsToast}
+                className="gap-1.5"
+                title="Open a diagnostics toast that shows the ticket app origin, manifest coverage, suggested patterns to add, reload instructions, and a one-click probe."
+              >
+                🔎 Diagnostics
+              </Button>
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => handleOpenChange(false)} className="gap-1.5">

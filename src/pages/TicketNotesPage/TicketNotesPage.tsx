@@ -1493,6 +1493,11 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               applyCaseFields: extensionBridge.connected
                 ? extensionBridge.applyCaseFields.bind(extensionBridge)
                 : undefined,
+              extensionConnection: {
+                connected: extensionBridge.connected,
+                requestConnection: extensionBridge.requestConnection.bind(extensionBridge),
+                diagnostics: extensionBridge.connectionDiagnostics,
+              },
               transcriptContent: (
                 <VoiceCaptionPanel
                   mic={{
