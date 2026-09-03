@@ -329,8 +329,49 @@ const INLINE_SF_EXTRACT = function () {
   const ai = text.match(/AI\s*Agent\s*\n([\s\S]*?)(?:\n\s*Summary\b|\n\s*Related\s*Files\b|$)/i);
   if (ai && clean(ai[1])) assignOnce(acc, 'aiAgentNote', clean(ai[1]));
 
-  // (2) Stacked-label cell sweep across visible grid cells
+  // (2) SPECIFIC: classic Salesforce `slds-form-element` rows — both the
+  // horizontal label / value pair layout (slds-form-element) and the
+  // stacked 2-line variant (slds-form-element__label on top, __static
+  // / control / value on the bottom / right).  The Ecovacs Case Console
+  // detail sidebar uses exactly this structure for Account Name,
+  // Contact Name, Phone, Email, Case Number, Case Origin, etc. so if we
+  // miss this tier we get 0 fields even on a perfectly normal Case page.
   if (typeof document !== 'undefined' && document.querySelectorAll) {
+    // 2A: slds-form-element (label + control horizontal row pairs)
+    const rows = document.querySelectorAll('.slds-form-element, .slds-form-element__row, [data-target-selection-name], lightning-output-field, [class*="form-element"], [class*="form-row"]');
+    for (const row of rows) {
+      const labels = row.querySelectorAll('.slds-form-element__label, label, [class*="-label"], th, [class*="Label"]');
+      let labelText = '';
+      for (const lab of labels) {
+        const t = clean((lab.textContent || lab.innerText || '').replace(/[:*]+$/, ''));
+        if (t && t.length < 60) { labelText = t; break; }
+      }
+      if (!labelText) continue;
+      const key = matchAlias(labelText);
+      if (!key) continue;
+      const valueCandidates = row.querySelectorAll(
+        '.slds-form-element__static, .slds-form-element__control, .slds-form-element__control input, .slds-form-element__control textarea, [class*="-value"], [class*="-static"], [class*="-output"], lightning-formatted-text, lightning-formatted-email, lightning-formatted-phone, lightning-formatted-url, a, span:not(.slds-form-element__label):not([class*="label"]), td, div'
+      );
+      let valueText = '';
+      for (const cand of valueCandidates) {
+        // don't re-use the label we already picked
+        let foundLabel = false;
+        for (const lab of labels) { if (cand === lab || cand.contains(lab)) { foundLabel = true; break; } }
+        if (foundLabel) continue;
+        const t = clean(cand.textContent || cand.innerText || cand.value || '');
+        if (!t) continue;
+        if (t === labelText) continue;
+        if (t.length > 500) continue;
+        // Prefer the first non-empty non-label candidate in DOM order;
+        // that's Salesforce's convention within a single form element.
+        valueText = t;
+        break;
+      }
+      if (valueText && !isLabelLine(valueText)) assignOnce(acc, key, valueText);
+    }
+
+    // 2B: Stacked-label cell sweep across visible grid cells (kept as
+    // fallback for custom blocks the slds-form-element tier missed)
     const cells = document.querySelectorAll('div[class*="slds"], div[class*="cell"], li[class*="slds"], section, article');
     for (const cell of cells) {
       const lines = splitLines(cell.innerText || cell.textContent || '');
@@ -371,6 +412,14 @@ const INLINE_SF_EXTRACT = function () {
           }
         }
       }
+    }
+    // (4) Breadcrumb / Page header / Title fallback: `<title>` or the
+    // browser tab title already has "04032251 | Case | Salesforce" so
+    // pull caseNumber from it in case the body regex sweep failed to.
+    if (!acc.caseNumber) {
+      const docTitle = (typeof document !== 'undefined' && document.title) || '';
+      const m = docTitle.match(/(?:^|\s|\/|\|)\s*(\d{7,8})\s*(\||\s|\/)/);
+      if (m) assignOnce(acc, 'caseNumber', m[1]);
     }
   }
 
@@ -443,18 +492,37 @@ const INLINE_EXTRACT_MAP = {
 };
 
 async function sendToTab(tabId, payload) {
-  // Tier 1: manifest content script listener
+  // Field-count helper used for two "should we actually fall through?" checks:
+  // a result with 0 non-empty fields is functionally "nothing found",
+  // even when `r.ok === true`.  This is what was causing the current Case
+  // tab to show "Not captured yet": the manifest SF content script replied
+  // { ok:true, data:{} } so the Tier3 chrome.scripting inline-executeScript
+  // (which usually salvages the parse) never ran — 0 fields → false success.
+  function fieldCount(data) {
+    const d = (data && typeof data === 'object') ? data : {};
+    return Object.keys(d).filter((k) => d[k] !== '' && d[k] != null && !Array.isArray(d[k]) ? String(d[k]).trim() !== '' : (Array.isArray(d[k]) ? d[k].length > 0 : false)).length;
+  }
+  const files = INJECT_MAP[payload.type];
+  const inlineFunc = INLINE_EXTRACT_MAP[payload.type];
+  let bestSoFar = null;
+
+  // Tier 1: manifest content script listener.  Keep going to Tier 3 if we
+  // get a 0-field "success" back, because the inline-executeScript fallback
+  // typically extracts more fields on real Salesforce pages.
   let firstError = null;
   try {
     const r = await chrome.tabs.sendMessage(tabId, payload);
-    if (r && (r.ok || r.scraped || r.diagnostic !== undefined)) return r;
-    firstError = r?.error || 'Content script replied without OK.';
+    if (r && (r.ok || r.scraped || r.diagnostic !== undefined)) {
+      if (fieldCount(r.data) > 0) return r;
+      // 0 fields → remember as best (might have diagnostic), fall through.
+      bestSoFar = r;
+      firstError = firstError || `Content script matched 0 fields.`;
+    } else {
+      firstError = r?.error || 'Content script replied without OK.';
+    }
   } catch (err) {
     firstError = String(err?.message || err);
   }
-
-  const files = INJECT_MAP[payload.type];
-  const inlineFunc = INLINE_EXTRACT_MAP[payload.type];
 
   // Tier 2: chrome.scripting.executeScript {files} — drop the content script
   // into every frame, then retry the message once.
@@ -483,7 +551,9 @@ async function sendToTab(tabId, payload) {
             firstError,
           };
         }
-        return retry;
+        if (fieldCount(retry.data) > 0) return retry;
+        // 0 fields → again keep going; Tier 3 inline is the real workhorse.
+        if (!bestSoFar || fieldCount(bestSoFar.data) < fieldCount(retry.data)) bestSoFar = retry;
       }
     } catch (err2) {
       // Fall through to tier 3 instead of aborting here.
@@ -535,6 +605,11 @@ async function sendToTab(tabId, payload) {
       inlineDiag.bestFrameFieldCount = n;
       if (Object.keys(merged).length > 0) {
         return { ok: true, data: merged, diagnostic: inlineDiag, scraped: true };
+      }
+      // Tier3 also produced 0 fields — return the BEST of bestSoFar (from a
+      // listener reply that had diagnostic info) plus what Tier 3 found.
+      if (bestSoFar) {
+        return bestSoFar;
       }
       return {
         ok: false,
