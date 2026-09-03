@@ -150,32 +150,57 @@ export default function OutputModal({
     if (typeof location !== 'undefined') lines.push(`Full URL: ${location.href}`);
     if (!d) {
       lines.push('No diagnostics available — TicketPanelsContext.extensionConnection is missing from the page tree (OutputModal rendered outside the provider).');
+      lines.push('Workaround: OutputModal always falls back to a local bridge hook. If you still see this message, the hook mount itself crashed — copy window.__debug to clipboard and send to devs.');
       return lines;
     }
-    lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'} (listening for bridge.js handshake posts)`);
-    lines.push(`Manifest bridge patterns: ${(d.manifestBridgePatterns || []).length === 0 ? '(unknown)' : d.manifestBridgePatterns.join(',  ')}`);
-    lines.push(`Manifest external patterns: ${(d.manifestExternalPatterns || []).length === 0 ? '(unknown)' : d.manifestExternalPatterns.join(',  ')}`);
-    lines.push(`Origin matched by bridge: ${d.originCoveredByBridge ? 'YES' : 'NO'}`);
-    lines.push(`Origin matched by externally_connectable: ${d.originCoveredByExternal ? 'YES' : 'NO'}`);
-    if (d.bridgeInjected) {
-      lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
-    } else if (d.originCoveredByBridge) {
-      lines.push('Patterns SHOULD match this origin — click "Try probing bridge again" below, or open chrome://extensions and click 🔄 Reload on Ecovacs Note Helper, then refresh THIS ticket notes tab.');
-    } else {
-      lines.push('Current URL is NOT covered by the extension manifest content-script list.');
+    // Version block (NEW): tells the user "this is what bridge.js claimed"
+    // and lets us distinguish "patterns are covered but bridge.js never
+    // loaded" from "patterns covered and bridge loaded BUT it's an old
+    // cached version → reload extension".
+    lines.push(`Expected extension manifest version: ${d.expectedManifestVersion}  (ticket app was built against this version)`);
+    lines.push(`Injected bridge manifest version: ${d.injectedManifestVersion ?? 'not received yet (bridge handshake never seen — content script not loaded)'}  ${d.patternsReceivedFromBridge ? '✅ source-of-truth received' : '⚠️ defaults shown; no runtime :diagnostics received yet — either bridge not injected, or Chrome cached an older build without this broadcast field'}`);
+    lines.push(`Pattern fingerprint: ${d.injectedFingerprint ?? '(none)'}`);
+    if (d.injectedVersionStale) {
+      lines.push('');
+      lines.push('🚨 STALE CACHE DETECTED: the copy of bridge.js Chrome injected into this page is OLDER than expected. That 100% means the extension was NOT reloaded at chrome://extensions after the last manifest update. Fix: open chrome://extensions → click 🔄 Reload on Ecovacs Note Helper, THEN refresh THIS ticket notes tab.');
+      lines.push('');
+    } else if (d.injectedVersionMatchesExpected === false) {
+      lines.push('⚠️ Version mismatch: injected manifest version ≠ expected. Usually means the ticket app shipped a newer expected constant than the extension you loaded. Reload extension + compare installed manifest version to popup.');
+    }
+    lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'}  (${d.patternsReceivedFromBridge ? 'based on actual runtime handshake' : 'based on no handshake yet; guess from defaults'})`);
+    lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
+    if (d.patternsReceivedAt) lines.push(`Runtime-extracted patterns received at: ${new Date(d.patternsReceivedAt).toLocaleString()}`);
+    lines.push(`Manifest bridge patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️'}): ${(d.manifestBridgePatterns || []).length === 0 ? '(EMPTY — bridge loaded but no patterns match any ticket-app origin — this is why injection failed)' : d.manifestBridgePatterns.join(',  ')}`);
+    lines.push(`Manifest external patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️'}): ${(d.manifestExternalPatterns || []).length === 0 ? '(EMPTY)' : d.manifestExternalPatterns.join(',  ')}`);
+    lines.push(`Origin matched by bridge (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable'}): ${d.originCoveredByBridge ? 'YES' : 'NO'}`);
+    lines.push(`Origin matched by externally_connectable (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable'}): ${d.originCoveredByExternal ? 'YES' : 'NO'}`);
+    if (!d.bridgeInjected && d.originCoveredByBridge) {
+      lines.push('');
+      if (d.patternsReceivedFromBridge) {
+        lines.push('Patterns ARE loaded and match this origin → bridge SHOULD have injected. Next action:');
+        lines.push('  (a) Chrome > ⋮ > More tools > Extensions, find Ecovacs Note Helper, click 🔄 RELOAD. Then refresh THIS tab.');
+        lines.push('  (b) If after reload still NO handshake: the unpacked extension folder you loaded is NOT the repo one. Copy the repo extension/ folder to that location and reload.');
+      } else {
+        lines.push('Defaults GUESS that patterns SHOULD match this origin, but we never saw a bridge handshake or diagnostics broadcast. Two possible causes:');
+        lines.push('  (1) Chrome cached a STALE bridge content-script registration from before the most recent manifest edit → reload extension at chrome://extensions, refresh page.');
+        lines.push('  (2) The loaded extension manifest does NOT actually include this origin → the guess is wrong. Reload extension + run Diagnostics again — patternsReceivedFromBridge will flip true and reveal the real lists.');
+      }
+    }
+    if (!d.bridgeInjected && !d.originCoveredByBridge) {
+      lines.push('Current URL is NOT covered by the manifest content-script patterns (or defaults guess it is not).');
     }
     if (d.suggestedPatternsToAdd.length > 0) {
       lines.push('');
-      lines.push('▸ Paste these patterns into Ecovacs Note Helper/manifest.json then 🔄 reload the extension:');
+      lines.push('▸ To make this deployment work paste these into Ecovacs Note Helper/manifest.json then 🔄 reload extension + refresh page:');
       lines.push('  content_scripts → bridge.js → matches:');
       d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
       lines.push('');
       lines.push('  externally_connectable → matches:');
       d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
     }
-    if (d.lastExternalError) lines.push(`\nChrome.runtime error: "${d.lastExternalError.slice(0, 220)}"`);
+    if (d.lastExternalError) lines.push(`\nChrome.runtime sendMessage error: "${d.lastExternalError.slice(0, 220)}"`);
     lines.push('');
-    lines.push('Checklist: (1) extension loaded & enabled  (2) origin matches manifest  (3) reloaded the extension  (4) refresh this tab.');
+    lines.push('Checklist: (1) Extension loaded & enabled → popup shows v0.1.24 or newer. (2) Origin matches manifest → Diagnostics says RECEIVED + covered YES for both. (3) Reload extension. (4) Refresh THIS tab.');
     return lines;
   }, [extConn]);
 
@@ -312,10 +337,18 @@ export default function OutputModal({
       }
       // (1) Post body toast
       const pb = r.postBody as any;
+      const postSummary: string[] = [];
       if (pb) {
-        if (pb.ok) toast.success(`Post tab opened${pb.editorFound ? `, note body written (${pb.length ?? 0} chars)` : ''}${pb.publishClicked ? ' — auto-published.' : '.'}${!pb.publishClicked ? ' Review & click Publish in SF when ready.' : ''}`);
-        else if (pb.tabFound === false) toast.warning('Post tab: not found on this Case layout.');
-        else toast.warning(`Post tab: ${pb.error || 'editor not available'}. Paste manually from clipboard if needed.`);
+        if (pb.ok) {
+          postSummary.push(`Post tab: opened${pb.editorFound ? `, editor found; wrote ${pb.length ?? 0} chars to body` : ''}${pb.publishClicked ? '; auto-published' : '; NOT auto-published yet — click Publish in SF after proofreading'}.`);
+          toast.success(`Post tab opened${pb.editorFound ? `, note body written (${pb.length ?? 0} chars)` : ''}${pb.publishClicked ? ' — auto-published.' : '.'}${!pb.publishClicked ? ' Review & click Publish in SF when ready.' : ''}`);
+        } else if (pb.tabFound === false) {
+          postSummary.push('Post tab: layout has no Post tab / not reachable via current tabs.');
+          toast.warning('Post tab: not found on this Case layout.');
+        } else {
+          postSummary.push(`Post tab: error — ${pb.error || 'editor not available'}. Paste manually from clipboard if needed.`);
+          toast.warning(`Post tab: ${pb.error || 'editor not available'}. Paste manually from clipboard if needed.`);
+        }
       }
       // (2) Editable SF fields
       const labels: Record<string, string> = {
@@ -327,15 +360,21 @@ export default function OutputModal({
       const fields = (r.fields ?? {}) as Record<string, any>;
       const ks = Object.keys(labels) as (keyof typeof labels)[];
       let good = 0; let skipped = 0; let failed = 0;
+      const perFieldReport: string[] = [];
       for (const k of ks) {
+        const label = labels[k];
         const s = fields[k];
-        if (!s) continue;
-        if (s.skipped) { skipped += 1; continue; }
-        if (s.ok) good += 1;
-        else {
+        if (!s) { perFieldReport.push(`${label}: (no layout section found)`); continue; }
+        if (s.skipped) { skipped += 1; perFieldReport.push(`${label}: skipped (empty or new value = current value)`); continue; }
+        if (s.ok) {
+          good += 1;
+          perFieldReport.push(`${label}: ✅ wrote "${String(s.value ?? '').slice(0, 40) || '(empty)'}"${s.previousValue ? ` (was: "${String(s.previousValue).slice(0, 40)}")` : ''}`);
+        } else {
           failed += 1;
-          toast.warning(`${labels[k]}: ${s.error || 'could not be written.'}`, {
-            description: 'Field may be read-only, not on this layout, or the inline-edit button was not found.',
+          const reason = s.error || 'could not be written (field read-only, inline-edit not found, missing on layout, or Lacking FLS/permission)';
+          perFieldReport.push(`${label}: ❌ ${reason}`);
+          toast.warning(`${label}: ${reason}`, {
+            description: 'Field may be read-only, absent from this page layout, inline-edit pencil icon missing, or the agent lacks Edit on Field / Case-level permissions.',
           });
         }
       }
@@ -345,7 +384,33 @@ export default function OutputModal({
         toast.info('All editable layout fields were empty; note body was pushed to Post tab instead.');
       } else if (!pb?.ok && failed > 0 && good === 0) {
         toast.warning(`Push completed with ${failed} warning${failed === 1 ? '' : 's'}. (Fields were found but editing may require inline-edit permissions or different Case layout sections.)`);
+      } else if (good === 0 && failed === 0 && skipped < Object.keys(labels).length) {
+        // The agent complaint "nothing auto-fills on SF" usually lands here:
+        // applyCaseFields returned ok, but the Salesforce content-script
+        // couldn't LOCATE any of the editable target sections. This toast
+        // surfaces a verbose report rather than the previous "silent
+        // success". Always fire a window alert as well, so if the toasts
+        // are hidden under the modal the user still sees evidence that the
+        // extension really did try to write.
+        const msg = 'Push ran OK but 0 editable fields were located on the SF Case page (and 0 were skipped-empty). That usually means the Case layout uses different section names / field labels than our content-script selectors assume.';
+        try {
+          toast.warning(msg, {
+            description: `Fields located: ${ks.filter((k) => fields[k]).length}/${ks.length}. Scroll the SF Case page to Details and try again, or open a full Case tab (not Console inline view).`,
+            duration: 15_000,
+          });
+        } catch { /* ignore */ }
+        try {
+          window.alert(
+            `Push to Salesforce — 0 editable fields written.\n\n${msg}\n\nPer-field report:\n  • ${perFieldReport.join('\n  • ')}\n\nAlso see Post tab summary:\n  • ${postSummary.join('\n  • ') || '(no Post tab attempt)'}`
+          );
+        } catch { /* ignore */ }
       }
+      // Always stash per-field report + post summary on window.debug so any
+      // "fields didn't fill" bug report has instant reproduction data.
+      try {
+        (window as any).__debug = (window as any).__debug || {};
+        (window as any).__debug.lastPushReport = { at: new Date().toISOString(), ok: r.ok, postSummary, perFieldReport, postBody: pb, tab: (r as any).tab ?? null };
+      } catch { /* ignore */ }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tab = (r as any).tab;
       if (tab?.title || tab?.url) {

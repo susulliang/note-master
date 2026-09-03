@@ -127,13 +127,20 @@ export interface CcpExtensionBridge {
     /** True when we have received at least one postMessage from bridge.js
      *  (i.e. bridge.js content script *was* injected for this origin). */
     bridgeInjected: boolean;
-    /** Match patterns from the manifest bridge content-script block. */
+    /** Match patterns currently in memory. Source: patternsReceivedFromBridge
+     *  === true → from the INSTALLED extension's manifest.json via
+     *  bridge.js runtime fetch. Otherwise → app-side best-guess DEFAULTS
+     *  (bridge not yet loaded, or not covered by content_scripts matches). */
     manifestBridgePatterns: string[];
-    /** Match patterns from the manifest externally_connectable block. */
+    /** Match patterns from the manifest externally_connectable block.
+     *  Source caveat same as manifestBridgePatterns above. */
     manifestExternalPatterns: string[];
-    /** True if the app origin is covered by manifestBridgePatterns. */
+    /** True if the patterns in memory cover the ticket app origin.
+     *  IMPORTANT: only trust this 100% when patternsReceivedFromBridge is
+     *  true. Otherwise it's a guess from app-side defaults. */
     originCoveredByBridge: boolean;
-    /** True if the app origin is covered by manifestExternalPatterns. */
+    /** True if origin is covered by manifestExternalPatterns (same caveat
+     *  about patternsReceivedFromBridge as originCoveredByBridge). */
     originCoveredByExternal: boolean;
     /** If origin is NOT covered: a concrete pattern you should add to the
      *  manifest (both content_scripts > bridge matches AND externally
@@ -149,6 +156,33 @@ export interface CcpExtensionBridge {
      *  so the UI can surface "reload extension / confirm manifest
      *  patterns". */
     lastExternalError: string | null;
+    /** Ticket-app-side expected extension manifest version. Bump this
+     *  constant whenever the extension manifest version is bumped so the
+     *  page can flag stale-cache mismatches. */
+    expectedManifestVersion: string;
+    /** Version string from the actually-injected bridge (taken from the
+     *  manifest the installed extension shipped). Null until first
+     *  handshake or diagnostics broadcast. */
+    injectedManifestVersion: string | null;
+    /** Tiny fingerprint (DJB2 hash of manifest version + bridge pattern
+     *  list + external pattern list) so both sides can detect "same
+     *  version string, different patterns shipped" drift. */
+    injectedFingerprint: string | null;
+    /** TRUE when we've received a :diagnostics broadcast from bridge with
+     *  filled-in pattern arrays extracted at runtime from the INSTALLED
+     *  manifest. This is the ONLY state under which
+     *  originCoveredByBridge/originCoveredByExternal are 100% trustworthy. */
+    patternsReceivedFromBridge: boolean;
+    /** ISO timestamp of when we last received a filled-in :diagnostics
+     *  broadcast. */
+    patternsReceivedAt: string | null;
+    /** Version mismatch detection: null = not yet known, true = mismatch
+     *  (installed older or newer than expected), false = matches. */
+    injectedVersionMatchesExpected: boolean | null;
+    /** True when injectedManifestVersion is clearly behind
+     *  expectedManifestVersion (the "you need to 🔄 reload extension at
+     *  chrome://extensions" case). false / null otherwise. */
+    injectedVersionStale: boolean;
   };
 
   /** Probe the bridge right now. Useful when the UI shows "disconnected"
@@ -235,20 +269,40 @@ export function useCcpExtensionBridge({
   const appOrigin = typeof window !== 'undefined' ? (window.location?.origin ?? '') : '';
   const appHref = typeof window !== 'undefined' ? (window.location?.href ?? '') : '';
   const [bridgeInjected, setBridgeInjected] = useState(false);
-  const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([
+  // DEFAULT patterns — used ONLY until bridge.js broadcasts a
+  // :diagnostics message (which ships patterns extracted at runtime DIRECTLY
+  // from manifest.json so they can never drift from what Chrome loaded).
+  // Initializing to non-empty covers the "user clicks Diagnostics before
+  // any message arrives" case; we mark results as "(defaults, not yet
+  // received from bridge)" in that scenario.
+  const DEFAULT_BRIDGE_PATTERNS = Object.freeze([
     '*://localhost:*/*',
     '*://127.0.0.1:*/*',
+    '*://[::1]:*/*',
     'https://*.vercel.app/*',
     'https://note-master.vercel.app/*',
-  ]);
-  const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([
+    'https://note-master-roan.vercel.app/*',
+  ] as const);
+  const DEFAULT_EXTERNAL_PATTERNS = Object.freeze([
     'http://localhost:*/*',
     'https://localhost:*/*',
     'http://127.0.0.1:*/*',
     'https://127.0.0.1:*/*',
+    'http://[::1]:*/*',
+    'https://[::1]:*/*',
     'https://*.vercel.app/*',
     'https://note-master.vercel.app/*',
-  ]);
+    'https://note-master-roan.vercel.app/*',
+  ] as const);
+  // Bump this EXPECTED whenever extension manifest version bumps so the
+  // ticket app page can immediately flag "bridge content script loaded but
+  // it's still the OLD cached version (user needs 🔄 reload extension)".
+  const EXPECTED_MANIFEST_VERSION = '0.1.25';
+  const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
+  const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
+  const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
+  const [injectedManifestVersion, setInjectedManifestVersion] = useState<string | null>(null);
+  const [injectedFingerprint, setInjectedFingerprint] = useState<string | null>(null);
   const [lastHandshakeAt, setLastHandshakeAt] = useState<string | null>(null);
   const [handshakeRequested, setHandshakeRequested] = useState(false);
   const [lastExternalError, setLastExternalError] = useState<string | null>(null);
@@ -309,8 +363,27 @@ export function useCcpExtensionBridge({
     } catch { return false; }
   }, []);
 
+  // "Covered" check is against the PATTERNS BRIDGE.JS BROADCASTS. Why? The
+  // user's screenshot showed "patterns say covered but bridge injected: NO"
+  // — that happened because we were testing against app-side defaults, not
+  // what Chrome actually loaded. If bridge never broadcasted patterns, we
+  // still show a coverage guess from defaults, but explicitly tag it as a
+  // guess so the diagnostic text can say "STALE CACHE, reload extension".
+  const patternsReceivedFromBridge = receivedBridgePatternsAt != null;
   const originCoveredByBridge = manifestBridgePatterns.length > 0 && manifestBridgePatterns.some((p) => matchPattern(appHref || appOrigin + '/', p));
   const originCoveredByExternal = manifestExternalPatterns.length > 0 && manifestExternalPatterns.some((p) => matchPattern(appHref || appOrigin + '/', p));
+  const injectedVersionMatchesExpected = injectedManifestVersion == null
+    ? null
+    : injectedManifestVersion === EXPECTED_MANIFEST_VERSION;
+  // Extension bridge loaded (handshake seen) but version fingerprint or
+  // manifest version is BEHIND what the ticket app expects → tell user to
+  // reload extension. Note: injectedManifestVersion can be 'loading' or
+  // 'fetch-failed:…' while bridge.js is still awaiting manifest fetch —
+  // those aren't "mismatch" errors, just transient.
+  const injectedVersionStale = injectedManifestVersion != null
+    && !injectedManifestVersion.startsWith('loading')
+    && !injectedManifestVersion.startsWith('fetch-failed')
+    && injectedManifestVersion !== EXPECTED_MANIFEST_VERSION;
 
   /** When origin is NOT covered, build the TWO exact patterns the user
    *  should paste into manifest.json: (1) content_scripts bridge match →
@@ -389,6 +462,8 @@ export function useCcpExtensionBridge({
         bridgeReadyRef.current = true;
         setBridgeInjected(true);
         setLastHandshakeAt(new Date().toISOString());
+        if (typeof data.manifestVersion === 'string') setInjectedManifestVersion(data.manifestVersion);
+        if (typeof data.fingerprint === 'string') setInjectedFingerprint(data.fingerprint);
         const id: string | undefined = data.extensionId;
         if (id) {
           extIdRef.current = id;
@@ -411,17 +486,23 @@ export function useCcpExtensionBridge({
         return;
       }
       if (src === 'ecovacs-ccp-extension:diagnostics') {
-        // Broadcast from bridge.js — carries the "true" manifest pattern
-        // lists that are baked into the installed extension, so our
-        // UI-side "default pattern" assumptions don't drift when the user
-        // upgrades without also upgrading the ticket app source.
+        // Broadcast from bridge.js — carries the TRUE manifest pattern
+        // lists (runtime-extracted straight from manifest.json inside the
+        // installed extension), version + fingerprint. This is the only
+        // source of trust for coverage/version-mismatch detection.
         setBridgeInjected(true);
         setLastHandshakeAt(new Date().toISOString());
-        if (Array.isArray(data.ticketAppPatterns) && data.ticketAppPatterns.length > 0) {
-          setManifestBridgePatterns(data.ticketAppPatterns);
+        setReceivedBridgePatternsAt(new Date().toISOString());
+        if (typeof data.manifestVersion === 'string') setInjectedManifestVersion(data.manifestVersion);
+        if (typeof data.fingerprint === 'string') setInjectedFingerprint(data.fingerprint);
+        if (Array.isArray(data.ticketAppPatterns)) {
+          // Accept empty arrays too: an empty list from the bridge is a
+          // real signal (bridge loaded with zero patterns) that should
+          // OVERRIDE our defaults, not be silently ignored.
+          setManifestBridgePatterns(data.ticketAppPatterns.filter((x: unknown) => typeof x === 'string') as string[]);
         }
-        if (Array.isArray(data.externalConnectablePatterns) && data.externalConnectablePatterns.length > 0) {
-          setManifestExternalPatterns(data.externalConnectablePatterns);
+        if (Array.isArray(data.externalConnectablePatterns)) {
+          setManifestExternalPatterns(data.externalConnectablePatterns.filter((x: unknown) => typeof x === 'string') as string[]);
         }
         if (typeof data.extensionId === 'string' && data.extensionId) {
           extIdRef.current = data.extensionId;
@@ -776,6 +857,13 @@ export function useCcpExtensionBridge({
       lastHandshakeAt,
       handshakeRequested,
       lastExternalError,
+      expectedManifestVersion: EXPECTED_MANIFEST_VERSION,
+      injectedManifestVersion,
+      injectedFingerprint,
+      patternsReceivedFromBridge,
+      patternsReceivedAt: receivedBridgePatternsAt,
+      injectedVersionMatchesExpected,
+      injectedVersionStale,
     },
     requestConnection,
   };

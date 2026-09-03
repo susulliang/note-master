@@ -101,6 +101,24 @@ export interface TicketPanelsContextShape {
       lastHandshakeAt: string | null;
       handshakeRequested: boolean;
       lastExternalError: string | null;
+      /** Version of the installed-extension manifest we WANT to see. */
+      expectedManifestVersion: string;
+      /** Version of the manifest that actually injected bridge.js. */
+      injectedManifestVersion: string | null;
+      /** Content hash of manifest + patterns that injected bridge.js. */
+      injectedFingerprint: string | null;
+      /** True if pattern lists below came from the INSTALLED extension
+       *  (runtime-extracted from manifest.json). False means the values
+       *  you're reading are best-guess DEFAULTS, not authoritative. */
+      patternsReceivedFromBridge: boolean;
+      /** Timestamp (ISO) of the last runtime-extracted pattern list we
+       *  received from bridge.js. */
+      patternsReceivedAt: string | null;
+      /** null / false / true tri-state for expected vs injected version. */
+      injectedVersionMatchesExpected: boolean | null;
+      /** True when installed is clearly older than expected (Chrome
+       *  cached stale content script → user must reload extension) */
+      injectedVersionStale: boolean;
     };
   };
 }
