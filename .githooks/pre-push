@@ -83,9 +83,18 @@ fi
 # ---------------------------------------------------------------------------
 # Step 3 — re-launch `git push` with sentinel so the bump commit uploads.
 #
-# Git passes us: $1 = remote name (e.g. "origin"), $2 = remote url (empty if
-# Git resolved it from config). We forward the name; if a URL was given we
-# also forward the URL (so URL-override push calls still work).
+# Git's pre-push argv when invoked from inside a `git push <r>` session:
+#   $1 = remote NAME  – e.g. "origin"  (never empty)
+#   $2 = remote URL   – the full URL associated with that name (e.g.
+#                       https://github.com/…/note-master.git). Empty only in
+#                       the theoretical case Git had no URL mapping.
+#
+# Importantly: `git push NAME URL` is WRONG — the second positional arg to
+# `git push` is a refspec, not a URL. Passing the URL as the second arg
+# causes fatal: invalid refspec '<url>'. So the rule is:
+#   - If $2 is a URL (http(s)://, ssh://, git@…:…)  → push USING the URL as
+#     the sole target (git push "<remote_url>").
+#   - Otherwise (no URL in $2)                         → git push "<name>".
 # ---------------------------------------------------------------------------
 REMOTE_NAME="${1:-origin}"
 REMOTE_URL="${2:-}"
@@ -93,11 +102,12 @@ REMOTE_URL="${2:-}"
 echo "" >&2
 echo "✓ Pre-push bumped to $NEW_VER — re-launching push with the new tip." >&2
 
-set --
-set -- "$REMOTE_NAME"
-if [ -n "${REMOTE_URL}" ]; then
-  set -- "$@" "$REMOTE_URL"
-fi
+TARGET="$REMOTE_NAME"
+case "$REMOTE_URL" in
+  http://*|https://*|ssh://*|git@*:*|file:///*)
+    TARGET="$REMOTE_URL"
+    ;;
+esac
 
 export ECOVACS_PRE_PUSH_BUMPED=1
-exec git push "$@"
+exec git push "$TARGET"
