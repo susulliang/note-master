@@ -733,6 +733,17 @@ body[data-ui-scale="small"] {
       0 0 26px color-mix(in oklab, #58a6ff 30%, transparent);
   }
 
+  /* Salesforce DOM-filled fields — cool turquoise. Distinct from yellow
+     (AI read) and blue (regex provisional): when an agent sees this glow
+     they know the value came straight from the Case/SF tab via the
+     extension scrape and needs review before moving on. */
+  .glass-parsed-dom {
+    --glass-border: color-mix(in oklab, #22d3ee 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #22d3ee 55%, transparent),
+      0 0 28px color-mix(in oklab, #22d3ee 32%, transparent);
+  }
+
   /* Idle dimming (toolbar): almost no frost, no shadow */
   .glass-dim {
     background: color-mix(in oklab, var(--card) 10%, transparent);

@@ -42,13 +42,17 @@ export type ExtensionMeta = {
 };
 
 export type PendingExtensionPush = {
-  /** EXT_TO_NODE_ID → value (already mapped) for only the 4 identity fields. */
+  /** EXT_TO_NODE_ID → value (already mapped). For auto scope: 4 identity
+   *  fields only. For manual scope: full merged set from the extension. */
   mapped: Record<string, string>;
   /** Extension metadata (which URLs/tabs this scrape came from). */
   meta: ExtensionMeta | null;
-  /** Original filtered fields (extension keys) for display labels. */
+  /** Original fields (extension keys) for display labels. */
   fields: ExtensionFieldMap;
   pushedAt: string;
+  /** 'auto' = scrape triggered, key fields only. 'manual' = popup "Push to
+   *  open Ticket Notes" → full merged set. */
+  scope: 'auto' | 'manual';
 };
 
 export interface CcpExtensionBridge {
@@ -204,16 +208,19 @@ export function useCcpExtensionBridge({
       }
       if (src === 'ecovacs-ccp-extension:push') {
         // Background service worker pushed merged fields via bridge.
+        // Every push surfaces the bottom-right "review these fields?"
+        // confirm card FIRST — nothing ever writes to the form without the
+        // user clicking "Fill". The mode only controls field filtering:
+        //   auto  → 4 identity key fields (scrape-triggered)
+        //   manual → full merged field set (popup "Push to open Ticket
+        //            Notes" button → still shows the card, no silent apply)
         const payload = data.payload;
         if (payload?.fields && typeof payload.fields === 'object') {
           setConnected(true);
           const mode: unknown = payload.mode;
           if (mode === 'manual') {
-            // "Push to open Ticket Notes" button = explicit user action.
-            applyMerged(payload.fields, payload.state ?? null, false);
+            queueFullPendingPush(payload.fields, payload.state ?? null, payload.pushedAt);
           } else {
-            // Auto push after scrape (mode 'auto', or undefined for older
-            // extensions) → show confirm popup, defensively filter to 4 fields.
             queuePendingPush(payload.fields, payload.state ?? null, payload.pushedAt);
           }
         }
@@ -304,10 +311,40 @@ export function useCcpExtensionBridge({
       meta,
       fields: keyFields,
       pushedAt: pushedAt || meta?.pushedAt || new Date().toISOString(),
+      scope: 'auto',
     };
     pendingPushRef.current = next;
     setPendingPush(next);
   }, [buildMapped, pickKeyFields]);
+
+  /** Queue the FULL merged field set (popup "Push to open Ticket Notes"
+   *  button → scope 'manual'). Still goes through the confirm popup — the
+   *  user must explicitly click Fill to accept. */
+  const queueFullPendingPush = useCallback((
+    rawFields: ExtensionFieldMap,
+    state: unknown,
+    pushedAt?: string
+  ) => {
+    if (!rawFields || Object.keys(rawFields).length === 0) return;
+    const displayFields: ExtensionFieldMap = {};
+    for (const [k, v] of Object.entries(rawFields)) {
+      const s = Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v ?? '');
+      if (s.trim()) displayFields[k] = s;
+    }
+    if (Object.keys(displayFields).length === 0) return;
+    const mapped = buildMapped(displayFields);
+    if (Object.keys(mapped).length === 0) return;
+    const meta: ExtensionMeta | null = extractMeta(state);
+    const next: PendingExtensionPush = {
+      mapped,
+      meta,
+      fields: displayFields,
+      pushedAt: pushedAt || meta?.pushedAt || new Date().toISOString(),
+      scope: 'manual',
+    };
+    pendingPushRef.current = next;
+    setPendingPush(next);
+  }, [buildMapped]);
 
   const acceptPendingPush = useCallback(() => {
     const pending = pendingPushRef.current;

@@ -398,26 +398,72 @@ function ExtensionPushConfirmPopup({
       return '';
     }
   })();
+  const header =
+    pending.scope === 'manual'
+      ? { tag: 'Salesforce push', body: `${fieldEntries.length} field${fieldEntries.length === 1 ? '' : 's'} ready to fill` }
+      : { tag: 'Scrape detected', body: 'Parse these fields into the corresponding form cells?' };
+  // Merge a full-set pretty-label lookup (manual scope shows dozens more)
+  const allLabels: Record<string, string> = {
+    contactNumber: 'Contact Number',
+    customerName: 'Customer Name',
+    accountName: 'Account Name',
+    contactName: 'Contact Name',
+    deebotModel: 'Device Model',
+    serialNumber: 'Serial Number',
+    emailAddress: 'Email',
+    shippingAddress: 'Shipping Address',
+    skuNumber: 'SKU',
+    caseNumber: 'Case #',
+    caseOwner: 'Case Owner',
+    caseStatus: 'Status',
+    issueTitle: 'Subject',
+    issueType: 'Issue Type',
+    detailedIssue: 'Request Description',
+    resolutionSummary: 'Resolution',
+    additionalNotes: 'Additional Notes',
+    brand: 'Brand',
+    caseOrigin: 'Case Origin',
+    city: 'City',
+    provinceState: 'Province/State',
+    postalCode: 'Postal Code',
+    country: 'Country',
+    address: 'Address',
+    phoneSurveyResult: 'Survey',
+    escalationType: 'Escalation',
+    purchasingChannel: 'Purchasing Channel',
+    orderNumber: 'Order #',
+    purchaseDate: 'Purchase Date',
+    firstPendingTs: 'First Pending',
+    lastPendingTs: 'Last Pending',
+    mergedCaseIds: 'Merged Cases',
+    caseTag: 'Case Tag',
+    appVersion: 'App Version',
+    phoneModel: 'Phone Model',
+    osVersion: 'OS Version',
+    deviceTypeName: 'Device Type',
+    marketName: 'Device Name',
+    ...labels,
+  };
 
   return (
     <div
-      className="fixed bottom-24 right-6 z-[70] w-[min(22rem,calc(100vw-3rem))]"
+      className="fixed bottom-24 right-6 z-[70] w-[min(24rem,calc(100vw-3rem))]"
       role="dialog"
       aria-live="polite"
-      aria-label="Scrape data received"
+      aria-label="Scrape data received — fill confirmation"
     >
       <div className="glass-panel border border-border/80 rounded-lg shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <div className="flex items-center gap-2 min-w-0">
             <span className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-primary/15 text-primary text-xs font-semibold">
-              ⇩
+              {pending.scope === 'manual' ? '📤' : '🔌'}
             </span>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-foreground leading-tight truncate">
-                Scrape data received {when}
+                {header.tag} {when}
               </div>
               <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">
-                Parse these fields into the corresponding form fields?
+                {header.body}
               </div>
             </div>
           </div>
@@ -431,14 +477,14 @@ function ExtensionPushConfirmPopup({
           </button>
         </div>
 
-        <dl className="px-4 py-3 space-y-2 max-h-64 overflow-y-auto">
+        <dl className="px-4 py-3 space-y-2 max-h-80 overflow-y-auto">
           {fieldEntries.length === 0 && (
             <div className="text-xs text-muted-foreground italic py-2">No fields available.</div>
           )}
           {fieldEntries.map(([k, v]) => (
-            <div key={k} className="grid grid-cols-[7rem_1fr] gap-3 items-start">
+            <div key={k} className="grid grid-cols-[8rem_1fr] gap-3 items-start">
               <dt className="text-[11px] uppercase tracking-wide text-muted-foreground pt-0.5">
-                {labels[k] || k}
+                {allLabels[k] || k}
               </dt>
               <dd className="text-sm text-foreground break-words font-medium leading-snug">
                 {String(v)}
@@ -458,9 +504,9 @@ function ExtensionPushConfirmPopup({
           <button
             type="button"
             onClick={onApply}
-            className="px-3 py-1.5 rounded-md text-sm font-medium text-primary-foreground bg-primary hover:brightness-110 border border-primary/60 shadow-sm transition"
+            className="px-4 py-1.5 rounded-md text-sm font-semibold text-primary-foreground bg-primary hover:brightness-110 border border-primary/60 shadow-sm transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            Apply to form
+            Fill {fieldEntries.length} field{fieldEntries.length === 1 ? '' : 's'}
           </button>
         </div>
       </div>
@@ -1038,9 +1084,11 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             ? 'AI parsed'
             : source === 'paraphrase'
               ? 'AI polished'
-              : source === 'regex-grow'
-                ? 'Pattern updated'
-                : 'Pattern filled';
+              : source === 'dom-ext'
+                ? 'Salesforce'
+                : source === 'regex-grow'
+                  ? 'Pattern updated'
+                  : 'Pattern filled';
         toast.success(`${label}: ${fieldId}`, {
           description: value.length > 80 ? `${value.slice(0, 80)}…` : value
         });
@@ -1124,15 +1172,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       for (const [nodeId, value] of Object.entries(mapped)) {
         if (!value) continue;
         try {
-          // Prefer FIELD_TO_NODE lookups (handleAutoFill signature). The
-          // hook already translated extension keys to canvas node ids, so
-          // for fields where FIELD_TO_NODE entry does not use the same id,
-          // we fall back to treating the `nodeId` as the raw form key by
-          // also writing it through setFormData directly when needed.
           const knownFieldKey =
             (Object.entries(FIELD_TO_NODE).find(([, v]) => v === nodeId)?.[0] as string | undefined) ?? nodeId;
-          // handleAutoFill path: merges multi-sentence textareas, skips
-          // proofread fields, marks parsedFields badge, etc.
           autoFillRef.current(knownFieldKey, value, 'dom-ext');
           applied.push({ fieldId: nodeId, value });
         } catch {
@@ -1140,7 +1181,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
         }
       }
       if (applied.length > 0) {
-        toast.success(`Extension DOM filled ${applied.length} field${applied.length === 1 ? '' : 's'}.`);
+        toast.success(`Salesforce filled ${applied.length} field${applied.length === 1 ? '' : 's'}.`);
       }
       return applied;
     },

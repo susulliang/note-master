@@ -13,7 +13,9 @@ if (!existsSync('.git') || !existsSync('.githooks/pre-commit')) {
 }
 
 try {
-  chmodSync('.githooks/pre-commit', 0o755); // 兜底任何丢 +x 的分发链路
+  // Pre-commit 与 pre-push 钩子，兜底任何丢 +x 的分发链路
+  if (existsSync('.githooks/pre-commit')) chmodSync('.githooks/pre-commit', 0o755);
+  if (existsSync('.githooks/pre-push'))   chmodSync('.githooks/pre-push', 0o755);
   execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { stdio: 'ignore' });
 } catch {
   // git 未安装或任何异常：忽略，不阻断 npm install

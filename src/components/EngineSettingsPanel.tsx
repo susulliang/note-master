@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
@@ -769,6 +770,19 @@ export default function EngineSettingsPanel({
           </div>
         </div>
       )}
+
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground/80">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
+          <span className="font-semibold tracking-wide">Ticket Notes</span>
+        </div>
+        <div className="font-mono">
+          v{APP_VERSION}
+          {APP_RELEASED_AT && (
+            <span className="ml-1 opacity-70">· {APP_RELEASED_AT.replace('T', ' ').replace('Z', '')}</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

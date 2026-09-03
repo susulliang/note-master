@@ -1,0 +1,57 @@
+#!/bin/sh
+# ecovacs ticket-notes: pre-push hook
+#
+# Guarantees every `git push` strictly increases the LAST digit of the shared
+# version number (package.json + extension/ + Engine Settings Panel footer).
+#
+# Flow:
+#   1. Run bump-version.mjs with --pre-push flag — script exits early if the
+#      current branch already carries a version newer than its upstream
+#      tracking ref (i.e. a prior commit / commit in this push already
+#      bumped). Exit code 0 with a "skipping" log in that case.
+#   2. If the script wrote changes, commit ONLY the five version-related
+#      files onto the local branch tip as a chore commit. Because we are in
+#      pre-push, git will then push this extra commit along with the rest.
+#
+# Bypass the hook entirely with:   SKIP_GIT_HOOKS=1  git push …
+[ "$SKIP_GIT_HOOKS" = "1" ] && exit 0
+[ "$ECOVACS_PRE_PUSH_BUMPED" = "1" ] && exit 0
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# Run the bump script — reports whether it actually modified anything.
+OUTPUT="$(node scripts/bump-version.mjs --pre-push 2>&1)"
+STATUS=$?
+echo "$OUTPUT"
+if [ "$STATUS" -ne 0 ]; then
+  echo "✗ pre-push: version bump failed (see above)" >&2
+  exit 1
+fi
+
+# Only proceed to git commit if the script actually bumped (skipped output line:
+# "already bumped vs upstream" message contains "— skipping auto bump.")
+case "$OUTPUT" in
+  *skipping*) exit 0 ;;
+esac
+
+# Stage only the 5 tracked files the bump script is allowed to write. If
+# nothing staged (no diff), nothing to commit → just proceed.
+git add \
+  extension/version.json \
+  extension/manifest.json \
+  extension/docs/install.html \
+  extension/popup/popup.html \
+  package.json \
+  2>/dev/null
+
+if ! git diff --cached --quiet; then
+  export ECOVACS_PRE_PUSH_BUMPED=1
+  NEW_VER="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('extension/version.json','utf8')).version)}catch(e){process.exit(1)}" 2>/dev/null || echo "patch")"
+  if ! git commit -m "chore(version): auto bump $NEW_VER"; then
+    echo "✗ pre-push: could not commit the auto-bump. Stage+commit version files manually, then retry." >&2
+    exit 1
+  fi
+fi
+
+exit 0

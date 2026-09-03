@@ -1010,9 +1010,10 @@ function FlowNodeComponent({
         // Auto-parsed value awaiting proofreading — engine-colored glow
         // takes precedence over the accent skins (later in the stylesheet):
         // YELLOW = LLM's full-context reading, BLUE = provisional regex
-        // match the AI may still replace
+        // match the AI may still replace, TURQUOISE = Salesforce DOM scrape
         parsedSource === 'llm' && !isPanelNode && 'glass-parsed',
-        parsedSource && parsedSource !== 'llm' && !isPanelNode && 'glass-parsed-regex',
+        parsedSource === 'dom-ext' && !isPanelNode && 'glass-parsed-dom',
+        parsedSource && parsedSource !== 'llm' && parsedSource !== 'dom-ext' && !isPanelNode && 'glass-parsed-regex',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
@@ -1030,7 +1031,7 @@ function FlowNodeComponent({
               : parsedSource === 'paraphrase'
                 ? 'border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300'
                 : parsedSource === 'dom-ext'
-                  ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-700 dark:text-emerald-300'
+                  ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-700 dark:text-cyan-300'
                   : 'border-sky-400/40 bg-sky-400/15 text-sky-600 dark:text-sky-300'
           )}
           title={
@@ -1039,7 +1040,7 @@ function FlowNodeComponent({
               : parsedSource === 'paraphrase'
                 ? 'AI-polished condensation of the transcript — please verify'
                 : parsedSource === 'dom-ext'
-                  ? 'Filled directly from the CCP / Salesforce tab DOM via the browser extension — trust level highest'
+                  ? 'Filled from Salesforce Case data via the browser extension — verify against the live case if uncertain'
                   : 'Provisional pattern match from speech — the AI parser may still replace it, please verify'
           }
         >
@@ -1048,7 +1049,7 @@ function FlowNodeComponent({
             : parsedSource === 'paraphrase'
               ? 'AI polished'
               : parsedSource === 'dom-ext'
-                ? 'Extension DOM'
+                ? 'Salesforce'
                 : 'auto parsed'}
         </span>
       )}
