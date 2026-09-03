@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ecovacs Ticket DOM Scraper",
   "short_name": "CCP Scraper",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Tier-2 browser extension: scrapes the current CCP (Amazon Connect / Five9 / Genesys) tab and the Salesforce Case / Ticket tab, then pushes customer / case fields straight into the Ticket Notes web app.",
   "minimum_chrome_version": "114",
   "icons": {
