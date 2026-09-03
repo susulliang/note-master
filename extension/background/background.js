@@ -163,6 +163,46 @@ async function findTab(patterns) {
   return scored[0].t;
 }
 
+/** Variant of findTab() used by "Push to Salesforce Case": when the caller
+ *  gives us a suggested tabId we verify it still exists & still matches a
+ *  Salesforce URL, otherwise fall back to the most-recent / active SF tab.
+ *  Returns the chrome.tabs.Tab object or null. */
+async function findOrSuggestSalesforceTab(suggestedTabId) {
+  if (typeof suggestedTabId === 'number') {
+    try {
+      const t = await chrome.tabs.get(suggestedTabId);
+      if (t?.url && SF_PATTERNS.some((p) => p.test(t.url))) return t;
+    } catch { /* tab no longer exists; fall through */ }
+  }
+  // Prefer SF tabs that look like Case pages (so we don't push into Setup)
+  const all = await chrome.tabs.query({});
+  const scored = [];
+  for (const t of all) {
+    if (!t.url) continue;
+    if (!SF_PATTERNS.some((p) => p.test(t.url))) continue;
+    const looksCase = /\/lightning\/r\/Case\//i.test(t.url) || /case/i.test(t.title || '');
+    const activeNow = !!t.active;
+    const la = (typeof t.lastAccessed === 'number') ? t.lastAccessed : -Infinity;
+    scored.push({
+      t,
+      sort: [
+        looksCase ? 0 : 1,
+        activeNow ? 0 : 1,
+        -la,
+      ],
+    });
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => {
+    for (let i = 0; i < a.sort.length; i += 1) {
+      if (a.sort[i] < b.sort[i]) return -1;
+      if (a.sort[i] > b.sort[i]) return 1;
+    }
+    return 0;
+  });
+  return scored[0].t;
+}
+
 const CCP_PATTERNS = [
   /^https:\/\/.*\.my\.connect\.aws\//i,
   /^https:\/\/.*\.connect\.aws\.a2z\.com\//i,
@@ -1370,6 +1410,37 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
           newTab:     Boolean(msg?.newTab ?? false),
         });
         sendResponse(resp);
+        return;
+      }
+      if (t === 'EXT_APPLY_CASE_FIELDS') {
+        // After Generate Note → push the formatted Post body + editable
+        // layout fields (AMR Model No., Account Name, Name, Phone) into an
+        // open Salesforce Case tab via the content script's APPLY_CASE_FIELDS
+        // message.  If caller doesn't pass a tabId we auto-pick:
+        //   1. state.sf.lastScrapedTabId (if still open & matches SF urls)
+        //   2. any currently open SF/lightning tab
+        // The content script replies with a per-field result shape:
+        //   { postBody: {ok, tabFound, editorFound…}, fields: {contactPhone,
+        //     customerName, accountName, amrModelNo}, summary: {ok, okCount} }
+        const suggestedTabId = typeof msg?.tabId === 'number' ? msg.tabId : null;
+        const saveEach = msg?.saveEach === false ? false : true;
+        try {
+          const tab = await findOrSuggestSalesforceTab(suggestedTabId);
+          if (!tab || typeof tab.id !== 'number') {
+            sendResponse({ ok: false, error: 'No open Salesforce Case tab found. Please open any Ecovacs Lightning Case tab first, then retry Push.' });
+            return;
+          }
+          const fields = msg?.fields ?? {};
+          const result = await chrome.tabs.sendMessage(tab.id, {
+            type: 'APPLY_CASE_FIELDS',
+            fields,
+            saveEach,
+          });
+          if (result?.ok) sendResponse({ ok: true, tab: { id: tab.id, url: tab.url, title: tab.title }, ...result });
+          else sendResponse({ ok: false, error: result?.error || 'Content script returned non-ok for APPLY_CASE_FIELDS.', detail: result ?? null });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        }
         return;
       }
       sendResponse({ ok: false, error: `Unknown external type: ${t}` });

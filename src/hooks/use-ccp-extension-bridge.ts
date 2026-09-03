@@ -87,6 +87,33 @@ export interface CcpExtensionBridge {
     directUrl?: string;
     newTab?: boolean;
   }) => Promise<{ ok: boolean; url?: string; navigated?: 'new' | 'reused' | null; error?: string }>;
+  /** After generating a formatted ticket note, push the note body (Post tab
+   *  chatter publisher) + editable layout fields (AMR Model No., Name,
+   *  Account Name, Phone) back into a Salesforce Case tab via the content
+   *  script.  If tabId is omitted, the extension auto-selects: active SF
+   *  Case tab → most-recent / active SF tab.  `postPublish: true` will
+   *  click the Publish button (disabled by default so the agent can
+   *  proofread before publishing).  Result includes per-field ok/skipped
+   *  + summary counts. */
+  applyCaseFields: (opts: {
+    fields: {
+      postBody?: string;
+      postPublish?: boolean;
+      amrModelNo?: string;
+      customerName?: string;
+      accountName?: string;
+      contactPhone?: string;
+    };
+    tabId?: number;
+    saveEach?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    summary?: { ok: boolean; okCount: number; total: number } | null;
+    postBody?: unknown;
+    fields?: unknown;
+    tab?: unknown;
+    error?: string | null;
+  }>;
 }
 
 /** Map the flat field shape produced by the background's
@@ -491,6 +518,36 @@ export function useCcpExtensionBridge({
     }
   }, [sendRequest]);
 
+  /** Push the formatted Post body + editable layout fields into the open
+   *  Salesforce Case tab (or an auto-selected one if tabId is omitted).
+   *  Returns { ok, summary:{ok,okCount,total}, postBody?, fields?:{…}, tab? }
+   *  so the caller can surface per-field successes / failures via toast. */
+  const applyCaseFields = useCallback(async (opts: {
+    fields: {
+      postBody?: string;
+      postPublish?: boolean;
+      amrModelNo?: string;
+      customerName?: string;
+      accountName?: string;
+      contactPhone?: string;
+    };
+    tabId?: number;
+    saveEach?: boolean;
+  }): Promise<{ ok: boolean; summary?: { ok: boolean; okCount: number; total: number } | null; postBody?: any; fields?: any; tab?: any; error?: string | null }> => {
+    try {
+      const r = await sendRequest({
+        type: 'EXT_APPLY_CASE_FIELDS',
+        fields: opts?.fields ?? {},
+        tabId: typeof opts?.tabId === 'number' ? opts.tabId : null,
+        saveEach: opts?.saveEach === false ? false : true,
+      });
+      if (r?.ok) return { ok: true, summary: r.summary ?? null, postBody: r.postBody ?? null, fields: r.fields ?? null, tab: r.tab ?? null };
+      return { ok: false, error: r?.error || 'Extension failed to apply fields.', summary: null };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e), summary: null };
+    }
+  }, [sendRequest]);
+
   return {
     connected,
     extensionId,
@@ -503,6 +560,7 @@ export function useCcpExtensionBridge({
     scrapeAll,
     getSnapshot,
     openCase,
+    applyCaseFields,
   };
 }
 

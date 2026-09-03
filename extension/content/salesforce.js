@@ -596,14 +596,449 @@
   //  Messaging hooks
   // -------------------------------------------------------------------------
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type !== 'SCRAPE_SF') return false;
-    try {
-      sendResponse({ ok: true, data: scrapeNow(), url: location.href, title: document.title });
-    } catch (e) {
-      sendResponse({ ok: false, error: String(e?.message || e) });
+    if (msg?.type === 'SCRAPE_SF') {
+      try {
+        sendResponse({ ok: true, data: scrapeNow(), url: location.href, title: document.title });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+      return true;
     }
-    return true;
+    if (msg?.type === 'APPLY_CASE_FIELDS') {
+      // Called by the ticket notes app after "Generate Note" to push the
+      // formatted note body + a handful of case fields back into the
+      // current Case record (Post feed item via the Post tab, plus the
+      // editable Highlights / Details layout fields — AMR Model No.,
+      // Account Name, Name, Phone).  Returns a per-field result so the
+      // caller can surface successes / failures as toasts.
+      Promise.resolve()
+        .then(() => applyCaseFields(msg?.fields || {}, { saveEach: msg?.saveEach !== false }))
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+      return true;
+    }
+    return false;
   });
+
+  // =========================================================================
+  //  WRITE: push values back into the Case page (Post feed + inline fields)
+  // =========================================================================
+  //
+  // Salesforce Console uses LWC shadow DOM + aura components, with
+  // *controlled* inputs — setting .value via assignment doesn't update
+  // LWC state (see the ExperienceRecall rule: never fill() or assign when
+  // the element is a framework-managed controlled input).  All the setters
+  // below use the focus → selectAll → document.execCommand('insertText')
+  // → dispatchEvent('input' + 'change' + 'blur') event chain, which
+  // mirrors keyboard typing and reliably triggers LWC onChange listeners
+  // plus combobox/lookup dropdowns.  For readonly output fields we first
+  // click the inline-edit button (title="Edit <Label>") then wait for the
+  // editor to render, then set.
+  //
+  //  Messaging contract (msg.fields.*):
+  //
+  //    postBody            (string)  the formatted ticket note text; we
+  //                                  click the Post tab, write it into the
+  //                                  chatter publisher and (optionally)
+  //                                  click the Publish button.
+  //    postPublish         (bool)    if true, click Publish after writing
+  //                                  the body. Default: false so the agent
+  //                                  can proofread before sending.
+  //    amrModelNo          (string)  e.g. "DEEBOT T30S" — fills AMR Model
+  //                                  No. (a lookup / formatted-lookup edit)
+  //    customerName        (string)  e.g. "Fay Young" — fills the editable
+  //                                  Contact "Name" OR "Account Name" when
+  //                                  Account lookup is writable,
+  //                                  preferring Contact.
+  //    accountName         (string)  override — fills Account Name lookup
+  //    contactPhone        (string)  e.g. "+12157673984" — fills editable
+  //                                  Phone field (Contact Details block).
+  // -------------------------------------------------------------------------
+
+  const $sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function $fire(el, type, detail) {
+    if (!el) return;
+    const evt = detail instanceof Event ? detail : new Event(type, { bubbles: true, cancelable: true, composed: true });
+    if (detail && !(detail instanceof Event)) Object.assign(evt, detail);
+    (el.dispatchEvent || el.fireEvent).call(el, evt);
+  }
+
+  /** Find an element, optionally inside one or more open shadow roots. */
+  function $qs(root, sel) {
+    try {
+      return root.querySelector ? root.querySelector(sel) : null;
+    } catch { return null; }
+  }
+  function $qa(root, sel) {
+    try { return Array.from(root.querySelectorAll ? root.querySelectorAll(sel) : []); }
+    catch { return []; }
+  }
+
+  /** Resolve input element from a lightning-input / lightning-input-field
+   *  wrapper by walking into the LWC shadowRoot when open. */
+  function resolveNativeInput(wrapperOrInput) {
+    if (!wrapperOrInput) return null;
+    // Native <input>/<textarea>/<select>
+    const tn = (wrapperOrInput.tagName || '').toLowerCase();
+    if (['input', 'textarea', 'select'].includes(tn)) return wrapperOrInput;
+    // lightning-primitive-input-simple → shadow → <input>
+    if (wrapperOrInput.shadowRoot) {
+      const inner = wrapperOrInput.shadowRoot.querySelector('input, textarea, select');
+      if (inner) return inner;
+    }
+    // lightning-input → contains lightning-primitive-input-simple as a
+    // light child; try slotted / direct children recursively
+    for (const child of wrapperOrInput.children || []) {
+      const found = resolveNativeInput(child);
+      if (found) return found;
+    }
+    // Some LWCs render input into shadow of a light child
+    for (const child of wrapperOrInput.children || []) {
+      if (child?.shadowRoot) {
+        const inner = child.shadowRoot.querySelector('input, textarea, select');
+        if (inner) return inner;
+      }
+    }
+    // ContentEditable (rich-text editor)
+    if (wrapperOrInput.isContentEditable) return wrapperOrInput;
+    // Last resort: text node container with [contenteditable] descendent
+    const ce = wrapperOrInput.querySelector?.('[contenteditable="true"]');
+    if (ce) return ce;
+    return null;
+  }
+
+  /**
+   * Native-type a string value into an input/textarea, using real DOM
+   * events. This triggers the full LWC event chain and avoids the "looks
+   * filled but Save is still disabled" problem. Steps:
+   *   1. focus → 2. selectAll → 3. delete (so the old value is gone) →
+   *   4. fire keydown/keyup with synthetic printable keys →
+   *   5. execCommand('insertText',…) for each printable batch →
+   *   6. dispatch 'input', 'change', 'blur'.
+   * For contentEditable containers, execCommand handles insertion directly.
+   */
+  function nativeTypeText(nativeEl, value) {
+    if (!nativeEl) return false;
+    value = value == null ? '' : String(value);
+    try { nativeEl.focus({ preventScroll: false }); } catch { try { nativeEl.focus(); } catch { /* ignore */ } }
+    // Select-all old contents
+    try {
+      if (nativeEl.setSelectionRange && typeof nativeEl.value === 'string') {
+        nativeEl.setSelectionRange(0, nativeEl.value.length);
+      } else {
+        document.execCommand('selectAll', false, null);
+      }
+    } catch { try { document.execCommand('selectAll', false, null); } catch { /* ignore */ } }
+    $fire(nativeEl, 'focus');
+    $fire(nativeEl, new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Backspace', code: 'Backspace', which: 8 }));
+    try { document.execCommand('delete', false, null); } catch { try { if ('value' in nativeEl) nativeEl.value = ''; } catch { /* ignore */ } }
+    $fire(nativeEl, new KeyboardEvent('input', { bubbles: true, cancelable: true, data: null, inputType: 'deleteContentBackward' }));
+    if (value.length > 0) {
+      // execCommand('insertText') works for both textareas/text inputs AND
+      // contentEditable editors. We use 2 big chunks to avoid flicker:
+      // a single insertText call is fastest.
+      try {
+        const ok = document.execCommand('insertText', false, value);
+        if (!ok) throw new Error('execCommand returned false');
+      } catch {
+        // Fallback: assign value + dispatch input/change (non-native). Only
+        // activates when the page CSP blocked execCommand — which should
+        // not happen in Ecovacs SF pages, but keeps the fill from failing
+        // silently.
+        if ('value' in nativeEl) { nativeEl.value = value; }
+        else if (nativeEl.isContentEditable) { nativeEl.textContent = value; }
+      }
+      $fire(nativeEl, new InputEvent('input', { bubbles: true, cancelable: true, data: value, inputType: 'insertText' }));
+    }
+    $fire(nativeEl, new InputEvent('change', { bubbles: true, cancelable: true }));
+    $fire(nativeEl, new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'End' }));
+    try { nativeEl.blur(); } catch { /* ignore */ }
+    $fire(nativeEl, 'blur');
+    return true;
+  }
+
+  /**
+   * For combobox / lookups (lightning-combobox, lightning-lookup), type the
+   * desired value then pick the first matching item from the popover. Used
+   * by Account Name (lookup to Account record) & AMR Model No (lookup to
+   * custom object). Fallback (if no popover): leave the typed string in —
+   * the agent can finish it manually.
+   */
+  async function nativeSetCombobox(pickerWrapper, value) {
+    const nativeInput = resolveNativeInput(pickerWrapper);
+    if (!nativeInput) return { ok: false, reason: 'combobox has no native input' };
+    // Open dropdown: comboboxes open after focus + click + typing
+    try { nativeInput.focus?.(); } catch { /* ignore */ }
+    try { nativeInput.click?.(); } catch { /* ignore */ }
+    await $sleep(80);
+    nativeTypeText(nativeInput, value);
+    await $sleep(350); // let the combobox query + render result popover
+    // Look for a dropdown cell (<ul role="listbox" + <li role="option">,
+    // or the LWC popover containing a match whose innerText begins/equals
+    // the typed value).  Prefer: closest combobox element document-wide,
+    // search all dropdowns open right now.
+    const popovers = Array.from(document.querySelectorAll('[role="listbox"], .slds-listbox, .slds-dropdown, lightning-base-combobox-item, [data-dropdown-root="true"]'));
+    for (const pop of popovers) {
+      const opts = Array.from(pop.querySelectorAll('[role="option"], li, .slds-listbox__item, .slds-dropdown__item, lightning-base-combobox-item'));
+      for (const opt of opts) {
+        const t = (opt.innerText || opt.textContent || '').trim().toLowerCase();
+        const v = value.trim().toLowerCase();
+        if (!t) continue;
+        if (t === v || t.includes(v)) {
+          try {
+            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            opt.click?.();
+            await $sleep(100);
+            opt.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+            return { ok: true, matched: t };
+          } catch (e) { return { ok: false, reason: String(e?.message || e) }; }
+        }
+      }
+    }
+    // Couldn't pick → value is typed, blur so it saves best-effort
+    try { nativeInput.blur?.(); $fire(nativeInput, 'blur'); } catch { /* ignore */ }
+    return { ok: true, picked: false, note: 'typed-only' };
+  }
+
+  /**
+   * Find the inline-edit button that matches the given label. Strategy:
+   *   1. Collect slds-form-element__label texts that equal the alias OR
+   *      records-record-layout-item containing labelText as formatted
+   *      label/legend.
+   *   2. Walk up to the layout-item container.
+   *   3. Click the button[title="Edit <labelText>"].
+   *   4. Wait ~250ms then return the editor wrapper element inside.
+   */
+  async function clickInlineEdit(labelAliases) {
+    const aliases = Array.isArray(labelAliases) ? labelAliases : [labelAliases];
+    const labels = $qa(document, '.slds-form-element__label, legend, label');
+    let hit = null;
+    for (const lbl of labels) {
+      const txt = (lbl.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt) continue;
+      const matched = aliases.some((a) => typeof a === 'string'
+        ? txt.toLowerCase() === a.toLowerCase() || txt.toLowerCase().includes(a.toLowerCase())
+        : a.test(txt));
+      if (matched) { hit = lbl; break; }
+    }
+    if (!hit) {
+      // Fallback: look for layout items that have the inline-edit button
+      // title matching the alias
+      const btns = $qa(document, 'button[title]');
+      for (const b of btns) {
+        const t = (b.getAttribute('title') || '').replace(/^Edit\s+/, '');
+        const ok = aliases.some((a) => typeof a === 'string'
+          ? t.toLowerCase() === a.toLowerCase() || t.toLowerCase().includes(a.toLowerCase())
+          : a.test(t));
+        if (ok && /^Edit\s+/.test(b.getAttribute('title') || '')) { hit = b; break; }
+      }
+      if (hit?.tagName === 'BUTTON') {
+        try { hit.click(); await $sleep(260); return { wrapper: hit.closest('records-record-layout-item, .slds-form-element, .test-id__field-label-container, lightning-output-field, div') || document.body }; }
+        catch (e) { return { ok: false, error: String(e?.message || e) }; }
+      }
+      return { ok: false, error: `No label "${aliases[0]}" found for inline edit.` };
+    }
+    const layoutItem = hit.closest(
+      'records-record-layout-item, lightning-output-field, .slds-form-element, .test-id__field-label-container, li, div'
+    );
+    if (!layoutItem) return { ok: false, error: `Couldn't find layout item for label "${aliases[0]}".` };
+    const btn = $qs(layoutItem, 'button.inline-edit-trigger, button[title^="Edit "], button.test-id__inline-edit-trigger');
+    if (!btn) return { ok: false, error: `No inline-edit button for label "${aliases[0]}". Field might be read-only or not on this page.` };
+    try { btn.click(); } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+    await $sleep(320); // let LWC swap the editor in
+    return { wrapper: layoutItem, aliasUsed: aliases[0] };
+  }
+
+  /** Click the docked footer's Save button. */
+  async function clickFooterSave() {
+    // 2026 Console modal/docked-form-footer button with label Save
+    const candidates = Array.from(document.querySelectorAll('footer button, .slds-docked-form-footer button, [data-render-mode-inline="form"] button, button'));
+    for (const b of candidates) {
+      const txt = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '')).toLowerCase();
+      if (/^(save|保存)\b|(^|\s)save($|\s)/.test(txt) || txt.includes('save changes')) {
+        try { b.click(); await $sleep(260); return true; }
+        catch { /* ignore */ }
+      }
+    }
+    return false;
+  }
+  /** Click Cancel when an edit goes badly so the next field doesn't error. */
+  async function clickFooterCancel() {
+    const candidates = Array.from(document.querySelectorAll('footer button, .slds-docked-form-footer button, button'));
+    for (const b of candidates) {
+      const txt = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '')).toLowerCase();
+      if (/^(cancel|取消)\b/.test(txt) || /\bcancel\b/.test(txt)) {
+        try { b.click(); await $sleep(120); return true; } catch { /* ignore */ }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Find one editable field by label aliases, enter edit mode, write value,
+   * then click Save footer.  Returns a per-field result shape:
+   *   { ok, aliasUsed, editorKind, detail? } | { ok:false, error }.
+   *   kind: 'text' | 'combobox' | 'textarea' | 'lookup'
+   */
+  async function editAndSet(labelAliases, value, editorKind = 'auto') {
+    if (value == null || String(value).trim() === '') {
+      return { ok: true, skipped: true, reason: 'empty value' };
+    }
+    const e = await clickInlineEdit(labelAliases);
+    if (!e || e.ok === false) return { ok: false, error: e?.error || `couldn't open editor for ${labelAliases[0]}` };
+    const wrap = e.wrapper;
+    // Detect editor: combobox = lightning-combobox, else input/textarea.
+    let kind = editorKind;
+    let combobox = null;
+    if (kind === 'auto') {
+      combobox = $qs(wrap, 'lightning-combobox, [role="combobox"]');
+      if (combobox) kind = 'combobox';
+      else {
+        const ta = $qs(wrap, 'textarea, [data-textarea]');
+        kind = ta ? 'textarea' : 'text';
+      }
+    }
+    let result = { ok: false, error: 'editor not resolved' };
+    if (kind === 'combobox' || kind === 'lookup') {
+      const picker = combobox || $qs(wrap, 'lightning-combobox, [role="combobox"]');
+      const r = await nativeSetCombobox(picker, String(value));
+      result = r.ok ? { ok: true, editorKind: kind, detail: r } : { ok: false, error: r.reason || 'combobox pick failed' };
+    } else {
+      const wrapperEl = $qs(wrap, 'lightning-input, lightning-input-field, lightning-textarea, textarea, input');
+      const native = resolveNativeInput(wrapperEl) || $qs(wrap, 'input, textarea');
+      const ok = nativeTypeText(native, String(value));
+      result = ok ? { ok: true, editorKind: kind } : { ok: false, error: `couldn't set native input for ${labelAliases[0]}` };
+    }
+    await $sleep(120);
+    // Save (if the page has a single footer Save it will commit the batch
+    // and the next edit will re-open its inline edit fresh).
+    const saved = await clickFooterSave();
+    if (!saved) {
+      // Maybe auto-saved, that's fine for combobox lookups with blur commit
+      // but we warn the caller.
+      result.saveTried = false;
+    }
+    return result;
+  }
+
+  /**
+   * Click the "Post" tab in the chatter feed and (if provided) write the
+   * post body into the lightning-input-rich-text contenteditable.
+   * Publisher steps:
+   *   1. Find the Post tab header (the exact anchor the user gave:
+   *      <a title="Post" class="tabHeader" data-target-selection-name="FeedItem.TextPostTab">).
+   *   2. Click it, wait ~420ms.
+   *   3. Locate the chatter publisher's rich text editor (any
+   *      contenteditable="true" inside a forceChatter* area or the
+   *      element with role="textbox" aria-multiline="true").
+   *   4. Clear existing placeholder (if any), execCommand('insertText', body).
+   *   5. If publish=true, click the Publish/Share button.
+   */
+  async function clickPostTabAndWrite(body, opts) {
+    const publish = !!opts?.publish;
+    const result = { postBody: { ok: false, length: 0, tabFound: false, editorFound: false, publishClicked: false } };
+    const tabHeader = document.querySelector(
+      'a.tabHeader[data-target-selection-name="FeedItem.TextPostTab"], a[title="Post"].tabHeader, a.tabHeader:has(span.title:is(:-webkit-any(:-moz-read-write)))'
+    ) || (() => {
+      const spans = Array.from(document.querySelectorAll('span.title'));
+      const s = spans.find((x) => (x.textContent || '').trim() === 'Post');
+      return s?.closest?.('a.tabHeader, li.tabs__item a') || null;
+    })();
+    if (!tabHeader) return result;
+    result.postBody.tabFound = true;
+    try { tabHeader.click(); } catch (e) { result.postBody.error = String(e?.message || e); return result; }
+    await $sleep(480);
+    // Prefer the chatter publisher's contentEditable (the one inside the
+    // *active* publisher — not old feed post entries that are also
+    // contentEditable). Pick the shallowest one *after* an
+    // forceChatterPublisher or the picker-shell/publisher container.
+    const container =
+      document.querySelector('.forceChatterPublisher, .forceChatterPublisherContainer, .cuf-publisherContainer, .slds-rich-text-editor, [data-component-id="publisher"], .template-input-row, .picker-shell') ||
+      document;
+    const candidates = Array.from(
+      container.querySelectorAll('[contenteditable="true"], [role="textbox"][aria-multiline="true"]')
+    );
+    // Prefer the smallest (in DOM order) non-disabled one with largest
+    // offsetWidth & offsetHeight — the editor that's actually rendered on
+    // screen.
+    let editor = null;
+    let score = -1;
+    for (const el of candidates) {
+      if (el.getAttribute('disabled') != null) continue;
+      const rect = el.getBoundingClientRect();
+      const sz = (rect.width || 0) * (rect.height || 0);
+      if (sz > score) { score = sz; editor = el; }
+    }
+    if (!editor) return result;
+    result.postBody.editorFound = true;
+    if (body != null) {
+      const ok = nativeTypeText(editor, body);
+      result.postBody.ok = ok;
+      result.postBody.length = String(body).length;
+      await $sleep(200);
+    } else {
+      result.postBody.ok = true;
+    }
+    if (publish) {
+      // Find Publish button (Share / Post) in the footer / modal below
+      // the editor — it's a primary action button.
+      const btns = Array.from(document.querySelectorAll('button'));
+      let pub = null;
+      for (const b of btns) {
+        const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+        if (/(^publish$|^post$|^share$)/.test(txt)) { pub = b; break; }
+      }
+      if (pub) {
+        try { pub.click(); result.postBody.publishClicked = true; await $sleep(400); }
+        catch (e) { result.postBody.error = String(e?.message || e); }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Orchestrator — apply a whole bundle and return per-field results.
+   * Runs in serial so inline edits don't stomp on each other (each edit
+   * commits via Save footer before the next field opens).
+   */
+  async function applyCaseFields(fields, _opts) {
+    const out = {
+      postBody: null,
+      fields: {},
+      saveEach: _opts?.saveEach === true,
+    };
+    // (1) Post tab + note body
+    if (fields.postBody != null) {
+      const r = await clickPostTabAndWrite(fields.postBody, { publish: !!fields.postPublish });
+      Object.assign(out, r);
+    }
+    // (2) Editable layout fields — each open-save serial
+    const defs = [
+      { key: 'contactPhone', labelAliases: ['Phone', 'Contact Phone', 'Mobile Phone', 'Mobile', 'Telephone'], kind: 'text' },
+      { key: 'customerName', labelAliases: [/^Contact Name$/, /^Name$/, /^Contact$/], kind: 'auto' },
+      { key: 'accountName',  labelAliases: [/^Account Name$/], kind: 'lookup' },
+      { key: 'amrModelNo',   labelAliases: [/^AMR Model No\.?$/i, 'AMR Model', 'Model No'], kind: 'lookup' },
+    ];
+    for (const d of defs) {
+      const v = fields[d.key];
+      if (v == null || String(v).trim() === '') { out.fields[d.key] = { ok: true, skipped: true }; continue; }
+      try {
+        const r = await editAndSet(d.labelAliases, v, d.kind);
+        out.fields[d.key] = r;
+      } catch (e) {
+        out.fields[d.key] = { ok: false, error: String(e?.message || e) };
+        // If an edit got stuck open, cancel so the next one is clean
+        await clickFooterCancel();
+      }
+    }
+    // Aggregate status for caller
+    const all = [out.postBody, ...Object.values(out.fields)].filter(Boolean);
+    const okCount = all.filter((x) => x.ok).length;
+    const total = all.length;
+    out.summary = { ok: okCount === total, okCount, total };
+    return out;
+  }
 
   // Heartbeat reports + SPA navigation listeners
   let lastHash = '';

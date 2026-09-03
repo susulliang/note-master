@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Copy, Check, X, Pencil, Eye, Code2 } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo, useContext } from 'react';
+import { Copy, Check, X, Pencil, Eye, Code2, Upload, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { TicketPanelsContext } from './FlowNode';
+import { cn } from '@/lib/utils';
 
 interface OutputModalProps {
   open: boolean;
@@ -68,6 +70,117 @@ export default function OutputModal({
 }: OutputModalProps) {
   const [copied, setCopied] = useState<null | 'rich' | 'plain'>(null);
   const [editableText, setEditableText] = useState(noteText);
+  const [pushing, setPushing] = useState(false);
+  const panelsCtx = useContext(TicketPanelsContext);
+  const applyCaseFields = panelsCtx?.applyCaseFields;
+
+  // Parse extra fields for "Push to Salesforce Case" (beyond the 3 chip ones)
+  //   - Deebot Model / Serial / SKU / Email / Shipping Address / Phone → for
+  //     this iteration we only expose the 4 editable SF fields the user
+  //     explicitly asked about: AMR Model No. (← deebotModel), Name
+  //     (customerName) → customerName/contact field, Account Name → account
+  //     if available else customerName, Phone → contactNumber.
+  const pushableFields = useMemo<{
+    postBody: string;
+    amrModelNo?: string;
+    customerName?: string;
+    accountName?: string;
+    contactPhone?: string;
+  }>(() => {
+    const text = editableText;
+    const oneLine = (label: string) => {
+      const m = text.match(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.+)$`, 'mi'));
+      return stripMarkdownBold(m?.[1] ?? '').trim() || undefined;
+    };
+    const phone = oneLine('Contact number') || oneLine('Contact Number') || oneLine('Phone');
+    const email = oneLine('Email address') || oneLine('Email Address');
+    const name = oneLine('Customer Name');
+    const model = oneLine('Deebot Model') || oneLine('Robot Model') || oneLine('Model') || oneLine('Product Model') || oneLine('AMR Model No.');
+    const accountName = oneLine('Account Name') || name;
+    return {
+      postBody: text,
+      amrModelNo: model,
+      customerName: name,
+      accountName,
+      contactPhone: phone,
+      // eslint-disable-next-line no-console
+      ...(email ? {} : {}),
+    };
+  }, [editableText]);
+
+  /** Run through the extension → SF Case tab. Each success/failure → toast. */
+  const handlePushToSalesforce = useCallback(async () => {
+    if (!applyCaseFields) {
+      toast.error("Extension bridge isn't connected. Reload the Ecovacs Note Helper extension, or make sure the app is running on an allowed host (localhost/Vercel).");
+      return;
+    }
+    setPushing(true);
+    try {
+      const f = pushableFields;
+      const r = await applyCaseFields({
+        fields: {
+          postBody: f.postBody,
+          postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
+          amrModelNo: f.amrModelNo,
+          customerName: f.customerName,
+          accountName: f.accountName,
+          contactPhone: f.contactPhone,
+        },
+      });
+      if (!r.ok) {
+        toast.error(r.error || 'Push failed.', {
+          description: r.error ? 'Retry after opening any Lightning Case tab.' : undefined,
+        });
+        return;
+      }
+      // (1) Post body toast
+      const pb = r.postBody as any;
+      if (pb) {
+        if (pb.ok) toast.success(`Post tab opened${pb.editorFound ? `, note body written (${pb.length ?? 0} chars)` : ''}${pb.publishClicked ? ' — auto-published.' : '.'}${!pb.publishClicked ? ' Review & click Publish in SF when ready.' : ''}`);
+        else if (pb.tabFound === false) toast.warning('Post tab: not found on this Case layout.');
+        else toast.warning(`Post tab: ${pb.error || 'editor not available'}. Paste manually from clipboard if needed.`);
+      }
+      // (2) Editable SF fields
+      const labels: Record<string, string> = {
+        contactPhone: 'Phone',
+        customerName: 'Contact Name',
+        accountName:  'Account Name',
+        amrModelNo:   'AMR Model No.',
+      };
+      const fields = (r.fields ?? {}) as Record<string, any>;
+      const ks = Object.keys(labels) as (keyof typeof labels)[];
+      let good = 0; let skipped = 0; let failed = 0;
+      for (const k of ks) {
+        const s = fields[k];
+        if (!s) continue;
+        if (s.skipped) { skipped += 1; continue; }
+        if (s.ok) {
+          good += 1;
+        } else {
+          failed += 1;
+          toast.warning(`${labels[k]}: ${s.error || 'could not be written.'}`, {
+            description: 'Field may be read-only, not on this layout, or the inline-edit button was not found.',
+          });
+        }
+      }
+      if (good > 0) {
+        toast.success(`Wrote ${good} editable SF field${good === 1 ? '' : 's'}.${skipped > 0 ? ` ${skipped} empty skipped.` : ''}${failed > 0 ? ` (${failed} had errors — see warnings above.)` : ''}`);
+      } else if (skipped === Object.keys(labels).length && (pb?.ok || pb === null)) {
+        toast.info('All editable layout fields were empty; note body was pushed to Post tab instead.');
+      } else if (!pb?.ok && failed > 0 && good === 0) {
+        toast.warning(`Push completed with ${failed} warning${failed === 1 ? '' : 's'}. (Fields were found but editing may require inline-edit permissions or different Case layout sections.)`);
+      }
+      if (r.tab?.title || r.tab?.url) {
+        toast.message(`Pushed to tab: ${r.tab?.title || new URL(r.tab.url).origin}`, {
+          description: r.tab?.url ? new URL(r.tab.url).pathname : undefined,
+        });
+      }
+    } catch (e: any) {
+      toast.error(String(e?.message || e));
+    } finally {
+      setPushing(false);
+    }
+  }, [applyCaseFields, pushableFields]);
 
   // Parse contact fields out of the (possibly edited) note text.
   // Chip values are shown & copied without the **…** bold markers that the
@@ -281,8 +394,19 @@ export default function OutputModal({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-          <div className="text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handlePushToSalesforce()}
+              disabled={pushing}
+              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'opacity-70')}
+              title={applyCaseFields ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit." : 'Extension bridge must be connected first (Ecovacs Note Helper extension + allowed origin).'}
+            >
+              {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+              {pushing ? 'Pushing to Salesforce…' : '📤 Push to Salesforce Case'}
+            </Button>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => handleOpenChange(false)} className="gap-1.5">

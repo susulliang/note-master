@@ -51,6 +51,31 @@ export interface TicketPanelsContextShape {
    *  asking to open ANY org tab first). */
   openCase?: (opts: { caseNumber?: string; directUrl?: string; newTab?: boolean }) =>
     Promise<{ ok: boolean; url?: string | null; navigated?: 'new' | 'reused' | null; error?: string | null }>;
+
+  /** After generating a formatted ticket note, push the Post body + a
+   *  handful of editable layout fields back into the currently-open
+   *  Salesforce Case tab (or auto-select one if tabId omitted).  Used by
+   *  the new "Push to Salesforce Case" button in the Output Modal.
+   *  Returns { ok, summary:{okCount/total}, postBody, fields, tab }. */
+  applyCaseFields?: (opts: {
+    fields: {
+      postBody?: string;
+      postPublish?: boolean;
+      amrModelNo?: string;
+      customerName?: string;
+      accountName?: string;
+      contactPhone?: string;
+    };
+    tabId?: number;
+    saveEach?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    summary?: { ok: boolean; okCount: number; total: number } | null;
+    postBody?: any;
+    fields?: any;
+    tab?: any;
+    error?: string | null;
+  }>;
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';

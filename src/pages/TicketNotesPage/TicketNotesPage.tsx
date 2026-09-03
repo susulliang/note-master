@@ -1490,6 +1490,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                 }
                 return { ok: false, url: null, navigated: null, error: 'Extension not connected. Paste a full Lightning Case URL to open it directly, or reload the Ecovacs Note Helper extension.' };
               },
+              applyCaseFields: extensionBridge.connected
+                ? extensionBridge.applyCaseFields.bind(extensionBridge)
+                : undefined,
               transcriptContent: (
                 <VoiceCaptionPanel
                   mic={{
