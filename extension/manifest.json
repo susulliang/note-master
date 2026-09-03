@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ecovacs Note Helper",
   "short_name": "Note Helper",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Tier-2 browser extension for Ecovacs NA agents: scrapes the Salesforce Case tab (and embedded CCP phone panel) for customer/device fields, then pushes them straight into the Ticket Notes web app with a one-click confirm gate.",
   "minimum_chrome_version": "114",
   "icons": {
@@ -50,8 +50,11 @@
       "https://localhost:*/*",
       "http://127.0.0.1:*/*",
       "https://127.0.0.1:*/*",
+      "http://[::1]:*/*",
+      "https://[::1]:*/*",
       "https://*.vercel.app/*",
-      "https://note-master.vercel.app/*"
+      "https://note-master.vercel.app/*",
+      "https://note-master-roan.vercel.app/*"
     ],
     "accepts_tls_channel_id": false
   },
@@ -97,8 +100,10 @@
       "matches": [
         "*://localhost:*/*",
         "*://127.0.0.1:*/*",
+        "*://[::1]:*/*",
         "https://*.vercel.app/*",
-        "https://note-master.vercel.app/*"
+        "https://note-master.vercel.app/*",
+        "https://note-master-roan.vercel.app/*"
       ],
       "js": [
         "bridge.js"
