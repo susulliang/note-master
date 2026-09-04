@@ -1829,6 +1829,7 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
               postBodyEditorFound: result.postBody?.editorFound ?? null,
               postBodyChars: result.postBody?.length ?? null,
               postBodyLandedChars: result.postBody?.landedChars ?? null,
+              postBodyHtmlUsed: result.postBody?.htmlUsed ?? null,
               postBodyPublished: result.postBody?.publishClicked ?? null,
               fieldSummary: Object.fromEntries(
                 Object.entries(result?.fields ?? {}).map(([k, s]) => [k, {

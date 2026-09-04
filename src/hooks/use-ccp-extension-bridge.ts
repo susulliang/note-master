@@ -98,6 +98,10 @@ export interface CcpExtensionBridge {
   applyCaseFields: (opts: {
     fields: {
       postBody?: string;
+      /** Rich-text (HTML) rendering of postBody — <strong>/<br> etc. When
+       *  present the SF content script prefers execCommand('insertHTML')
+       *  so the chatter Post keeps bold formatting instead of literal **. */
+      postBodyHtml?: string;
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;
@@ -1194,6 +1198,10 @@ export function useCcpExtensionBridge({
   const applyCaseFields = useCallback(async (opts: {
     fields: {
       postBody?: string;
+      /** Rich-text (HTML) rendering of postBody — <strong>/<br> etc. When
+       *  present the SF content script prefers execCommand('insertHTML')
+       *  so the chatter Post keeps bold formatting instead of literal **. */
+      postBodyHtml?: string;
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;

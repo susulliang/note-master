@@ -60,6 +60,7 @@ export interface TicketPanelsContextShape {
   applyCaseFields?: (opts: {
     fields: {
       postBody?: string;
+      postBodyHtml?: string;
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;

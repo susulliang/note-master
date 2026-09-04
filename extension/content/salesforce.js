@@ -758,6 +758,32 @@
   }
 
   /**
+   * Insert an HTML fragment into a contenteditable rich-text editor
+   * (the SF chatter publisher is Quill-based): focus → selectAll →
+   * delete → execCommand('insertHTML', html) → input/change/blur chain.
+   * Unlike insertText this carries formatting (<strong>, <br>) verbatim
+   * and does not truncate the payload at the first newline.
+   */
+  function nativeInsertHtml(el, html) {
+    if (!el || !el.isContentEditable) return false;
+    try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
+    try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
+    $fire(el, 'focus');
+    try { document.execCommand('delete', false, null); } catch { /* ignore */ }
+    let ok = false;
+    try {
+      ok = document.execCommand('insertHTML', false, html);
+    } catch { ok = false; }
+    if (ok) {
+      $fire(el, new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText' }));
+      $fire(el, new InputEvent('change', { bubbles: true, cancelable: true }));
+    }
+    try { el.blur(); } catch { /* ignore */ }
+    $fire(el, 'blur');
+    return Boolean(ok);
+  }
+
+  /**
    * For combobox / lookups (lightning-combobox, lightning-lookup), type the
    * desired value then pick the first matching item from the popover. Used
    * by Account Name (lookup to Account record) & AMR Model No (lookup to
@@ -1020,20 +1046,37 @@
 
     // --- (3) write the note body ---------------------------------------
     if (body != null) {
-      const ok = nativeTypeText(editor, body);
+      // RICH TEXT path: when the caller supplied an HTML rendering of the
+      // note (bold headings as <strong>, lines as <br>) insert it with
+      // execCommand('insertHTML'). This is the verbatim "what the preview
+      // shows" version AND the reliable multi-line path — plain
+      // insertText gets mangled at the first \n in the Quill publisher
+      // (a full note once landed as just its "**Notes**" heading line).
+      let ok = false;
+      if (opts?.html && editor.isContentEditable) {
+        ok = nativeInsertHtml(editor, String(opts.html));
+        if (ok) result.postBody.htmlUsed = true;
+      }
+      if (!ok) {
+        // Plain-text fallback (also the only path for non-contenteditable
+        // native inputs).
+        ok = nativeTypeText(editor, body);
+      }
       result.postBody.ok = ok;
       result.postBody.length = String(body).length;
-      if (!ok) result.postBody.detail = 'nativeTypeText returned false';
+      if (!ok) result.postBody.detail = result.postBody.htmlUsed
+        ? 'insertHTML returned false'
+        : 'nativeTypeText returned false';
       await $sleep(220);
-      // VERIFY the text actually landed: execCommand('insertText') can
-      // silently no-op on some LWC rich-text builds, and a green "ok"
-      // with an empty editor is exactly the janky fill agents reported.
+      // VERIFY the text actually landed: execCommand can silently no-op
+      // on some LWC rich-text builds, and a green "ok" with an empty
+      // editor is exactly the janky fill agents reported.
       const landed = (editor.innerText || '').length;
       result.postBody.landedChars = landed;
       const expected = String(body).replace(/[*#>`]/g, '').length;
       if (ok && landed < Math.max(10, expected * 0.4)) {
         result.postBody.ok = false;
-        result.postBody.detail = `editor stayed near-empty after insertText (landed ${landed}/${expected} chars) — paste the note from clipboard instead`;
+        result.postBody.detail = `editor stayed near-empty after insert (landed ${landed}/${expected} chars) — paste the note from clipboard instead`;
       }
     } else {
       result.postBody.ok = true;
@@ -1077,7 +1120,13 @@
     };
     // (1) Post tab + note body
     if (fields.postBody != null) {
-      const r = await clickPostTabAndWrite(fields.postBody, { publish: !!fields.postPublish });
+      const r = await clickPostTabAndWrite(fields.postBody, {
+        publish: !!fields.postPublish,
+        // Rich-text rendering supplied by the app (**bold** → <strong>,
+        // lines → <br>) — inserted via execCommand('insertHTML') so the
+        // publisher keeps formatting and the full multi-line body.
+        html: fields.postBodyHtml || null,
+      });
       Object.assign(out, r);
     }
     // (2) Editable layout fields — each open-save serial

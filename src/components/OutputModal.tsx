@@ -31,6 +31,23 @@ function stripMarkdownBold(text: string): string {
   return text.replace(/\*\*/g, '');
 }
 
+/** Convert the note markdown into the minimal semantic HTML pushed into the
+ *  Salesforce chatter Post editor: HTML-escaped text, `**bold**` →
+ *  <strong>, every source line kept verbatim and joined with <br>. No
+ *  wrapper div / inline styles — the SF publisher (Quill) keeps only the
+ *  formatting it understands, so the note lands exactly as the preview
+ *  shows it, bold included. */
+function noteMarkdownToHtml(md: string): string {
+  const esc = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return md
+    .split(/\r?\n/)
+    .map((line) => esc(line).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'))
+    .join('<br>');
+}
+
 /** Convert a raw markdown note string into safe(ish) HTML for the clipboard
  *  "text/html" flavour. Uses remark-gfm to render the same way the preview
  *  panel does. We deliberately avoid sanitisation libraries here — the
@@ -373,6 +390,11 @@ export default function OutputModal({
         r = await applyCaseFields({
           fields: {
             postBody: f.postBody,
+            // Rich-text version — the content script inserts it via
+            // execCommand('insertHTML') so the Post keeps the bold headings
+            // (insertText mangles multi-line bodies at the first \n, which
+            // is how a push once landed with only the "**Notes**" heading).
+            postBodyHtml: noteMarkdownToHtml(f.postBody),
             postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
             amrModelNo: f.amrModelNo,
             customerName: f.customerName,
@@ -535,7 +557,7 @@ export default function OutputModal({
           label: 'Post — note body',
           status: pb.ok ? 'ok' : 'failed',
           detail: pb.ok
-            ? `${pb.length ?? 0} chars written to publisher${pb.publishClicked ? ' — published' : ' — review & click Publish in SF'}`
+            ? `${pb.length ?? 0} chars written (${pb.htmlUsed ? 'rich text, bold kept' : 'plain text'})${pb.publishClicked ? ' — published' : ' — review & click Publish in SF'}`
             : (!pb.tabFound
                 ? 'Post tab not found on this Case feed'
                 : !pb.editorFound
