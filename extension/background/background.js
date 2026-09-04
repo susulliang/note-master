@@ -1790,4 +1790,118 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       await chrome.tabs.create({ url: chrome.runtime.getURL('docs/install.html') });
     } catch { /* ignore */ }
   }
+  // On install/update, proactively inject bridge.js into any ticket-app
+  // tabs that are ALREADY open. Content scripts only inject on navigation,
+  // so tabs opened before the extension (re)load never get bridge.js unless
+  // we do this. This is the #1 reason "bridge not connected" persists
+  // after a reload.
+  try {
+    const openTabs = await chrome.tabs.query({});
+    for (const t of openTabs) {
+      if (t.id && typeof t.url === 'string' && isTicketAppUrl(t.url)) {
+        void ensureBridgeInjected(t.id, t.url);
+      }
+    }
+  } catch { /* ignore */ }
+});
+
+// ---------------------------------------------------------------------------
+//  Proactive bridge.js injection (belt-and-suspenders for content_scripts)
+// ---------------------------------------------------------------------------
+//  MV3 content_scripts registration is cached aggressively by Edge/Chrome.
+//  Even with perfectly correct `matches` patterns, after an extension reload
+//  the browser may keep serving the OLD content-script registration to tabs
+//  that were already open — or skip injection entirely until the user
+//  navigates. This makes "bridge not connected" appear even though
+//  manifest patterns cover the URL.
+//
+//  Workaround: on every tab update/activate to a ticket-app URL, the service
+//  worker runs chrome.scripting.executeScript to (1) check whether
+//  bridge.js already installed itself (window.__NM_EXT_BRIDGE_INSTALLED__)
+//  and (2) if not, inject bridge.js RIGHT NOW. scripting.executeScript
+//  bypasses the content_scripts cache entirely and only requires
+//  host_permissions (which the manifest already declares for these URLs).
+// ---------------------------------------------------------------------------
+const TICKET_APP_URL_RE = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/|^https:\/\/([a-z0-9-]+\.)?vercel\.app\//i;
+
+function isTicketAppUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  // Quick reject: chrome:// / edge:// / about: / extension:// never qualify
+  if (/^(chrome|edge|about|extension|moz-extension):/i.test(url)) return false;
+  return TICKET_APP_URL_RE.test(url);
+}
+
+/**
+ * Check whether bridge.js is already installed in the tab (via the
+ * window.__NM_EXT_BRIDGE_INSTALLED__ sentinel it sets on boot). If not,
+ * inject bridge.js via chrome.scripting.executeScript {files}. Returns
+ * true when injection happened, false when bridge was already present.
+ */
+async function ensureBridgeInjected(tabId, url) {
+  if (!tabId) return false;
+  try {
+    // Probe: read the DOM attribute bridge.js sets on boot. DOM attributes
+    // are visible from BOTH the MAIN world and every ISOLATED world, so
+    // this works even though the probe may run in a different isolated
+    // world than the content-script bridge.js.
+    const probe = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      injectImmediately: true,
+      world: 'MAIN',
+      func: () => ({
+        installed: !!(document && document.documentElement && document.documentElement.getAttribute('data-ecovacs-bridge-installed')),
+      }),
+    });
+    const already = probe && probe[0] && probe[0].result && probe[0].result.installed;
+    if (already) {
+      addDiagLog('bridge:already_injected', { tabId, url });
+      return false;
+    }
+    // Inject bridge.js now. {files} injection runs in ISOLATED world by
+    // default — bridge.js must keep using window.postMessage to talk to the
+    // page (it already does). all_frames:false because bridge.js only needs
+    // to run in the top frame of the ticket notes app.
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      files: ['bridge.js'],
+      injectImmediately: true,
+    });
+    addDiagLog('bridge:proactive_inject', { tabId, url });
+    return true;
+  } catch (e) {
+    addDiagLog('bridge:proactive_inject_error', { tabId, url, error: String(e?.message || e).slice(0, 200) });
+    return false;
+  }
+}
+
+// Fire on every tab navigation completion. Only act on ticket-app URLs.
+// We debounce per-tabId to avoid re-injecting when multiple onUpdated
+// events fire for the same navigation.
+const _bridgeInjectInflight = new Set();
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  const url = tab?.url;
+  if (!url || !isTicketAppUrl(url)) return;
+  if (_bridgeInjectInflight.has(tabId)) return;
+  _bridgeInjectInflight.add(tabId);
+  ensureBridgeInjected(tabId, url).finally(() => {
+    // Keep the debounce key for 1.5s so rapid status events don't re-trigger.
+    setTimeout(() => _bridgeInjectInflight.delete(tabId), 1500);
+  });
+});
+
+// Also fire when the user activates (focuses) a tab — handles the case
+// where the ticket-app tab was open before the extension loaded, or where
+// Edge skipped document_start injection on the initial navigation.
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab?.url;
+    if (!url || !isTicketAppUrl(url)) return;
+    if (_bridgeInjectInflight.has(tabId)) return;
+    _bridgeInjectInflight.add(tabId);
+    ensureBridgeInjected(tabId, url).finally(() => {
+      setTimeout(() => _bridgeInjectInflight.delete(tabId), 1500);
+    });
+  } catch { /* tab gone — ignore */ }
 });

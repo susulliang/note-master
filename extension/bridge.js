@@ -32,6 +32,15 @@
 (function () {
   if (window.__NM_EXT_BRIDGE_INSTALLED__) return;
   window.__NM_EXT_BRIDGE_INSTALLED__ = true;
+  // World-agnostic sentinel: DOM attribute visible from MAIN and ISOLATED
+  // worlds so background's proactive-inject probe (which may run in a
+  // different isolated world) can detect bridge.js is already present and
+  // skip re-injection.
+  try {
+    if (document && document.documentElement) {
+      document.documentElement.setAttribute('data-ecovacs-bridge-installed', '1');
+    }
+  } catch { /* ignore */ }
 
   // ---------------------------------------------------------------------
   // Read manifest ONCE asynchronously and cache patterns + version.

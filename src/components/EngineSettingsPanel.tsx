@@ -7,6 +7,7 @@ import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
 import { TicketPanelsContext } from '@/components/FlowNode';
+import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
 import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
@@ -242,7 +243,16 @@ export default function EngineSettingsPanel({
   onClose,
 }: EngineSettingsPanelProps) {
   const panelsCtx = useContext(TicketPanelsContext);
-  const ext = panelsCtx?.extensionConnection ?? null;
+  // Fallback: EngineSettingsPanel may render outside TicketPanelsContext.Provider
+  // in some layout paths (same regression OutputModal had earlier). Use the
+  // hook directly so the version footer never shows stale/null diagnostics.
+  const extBridgeHook = useCcpExtensionBridge({ onApply: () => [] });
+  const ext = panelsCtx?.extensionConnection
+    ?? {
+        connected: extBridgeHook.connected,
+        requestConnection: extBridgeHook.requestConnection,
+        diagnostics: extBridgeHook.connectionDiagnostics,
+      };
   const extExpected = ext?.diagnostics?.expectedManifestVersion ?? null;
   const extInjected = ext?.diagnostics?.injectedManifestVersion ?? null;
   const extBridgeOk = Boolean(ext?.connected);

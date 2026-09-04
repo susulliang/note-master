@@ -912,11 +912,35 @@ async function bootstrap() {
         else if (action === 'inject') void injectNow(row, tabId);
       });
       async function refreshBridgePanel() {
-        if (!chrome.runtime?.sendMessage) return;
+        // If the extension was reloaded while this popup was open, the
+        // popup's own MV3 chrome.runtime bindings become stale and
+        // sendMessage is undefined. The user must close & reopen the popup
+        // (a refresh of the popup page itself is not enough because the
+        // popup document context is already invalidated). Detect this and
+        // show a clear message instead of silently leaving "Loading...".
+        if (!chrome.runtime?.sendMessage || !chrome.runtime?.id) {
+          if (elBridgeSummary) elBridgeSummary.innerHTML =
+            '<span class="pane__hint" style="color:var(--warn);font-weight:600">' +
+            '🧩 Popup context invalidated — the extension was reloaded while this popup was open. ' +
+            '<strong>Close this popup (click outside it) and re-open it</strong>, then the Bridge panel will work again.</span>';
+          if (elBridgeCount) elBridgeCount.textContent = '—';
+          return;
+        }
         let r;
         try { r = await chrome.runtime.sendMessage({ type: 'POPUP_DIAG_QUERY_LOG' }); }
         catch (err) {
-          if (elBridgeSummary) elBridgeSummary.innerHTML = `<span class="pane__hint" style="color:var(--err)"><strong>Service worker not reachable</strong> (${escHtml(String(err?.message || err))}). Click Scan Salesforce &amp; CCP once (wakes SW via scripting.executeScript), then Refresh.</span>`;
+          const msg = String(err?.message || err);
+          // Same root cause as above, but thrown at call time instead of
+          // being undefined upfront.
+          if (/context invalidated|extension context/i.test(msg) || !chrome.runtime?.id) {
+            if (elBridgeSummary) elBridgeSummary.innerHTML =
+              '<span class="pane__hint" style="color:var(--warn);font-weight:600">' +
+              '🧩 Popup context invalidated (extension was reloaded). ' +
+              '<strong>Close this popup and re-open it.</strong></span>';
+            if (elBridgeCount) elBridgeCount.textContent = '—';
+            return;
+          }
+          if (elBridgeSummary) elBridgeSummary.innerHTML = `<span class="pane__hint" style="color:var(--err)"><strong>Service worker not reachable</strong> (${escHtml(msg)}). Click Scan Salesforce &amp; CCP once (wakes SW via scripting.executeScript), then Refresh.</span>`;
           return;
         }
         if (!r || !r.ok) {
