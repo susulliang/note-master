@@ -3,7 +3,7 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnmIZrVCK1Ai/Wl62LoyEiklEiPrQ8gYybXGdhqCyN3OkbzQSmYu1h8dSfpK5ZL7DOBtyUEUT6wI1CklDYAOuihgS0aDqA8ap+BsCf+oWEeR9r9le4CcNLZdI7PMQQqtMTURVxRFw3oHw5s1RvW0N2ajydk9OzZ8Jv2Ryzb5uoOxo5OK0yknA485vVS3mv4C0Hy7BB/6HLyB3Zvs63kFQgUoGMQYhmkk0+eiNpvo9ENB+dMktS+9aJ+UHz/XDEmR3Q5qvPszB+n71sM1EpjaDnfjg9Zu0uOqXLBnGGurvJuBXW1+/0mxURbm2r9c/WVNYE6h7I58LJ8ArVZipve1QHwIDAQAB",
   "name": "Ecovacs Note Helper",
   "short_name": "Note Helper",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "Tier-2 browser extension for Ecovacs NA agents: scrapes the Salesforce Case tab (and embedded CCP phone panel) for customer/device fields, then pushes them straight into the Ticket Notes web app with a one-click confirm gate.",
   "minimum_chrome_version": "114",
   "icons": {
