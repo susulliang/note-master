@@ -844,9 +844,133 @@ export default function EngineSettingsPanel({
                 Fix: press <strong>Ctrl+Shift+R</strong> (hard refresh) on this Ticket Notes tab, then try Push again.
               </div>
             )}
+            {/* Probe & Connect button — fires handshake immediately. Success → success lines. Failure → full diagnostics alert. */}
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleProbeConnect}
+                className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-card/60 px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-primary/20 hover:border-primary/60 active:bg-primary/30"
+                title="Send a :handshake_request probe to the Ecovacs Note Helper bridge. If no bridge is injected within ~8s, full diagnostics including manifest pattern hints are shown."
+              >
+                🔌 Probe & Connect
+              </button>
+              {extBridgeOk && (
+                <span className="text-[10.5px] text-muted-foreground/80">
+                  Already connected — re-probes to confirm handshake freshness.
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
+
+  function handleProbeConnect() {
+    const probe = ext?.requestConnection ?? extBridgeHook.requestConnection;
+    if (typeof probe !== 'function') {
+      window.alert('requestConnection is not available on this bridge.');
+      return;
+    }
+    probe();
+    let waited = 0;
+    const tick = () => {
+      waited += 250;
+      const dNow = ext?.diagnostics ?? extBridgeHook.connectionDiagnostics ?? null;
+      const nowConnected = Boolean(ext?.connected) || Boolean(extBridgeHook.connected);
+      if (nowConnected) {
+        const lines = buildDiagnosticsLines(dNow, true, waited);
+        try { window.alert(lines.join('\n')); } catch { /* ignore */ }
+        return;
+      }
+      if (waited >= 8000) {
+        const lines = buildDiagnosticsLines(dNow, false, waited);
+        const patterns = (dNow?.suggestedPatternsToAdd || []) as string[];
+        const copyableSnippet = patterns.length > 0
+          ? `// manifest.json snippet:\n"matches": [\n${patterns.map((p) => `  "${p}"`).join(',\n')}\n]`
+          : '';
+        if (copyableSnippet) {
+          try { void navigator.clipboard?.writeText(copyableSnippet); } catch { /* ignore */ }
+        }
+        lines.push('');
+        lines.push('━━━━━━━━━━━━━━━━━━━━━━');
+        lines.push(copyableSnippet || '(no manifest patterns need to be added — content_scripts cache is the likely culprit; see popup Bridge → Tabs snapshot → 🚀 Inject bridge now)');
+        try { window.alert(lines.join('\n')); } catch { /* ignore */ }
+        return;
+      }
+      setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
+    try {
+      (window as any).__debug = (window as any).__debug || {};
+      (window as any).__debug.lastEngineProbe = {
+        at: new Date().toISOString(),
+        startedConnected: Boolean(ext?.connected) || Boolean(extBridgeHook.connected),
+      };
+    } catch { /* ignore */ }
+  }
+}
+
+/** Build a plain-text diagnostics report from the current state.
+ *  Mirrors OutputModal's diagnoseText so EngineSettings and Output
+ *  surface the same information. */
+function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number): string[] {
+  const lines: string[] = [];
+  const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+  const isEdge = /Edg\//i.test(ua);
+  const browserTag = isEdge ? 'Microsoft Edge' : 'Chrome/Chromium';
+  const extMgrUrl = isEdge ? 'edge://extensions' : 'chrome://extensions';
+  const appOrigin = (typeof location !== 'undefined' ? location.origin : '') + '/';
+  if (!d) {
+    lines.push('No diagnostics object available from the TicketPanelsContext / bridge hook.');
+    lines.push(`App origin: ${appOrigin}`);
+    return lines;
+  }
+  if (justConnected) {
+    lines.push('✅✅ Bridge connected successfully within ' + Math.round(waitedMs / 100) / 10 + 's.');
+    lines.push('');
+  } else {
+    lines.push('❌❌ Probe did NOT receive a bridge handshake after ~' + (waitedMs / 1000) + 's.');
+  }
+  if (d.contextInvalidatedSeen) {
+    lines.unshift(`🚨 EXTENSION CONTEXT INVALIDATED (last seen: ${new Date(d.contextInvalidatedSeenAt || Date.now()).toLocaleString()}).`);
+    lines.unshift(`This tab holds dead chrome.runtime handles. Refreshing JUST the extension won't fix it — you MUST refresh THIS tab too.`);
+    lines.unshift(`Ctrl+Shift+R (hard refresh) the Ticket Notes tab first. Only if still failing → open ${extMgrUrl} → 🔄 Reload, then Ctrl+Shift+R again.`);
+    lines.unshift('');
+  }
+  lines.push(`Browser: ${browserTag}`);
+  lines.push(`App origin: ${d.appOrigin || appOrigin}`);
+  lines.push(`Bridge content-script injected: ${d.bridgeInjected ? 'YES (handshake seen)' : 'NO'}${d.lastHandshakeAt ? ` (last: ${new Date(d.lastHandshakeAt).toLocaleString()})` : ''}`);
+  if (d.patternsReceivedFromBridge) {
+    lines.push(`Manifest bridge patterns (RECEIVED ✅ from running extension):`);
+    lines.push(`  [${(d.manifestBridgePatterns || []).join(', ')}]`);
+    lines.push(`Manifest externally_connectable patterns (RECEIVED ✅):`);
+    lines.push(`  [${(d.manifestExternalPatterns || []).join(', ')}]`);
+  } else {
+    lines.push(`Manifest bridge patterns (DEFAULTS ⚠️ — no handshake yet; stale list, reload extension to refresh):`);
+    lines.push(`  [${(d.manifestBridgePatterns || []).join(', ')}]`);
+    lines.push(`Manifest externally_connectable patterns (DEFAULTS ⚠️):`);
+    lines.push(`  [${(d.manifestExternalPatterns || []).join(', ')}]`);
+  }
+  lines.push(`Origin covered by bridge content-scripts: ${d.originCoveredByBridge ? 'YES' : 'NO ❌'}`);
+  lines.push(`Origin covered by externally_connectable: ${d.originCoveredByExternal ? 'YES' : 'NO ❌'}`);
+  lines.push(`Expected extension manifest version: ${d.expectedManifestVersion || '(unknown)'}`);
+  lines.push(`Running bridge manifest version: ${d.injectedManifestVersion || '(not announced yet)'}`);
+  if (d.injectedVersionStale) {
+    lines.push('⚠️ Running extension is OLDER than this Ticket Notes build expects — reload the extension at ' + extMgrUrl);
+  }
+  if ((d.suggestedPatternsToAdd || []).length > 0) {
+    lines.push('');
+    lines.push('⚠️ These manifest patterns are MISSING from the installed extension:');
+    d.suggestedPatternsToAdd.forEach((p: string) => lines.push(`  - ${p}`));
+  }
+  if (!d.bridgeInjected) {
+    lines.push('');
+    lines.push(`Fix checklist (${browserTag}):`);
+    lines.push(`  1. Open ${extMgrUrl} → Developer mode → find Ecovacs Note Helper → 🔄 Reload (do it TWICE on Edge — cache is sticky).`);
+    lines.push(`  2. Hard refresh (Ctrl+Shift+R) THIS Ticket Notes tab.`);
+    lines.push(`  3. If popup was open during reload: close it and re-open it (popup context invalidated too).`);
+    lines.push(`  4. Popup → Bridge → Tabs snapshot → find this vercel row → click 🔬 Injectable? → if YES / Bridge: not loaded yet → click 🚀 Inject bridge now.`);
+  }
+  return lines;
 }
