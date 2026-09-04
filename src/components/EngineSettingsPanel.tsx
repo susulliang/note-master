@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -6,6 +6,7 @@ import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
+import { TicketPanelsContext } from '@/components/FlowNode';
 import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
@@ -240,6 +241,12 @@ export default function EngineSettingsPanel({
   onToggleCapture,
   onClose,
 }: EngineSettingsPanelProps) {
+  const panelsCtx = useContext(TicketPanelsContext);
+  const ext = panelsCtx?.extensionConnection ?? null;
+  const extExpected = ext?.diagnostics?.expectedManifestVersion ?? null;
+  const extInjected = ext?.diagnostics?.injectedManifestVersion ?? null;
+  const extBridgeOk = Boolean(ext?.connected);
+  const extVersionMismatch = ext?.diagnostics?.injectedVersionMatchesExpected === false;
   const [showLlmDebug, setShowLlmDebug] = useState(false);
   const [showJsonWindow, setShowJsonWindow] = useState(false);
   const [jsonCopied, setJsonCopied] = useState(false);
@@ -771,16 +778,54 @@ export default function EngineSettingsPanel({
         </div>
       )}
 
-      <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground/80">
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
-          <span className="font-semibold tracking-wide">Ticket Notes</span>
-        </div>
-        <div className="font-mono">
-          v{APP_VERSION}
-          {APP_RELEASED_AT && (
-            <span className="ml-1 opacity-70">· {APP_RELEASED_AT.replace('T', ' ').replace('Z', '')}</span>
-          )}
+      <div className="mt-2 flex items-start justify-between gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground/80">
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
+            <span className="font-semibold tracking-wide">Ticket Notes</span>
+          </div>
+          <div className="font-mono leading-relaxed">
+            <div>
+              App build: <span className="text-foreground">v{APP_VERSION}</span>
+              {APP_RELEASED_AT && (
+                <span className="ml-1 opacity-70">· {APP_RELEASED_AT.replace('T', ' ').replace('Z', '')}</span>
+              )}
+            </div>
+            <div>
+              Extension (expected):{' '}
+              <span className="text-foreground">
+                {extExpected ? `v${extExpected}` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              Extension (running):{' '}
+              <span className={cn('text-foreground', extVersionMismatch && 'text-red-400')}>
+                {extInjected ? `v${extInjected}` : extBridgeOk ? 'connected, not yet announced' : 'bridge not connected'}
+              </span>
+              <span
+                className={cn(
+                  'inline-block h-1.5 w-1.5 rounded-full',
+                  extVersionMismatch
+                    ? 'bg-red-400 animate-pulse'
+                    : extBridgeOk
+                      ? 'bg-green-500'
+                      : 'bg-muted-foreground/50',
+                )}
+                title={
+                  extVersionMismatch
+                    ? 'Version mismatch: the extension loaded in your browser is older than this build expects. Reload the extension.'
+                    : extBridgeOk
+                      ? 'Bridge handshake seen.'
+                      : 'Waiting for bridge handshake or permission.'
+                }
+              />
+            </div>
+            {extVersionMismatch && (
+              <div className="mt-0.5 text-red-400">
+                ⚠ Mismatch — go to edge://extensions (or chrome://extensions) → 🔄 Reload Ecovacs Note Helper.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
