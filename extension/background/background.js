@@ -1060,8 +1060,8 @@ async function refreshCcpTab() {
 //  accepts both the 8-digit display number and the 18-digit record Id).
 // ---------------------------------------------------------------------------
 
-async function resolveSalesforceBase(): Promise<string | null> {
-  const tryUrl = (raw: string | null | undefined): string | null => {
+async function resolveSalesforceBase() {
+  const tryUrl = (raw) => {
     if (!raw) return null;
     try {
       const u = new URL(raw);
@@ -1089,7 +1089,7 @@ async function openCaseInSalesforce({
   caseNumber,
   directUrl,
   newTab = false,
-}: { caseNumber?: string | null; directUrl?: string | null; newTab?: boolean } = {}) {
+} = {}) {
   const cNum = (caseNumber || '').trim();
   const dUrl = (directUrl || '').trim();
   if (!cNum && !dUrl) {
@@ -1097,7 +1097,7 @@ async function openCaseInSalesforce({
   }
 
   // 1) Direct URL — open exactly.
-  let finalUrl: string | null = null;
+  let finalUrl = null;
   if (dUrl) {
     try { const u = new URL(dUrl); if (/^https?:/i.test(u.protocol)) finalUrl = u.href; }
     catch { /* ignore */ }
@@ -1134,7 +1134,7 @@ async function openCaseInSalesforce({
   //    - Else if newTab=false → reuse the most-recent/active Salesforce
   //      Console tab (reuse is friendlier for the agent — fewer tabs).
   //    - Otherwise → brand-new foreground tab.
-  let targetTab: { id: number; windowId?: number | undefined } | null = null;
+  let targetTab = null;
   try {
     const matches = await chrome.tabs.query({ url: finalUrl });
     const exact = (matches || []).sort((a, b) => Number(!!b.active) - Number(!!a.active))[0];
@@ -1145,7 +1145,7 @@ async function openCaseInSalesforce({
     if (sfTab && sfTab.id != null) targetTab = { id: sfTab.id, windowId: sfTab.windowId };
   }
 
-  let tab: chrome.tabs.Tab | undefined;
+  let tab;
   if (targetTab) {
     try {
       tab = await chrome.tabs.update(targetTab.id, { url: finalUrl, active: true });
@@ -1153,13 +1153,13 @@ async function openCaseInSalesforce({
         try { await chrome.windows.update(tab.windowId, { focused: true }); } catch { /* ignore */ }
       }
     } catch (err) {
-      return { ok: false, error: `Failed to navigate existing tab: ${String((err as Error).message || err)}` };
+      return { ok: false, error: `Failed to navigate existing tab: ${String(err?.message || err)}` };
     }
   } else {
     try {
       tab = await chrome.tabs.create({ url: finalUrl, active: true });
     } catch (err) {
-      return { ok: false, error: `Failed to create tab: ${String((err as Error).message || err)}` };
+      return { ok: false, error: `Failed to create tab: ${String(err?.message || err)}` };
     }
   }
   return {
@@ -1488,6 +1488,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       const manifestVersion = chrome.runtime.getManifest?.().version ?? '0.1.0';
       const m = chrome.runtime.getManifest?.() || {};
+      // IMPORTANT: if the service worker just woke for THIS query, the async
+      // diagBootLoad() merge may not have run yet and diagLog is empty — the
+      // popup would render a FALSE "No events yet" and send us debugging in
+      // the wrong direction. Await the persisted log here and merge it into
+      // memory before responding, so the popup ALWAYS sees the full log.
+      try {
+        const stored = await chrome.storage?.local?.get({ __ecovacs_diag_log: [] });
+        if (Array.isArray(stored?.__ecovacs_diag_log)) {
+          const seen = new Set(diagLog.map((e) => e.ts + '|' + e.cat));
+          for (const e of stored.__ecovacs_diag_log) {
+            if (e && !seen.has(e.ts + '|' + e.cat) && diagLog.length < DIAG_LOG_MAX) diagLog.push(e);
+          }
+          diagLog.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+        }
+      } catch { /* ignore */ }
       // Snapshot of open ticket app tabs + sf/ccp tabs so the popup Bridge
       // panel can answer "Is there even a vercel app tab open?"
       const [ticketTabs, sfTabs, ccpTabs] = await Promise.all([
@@ -1516,6 +1531,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (t === 'POPUP_DIAG_CLEAR') {
     diagClear();
     sendResponse({ ok: true, entries: diagLog.slice() });
+    return true;
+  }
+  if (t === 'POPUP_SW_SELFTEST') {
+    // Internal round-trip (popup → SW, no externally_connectable involved).
+    // If this PASSES but the web-app's direct probe still fails, the failure
+    // is browser-level: the ticket-app origin is not actually covered by the
+    // INSTALLED externally_connectable matches, or Edge site access blocks
+    // the site. This discriminator is what the popup's self-test button uses.
+    diagRecord('sw:selftest', { version: chrome.runtime.getManifest?.().version ?? 'unknown' });
+    const m = chrome.runtime.getManifest?.() || {};
+    sendResponse({
+      ok: true,
+      pong: Date.now(),
+      version: m.version ?? null,
+      extId: chrome.runtime.id,
+      onMessageExternalRegistered: typeof chrome.runtime.onMessageExternal?.addListener === 'function',
+      externalPatterns: (m.externally_connectable?.matches) || [],
+      uaSelfTestAt: new Date().toISOString(),
+    });
     return true;
   }
   if (t === 'POPUP_DIAG_PROBE_TAB') {
@@ -1548,9 +1582,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               ok: true,
               href: (typeof location !== 'undefined' ? location.href : ''),
               origin: (typeof location !== 'undefined' ? location.origin : ''),
-              bridgeInjected: typeof (window as any).__NM_EXT_BRIDGE_INSTALLED__ === 'boolean' ? Boolean((window as any).__NM_EXT_BRIDGE_INSTALLED__) : false,
-              bridgeVersion: typeof (window as any).__NM_EXT_BRIDGE_VERSION__ !== 'undefined' ? String((window as any).__NM_EXT_BRIDGE_VERSION__) : null,
-              bridgeFingerprint: typeof (window as any).__NM_EXT_BRIDGE_FP__ !== 'undefined' ? String((window as any).__NM_EXT_BRIDGE_FP__) : null,
+              bridgeInjected: typeof window.__NM_EXT_BRIDGE_INSTALLED__ === 'boolean' ? Boolean(window.__NM_EXT_BRIDGE_INSTALLED__) : false,
+              bridgeVersion: typeof window.__NM_EXT_BRIDGE_VERSION__ !== 'undefined' ? String(window.__NM_EXT_BRIDGE_VERSION__) : null,
+              bridgeFingerprint: typeof window.__NM_EXT_BRIDGE_FP__ !== 'undefined' ? String(window.__NM_EXT_BRIDGE_FP__) : null,
               readyState: (typeof document !== 'undefined' && document.readyState) || null,
             };
           },

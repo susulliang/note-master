@@ -341,7 +341,7 @@
       window.postMessage({
         source: 'ecovacs-ccp-extension:context_invalidated',
         when: 'onMessage:init',
-        error: String((eInitOnMsg as any)?.message || eInitOnMsg).slice(0, 300),
+        error: String(eInitOnMsg?.message || eInitOnMsg).slice(0, 300),
         ts: Date.now(),
       }, '*');
     } catch { /* ignore */ }
