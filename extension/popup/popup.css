@@ -615,6 +615,38 @@ body {
   border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
+.tlist--withProbe > li { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.tlist__rowTop { display: flex; align-items: flex-start; gap: 8px; }
+.tlist__titleWrap { flex: 1 1 auto; min-width: 0; }
+.tlist__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.tlist__probeState {
+  background: rgba(255,255,255,0.015);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tlist__probeMore,
+.tlist__probeErr {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.tlist__probeErr { color: var(--err); }
+.tlist__probeState code {
+  background: rgba(255,255,255,0.04);
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
 .tlist__title {
   font-size: 12px;
   color: var(--fg);

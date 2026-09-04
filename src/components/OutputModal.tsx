@@ -144,7 +144,14 @@ export default function OutputModal({
   const diagnoseText = useCallback((): string[] => {
     const lines: string[] = [];
     const d = extConn?.diagnostics ?? null;
+    const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+    const isEdge = /Edg\//i.test(ua);
+    const isChrome = !isEdge && /Chrome\//i.test(ua);
+    const extMgrUrl = isEdge ? 'edge://extensions' : 'chrome://extensions';
+    const browserTag = isEdge ? 'Edge' : (isChrome ? 'Chrome' : 'Chromium');
     lines.push('── Extension bridge diagnostics ──');
+    lines.push(`Browser: ${browserTag}  →  reload/Manage extensions at: ${extMgrUrl}`);
+    lines.push(`If you are on Microsoft Edge: manifest pattern lists shown below may be GUESSING because the installed extension's content-script registration cache is extra-fussy after edits. Go to ${extMgrUrl} → Details → 🔄 Reload, then refresh THIS tab, then re-click Probe.`);
     const appOrigin = (d?.appOrigin) || (typeof location !== 'undefined' ? location.origin : '(unknown)');
     lines.push(`App origin: ${appOrigin}`);
     if (typeof location !== 'undefined') lines.push(`Full URL: ${location.href}`);
@@ -153,16 +160,12 @@ export default function OutputModal({
       lines.push('Workaround: OutputModal always falls back to a local bridge hook. If you still see this message, the hook mount itself crashed — copy window.__debug to clipboard and send to devs.');
       return lines;
     }
-    // Version block (NEW): tells the user "this is what bridge.js claimed"
-    // and lets us distinguish "patterns are covered but bridge.js never
-    // loaded" from "patterns covered and bridge loaded BUT it's an old
-    // cached version → reload extension".
     lines.push(`Expected extension manifest version: ${d.expectedManifestVersion}  (ticket app was built against this version)`);
-    lines.push(`Injected bridge manifest version: ${d.injectedManifestVersion ?? 'not received yet (bridge handshake never seen — content script not loaded)'}  ${d.patternsReceivedFromBridge ? '✅ source-of-truth received' : '⚠️ defaults shown; no runtime :diagnostics received yet — either bridge not injected, or Chrome cached an older build without this broadcast field'}`);
+    lines.push(`Injected bridge manifest version: ${d.injectedManifestVersion ?? 'not received yet (bridge handshake never seen — content script not loaded)'}  ${d.patternsReceivedFromBridge ? '✅ source-of-truth received (came from installed bridge → browser is actually running the new build)' : '⚠️ defaults shown; NO runtime :diagnostics received yet → the installed copy of bridge.js has NOT broadcasted its patterns yet → the DEFAULTS guesses below could be LIES.'}`);
     lines.push(`Pattern fingerprint: ${d.injectedFingerprint ?? '(none)'}`);
     if (d.injectedVersionStale) {
       lines.push('');
-      lines.push('🚨 STALE CACHE DETECTED: the copy of bridge.js Chrome injected into this page is OLDER than expected. That 100% means the extension was NOT reloaded at chrome://extensions after the last manifest update. Fix: open chrome://extensions → click 🔄 Reload on Ecovacs Note Helper, THEN refresh THIS ticket notes tab.');
+      lines.push(`🚨 STALE CACHE DETECTED: manifest version Chrome/Edge injected into this page is OLDER than the ticket app expects. ${isEdge ? '(On Edge this happens often after manifest edits even if you clicked Reload once — a second Reload usually flushes.)' : ''} Fix: open ${extMgrUrl} → click 🔄 Reload on Ecovacs Note Helper, THEN refresh THIS ticket notes tab.`);
       lines.push('');
     } else if (d.injectedVersionMatchesExpected === false) {
       lines.push('⚠️ Version mismatch: injected manifest version ≠ expected. Usually means the ticket app shipped a newer expected constant than the extension you loaded. Reload extension + compare installed manifest version to popup.');
@@ -170,28 +173,32 @@ export default function OutputModal({
     lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'}  (${d.patternsReceivedFromBridge ? 'based on actual runtime handshake' : 'based on no handshake yet; guess from defaults'})`);
     lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
     if (d.patternsReceivedAt) lines.push(`Runtime-extracted patterns received at: ${new Date(d.patternsReceivedAt).toLocaleString()}`);
-    lines.push(`Manifest bridge patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️'}): ${(d.manifestBridgePatterns || []).length === 0 ? '(EMPTY — bridge loaded but no patterns match any ticket-app origin — this is why injection failed)' : d.manifestBridgePatterns.join(',  ')}`);
-    lines.push(`Manifest external patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️'}): ${(d.manifestExternalPatterns || []).length === 0 ? '(EMPTY)' : d.manifestExternalPatterns.join(',  ')}`);
-    lines.push(`Origin matched by bridge (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable'}): ${d.originCoveredByBridge ? 'YES' : 'NO'}`);
-    lines.push(`Origin matched by externally_connectable (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable'}): ${d.originCoveredByExternal ? 'YES' : 'NO'}`);
+    lines.push(`Manifest bridge patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️ — GUESS'}): ${(d.manifestBridgePatterns || []).length === 0 ? '(EMPTY — bridge loaded but no patterns match any ticket-app origin — this is why injection failed)' : d.manifestBridgePatterns.join(',  ')}`);
+    lines.push(`Manifest external patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️ — GUESS'}): ${(d.manifestExternalPatterns || []).length === 0 ? '(EMPTY)' : d.manifestExternalPatterns.join(',  ')}`);
+    lines.push(`Origin matched by bridge (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable if on Edge, see top note'}): ${d.originCoveredByBridge ? 'YES' : 'NO'}`);
+    lines.push(`Origin matched by externally_connectable (${d.patternsReceivedFromBridge ? 'source-of-truth' : 'GUESS — unreliable if on Edge, see top note'}): ${d.originCoveredByExternal ? 'YES' : 'NO'}`);
+    lines.push('');
+    lines.push(`Shortest fix path for ${browserTag}: (1) open Ecovacs Note Helper popup → Bridge → Tabs snapshot → on the vercel row click 🔬 Injectable? → it will tell you YES/NO with the browser's OWN permission check, not a guess. (2) If Injectable: YES / Bridge: not loaded → click 🚀 Inject bridge now (same row), done. (3) If Injectable: BLOCKED → you need to reload the extension AT ${extMgrUrl} first — because host permissions haven't taken effect yet, even though the files on disk look correct.`);
+    lines.push('');
     if (!d.bridgeInjected && d.originCoveredByBridge) {
-      lines.push('');
       if (d.patternsReceivedFromBridge) {
         lines.push('Patterns ARE loaded and match this origin → bridge SHOULD have injected. Next action:');
-        lines.push('  (a) Chrome > ⋮ > More tools > Extensions, find Ecovacs Note Helper, click 🔄 RELOAD. Then refresh THIS tab.');
-        lines.push('  (b) If after reload still NO handshake: the unpacked extension folder you loaded is NOT the repo one. Copy the repo extension/ folder to that location and reload.');
+        lines.push(`  (a) ${browserTag} > go to ${extMgrUrl}, find Ecovacs Note Helper, click 🔄 RELOAD. Then refresh THIS tab.`);
+        lines.push('  (b) If after reload still NO handshake: go to Ecovacs Note Helper popup → Bridge → Tabs snapshot → click 🔬 Injectable? on the vercel row for a ground-truth check. If BLOCKED: the unpacked extension folder you loaded is NOT the repo one — replace its contents with repo extension/ and reload.');
+        lines.push('  (c) Still NO handshake: click 🚀 Inject bridge now button on the vercel row → emergency injection bypasses cached document_start registrations on both Chrome + Edge.');
       } else {
-        lines.push('Defaults GUESS that patterns SHOULD match this origin, but we never saw a bridge handshake or diagnostics broadcast. Two possible causes:');
-        lines.push('  (1) Chrome cached a STALE bridge content-script registration from before the most recent manifest edit → reload extension at chrome://extensions, refresh page.');
-        lines.push('  (2) The loaded extension manifest does NOT actually include this origin → the guess is wrong. Reload extension + run Diagnostics again — patternsReceivedFromBridge will flip true and reveal the real lists.');
+        lines.push('Defaults GUESS that patterns SHOULD match this origin, but we never saw a bridge handshake or diagnostics broadcast. Two likely causes:');
+        lines.push(`  (1) ${browserTag} cached a STALE bridge content-script registration from before the last manifest edit → open ${extMgrUrl}: Reload extension + refresh page.`);
+        lines.push('  (2) The loaded extension manifest does NOT actually include this origin → the guess is wrong. Use Ecovacs Note Helper popup → Bridge → Tabs snapshot → 🔬 Injectable? on the vercel row to get a browser-level yes/no, then open Patterns tab and compare the REAL lists printed there.');
+        lines.push('  (3) Fastest workaround no matter what: popup → Tabs snapshot → 🚀 Inject bridge NOW on the vercel row. If browser host permissions allow it, bridge loads within 2s.');
       }
     }
     if (!d.bridgeInjected && !d.originCoveredByBridge) {
-      lines.push('Current URL is NOT covered by the manifest content-script patterns (or defaults guess it is not).');
+      lines.push('Current URL is NOT covered (either by received patterns or the defaults guess). Expand the suggested patterns block below.');
     }
     if (d.suggestedPatternsToAdd.length > 0) {
       lines.push('');
-      lines.push('▸ To make this deployment work paste these into Ecovacs Note Helper/manifest.json then 🔄 reload extension + refresh page:');
+      lines.push(`▸ To make ${browserTag} allow this deployment, paste these into Ecovacs Note Helper/manifest.json then 🔄 reload extension at ${extMgrUrl} + refresh page:`);
       lines.push('  content_scripts → bridge.js → matches:');
       d.suggestedPatternsToAdd.forEach((p) => lines.push(`    "${p}",`));
       lines.push('');
@@ -200,7 +207,7 @@ export default function OutputModal({
     }
     if (d.lastExternalError) lines.push(`\nChrome.runtime sendMessage error: "${d.lastExternalError.slice(0, 220)}"`);
     lines.push('');
-    lines.push('Checklist: (1) Extension loaded & enabled → popup shows v0.1.24 or newer. (2) Origin matches manifest → Diagnostics says RECEIVED + covered YES for both. (3) Reload extension. (4) Refresh THIS tab.');
+    lines.push(`Checklist (${browserTag}): (1) Popup shows v0.1.27 or newer. (2) Patterns tab shows both host_permissions + content_scripts containing vercel patterns. (3) Tabs snapshot → vercel row → 🔬 Injectable? = YES → then click 🚀 Inject bridge now as the universal fallback.`);
     return lines;
   }, [extConn]);
 

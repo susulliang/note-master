@@ -797,6 +797,18 @@ async function bootstrap() {
       const elTabsSnap = document.getElementById('tabsSnap');
       const elPlBridge = document.getElementById('plBridge');
       const elPlExternal = document.getElementById('plExternal');
+      const elPlHost = document.getElementById('plHost');
+      const elAgentBadge = document.getElementById('agentBadge');
+      const elExtMgrUrlHint = document.getElementById('extMgrUrlHint');
+      const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+      const isEdge = /Edg\//i.test(ua);
+      const isChrome = !isEdge && /Chrome\//i.test(ua);
+      const extMgrUrl = isEdge ? 'edge://extensions' : 'chrome://extensions';
+      const browserLabel = isEdge ? 'Microsoft Edge (Chromium)' : (isChrome ? 'Google Chrome' : 'Chromium-based browser');
+      if (elAgentBadge) {
+        elAgentBadge.innerHTML = `<strong>${escHtml(browserLabel)}</strong> · extensions at <code>${escHtml(extMgrUrl)}</code>`;
+      }
+      if (elExtMgrUrlHint) elExtMgrUrlHint.textContent = extMgrUrl;
       // Tab switching
       document.querySelectorAll('.bridge__tab').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -828,6 +840,77 @@ async function bootstrap() {
         } catch { /* fall through to original */ }
         return escHtml(rawDetail);
       }
+      // Helper: run an injectability live probe on a tab and update the row.
+      async function probeTabOnce(rowRoot, tabId) {
+        if (!rowRoot || typeof tabId !== 'number') return;
+        const meta = rowRoot.querySelector('.tlist__probeState');
+        if (meta) meta.innerHTML = `<span class="bdg bdg--muted">probing…</span>`;
+        let r;
+        try { r = await chrome.runtime.sendMessage({ type: 'POPUP_DIAG_PROBE_TAB', tabId }); }
+        catch (err) {
+          if (meta) meta.innerHTML = `<span class="bdg bdg--warn" title="${escHtml(String(err?.message || err))}">🚫 SW unreachable</span>`;
+          return;
+        }
+        if (!r || !r.ok) {
+          const reason = r?.reason || 'blocked';
+          const reasonLabel = {
+            'blocked:host-permissions':  '🚫 BLOCKED (host permissions / matches not loaded → reload extension or grant site access)',
+            'blocked:tab-discarded':    '🚫 DISCARDED TAB → focus the tab once first, then retry probe',
+            'blocked:tab-gone':         '🚫 TAB GONE',
+            'blocked:internal-url':     '🚫 INTERNAL URL (edge:// / chrome://)',
+            'blocked:no-listener':      '🚫 No listener (content script not loaded)',
+            'blocked':                  '🚫 BLOCKED',
+          }[reason] || `🚫 ${escHtml(reason)}`;
+          if (meta) {
+            meta.innerHTML = `<span class="bdg bdg--warn">${reasonLabel}</span>${r?.error ? `<div class="tlist__probeErr" title="${escHtml(String(r.error))}">${escHtml(String(r.error).slice(0, 240))}</div>` : ''}`;
+          }
+          return;
+        }
+        const ok = r?.result?.ok === true;
+        const bi = ok && r?.result?.bridgeInjected ? true : false;
+        const bv = ok && r?.result?.bridgeVersion ? r.result.bridgeVersion : null;
+        const bfp = ok && r?.result?.bridgeFingerprint ? r.result.bridgeFingerprint : null;
+        const ready = ok && r?.result?.readyState ? r.result.readyState : null;
+        if (meta) {
+          meta.innerHTML = `
+            <span class="bdg ${ok ? 'bdg--ok' : 'bdg--err'}">Injectable: ${ok ? 'YES' : 'NO'}</span>
+            ${ok
+                ? `<span class="bdg ${bi ? 'bdg--ok' : 'bdg--muted'}">Bridge: ${bi ? `v${escHtml(String(bv))}` : 'not loaded yet'}</span>`
+                : ''}
+            ${bfp ? `<div class="tlist__probeMore" title="bridge fingerprint">fp: <code>${escHtml(String(bfp))}</code></div>` : ''}
+            ${ready ? `<div class="tlist__probeMore">readyState: ${escHtml(String(ready))}</div>` : ''}
+          `;
+        }
+      }
+      async function injectNow(rowRoot, tabId) {
+        if (!rowRoot || typeof tabId !== 'number') return;
+        const meta = rowRoot.querySelector('.tlist__probeState');
+        if (meta) meta.innerHTML = `<span class="bdg bdg--muted">injecting bridge…</span>`;
+        let r;
+        try { r = await chrome.runtime.sendMessage({ type: 'POPUP_DIAG_INJECT_NOW_TAB', tabId }); }
+        catch (err) {
+          if (meta) meta.innerHTML = `<span class="bdg bdg--err">Inject failed: ${escHtml(String(err?.message || err).slice(0, 100))}</span>`;
+          return;
+        }
+        if (r?.ok) {
+          if (meta) meta.innerHTML = `<span class="bdg bdg--ok">✅ Bridge injected. Wait 2s → re-probe</span>`;
+          toast('Bridge injected now on that tab. The ticket app Push button should un-gray within 10s.', 'ok');
+          setTimeout(() => probeTabOnce(rowRoot, tabId), 2200);
+        } else {
+          if (meta) meta.innerHTML = `<span class="bdg bdg--err" title="${escHtml(String(r?.error || ''))}">Inject failed. ${escHtml(String(r?.error || '').slice(0, 140))}</span>`;
+        }
+      }
+      // Wire up delegated button clicks (rows are recreated on every refresh).
+      elTabsSnap?.addEventListener?.('click', (ev) => {
+        const target = ev.target instanceof HTMLElement ? ev.target.closest('button[data-action]') : null;
+        if (!target || !(target instanceof HTMLButtonElement)) return;
+        const tabId = Number(target.getAttribute('data-tabid'));
+        if (!Number.isFinite(tabId)) return;
+        const row = target.closest('[data-rowid]');
+        const action = target.getAttribute('data-action');
+        if (action === 'probe') void probeTabOnce(row, tabId);
+        else if (action === 'inject') void injectNow(row, tabId);
+      });
       async function refreshBridgePanel() {
         if (!chrome.runtime?.sendMessage) return;
         let r;
@@ -887,25 +970,57 @@ async function bootstrap() {
           }
         }
         if (elTabsSnap) {
-          const group = (arr, title, emptyMsg) => {
+          // (a) Ticket Notes tabs: render per-row Injectable state + 🔬 probe
+          // and 🚀 inject-now buttons. On subsequent refreshes we preserve
+          // probe results on rows that haven't changed by storing them in a
+          // WeakMap.
+          const ticketGroupHtml = (() => {
+            const arr = r.ticketAppTabs;
+            if (!arr || arr.length === 0) return `<h4 class="shead">Ticket Notes tabs</h4><div class="empty">No ticket notes tabs open. Open note-master-roan.vercel.app or localhost first.</div>`;
+            return `<h4 class="shead">Ticket Notes tabs · ${arr.length}</h4>
+              <ul class="tlist tlist--withProbe">${arr.map((t) => `
+                <li data-rowid="tkt-${Number(t.id)}">
+                  <div class="tlist__rowTop">
+                    <div class="tlist__titleWrap">
+                      <div class="tlist__title"><a href="${escHtml(t.url || '#')}" target="_blank" rel="noreferrer">${escHtml(String(t.title || t.url || '(no title)'))}${t.active ? ' <span class="bdg bdg--muted">active</span>' : ''}</a></div>
+                      <div class="tlist__meta">${t.status || '?'}${t.discarded ? ' · <strong style="color:var(--warn)">discarded (content scripts will NOT load until activated)</strong>' : ''} · tab id ${t.id}</div>
+                      <div class="tlist__url">${escHtml(String(t.url || ''))}</div>
+                    </div>
+                    <div class="tlist__actions">
+                      <button type="button" class="btn btn-ghost btn--sm" data-action="probe" data-tabid="${Number(t.id)}" title="Run a live scripting.executeScript probe and return bridgeInjected / version.">🔬 Injectable?</button>
+                      <button type="button" class="btn btn-ghost btn--sm" data-action="inject" data-tabid="${Number(t.id)}" title="Force-inject bridge.js via scripting.executeScript right now — bypasses the cached document_start registration that browsers sometimes hold after manifest edits.">🚀 Inject bridge now</button>
+                    </div>
+                  </div>
+                  <div class="tlist__probeState"><span class="bdg bdg--muted">Not yet probed. Click 🔬 Injectable?</span></div>
+                </li>`).join('')}</ul>`;
+          })();
+          const simpleGroup = (arr, title, emptyMsg) => {
             if (!arr || arr.length === 0) return `<h4 class="shead">${escHtml(title)}</h4><div class="empty">${escHtml(emptyMsg)}</div>`;
             return `<h4 class="shead">${escHtml(title)} · ${arr.length}</h4>
               <ul class="tlist">${arr.map((t) => `
                 <li>
-                  <div class="tlist__title"><a href="${escHtml(t.url || '#')}" target="_blank" rel="noreferrer">${escHtml(String(t.title || t.url || '(no title)'))}</a></div>
+                  <div class="tlist__title"><a href="${escHtml(t.url || '#')}" target="_blank" rel="noreferrer">${escHtml(String(t.title || t.url || '(no title)'))}${t.active ? ' <span class="bdg bdg--muted">active</span>' : ''}</a></div>
                   <div class="tlist__meta">${t.status || '?'}${t.discarded ? ' · discarded (content scripts will NOT load until activated)' : ''} · tab id ${t.id}</div>
                   <div class="tlist__url">${escHtml(String(t.url || ''))}</div>
                 </li>`).join('')}</ul>`;
           };
           elTabsSnap.innerHTML = [
-            group(r.ticketAppTabs, 'Ticket Notes tabs', 'No ticket notes tabs open. Open note-master-roan.vercel.app or localhost first.'),
-            group(r.salesforceTabs, 'Salesforce / Lightning tabs', 'No SF tabs open (patterns: *.lightning.force.com / *.salesforce.com / *.my.salesforce.com).'),
-            group(r.ccpTabs, 'CCP / Phone Panel tabs', 'No CCP panel tabs open. Extension uses broad URL patterns; your SF Console-embedded phone panel may appear under Salesforce tabs instead.'),
+            ticketGroupHtml,
+            simpleGroup(r.salesforceTabs, 'Salesforce / Lightning tabs', 'No SF tabs open (patterns: *.lightning.force.com / *.salesforce.com / *.my.salesforce.com).'),
+            simpleGroup(r.ccpTabs, 'CCP / Phone Panel tabs', 'No CCP panel tabs open. Extension uses broad URL patterns; your SF Console-embedded phone panel may appear under Salesforce tabs instead.'),
           ].join('');
+        }
+        if (elPlHost) {
+          const host = (Array.isArray(r.manifestHostPermissions) ? r.manifestHostPermissions : []).slice();
+          const opt = Array.isArray(r.manifestOptionalHostPermissions) ? r.manifestOptionalHostPermissions : [];
+          if (host.length === 0 && opt.length === 0) elPlHost.innerHTML = '<li class="empty">Empty — scripting.executeScript injection via live probe will be blocked everywhere.</li>';
+          else elPlHost.innerHTML = host.map((p) => `<li><code>${escHtml(String(p))}</code> <span class="bdg bdg--muted" style="margin-left:6px">host</span></li>`).concat(
+            opt.map((p) => `<li><code>${escHtml(String(p))}</code> <span class="bdg bdg--muted" style="margin-left:6px">optional</span></li>`)
+          ).join('');
         }
         if (elPlBridge) elPlBridge.innerHTML = (Array.isArray(r.manifestBridgePatterns) && r.manifestBridgePatterns.length > 0)
           ? r.manifestBridgePatterns.map((p) => `<li><code>${escHtml(String(p))}</code></li>`).join('')
-          : '<li class="empty">Empty — bridge content script has no matches. Chrome will never inject bridge.js anywhere.</li>';
+          : '<li class="empty">Empty — bridge content script has no matches. The browser will never inject bridge.js anywhere via document_start content-script registration (Inject bridge now still works if host_permissions cover the URL).</li>';
         if (elPlExternal) elPlExternal.innerHTML = (Array.isArray(r.manifestExternalPatterns) && r.manifestExternalPatterns.length > 0)
           ? r.manifestExternalPatterns.map((p) => `<li><code>${escHtml(String(p))}</code></li>`).join('')
           : '<li class="empty">Empty — no externally_connectable matches. chrome.runtime.sendMessage(EXT_ID) from any origin is blocked.</li>';

@@ -1487,15 +1487,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (t === 'POPUP_DIAG_QUERY_LOG') {
     (async () => {
       const manifestVersion = chrome.runtime.getManifest?.().version ?? '0.1.0';
+      const m = chrome.runtime.getManifest?.() || {};
       // Snapshot of open ticket app tabs + sf/ccp tabs so the popup Bridge
       // panel can answer "Is there even a vercel app tab open?"
       const [ticketTabs, sfTabs, ccpTabs] = await Promise.all([
         (async () => {
-          try { return (await chrome.tabs.query({ url: ['http://localhost:*/*', 'https://localhost:*/*', 'http://127.0.0.1:*/*', 'https://127.0.0.1:*/*', 'https://*.vercel.app/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); }
+          try { return (await chrome.tabs.query({ url: ['http://localhost:*/*', 'https://localhost:*/*', 'http://127.0.0.1:*/*', 'https://127.0.0.1:*/*', 'https://*.vercel.app/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null, active: t.active ?? false })); }
           catch { return []; }
         })(),
-        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*', 'https://*.salesforce.com/*', 'https://*.my.salesforce.com/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); } catch { return []; } })(),
-        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*/ccp*', 'https://*.my.connect.salesforce.com/*', 'https://*.amazonaws.com/*/connect/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); } catch { return []; } })(),
+        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*', 'https://*.salesforce.com/*', 'https://*.my.salesforce.com/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null, active: t.active ?? false })); } catch { return []; } })(),
+        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*/ccp*', 'https://*.my.connect.salesforce.com/*', 'https://*.amazonaws.com/*/connect/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null, active: t.active ?? false })); } catch { return []; } })(),
       ]);
       sendResponse({
         ok: true,
@@ -1504,8 +1505,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         ticketAppTabs: ticketTabs,
         salesforceTabs: sfTabs,
         ccpTabs,
-        manifestBridgePatterns: (chrome.runtime.getManifest?.()?.content_scripts || []).flatMap((cs) => Array.isArray(cs.matches) ? cs.matches : []).filter((x) => typeof x === 'string') || [],
-        manifestExternalPatterns: (chrome.runtime.getManifest?.()?.externally_connectable?.matches) || [],
+        manifestBridgePatterns: (m.content_scripts || []).flatMap((cs) => Array.isArray(cs.matches) ? cs.matches : []).filter((x) => typeof x === 'string') || [],
+        manifestExternalPatterns: (m.externally_connectable?.matches) || [],
+        manifestHostPermissions: Array.isArray(m.host_permissions) ? m.host_permissions.filter((x) => typeof x === 'string') : [],
+        manifestOptionalHostPermissions: Array.isArray(m.optional_host_permissions) ? m.optional_host_permissions.filter((x) => typeof x === 'string') : [],
       });
     })();
     return true;
@@ -1513,6 +1516,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (t === 'POPUP_DIAG_CLEAR') {
     diagClear();
     sendResponse({ ok: true, entries: diagLog.slice() });
+    return true;
+  }
+  if (t === 'POPUP_DIAG_PROBE_TAB') {
+    // Popup says "tell me if a ticket-app tab is currently INJECTABLE for
+    // content scripts". This is the ground-truth test that closes the loop
+    // for 'patterns say YES but bridgeInjected NO' — answers from the
+    // browser itself, not from guess patterns. Edge is extra-fussy here
+    // because sometimes IPv6 matches / reload caches silently fail.
+    (async () => {
+      const tabId = typeof msg?.tabId === 'number' ? msg.tabId : null;
+      if (!tabId) { sendResponse({ ok: false, error: 'tabId required' }); return; }
+      const probe = {
+        targetTabId: tabId,
+        at: new Date().toISOString(),
+      };
+      try {
+        // executeScript a pure no-op: returns whether it was allowed to
+        // inject an ISOLATED world function. If executeScript is permitted
+        // by host_permissions for this tab URL, bridge.js content-script
+        // SHOULD be injectable too (content_scripts runs at document_start
+        // with the same URL-based gate, modulo port wildcards).
+        const result = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: false },
+          injectImmediately: true,
+          world: 'ISOLATED',
+          func: () => {
+            // Return a few signals the popup can print to tell the user
+            // what state the page is in right now.
+            return {
+              ok: true,
+              href: (typeof location !== 'undefined' ? location.href : ''),
+              origin: (typeof location !== 'undefined' ? location.origin : ''),
+              bridgeInjected: typeof (window as any).__NM_EXT_BRIDGE_INSTALLED__ === 'boolean' ? Boolean((window as any).__NM_EXT_BRIDGE_INSTALLED__) : false,
+              bridgeVersion: typeof (window as any).__NM_EXT_BRIDGE_VERSION__ !== 'undefined' ? String((window as any).__NM_EXT_BRIDGE_VERSION__) : null,
+              bridgeFingerprint: typeof (window as any).__NM_EXT_BRIDGE_FP__ !== 'undefined' ? String((window as any).__NM_EXT_BRIDGE_FP__) : null,
+              readyState: (typeof document !== 'undefined' && document.readyState) || null,
+            };
+          },
+        });
+        const frame0 = Array.isArray(result) ? result[0]?.result : null;
+        diagRecord('diag:probeTab', { tabId, ok: true, bridgeInjected: frame0?.bridgeInjected ?? null, bridgeVersion: frame0?.bridgeVersion ?? null });
+        sendResponse({ ok: true, probe, result: frame0 ?? null, raw: Array.isArray(result) ? result.length : null });
+      } catch (e) {
+        const err = String(e?.message || e);
+        diagRecord('diag:probeTab:blocked', { tabId, error: err });
+        // Classify a couple of known Edge MV3 blockers so popup can give
+        // user-specific guidance instead of generic error text.
+        let reason = 'blocked';
+        if (/Cannot access a chrome:\/\/|edge:\/\//i.test(err)) reason = 'blocked:internal-url';
+        else if (/Cannot access contents of the page|Extension manifest must request permission/i.test(err)) reason = 'blocked:host-permissions';
+        else if (/No tab with id|was closed/i.test(err)) reason = 'blocked:tab-gone';
+        else if (/discarded/i.test(err)) reason = 'blocked:tab-discarded';
+        else if (/Receiving end does not exist/i.test(err)) reason = 'blocked:no-listener';
+        sendResponse({ ok: false, error: err, reason, probe });
+      }
+    })();
+    return true;
+  }
+  if (t === 'POPUP_DIAG_INJECT_NOW_TAB') {
+    // Emergency: bridge.js content script is covered by host_permissions
+    // for this origin but document_start already missed it. Push bridge.js
+    // into the tab RIGHT NOW via scripting.executeScript with FILE
+    // injection (requires scripting permission + host match on the URL).
+    // Used as a one-click "make Push work NOW" button inside Bridge panel
+    // when the user is on Edge with cached content scripts.
+    (async () => {
+      const tabId = typeof msg?.tabId === 'number' ? msg.tabId : null;
+      if (!tabId) { sendResponse({ ok: false, error: 'tabId required' }); return; }
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: false },
+          files: ['bridge.js'],
+          injectImmediately: true,
+          world: 'ISOLATED',
+        });
+        diagRecord('diag:injectNow:ok', { tabId });
+        sendResponse({ ok: true });
+      } catch (e) {
+        const err = String(e?.message || e);
+        diagRecord('diag:injectNow:error', { tabId, error: err });
+        sendResponse({ ok: false, error: err });
+      }
+    })();
     return true;
   }
   if (t === 'POPUP_UPDATE_SETTINGS') {

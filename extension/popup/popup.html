@@ -141,28 +141,36 @@
               <button class="bridge__tab" role="tab" data-tab="guide" type="button">Fix "bridge not connected"</button>
             </div>
             <section class="bridge__pane" data-pane="log" hidden>
-              <div class="pane__hint"><strong>What this shows:</strong> every handshake probe received from the Ticket Notes web-app, every externally_connectable call, SF scrape, push attempt, field writes + Post tab editor steps. This is data the extension-side actually saw. If you click Probe on the Ticket Notes page but no <code>bridge:handshake_request_received</code> row shows up within 2s, then bridge.js content script is NOT running on that tab (Chrome cached old registration or manifest pattern not matched — go to <code>chrome://extensions</code> 🔄 Reload, refresh the page, try again).</div>
+              <div class="pane__hint"><strong>What this shows:</strong> every handshake probe received from the Ticket Notes web-app, every externally_connectable call, SF scrape, push attempt, field writes + Post tab editor steps. This is data the extension-side actually saw. If you click Probe on the Ticket Notes page but no <code>bridge:handshake_request_received</code> row shows up within 2s, then bridge.js content script is NOT running on that tab (browser cached old registration or manifest pattern not matched — open <code id="extMgrUrlHint">edge://extensions</code> 🔄 Reload, refresh the page, try again). Go to the <em>Tabs snapshot</em> tab and click <strong>🔬 Injectable?</strong> on any ticket-app row to get a browser-level ground-truth.</div>
               <ul class="evlog" id="evlog"><li class="empty">No events yet. Click Probe on the Ticket Notes page or Scan/Push in this popup.</li></ul>
             </section>
             <section class="bridge__pane" data-pane="tabs" hidden>
-              <p class="pane__hint">Ticket-app / Salesforce / CCP tabs currently open in Chrome (as seen by the extension, via chrome.tabs.query patterns below):</p>
+              <p class="pane__hint">Ticket-app / Salesforce / CCP tabs currently open in this browser window, plus a LIVE "Injectable now?" ground-truth probe per tab. If a tab shows "Injectable: YES" but "bridge version: null" → click <strong>Inject bridge now</strong> on that row (bypasses cached content-script registrations; injects bridge.js immediately).</p>
               <div id="tabsSnap" class="tabs-snap"><div class="empty">Loading…</div></div>
             </section>
             <section class="bridge__pane" data-pane="patterns" hidden>
-              <p class="pane__hint">Patterns loaded DIRECTLY from the installed extension manifest. These are the patterns Chrome actually uses when deciding whether to inject bridge.js (content_scripts) and whether chrome.runtime.sendMessage(EXT_ID) is allowed (externally_connectable). If a pattern isn't listed here, Chrome won't inject/connect.</p>
+              <p class="pane__hint">Patterns loaded DIRECTLY from the installed extension manifest. These are the patterns the browser actually uses when deciding whether to inject bridge.js (content_scripts) and whether <code>chrome.runtime.sendMessage(EXT_ID)</code> is allowed (externally_connectable). If a pattern isn't listed here, the browser won't inject/connect — the DEFAULTS you see on the web-app page are guesses, not source of truth.</p>
+              <h3 class="shead">host_permissions (grants scripting.executeScript for live probe / inject bridge now)</h3>
+              <ul class="pl" id="plHost"><li class="empty">—</li></ul>
               <h3 class="shead">content_scripts → bridge.js → matches</h3>
               <ul class="pl" id="plBridge"><li class="empty">—</li></ul>
               <h3 class="shead">externally_connectable → matches</h3>
               <ul class="pl" id="plExternal"><li class="empty">—</li></ul>
             </section>
             <section class="bridge__pane" data-pane="guide" hidden>
+              <h3 class="shead">You are running: <span id="agentBadge">—</span></h3>
               <ol class="guided">
-                <li>Open a browser tab with <code>https://note-master-roan.vercel.app/</code>.
-                <li>Open Ecovacs Note Helper extension popup on ANY tab.
-                <li>Switch to this Bridge → Event log panel.
-                <li>On the Ticket Notes page click Hang Up → 🔎 <strong>Diagnostics</strong> → click its <strong>🔁 Try probing bridge again</strong> action.
-                <li>Back in popup Bridge → Event log, click Refresh. Within 2s you should see a row <code>bridge:handshake_request_received</code> → that means bridge.js content script is injected on vercel and the roundtrip works. If you do NOT see that row: the content script isn't running → go to <code>chrome://extensions</code>, click 🔄 <strong>Reload</strong> on Ecovacs Note Helper, refresh note-master-roan.vercel.app, repeat.
-                <li>For Salesforce field-writes: click 📤 <strong>Push to Salesforce Case</strong>. Within seconds Bridge → Event log will show <code>sf:apply:start</code> → <code>sf:apply:targetTab</code> → then per-field <code>wasSectionFound: false</code> with the exact reason (layout not found / inline-edit missing / read-only). Copy/paste that row into a bug report and we can tune the selectors.
+                <li>Open the extensions manager at:
+                  <ul style="margin:4px 0 0 18px; padding:0; list-style:disc;">
+                    <li><strong>Edge</strong>: type <code>edge://extensions</code> in the address bar.</li>
+                    <li><strong>Chrome</strong>: type <code>chrome://extensions</code> in the address bar.</li>
+                  </ul>
+                <li>Toggle <strong>Developer mode</strong> top-right. On the Ecovacs Note Helper card click <strong>🔄 Reload</strong>. The card should now show <strong>v0.1.27</strong> or newer.
+                <li>Open a tab at <code>https://note-master-roan.vercel.app/</code> and leave it active (not discarded).
+                <li>Open this popup → Bridge → Tabs snapshot → find the vercel row → click <strong>🔬 Injectable?</strong>. Within 2s it flips to YES/NO.
+                <li>If Injectable is YES but <code>bridge version: null</code> → cache issue. Click <strong>🚀 Inject bridge now</strong> (uses scripting.executeScript, bypasses document_start content-script registration) → wait 3s → re-click 🔬 Injectable? and it should now show bridge version 0.1.27. The web app Push button goes green within 10s (next heartbeat).
+                <li>If Injectable is BLOCKED:host-permissions → the installed manifest <strong>is not</strong> the one you just edited (browser still has an older loaded build), OR the optional_host_permissions all_urls wasn't granted for this origin. Go to Details → Site access on the extension card and confirm.
+                <li>For Salesforce "nothing auto-fills": with a full Lightning Case tab open (not inline-console), click 📤 Push to Salesforce Case on the Ticket Notes page. Then come to Bridge → Event log → you will see sf:apply:start / targetTab / ok+fieldSummary with per-field wasSectionFound. Copy the red rows if 0 fields wrote.
               </ol>
             </section>
           </div>
