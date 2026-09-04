@@ -305,7 +305,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.29';
+  const EXPECTED_MANIFEST_VERSION = '0.1.30';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -431,9 +431,64 @@ export function useCcpExtensionBridge({
 
   const requestConnection = useCallback(() => {
     setHandshakeRequested(true);
+    // 1. Always fire the bridge-side probe (works when bridge.js IS injected).
     try {
       window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
     } catch { /* ignore */ }
+    // 2. ALSO fire a direct handshake via externally_connectable
+    // (chrome.runtime.sendMessage) — this does NOT require bridge.js to be
+    // injected.  Background replies with manifest version + real patterns
+    // pulled straight from chrome.runtime.getManifest(), so the web-app
+    // Diagnostics surface always has real source-of-truth manifest data
+    // even when Edge/Chrome cached content-scripts and bridge.js hasn't
+    // arrived yet. The direct path also flips connected=true → Probe &
+    // Connect shows success.
+    const tryDirect = async () => {
+      const saved = (() => { try { return localStorage.getItem(EXT_ID_LS_KEY) || ''; } catch { return ''; } })();
+      const candidates: string[] = [];
+      if (extIdRef.current) candidates.push(extIdRef.current);
+      if (saved) candidates.push(saved);
+      candidates.push(...DEFAULT_EXT_ID_CANDIDATE);
+      const tried = new Set<string>();
+      for (const id of candidates) {
+        if (!id || tried.has(id)) continue;
+        tried.add(id);
+        try {
+          const reply: any = await new Promise((resolve, reject) => {
+            try {
+              const rt = (globalThis as any).chrome?.runtime;
+              if (!rt || typeof rt.sendMessage !== 'function') { reject(new Error('chrome.runtime not available')); return; }
+              rt.sendMessage(id, { type: 'EXT_HANDSHAKE_DIRECT' }, (r: any) => {
+                const err = rt.lastError;
+                if (err) reject(new Error(String(err.message || err)));
+                else resolve(r);
+              });
+            } catch (syncErr) { reject(syncErr); }
+          });
+          if (reply && reply.ok) {
+            // Direct handshake succeeded — extension reachable WITHOUT
+            // bridge.js. Flip connected, remember ext id, and stamp the
+            // source-of-truth manifest patterns (this is what was missing
+            // before — Diagnostics always showed DEFAULTS even though the
+            // extension was perfectly reachable via externally_connectable).
+            setConnected(true);
+            setExtensionId(id);
+            extIdRef.current = id;
+            try { localStorage.setItem(EXT_ID_LS_KEY, id); } catch { /* ignore */ }
+            setInjectedManifestVersion(String(reply.manifestVersion || reply.version || ''));
+            setInjectedFingerprint(String(reply.fingerprint || ''));
+            if (Array.isArray(reply.bridgePatterns)) setManifestBridgePatterns(reply.bridgePatterns);
+            if (Array.isArray(reply.externalPatterns)) setManifestExternalPatterns(reply.externalPatterns);
+            setReceivedBridgePatternsAt(new Date().toISOString());
+            setLastHandshakeAt(new Date().toISOString());
+            setContextInvalidatedSeenAt(null);
+            setLastExternalError(null);
+            break;
+          }
+        } catch { /* ignore — try next id candidate */ }
+      }
+    };
+    try { void tryDirect(); } catch { /* ignore */ }
   }, []);
 
   // Stable transport state across renders.

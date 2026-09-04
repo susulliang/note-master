@@ -1649,9 +1649,60 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
       if (t === 'EXT_HELLO') {
         // The web app says hello on boot; confirm extension is present and
         // hand back the current snapshot of merged fields so existing tabs
-        // catch up immediately.
-        sendResponse({ ok: true, version: chrome.runtime.getManifest?.().version ?? '0.1.0', merged: buildMergedFields(), state });
-        diagRecord('external:ok', { type: t, mergedFields: Object.keys(buildMergedFields() || {}).length });
+        // catch up immediately. ALSO include manifest patterns pulled STRAIGHT
+        // from chrome.runtime.getManifest() — the web-app bridge-free probe
+        // uses these to populate Diagnostics even when bridge.js is not on
+        // the page (Edge content-script cache). This gives us a reliable
+        // "extension is there" signal via externally_connectable that does
+        // NOT depend on bridge.js content-script injection.
+        const m = chrome.runtime.getManifest?.() || {};
+        const bridgePatterns = (m.content_scripts || []).reduce((acc, cs) => {
+          if (Array.isArray(cs.js) && cs.js.includes('bridge.js')) {
+            for (const p of (cs.matches || [])) acc.push(p);
+          }
+          return acc;
+        }, []);
+        const extPatterns = (m.externally_connectable && Array.isArray(m.externally_connectable.matches))
+          ? m.externally_connectable.matches
+          : [];
+        sendResponse({
+          ok: true,
+          version: m.version ?? '0.1.0',
+          manifestVersion: m.version ?? '0.1.0',
+          extId: chrome.runtime.id,
+          bridgePatterns,
+          externalPatterns: extPatterns,
+          fingerprint: [m.version || '', bridgePatterns.length, extPatterns.length].join('|'),
+          merged: buildMergedFields(),
+          state,
+        });
+        diagRecord('external:ok', { type: t, mergedFields: Object.keys(buildMergedFields() || {}).length, bridgePatterns, externalPatterns });
+        return;
+      }
+      // New: direct handshake path from Probe & Connect that ALSO works when
+      // bridge.js content-script is not injected (so externally_connectable
+      // can still confirm extension presence). Returns same shape as EXT_HELLO
+      // but without merged fields (handshake-only).
+      if (t === 'EXT_HANDSHAKE_DIRECT') {
+        const m = chrome.runtime.getManifest?.() || {};
+        const bridgePatterns = (m.content_scripts || []).reduce((acc, cs) => {
+          if (Array.isArray(cs.js) && cs.js.includes('bridge.js')) {
+            for (const p of (cs.matches || [])) acc.push(p);
+          }
+          return acc;
+        }, []);
+        const extPatterns = (m.externally_connectable && Array.isArray(m.externally_connectable.matches))
+          ? m.externally_connectable.matches
+          : [];
+        diagRecord('external:handshake_direct', { fromOrigin: (sender?.url) ? (new URL(sender.url).origin) : null });
+        sendResponse({
+          ok: true,
+          manifestVersion: m.version ?? '0.1.0',
+          extId: chrome.runtime.id,
+          bridgePatterns,
+          externalPatterns: extPatterns,
+          fingerprint: [m.version || '', bridgePatterns.length, extPatterns.length].join('|'),
+        });
         return;
       }
       if (t === 'EXT_SCRAPE_ALL') {
