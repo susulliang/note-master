@@ -956,6 +956,35 @@ async function bootstrap() {
         const pushOk = entries.filter((e) => String(e.cat) === 'push:ok').length;
         const sfApplyOk = entries.filter((e) => String(e.cat) === 'sf:apply:ok').length;
         const sfApplyNonOk = entries.filter((e) => String(e.cat) === 'sf:apply:nonOk' || String(e.cat) === 'sf:apply:error' || String(e.cat) === 'sf:apply:throw').length;
+        // Per-target breakdown of the most recent apply run — answers
+        // "which fields actually filled, which failed" without opening the
+        // Ticket Notes modal. detail shape (from the SW):
+        //   { postBodyOk, postBodyChars, postBodyEditorFound,
+        //     fieldSummary: { contactPhone: {ok, skipped, error}, … } }
+        const FIELD_LABELS = { contactPhone: 'Phone', customerName: 'Contact Name', accountName: 'Account Name', amrModelNo: 'AMR Model No.' };
+        const lastApply = entries.find((e) => /^sf:apply:(ok|nonOk|error|throw)$/.test(String(e.cat)));
+        let lastApplyHtml = '(no SF write attempted yet)';
+        if (lastApply) {
+          // diagRecord stores details as a JSON STRING — parse before use.
+          let d = {};
+          try { d = typeof lastApply.detail === 'string' ? (JSON.parse(lastApply.detail) || {}) : (lastApply.detail || {}); } catch { d = {}; }
+          const bits = [];
+          if (typeof d.postBodyOk === 'boolean') {
+            bits.push(d.postBodyOk
+              ? `Post ✅ ${d.postBodyChars ?? '?'} chars`
+              : `Post ❌ ${d.postBodyEditorFound === false ? 'editor missing' : 'not written'}`);
+          }
+          const fs = d.fieldSummary || {};
+          for (const [k, lbl] of Object.entries(FIELD_LABELS)) {
+            const s = fs[k];
+            if (!s) bits.push(`${lbl} ⚠️ not on layout`);
+            else if (s.skipped) bits.push(`${lbl} ⏭️ empty`);
+            else if (s.ok) bits.push(`${lbl} ✅`);
+            else bits.push(`${lbl} ❌ ${s.error ? escHtml(String(s.error).slice(0, 40)) : 'failed'}`);
+          }
+          if (bits.length === 0) bits.push(escHtml(String(d.error || 'no detail recorded')));
+          lastApplyHtml = bits.join(' · ') + ` <span style="opacity:.6">(${new Date(lastApply.ts).toLocaleTimeString()})</span>`;
+        }
         if (elBridgeSummary) {
           elBridgeSummary.innerHTML = `
             <div class="summ__grid">
@@ -969,6 +998,8 @@ async function bootstrap() {
               <div class="summ__v">${pushOk}</div>
               <div class="summ__k">Salesforce Case field writes OK / non-OK</div>
               <div class="summ__v">${sfApplyOk} / <span style="color:${sfApplyNonOk > 0 ? 'var(--err)' : 'inherit'}">${sfApplyNonOk}</span></div>
+              <div class="summ__k">Last SF write — filled / failed</div>
+              <div class="summ__v" style="grid-column:1/-1;line-height:1.7">${lastApplyHtml}</div>
               <div class="summ__k">Category counts (top)</div>
               <div class="summ__v">${Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `<code>${escHtml(k)}</code> × ${v}`).join(' · ') || '(none)'}</div>
             </div>

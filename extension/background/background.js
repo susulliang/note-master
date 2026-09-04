@@ -1811,14 +1811,24 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
             fields,
             saveEach,
           });
-          if (result?.ok) {
+          // The content script replies { ok, postBody, fields, summary }
+          // where ok only means "the apply RAN" — per-target status lives
+          // inside (postBody.ok / fields[k].ok / summary.ok). Accept the
+          // structured shape as the success path, and split the diag record
+          // by summary.ok (overallOk) so partial failures (e.g. Post body
+          // never landed) count as non-OK in the popup stats instead of a
+          // false green.
+          const structured = result && (result.summary || result.fields);
+          if (structured) {
             const summary = {
               ok: true,
+              overallOk: Boolean(result.summary?.ok),
               tab: { id: tab.id, url: tab.url, title: tab.title },
               postBodyOk: Boolean(result.postBody?.ok),
               postBodyTabFound: result.postBody?.tabFound ?? null,
               postBodyEditorFound: result.postBody?.editorFound ?? null,
               postBodyChars: result.postBody?.length ?? null,
+              postBodyLandedChars: result.postBody?.landedChars ?? null,
               postBodyPublished: result.postBody?.publishClicked ?? null,
               fieldSummary: Object.fromEntries(
                 Object.entries(result?.fields ?? {}).map(([k, s]) => [k, {
@@ -1829,12 +1839,16 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
                 }])
               ),
             };
-            sendResponse({ ok: true, tab: { id: tab.id, url: tab.url, title: tab.title }, ...result });
-            diagRecord('sf:apply:ok', summary);
+            sendResponse({ ok: true, overallOk: Boolean(result.summary?.ok), tab: { id: tab.id, url: tab.url, title: tab.title }, ...result });
+            diagRecord(result.summary?.ok ? 'sf:apply:ok' : 'sf:apply:nonOk', summary);
           } else {
             sendResponse({ ok: false, error: result?.error || 'Content script returned non-ok for APPLY_CASE_FIELDS.', detail: result ?? null });
             diagRecord('sf:apply:nonOk', {
               error: result?.error ?? null,
+              postBodyOk: Boolean(result?.postBody?.ok),
+              postBodyChars: result?.postBody?.length ?? null,
+              postBodyEditorFound: result?.postBody?.editorFound ?? null,
+              postBodyDetail: result?.postBody?.detail ?? null,
               fieldSummary: Object.fromEntries(
                 Object.entries(result?.fields ?? {}).map(([k, s]) => [k, {
                   ok: s && typeof s === 'object' ? Boolean(s.ok) : null,

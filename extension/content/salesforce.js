@@ -903,12 +903,16 @@
     if (kind === 'combobox' || kind === 'lookup') {
       const picker = combobox || $qs(wrap, 'lightning-combobox, [role="combobox"]');
       const r = await nativeSetCombobox(picker, String(value));
-      result = r.ok ? { ok: true, editorKind: kind, detail: r } : { ok: false, error: r.reason || 'combobox pick failed' };
+      result = r.ok
+        ? { ok: true, editorKind: kind, value: String(value).slice(0, 80), detail: r }
+        : { ok: false, error: r.reason || 'combobox pick failed' };
     } else {
       const wrapperEl = $qs(wrap, 'lightning-input, lightning-input-field, lightning-textarea, textarea, input');
       const native = resolveNativeInput(wrapperEl) || $qs(wrap, 'input, textarea');
       const ok = nativeTypeText(native, String(value));
-      result = ok ? { ok: true, editorKind: kind } : { ok: false, error: `couldn't set native input for ${labelAliases[0]}` };
+      result = ok
+        ? { ok: true, editorKind: kind, value: String(value).slice(0, 80) }
+        : { ok: false, error: `couldn't set native input for ${labelAliases[0]}` };
     }
     await $sleep(120);
     // Save (if the page has a single footer Save it will commit the batch
@@ -937,57 +941,120 @@
    */
   async function clickPostTabAndWrite(body, opts) {
     const publish = !!opts?.publish;
-    const result = { postBody: { ok: false, length: 0, tabFound: false, editorFound: false, publishClicked: false } };
-    const tabHeader = document.querySelector(
-      'a.tabHeader[data-target-selection-name="FeedItem.TextPostTab"], a[title="Post"].tabHeader, a.tabHeader:has(span.title:is(:-webkit-any(:-moz-read-write)))'
-    ) || (() => {
-      const spans = Array.from(document.querySelectorAll('span.title'));
-      const s = spans.find((x) => (x.textContent || '').trim() === 'Post');
-      return s?.closest?.('a.tabHeader, li.tabs__item a') || null;
-    })();
-    if (!tabHeader) return result;
+    const result = { postBody: { ok: false, length: 0, tabFound: false, editorFound: false, publishClicked: false, detail: '' } };
+    // --- (1) locate the Post tab header --------------------------------
+    // Try the canonical tabHeader anchor first, then progressively looser
+    // text matches (button/a with title or text exactly "Post").
+    const findPostTab = () => {
+      const direct = document.querySelector(
+        'a.tabHeader[data-target-selection-name="FeedItem.TextPostTab"], a[title="Post"].tabHeader'
+      );
+      if (direct) return { el: direct, via: 'tabHeader[data-target-selection-name]' };
+      const spans = Array.from(document.querySelectorAll('span.title, a[role="tab"], button[role="tab"], li.tabs__item a, .tabHeader, a[title="Post"], button[title="Post"]'));
+      const s = spans.find((x) => {
+        const t = (x.textContent || '').trim();
+        const ttl = (x.getAttribute('title') || '').trim();
+        return t === 'Post' || ttl === 'Post';
+      });
+      if (s) return { el: s.closest('a, button') || s, via: 'text/title="Post"' };
+      return null;
+    };
+    const tabHit = findPostTab();
+    if (!tabHit) { result.postBody.detail = 'no "Post" tab header found on the Case feed'; return result; }
     result.postBody.tabFound = true;
-    try { tabHeader.click(); } catch (e) { result.postBody.error = String(e?.message || e); return result; }
-    await $sleep(480);
-    // Prefer the chatter publisher's contentEditable (the one inside the
-    // *active* publisher — not old feed post entries that are also
-    // contentEditable). Pick the shallowest one *after* an
-    // forceChatterPublisher or the picker-shell/publisher container.
-    const container =
-      document.querySelector('.forceChatterPublisher, .forceChatterPublisherContainer, .cuf-publisherContainer, .slds-rich-text-editor, [data-component-id="publisher"], .template-input-row, .picker-shell') ||
-      document;
-    const candidates = Array.from(
-      container.querySelectorAll('[contenteditable="true"], [role="textbox"][aria-multiline="true"]')
-    );
-    // Prefer the smallest (in DOM order) non-disabled one with largest
-    // offsetWidth & offsetHeight — the editor that's actually rendered on
-    // screen.
+    result.postBody.tabVia = tabHit.via;
+    try { tabHit.el.click(); } catch (e) { result.postBody.error = String(e?.message || e); return result; }
+
+    // --- (2) wait for the publisher's rich-text editor -----------------
+    // Lightning lazily swaps the publisher panel in AFTER the tab click —
+    // a single fixed sleep raced that swap on slower Console tabs, which
+    // is why the note body sometimes never landed. Poll instead.
+    const inPublishedFeedItem = (el) => !!el.closest?.('.feeditem, article, .forceChatterFeedItemBody, .cuf-comment, .slds-feed__item');
+    const findEditor = () => {
+      const pool = [];
+      // Priority 1: editors inside a publisher container.
+      const containers = document.querySelectorAll(
+        '.forceChatterPublisher, .forceChatterPublisherContainer, .cuf-publisherContainer, [data-component-id="publisher"], .slds-rich-text-editor, .picker-shell, .template-input-row'
+      );
+      for (const c of containers) {
+        for (const el of c.querySelectorAll('[contenteditable="true"], [role="textbox"][aria-multiline="true"]')) {
+          if (el.getAttribute('disabled') != null) continue;
+          if (inPublishedFeedItem(el)) continue;
+          pool.push(el);
+        }
+      }
+      // Priority 2: any visible multiline textbox outside published feed
+      // items (old posts are contenteditable too once edited — never type
+      // into those).
+      if (pool.length === 0) {
+        for (const el of document.querySelectorAll('[contenteditable="true"], [role="textbox"][aria-multiline="true"]')) {
+          if (el.getAttribute('disabled') != null) continue;
+          if (inPublishedFeedItem(el)) continue;
+          pool.push(el);
+        }
+      }
+      // Score: an EMPTY editor always beats a filled one (the fresh
+      // publisher starts empty; a stale edit-mode box has content) —
+      // otherwise largest rendered area wins.
+      let best = null; let score = -1;
+      for (const el of pool) {
+        const rect = el.getBoundingClientRect();
+        const sz = (rect.width || 0) * (rect.height || 0);
+        const emptyBonus = (el.innerText || '').trim() === '' ? 1e7 : 0;
+        const s = sz + emptyBonus;
+        if (s > score) { score = s; best = el; }
+      }
+      return best;
+    };
     let editor = null;
-    let score = -1;
-    for (const el of candidates) {
-      if (el.getAttribute('disabled') != null) continue;
-      const rect = el.getBoundingClientRect();
-      const sz = (rect.width || 0) * (rect.height || 0);
-      if (sz > score) { score = sz; editor = el; }
+    for (let i = 0; i < 14 && !editor; i++) {
+      editor = findEditor();
+      if (!editor) await $sleep(150);
     }
-    if (!editor) return result;
+    if (!editor) { result.postBody.detail = 'Post tab opened but the publisher rich-text editor never appeared (layout may hide the feed publisher)'; return result; }
     result.postBody.editorFound = true;
+    try {
+      result.postBody.editorKind = editor.tagName.toLowerCase()
+        + (editor.className ? '.' + String(editor.className).trim().split(/\s+/).slice(0, 2).join('.') : '');
+    } catch { /* ignore */ }
+
+    // --- (3) write the note body ---------------------------------------
     if (body != null) {
       const ok = nativeTypeText(editor, body);
       result.postBody.ok = ok;
       result.postBody.length = String(body).length;
-      await $sleep(200);
+      if (!ok) result.postBody.detail = 'nativeTypeText returned false';
+      await $sleep(220);
+      // VERIFY the text actually landed: execCommand('insertText') can
+      // silently no-op on some LWC rich-text builds, and a green "ok"
+      // with an empty editor is exactly the janky fill agents reported.
+      const landed = (editor.innerText || '').length;
+      result.postBody.landedChars = landed;
+      const expected = String(body).replace(/[*#>`]/g, '').length;
+      if (ok && landed < Math.max(10, expected * 0.4)) {
+        result.postBody.ok = false;
+        result.postBody.detail = `editor stayed near-empty after insertText (landed ${landed}/${expected} chars) — paste the note from clipboard instead`;
+      }
     } else {
       result.postBody.ok = true;
     }
+
+    // --- (4) optional publish ------------------------------------------
     if (publish) {
-      // Find Publish button (Share / Post) in the footer / modal below
-      // the editor — it's a primary action button.
-      const btns = Array.from(document.querySelectorAll('button'));
+      // Find Publish button (Share / Post) near the editor first, then
+      // anywhere — it's a primary action button.
+      const scope = editor.closest('.forceChatterPublisher, .cuf-publisherContainer, form') || document;
+      const btns = Array.from(scope.querySelectorAll('button'));
       let pub = null;
       for (const b of btns) {
         const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
         if (/(^publish$|^post$|^share$)/.test(txt)) { pub = b; break; }
+      }
+      if (!pub) {
+        for (const b of document.querySelectorAll('button')) {
+          const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+          if (/(^publish$|^post$|^share$)/.test(txt)) { pub = b; break; }
+        }
       }
       if (pub) {
         try { pub.click(); result.postBody.publishClicked = true; await $sleep(400); }

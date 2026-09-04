@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useContext } from 'react';
-import { Copy, Check, X, Pencil, Eye, Code2, Upload, Loader2 } from 'lucide-react';
+import { Copy, Check, X, Pencil, Eye, Code2, Upload, Loader2, Minus, CircleAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -63,6 +63,24 @@ function markdownToHtml(md: string): string {
   return `<div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;color:#c9d1d9;background:#0d1117;padding:12px;border-radius:8px">${paragraphs.join('')}</div>`;
 }
 
+/** One row of the persistent "Last push report" card — rendered after every
+ *  Push to Salesforce so the agent sees exactly which targets filled and
+ *  which failed, without relying on transient toasts. */
+type PushReportRow = {
+  label: string;
+  status: 'ok' | 'skipped' | 'failed' | 'missing';
+  detail: string;
+  value?: string;
+};
+type PushReport = {
+  at: string;
+  /** The chatter Post body write (the most important target). */
+  post: PushReportRow | null;
+  /** Editable layout fields. */
+  rows: PushReportRow[];
+  tabTitle?: string;
+};
+
 export default function OutputModal({
   open,
   onOpenChange,
@@ -72,6 +90,7 @@ export default function OutputModal({
   const [copied, setCopied] = useState<null | 'rich' | 'plain'>(null);
   const [editableText, setEditableText] = useState(noteText);
   const [pushing, setPushing] = useState(false);
+  const [pushReport, setPushReport] = useState<PushReport | null>(null);
   const panelsCtx = useContext(TicketPanelsContext);
 
   // Defensive fallback: OutputModal was accidentally rendered outside
@@ -426,6 +445,11 @@ export default function OutputModal({
       }
       if (!r.ok) {
         const msg = r.error || 'Push failed.';
+        setPushReport({
+          at: new Date().toISOString(),
+          post: { label: 'Post — note body', status: 'failed', detail: `push aborted: ${msg}` },
+          rows: [],
+        });
         try { toast.error(msg, { description: 'Retry after opening any Lightning Case tab.', duration: 10_000 }); } catch { /* ignore */ }
         try { window.alert(`Push to Salesforce failed:\n\n${msg}\n\nOpen a Lightning Case tab, then try again.`); } catch { /* ignore */ }
         return;
@@ -500,13 +524,41 @@ export default function OutputModal({
           );
         } catch { /* ignore */ }
       }
+      // Persistent per-target report (Post first — the most important
+      // target — then each editable field). Survives after the toasts fade
+      // so the agent can verify exactly what filled and what needs manual
+      // entry.
+      const pushedTab = (r as any).tab;
+      setPushReport({
+        at: new Date().toISOString(),
+        post: pb ? {
+          label: 'Post — note body',
+          status: pb.ok ? 'ok' : 'failed',
+          detail: pb.ok
+            ? `${pb.length ?? 0} chars written to publisher${pb.publishClicked ? ' — published' : ' — review & click Publish in SF'}`
+            : (!pb.tabFound
+                ? 'Post tab not found on this Case feed'
+                : !pb.editorFound
+                  ? 'Post tab opened but publisher editor never appeared'
+                  : (pb.detail || pb.error || 'editor write failed')),
+        } : null,
+        rows: ks.map((k) => {
+          const label = labels[k];
+          const s = fields[k];
+          const val = String(f[k] ?? '').trim();
+          if (!s) return { label, status: 'missing' as const, detail: 'no matching layout section found on this Case', value: val };
+          if (s.skipped) return { label, status: 'skipped' as const, detail: s.reason || 'empty value — nothing to write', value: val };
+          if (s.ok) return { label, status: 'ok' as const, detail: `written${s.editorKind ? ` via ${s.editorKind}` : ''}`, value: String(s.value ?? val) };
+          return { label, status: 'failed' as const, detail: s.error || 'could not write (read-only / not on layout / no permission)', value: val };
+        }),
+        tabTitle: pushedTab?.title || undefined,
+      });
       // Always stash per-field report + post summary on window.debug so any
       // "fields didn't fill" bug report has instant reproduction data.
       try {
         (window as any).__debug = (window as any).__debug || {};
         (window as any).__debug.lastPushReport = { at: new Date().toISOString(), ok: r.ok, postSummary, perFieldReport, postBody: pb, tab: (r as any).tab ?? null };
       } catch { /* ignore */ }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tab = (r as any).tab;
       if (tab?.title || tab?.url) {
         toast.message(`Pushed to tab: ${tab?.title || new URL(tab.url).origin}`, {
@@ -733,6 +785,54 @@ export default function OutputModal({
           />
         </div>
 
+        {/* (C3) Last push report — persistent per-target breakdown of the
+         *  most recent "Push to Salesforce Case" run: the chatter Post
+         *  (note body) first, then each editable layout field, each with
+         *  ✅ wrote / ⏭️ skipped / ❌ failed / ⚠️ not-on-layout status. */}
+        {pushReport && (
+          <div className="rounded-xl border border-border/70 bg-card/70 backdrop-blur-sm">
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
+              <Upload className="size-3.5 text-accent" />
+              <span className="font-semibold tracking-wide text-accent">LAST PUSH REPORT</span>
+              <span className="opacity-70">{new Date(pushReport.at).toLocaleTimeString()}</span>
+              {pushReport.tabTitle && (
+                <span className="ml-auto max-w-[45%] truncate opacity-70" title={pushReport.tabTitle}>
+                  → {pushReport.tabTitle}
+                </span>
+              )}
+            </div>
+            <ul className="divide-y divide-border/40 text-xs">
+              {([pushReport.post, ...pushReport.rows].filter(Boolean) as PushReportRow[]).map((row) => (
+                <li key={row.label} className="flex items-start gap-2 px-3 py-1.5">
+                  {row.status === 'ok' && <Check className="mt-0.5 size-3.5 shrink-0 text-primary" />}
+                  {row.status === 'skipped' && <Minus className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
+                  {row.status === 'failed' && <X className="mt-0.5 size-3.5 shrink-0 text-destructive" />}
+                  {row.status === 'missing' && <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-accent" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-semibold text-foreground">{row.label}</span>
+                      {row.value && (
+                        <code className="max-w-[55%] truncate rounded bg-muted px-1 py-0.5 text-[0.9em] text-foreground" title={row.value}>
+                          {row.value}
+                        </code>
+                      )}
+                    </div>
+                    <p className={
+                      row.status === 'failed'
+                        ? 'text-destructive/90'
+                        : row.status === 'missing'
+                          ? 'text-accent/90'
+                          : 'text-muted-foreground'
+                    }>
+                      {row.detail}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
@@ -768,7 +868,6 @@ export default function OutputModal({
                 // this click even if showDiagnosticsToast short-circuits.
                 e.stopPropagation?.();
                 try {
-                  // eslint-disable-next-line no-console
                   console.log('[OutputModal] Diagnostics clicked at', new Date().toISOString(), 'extConn=', extConn);
                 } catch { /* ignore */ }
                 try { (window as any).__debug = (window as any).__debug || {}; (window as any).__debug.lastDiagClick = new Date().toISOString(); } catch { /* ignore */ }
