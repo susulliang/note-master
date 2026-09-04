@@ -258,14 +258,15 @@ const EXT_ID_LS_KEY = 'nm-ext-id';
 const MANUAL_EXT_ID_LS_KEY = 'nm-ext-id-manual';
 /** Stable extension ids tried via externally_connectable BEFORE the page
  *  has learned the real id from bridge.js:
- *  - hmbkrxnrsjhqckcc  → deterministic id derived from the "key" field in
- *    extension/manifest.json. Stable across machines, load paths and
- *    reinstalls — this is the id from 0.1.32 onward.
- *  - fmopcjlgligcpbkamecbcgjeedjdflno → id of the original unpacked load
- *    (path-derived). Kept so installs that have NOT reloaded with the key
- *    still connect. */
+ *  - nhamjnhcefdbanclmifhcbeedgnkbmli → deterministic id derived from the
+ *    "key" field in extension/manifest.json (sha256(DER SPKI), first 16
+ *    bytes, each byte → two nibble chars a–p). Stable across machines,
+ *    load paths and reinstalls — the id from 0.1.32 onward.
+ *  - fmopcjlgligcpbkamecbcgjeedjdflno → id of the ORIGINAL unpacked load
+ *    (path-derived, pre-"key"). Kept so installs that have NOT reloaded
+ *    with the key still connect. */
 const DEFAULT_EXT_ID_CANDIDATES: string[] = [
-  'hmbkrxnrsjhqckcc',
+  'nhamjnhcefdbanclmifhcbeedgnkbmli',
   'fmopcjlgligcpbkamecbcgjeedjdflno',
 ];
 
@@ -337,7 +338,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.32';
+  const EXPECTED_MANIFEST_VERSION = '0.1.33';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -487,13 +488,19 @@ export function useCcpExtensionBridge({
     triedIds: [], lastError: null, lastSuccessAt: null,
   });
   const [manualExtensionId, setManualExtensionIdState] = useState<string | null>(null);
+  // Sync mirror of manualExtensionId. setManualExtensionId must probe with
+  // the just-pasted id IMMEDIATELY, but React state updates are async — the
+  // memoized getCandidateIds closure would still see the OLD value on the
+  // same tick ("Save & Probe" silently did nothing). Reads go through the
+  // ref; the state copy only feeds rendering.
+  const manualExtIdRef = useRef<string>('');
 
   // Restore persisted ids on mount: manual override first, then the last id
   // that successfully answered.
   useEffect(() => {
     try {
       const manual = localStorage.getItem(MANUAL_EXT_ID_LS_KEY);
-      if (manual) { setManualExtensionIdState(manual); extIdRef.current = manual; }
+      if (manual) { manualExtIdRef.current = manual; setManualExtensionIdState(manual); extIdRef.current = manual; }
     } catch { /* ignore */ }
     try {
       const saved = localStorage.getItem(EXT_ID_LS_KEY);
@@ -502,10 +509,11 @@ export function useCcpExtensionBridge({
   }, []);
 
   /** Every extension id the direct channel should try, best-guess-first:
-   *  manual override → last-known-good → stable defaults. */
+   *  manual override → last-known-good → stable defaults. Reads refs +
+   * localStorage live (no stale closures), so it needs no deps. */
   const getCandidateIds = useCallback((): string[] => {
     const out: string[] = [];
-    if (manualExtensionId) out.push(manualExtensionId);
+    if (manualExtIdRef.current) out.push(manualExtIdRef.current);
     if (extIdRef.current) out.push(extIdRef.current);
     try {
       const saved = localStorage.getItem(EXT_ID_LS_KEY);
@@ -513,7 +521,7 @@ export function useCcpExtensionBridge({
     } catch { /* ignore */ }
     out.push(...DEFAULT_EXT_ID_CANDIDATES);
     return Array.from(new Set(out.filter(Boolean)));
-  }, [manualExtensionId]);
+  }, []);
 
   /**
    * Probe the extension DIRECTLY via externally_connectable
@@ -607,10 +615,12 @@ export function useCcpExtensionBridge({
   const setManualExtensionId = useCallback((id: string) => {
     const clean = (id || '').trim();
     if (!clean) {
+      manualExtIdRef.current = '';
       try { localStorage.removeItem(MANUAL_EXT_ID_LS_KEY); } catch { /* ignore */ }
       setManualExtensionIdState(null);
       return;
     }
+    manualExtIdRef.current = clean; // ref FIRST — the probe below reads it
     try { localStorage.setItem(MANUAL_EXT_ID_LS_KEY, clean); } catch { /* ignore */ }
     setManualExtensionIdState(clean);
     extIdRef.current = clean;

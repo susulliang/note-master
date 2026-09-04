@@ -1,0 +1,35 @@
+fix(bridge): correct stable extension id (32-char nibble mapping) + fix Save & Probe stale closure
+
+User tested 0.1.32: direct channel still "no answer", both candidate ids
+dead ("Receiving end does not exist"). Two bugs, both confirmed:
+
+1. WRONG ID FORMAT. The id I derived from the manifest "key" was
+   hmbkrxnrsjhqckcc — 16 chars. Chrome ids are ALWAYS 32 chars: sha256
+   of the DER SPKI, first 16 bytes, each byte mapped to TWO chars
+   (a-p per 4-bit nibble). Recomputed correctly: the real id for our
+   key is nhamjnhcefdbanclmifhcbeedgnkbmli — which matches exactly what
+   the user pasted from edge://extensions. The old path-derived id
+   fmopcjlgligcpbkamecbcgjeedjdflno also stopped working the moment the
+   user reloaded 0.1.32 (adding "key" changed the id), so BOTH shipped
+   candidates were dead. Now DEFAULT_EXT_ID_CANDIDATES ships
+   nhamjnhcefdbanclmifhcbeedgnkbmli first — auto-connects on every
+   fresh install, no manual paste needed.
+
+2. SAVE & PROBE STALE CLOSURE. setManualExtensionId wrote React state
+   then immediately called probeDirectExternal(), but the memoized
+   getCandidateIds closure still read the OLD manualExtensionId value
+   on that tick — so the just-pasted id was silently NOT tried on the
+   very click that was supposed to try it. Fixed with a sync
+   manualExtIdRef (written BEFORE the probe; state is render-only
+   copy). getCandidateIds now reads refs + localStorage live with []
+   deps.
+
+Also: placeholder in the Engine Settings manual-id box updated to the
+correct 32-char id example; EXPECTED_MANIFEST_VERSION bumped to 0.1.33
+along with the canonical version files.
+
+After this deploys the user needs NOTHING: the mount probes (30ms/
+400ms/1800ms) and the 12s interval try nhamjnhcefdbanclmifhcbeedgnkbmli
+first and the extension (already on 0.1.32+, id unchanged by this
+bump) answers EXT_HANDSHAKE_DIRECT → connected flips true with
+source-of-truth manifest patterns.

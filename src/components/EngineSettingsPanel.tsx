@@ -909,7 +909,7 @@ export default function EngineSettingsPanel({
                     type="text"
                     value={extIdDraft}
                     onChange={(e) => setExtIdDraft(e.target.value)}
-                    placeholder="Paste extension ID from edge://extensions (e.g. hmbkrxnrsjhqckcc)"
+                    placeholder="Paste extension ID from edge://extensions (32 chars, e.g. nhamjnhcefdbanclmifhcbeedgnkbmli)"
                     spellCheck={false}
                     className="min-w-0 flex-1 rounded-sm border border-border bg-background/60 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none"
                   />
