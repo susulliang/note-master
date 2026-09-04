@@ -128,7 +128,24 @@ export interface TicketPanelsContextShape {
       contextInvalidatedSeen: boolean;
       /** ISO timestamp of the last context invalidation signal we saw. */
       contextInvalidatedSeenAt: string | null;
+      /** Live status of the direct externally_connectable probe — the
+       *  channel that works WITHOUT bridge.js injected. */
+      directProbe: {
+        /** Every extension id the page has tried. */
+        triedIds: string[];
+        /** Most recent failure reason (e.g. "Could not establish
+         *  connection. Receiving end does not exist." = wrong id /
+         *  extension removed / origin not in externally_connectable). */
+        lastError: string | null;
+        /** When the direct channel last answered successfully. */
+        lastSuccessAt: string | null;
+        /** Id the user pinned manually via setManualExtensionId. */
+        manualId: string | null;
+      };
     };
+    /** Pin the extension id manually (pasted from edge://extensions).
+     *  Tried FIRST on every probe; persists in localStorage. Empty clears. */
+    setManualExtensionId: (id: string) => void;
   };
 }
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);

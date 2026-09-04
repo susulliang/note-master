@@ -191,6 +191,19 @@ export interface CcpExtensionBridge {
     contextInvalidatedSeen: boolean;
     /** ISO timestamp of when a :context_invalidated signal was last seen. */
     contextInvalidatedSeenAt: string | null;
+    /** Live status of the direct externally_connectable probe (the channel
+     *  that works WITHOUT bridge.js being injected). triedIds = every
+     *  extension id we attempted; lastError = most recent failure reason
+     *  ("Could not establish connection…" = wrong id / not installed /
+     *  origin not in externally_connectable); lastSuccessAt = when the
+     *  direct channel last answered. */
+    directProbe: {
+      triedIds: string[];
+      lastError: string | null;
+      lastSuccessAt: string | null;
+      /** Id the user manually pinned via setManualExtensionId (or null). */
+      manualId: string | null;
+    };
   };
 
   /** Probe the bridge right now. Useful when the UI shows "disconnected"
@@ -198,6 +211,11 @@ export interface CcpExtensionBridge {
    *  handshake_request so the connected flag flips true immediately
    *  instead of waiting for the next 10s heartbeat. */
   requestConnection: () => void;
+  /** Pin the extension id manually (pasted from edge://extensions).
+   *  Persists to localStorage, is tried FIRST on every direct probe, and
+   *  triggers an immediate probe so the connection flips without a page
+   *  reload. Pass an empty string to clear the override. */
+  setManualExtensionId: (id: string) => void;
 }
 
 /** Map the flat field shape produced by the background's
@@ -231,11 +249,25 @@ const KEY_FIELD_FALLBACKS: Readonly<Record<string, string[]>> = {
   deebotModel: [],
   serialNumber: [],
 };
-/** Default extension ID the packaged build uses; users can override via
- *  localStorage key `nm-ext-id` when loading an unpacked build that gets a
- *  different random ID on each machine. */
+/** localStorage keys for extension id persistence.
+ *  - EXT_ID_LS_KEY: last id we successfully talked to (auto-maintained).
+ *  - MANUAL_EXT_ID_LS_KEY: id the USER pasted from edge://extensions when
+ *    the built-in candidates don't match their install (escape hatch —
+ *    always tried FIRST, no deploy needed to fix a wrong id). */
 const EXT_ID_LS_KEY = 'nm-ext-id';
-const DEFAULT_EXT_ID_CANDIDATE = ''; // unknown until bridge.js says hello
+const MANUAL_EXT_ID_LS_KEY = 'nm-ext-id-manual';
+/** Stable extension ids tried via externally_connectable BEFORE the page
+ *  has learned the real id from bridge.js:
+ *  - hmbkrxnrsjhqckcc  → deterministic id derived from the "key" field in
+ *    extension/manifest.json. Stable across machines, load paths and
+ *    reinstalls — this is the id from 0.1.32 onward.
+ *  - fmopcjlgligcpbkamecbcgjeedjdflno → id of the original unpacked load
+ *    (path-derived). Kept so installs that have NOT reloaded with the key
+ *    still connect. */
+const DEFAULT_EXT_ID_CANDIDATES: string[] = [
+  'hmbkrxnrsjhqckcc',
+  'fmopcjlgligcpbkamecbcgjeedjdflno',
+];
 
 type PendingReqMap = Record<number, (reply: any) => void>;
 
@@ -305,7 +337,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.30';
+  const EXPECTED_MANIFEST_VERSION = '0.1.32';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -429,69 +461,8 @@ export function useCcpExtensionBridge({
     } catch { return []; }
   }, [appHref, appOrigin, originCoveredByBridge, originCoveredByExternal]);
 
-  const requestConnection = useCallback(() => {
-    setHandshakeRequested(true);
-    // 1. Always fire the bridge-side probe (works when bridge.js IS injected).
-    try {
-      window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
-    } catch { /* ignore */ }
-    // 2. ALSO fire a direct handshake via externally_connectable
-    // (chrome.runtime.sendMessage) — this does NOT require bridge.js to be
-    // injected.  Background replies with manifest version + real patterns
-    // pulled straight from chrome.runtime.getManifest(), so the web-app
-    // Diagnostics surface always has real source-of-truth manifest data
-    // even when Edge/Chrome cached content-scripts and bridge.js hasn't
-    // arrived yet. The direct path also flips connected=true → Probe &
-    // Connect shows success.
-    const tryDirect = async () => {
-      const saved = (() => { try { return localStorage.getItem(EXT_ID_LS_KEY) || ''; } catch { return ''; } })();
-      const candidates: string[] = [];
-      if (extIdRef.current) candidates.push(extIdRef.current);
-      if (saved) candidates.push(saved);
-      candidates.push(...DEFAULT_EXT_ID_CANDIDATE);
-      const tried = new Set<string>();
-      for (const id of candidates) {
-        if (!id || tried.has(id)) continue;
-        tried.add(id);
-        try {
-          const reply: any = await new Promise((resolve, reject) => {
-            try {
-              const rt = (globalThis as any).chrome?.runtime;
-              if (!rt || typeof rt.sendMessage !== 'function') { reject(new Error('chrome.runtime not available')); return; }
-              rt.sendMessage(id, { type: 'EXT_HANDSHAKE_DIRECT' }, (r: any) => {
-                const err = rt.lastError;
-                if (err) reject(new Error(String(err.message || err)));
-                else resolve(r);
-              });
-            } catch (syncErr) { reject(syncErr); }
-          });
-          if (reply && reply.ok) {
-            // Direct handshake succeeded — extension reachable WITHOUT
-            // bridge.js. Flip connected, remember ext id, and stamp the
-            // source-of-truth manifest patterns (this is what was missing
-            // before — Diagnostics always showed DEFAULTS even though the
-            // extension was perfectly reachable via externally_connectable).
-            setConnected(true);
-            setExtensionId(id);
-            extIdRef.current = id;
-            try { localStorage.setItem(EXT_ID_LS_KEY, id); } catch { /* ignore */ }
-            setInjectedManifestVersion(String(reply.manifestVersion || reply.version || ''));
-            setInjectedFingerprint(String(reply.fingerprint || ''));
-            if (Array.isArray(reply.bridgePatterns)) setManifestBridgePatterns(reply.bridgePatterns);
-            if (Array.isArray(reply.externalPatterns)) setManifestExternalPatterns(reply.externalPatterns);
-            setReceivedBridgePatternsAt(new Date().toISOString());
-            setLastHandshakeAt(new Date().toISOString());
-            setContextInvalidatedSeenAt(null);
-            setLastExternalError(null);
-            break;
-          }
-        } catch { /* ignore — try next id candidate */ }
-      }
-    };
-    try { void tryDirect(); } catch { /* ignore */ }
-  }, []);
-
-  // Stable transport state across renders.
+  // Stable transport state across renders. (Declared BEFORE the connection
+  // callbacks below so they can be referenced from their closures.)
   const bridgeReadyRef = useRef(false);
   const extIdRef = useRef<string>('');
   const pendingReqRef = useRef<PendingReqMap>({});
@@ -500,15 +471,153 @@ export function useCcpExtensionBridge({
   useEffect(() => { onApplyRef.current = onApply; }, [onApply]);
   const sourceRef = useRef(source);
   useEffect(() => { sourceRef.current = source; }, [source]);
+  // Latest-sendRequest / queuePendingPush accessors so earlier useCallbacks
+  // can call them without stale-closure risk (requestConnection is memoized
+  // with [] deps on purpose).
+  const sendRequestRef = useRef<((request: any) => Promise<any>) | null>(null);
+  const queuePendingPushRef = useRef<((f: any, s: any, at?: string) => void) | null>(null);
+  // Last merged-fields snapshot fetched via the direct polling path — used
+  // to dedupe confirm-card popups while bridge.js is not injected.
+  const lastPolledSnapshotRef = useRef<string>('');
 
-  // Persisted ext id override (copied from the popup). Also updated each
-  // time bridge.js sends a :ready message with the real id.
+  /** Live status of the direct externally_connectable probe, surfaced in
+   *  connectionDiagnostics so the UI can say precisely WHY the direct
+   *  channel failed (wrong id vs not installed vs blocked). */
+  const [directProbe, setDirectProbe] = useState<{ triedIds: string[]; lastError: string | null; lastSuccessAt: string | null }>({
+    triedIds: [], lastError: null, lastSuccessAt: null,
+  });
+  const [manualExtensionId, setManualExtensionIdState] = useState<string | null>(null);
+
+  // Restore persisted ids on mount: manual override first, then the last id
+  // that successfully answered.
   useEffect(() => {
     try {
+      const manual = localStorage.getItem(MANUAL_EXT_ID_LS_KEY);
+      if (manual) { setManualExtensionIdState(manual); extIdRef.current = manual; }
+    } catch { /* ignore */ }
+    try {
       const saved = localStorage.getItem(EXT_ID_LS_KEY);
-      if (saved) { extIdRef.current = saved; setExtensionId(saved); }
+      if (saved && !extIdRef.current) { extIdRef.current = saved; setExtensionId(saved); }
     } catch { /* ignore */ }
   }, []);
+
+  /** Every extension id the direct channel should try, best-guess-first:
+   *  manual override → last-known-good → stable defaults. */
+  const getCandidateIds = useCallback((): string[] => {
+    const out: string[] = [];
+    if (manualExtensionId) out.push(manualExtensionId);
+    if (extIdRef.current) out.push(extIdRef.current);
+    try {
+      const saved = localStorage.getItem(EXT_ID_LS_KEY);
+      if (saved) out.push(saved);
+    } catch { /* ignore */ }
+    out.push(...DEFAULT_EXT_ID_CANDIDATES);
+    return Array.from(new Set(out.filter(Boolean)));
+  }, [manualExtensionId]);
+
+  /**
+   * Probe the extension DIRECTLY via externally_connectable
+   * (chrome.runtime.sendMessage) — the one channel that works WITHOUT
+   * bridge.js being injected (Edge frequently fails to inject content
+   * scripts on vercel.app even with correct manifest patterns, but
+   * externally_connectable is an independent manifest grant that keeps
+   * working). Iterates all candidate ids; the first reply flips the hook
+   * into the connected state with source-of-truth manifest patterns.
+   */
+  const probeDirectExternal = useCallback(async (): Promise<boolean> => {
+    const ids = getCandidateIds();
+    setDirectProbe({ triedIds: ids, lastError: null, lastSuccessAt: null });
+    for (const id of ids) {
+      try {
+        const reply: any = await new Promise((resolve, reject) => {
+          try {
+            const rt = (globalThis as any).chrome?.runtime;
+            if (!rt || typeof rt.sendMessage !== 'function') {
+              reject(new Error('chrome.runtime.sendMessage not available on this page (no extension exposes it to this origin)'));
+              return;
+            }
+            rt.sendMessage(id, { type: 'EXT_HANDSHAKE_DIRECT' }, (r: any) => {
+              const err = rt.lastError;
+              if (err) reject(new Error(String(err.message || err)));
+              else resolve(r);
+            });
+          } catch (syncErr) { reject(syncErr); }
+        });
+        if (reply && reply.ok) {
+          // Direct handshake succeeded — extension reachable WITHOUT
+          // bridge.js. Remember the id, stamp source-of-truth manifest
+          // patterns (this kills the misleading "DEFAULTS ⚠️" banner), and
+          // pull an immediate merged-fields snapshot so scraped CCP/SF data
+          // still lands in the form even though the push channel
+          // (bridge.js) isn't injected.
+          setConnected(true);
+          setExtensionId(id);
+          extIdRef.current = id;
+          try { localStorage.setItem(EXT_ID_LS_KEY, id); } catch { /* ignore */ }
+          setInjectedManifestVersion(String(reply.manifestVersion || reply.version || ''));
+          setInjectedFingerprint(String(reply.fingerprint || ''));
+          if (Array.isArray(reply.bridgePatterns)) setManifestBridgePatterns(reply.bridgePatterns);
+          if (Array.isArray(reply.externalPatterns)) setManifestExternalPatterns(reply.externalPatterns);
+          setReceivedBridgePatternsAt(new Date().toISOString());
+          setLastHandshakeAt(new Date().toISOString());
+          setContextInvalidatedSeenAt(null);
+          setLastExternalError(null);
+          setDirectProbe((p) => ({ triedIds: p.triedIds, lastError: null, lastSuccessAt: new Date().toISOString() }));
+          void sendRequestRef.current?.({ type: 'EXT_HELLO' }).then((r: any) => {
+            if (r?.ok) {
+              setVersion(r.version ?? null);
+              if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
+                queuePendingPushRef.current?.(r.merged, r.state ?? null);
+              }
+            }
+          }).catch(() => { /* ignore */ });
+          return true;
+        }
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        setDirectProbe((p) => ({ triedIds: p.triedIds, lastError: msg, lastSuccessAt: p.lastSuccessAt }));
+        // This id no longer answers (extension removed, or its id changed
+        // after a reload). Forget it so future requests skip straight to
+        // the working candidates.
+        if (extIdRef.current === id) {
+          extIdRef.current = '';
+          setExtensionId(null);
+        }
+        try {
+          if (localStorage.getItem(EXT_ID_LS_KEY) === id) localStorage.removeItem(EXT_ID_LS_KEY);
+        } catch { /* ignore */ }
+      }
+    }
+    return false;
+  }, [getCandidateIds]);
+
+  const requestConnection = useCallback(() => {
+    setHandshakeRequested(true);
+    // 1. Bridge-side probe — works when bridge.js IS injected on the page.
+    try {
+      window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
+    } catch { /* ignore */ }
+    // 2. Direct externally_connectable probe — works WITHOUT bridge.js.
+    void probeDirectExternal();
+  }, [probeDirectExternal]);
+
+  /** Pin the extension id manually (pasted from edge://extensions →
+   *  Ecovacs Note Helper → ID). Tried FIRST on every probe; survives page
+   *  reloads via localStorage. Empty string clears the override. */
+  const setManualExtensionId = useCallback((id: string) => {
+    const clean = (id || '').trim();
+    if (!clean) {
+      try { localStorage.removeItem(MANUAL_EXT_ID_LS_KEY); } catch { /* ignore */ }
+      setManualExtensionIdState(null);
+      return;
+    }
+    try { localStorage.setItem(MANUAL_EXT_ID_LS_KEY, clean); } catch { /* ignore */ }
+    setManualExtensionIdState(clean);
+    extIdRef.current = clean;
+    setExtensionId(clean);
+    // Probe immediately so the user sees the result without a reload.
+    void probeDirectExternal();
+  }, [probeDirectExternal]);
 
   // -------------------------------------------------------------------------
   //  Transport 2: bridge.js → window.postMessage
@@ -642,11 +751,18 @@ export function useCcpExtensionBridge({
     const t1 = window.setTimeout(requestConnection, 30);
     const t2 = window.setTimeout(requestConnection, 400);
     const t3 = window.setTimeout(requestConnection, 1800);
+    // Keep probing while disconnected — the direct externally_connectable
+    // channel can come alive at ANY moment (user reloads the extension,
+    // grants site access, pastes a manual id in another tab of the same
+    // origin…). The effect re-runs when `connected` flips, which clears the
+    // interval again.
+    const iv = connected ? null : window.setInterval(requestConnection, 12000);
     return () => {
       window.removeEventListener('message', onMessage);
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      if (iv) window.clearInterval(iv);
     };
   }, [requestConnection, connected]);
 
@@ -885,42 +1001,46 @@ export function useCcpExtensionBridge({
     }
 
     // -- Channel 1: direct externally_connectable --------------------------
-    let id = extIdRef.current || (DEFAULT_EXT_ID_CANDIDATE as string);
-    const extIdLs = (() => { try { return (typeof localStorage !== 'undefined' ? (localStorage.getItem(EXT_ID_LS_KEY) || null) : null); } catch { return null; } })();
-    if (!id && extIdLs) id = extIdLs;
+    // Iterate every known candidate id (manual override → last-known-good →
+    // stable defaults). The first id that answers wins and is cached. This
+    // is what makes the app work on Edge even when bridge.js never injects.
     let firstExternalError: any = null;
-    if (id && typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
-      const attempt1 = await channelExternal(id, request);
-      if (attempt1.ok) return attempt1.value;
-      const cls = classifyError(attempt1.error);
-      firstExternalError = cls;
-      if (cls.isContextInvalidated) {
-        // First remediate: extension reload under a stale page context
-        // almost always kills the direct handle, but the bridge post
-        // route is still alive IF the injected copy of bridge.js still has
-        // chrome.runtime.sendMessage. If that too fails, we fall back with
-        // explicit remediation.
-        setBridgeInjected(false);
-        setLastExternalError(cls.normalizedMessage);
-        try { if (typeof localStorage !== 'undefined') localStorage.removeItem(EXT_ID_LS_KEY); } catch { /* ignore */ }
-        extIdRef.current = null;
-        setExtensionId(null);
-        // Ask bridge for handshake again — if bridge isn't invalidated we'll
-        // pick up the new extension id broadcasted by the reload extension.
-        try {
-          if (typeof window !== 'undefined') {
-            window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
+    if (typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
+      for (const cid of getCandidateIds()) {
+        const attempt1 = await channelExternal(cid, request);
+        if (attempt1.ok) {
+          if (extIdRef.current !== cid) {
+            extIdRef.current = cid;
+            setExtensionId(cid);
+            try { if (typeof localStorage !== 'undefined') localStorage.setItem(EXT_ID_LS_KEY, cid); } catch { /* ignore */ }
           }
-        } catch { /* ignore */ }
-        // Sleep a bit so the fresh bridge (if any) can reply.
-        await new Promise((r) => setTimeout(r, 650));
-        // Retry channel 1 ONCE with the potentially-refreshed extension id.
-        const retryId = extIdRef.current || (DEFAULT_EXT_ID_CANDIDATE as string);
-        if (retryId && typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
-          const retry1 = await channelExternal(retryId, request);
+          return attempt1.value;
+        }
+        const cls = classifyError(attempt1.error);
+        if (!firstExternalError) firstExternalError = cls;
+        if (cls.isContextInvalidated) {
+          // MV3 page holds a dead handle after an extension reload: drop the
+          // stale id, give a possibly re-injected bridge a moment to
+          // announce itself, then retry this id once.
+          setBridgeInjected(false);
+          setLastExternalError(cls.normalizedMessage);
+          try { if (typeof localStorage !== 'undefined') localStorage.removeItem(EXT_ID_LS_KEY); } catch { /* ignore */ }
+          if (extIdRef.current === cid) { extIdRef.current = ''; setExtensionId(null); }
+          try {
+            if (typeof window !== 'undefined') {
+              window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
+            }
+          } catch { /* ignore */ }
+          await new Promise((r) => setTimeout(r, 650));
+          const retry1 = await channelExternal(cid, request);
           if (retry1.ok) return retry1.value;
-          const cls2 = classifyError(retry1.error);
-          if (cls2.isContextInvalidated) firstExternalError = cls2; else firstExternalError = cls2;
+          firstExternalError = classifyError(retry1.error);
+        } else if (extIdRef.current === cid) {
+          // Believed-good id stopped responding (extension removed or its
+          // id changed after a reload). Forget it, try the next candidate.
+          extIdRef.current = '';
+          setExtensionId(null);
+          try { if (typeof localStorage !== 'undefined') localStorage.removeItem(EXT_ID_LS_KEY); } catch { /* ignore */ }
         }
       }
     }
@@ -971,7 +1091,41 @@ export function useCcpExtensionBridge({
       throw surfaceErr;
     }
     return { ok: false, error: 'Extension bridge unavailable.' };
-  }, []);
+  }, [getCandidateIds]);
+
+  // Keep the refs fresh so earlier-memoized callbacks (requestConnection /
+  // probeDirectExternal) always invoke the LATEST sendRequest /
+  // queuePendingPush.
+  useEffect(() => { sendRequestRef.current = sendRequest; }, [sendRequest]);
+  useEffect(() => { queuePendingPushRef.current = queuePendingPush; }, [queuePendingPush]);
+
+  // -------------------------------------------------------------------------
+  //  Direct-channel polling (reverse direction without bridge.js)
+  // -------------------------------------------------------------------------
+  //  When connected ONLY via externally_connectable (bridge.js not
+  //  injected — the common Edge case), the extension cannot push scraped
+  //  CCP/SF fields into the page. Poll EXT_HELLO every 5s instead and only
+  //  enqueue the confirm card when the snapshot actually changed, so
+  //  identical data doesn't re-pop the popup forever.
+  useEffect(() => {
+    if (!connected || bridgeInjected) return;
+    const tick = () => {
+      void sendRequestRef.current?.({ type: 'EXT_HELLO' }).then((r: any) => {
+        if (r?.ok) {
+          setVersion(r.version ?? null);
+          if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
+            const snap = JSON.stringify(r.merged);
+            if (snap !== lastPolledSnapshotRef.current) {
+              lastPolledSnapshotRef.current = snap;
+              queuePendingPushRef.current?.(r.merged, r.state ?? null);
+            }
+          }
+        }
+      }).catch(() => { /* ignore */ });
+    };
+    const iv = window.setInterval(tick, 5000);
+    return () => window.clearInterval(iv);
+  }, [connected, bridgeInjected]);
 
   const scrapeAll = useCallback(async (): Promise<any> => {
     try {
@@ -1087,8 +1241,15 @@ export function useCcpExtensionBridge({
       injectedVersionStale,
       contextInvalidatedSeen: contextInvalidatedSeenAt != null,
       contextInvalidatedSeenAt,
+      directProbe: {
+        triedIds: directProbe.triedIds,
+        lastError: directProbe.lastError,
+        lastSuccessAt: directProbe.lastSuccessAt,
+        manualId: manualExtensionId,
+      },
     },
     requestConnection,
+    setManualExtensionId,
   };
 }
 

@@ -1496,6 +1496,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               extensionConnection: {
                 connected: extensionBridge.connected,
                 requestConnection: extensionBridge.requestConnection.bind(extensionBridge),
+                setManualExtensionId: extensionBridge.setManualExtensionId.bind(extensionBridge),
                 diagnostics: extensionBridge.connectionDiagnostics,
               },
               transcriptContent: (
@@ -1643,6 +1644,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
           extensionConnection: {
             connected: extensionBridge.connected,
             requestConnection: extensionBridge.requestConnection.bind(extensionBridge),
+            setManualExtensionId: extensionBridge.setManualExtensionId.bind(extensionBridge),
             diagnostics: extensionBridge.connectionDiagnostics,
           },
         }}

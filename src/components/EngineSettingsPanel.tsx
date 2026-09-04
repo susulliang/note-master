@@ -251,6 +251,7 @@ export default function EngineSettingsPanel({
     ?? {
         connected: extBridgeHook.connected,
         requestConnection: extBridgeHook.requestConnection,
+        setManualExtensionId: extBridgeHook.setManualExtensionId,
         diagnostics: extBridgeHook.connectionDiagnostics,
       };
   const extExpected = ext?.diagnostics?.expectedManifestVersion ?? null;
@@ -259,6 +260,22 @@ export default function EngineSettingsPanel({
   const extVersionMismatch = ext?.diagnostics?.injectedVersionMatchesExpected === false;
   const contextInvalidatedSeen = Boolean(ext?.diagnostics?.contextInvalidatedSeen);
   const contextInvalidatedAt = ext?.diagnostics?.contextInvalidatedSeenAt ?? null;
+  const directProbe = ext?.diagnostics?.directProbe ?? null;
+  /** Manual extension-id override input (escape hatch: paste the id from
+   *  edge://extensions when the built-in candidates don't match). */
+  const [extIdDraft, setExtIdDraft] = useState<string>('');
+  const [extIdSaved, setExtIdSaved] = useState(false);
+  useEffect(() => {
+    // Prefill: manual override if set, else last-known extension id.
+    setExtIdDraft(directProbe?.manualId ?? extBridgeHook.extensionId ?? '');
+  }, [directProbe?.manualId, extBridgeHook.extensionId]);
+  const saveManualExtId = () => {
+    const setter = (ext as any)?.setManualExtensionId ?? extBridgeHook.setManualExtensionId;
+    if (typeof setter !== 'function') return;
+    setter(extIdDraft.trim());
+    setExtIdSaved(true);
+    window.setTimeout(() => setExtIdSaved(false), 2000);
+  };
   const [showLlmDebug, setShowLlmDebug] = useState(false);
   const [showJsonWindow, setShowJsonWindow] = useState(false);
   const [jsonCopied, setJsonCopied] = useState(false);
@@ -860,6 +877,56 @@ export default function EngineSettingsPanel({
                 </span>
               )}
             </div>
+
+            {/* Direct externally_connectable channel status — this is the
+                channel that works WITHOUT bridge.js (Edge often never injects
+                bridge.js on vercel.app, but externally_connectable still
+                works because it is an independent manifest grant). */}
+            {directProbe && (
+              <div className="mt-1.5 rounded-sm border border-border/70 bg-card/40 px-1.5 py-1 text-[10.5px] leading-relaxed">
+                <div className="font-semibold text-foreground/90">
+                  Direct channel (works without bridge.js):{' '}
+                  {directProbe.lastSuccessAt
+                    ? <span className="text-green-400">✅ last answered {new Date(directProbe.lastSuccessAt).toLocaleTimeString()}</span>
+                    : <span className="text-amber-400">no answer yet</span>}
+                </div>
+                {(directProbe.triedIds?.length ?? 0) > 0 && (
+                  <div className="text-muted-foreground">
+                    Tried ids: {directProbe.triedIds.join(', ')}
+                  </div>
+                )}
+                {directProbe.lastError && (
+                  <div className="text-amber-400/90">
+                    Last error: {directProbe.lastError}
+                    {/does not exist|receiving end/i.test(directProbe.lastError) && (
+                      <> — none of the known ids responded. Paste your real id from edge://extensions below.</>
+                    )}
+                  </div>
+                )}
+                {/* Manual extension-id override — the guaranteed escape hatch. */}
+                <div className="mt-1 flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={extIdDraft}
+                    onChange={(e) => setExtIdDraft(e.target.value)}
+                    placeholder="Paste extension ID from edge://extensions (e.g. hmbkrxnrsjhqckcc)"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded-sm border border-border bg-background/60 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveManualExtId}
+                    className="shrink-0 rounded-sm border border-border bg-card/60 px-1.5 py-0.5 text-[10.5px] font-medium text-foreground transition-colors hover:bg-primary/20 hover:border-primary/60"
+                    title="Pin this extension id (localStorage). It is tried FIRST on every direct probe — no reload needed."
+                  >
+                    {extIdSaved ? '✓ Saved' : '💾 Save & Probe'}
+                  </button>
+                </div>
+                <div className="text-muted-foreground/70">
+                  edge://extensions → Ecovacs Note Helper → ID (32 lowercase a–p chars). Saved id is tried first from now on.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -954,6 +1021,23 @@ function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number)
   }
   lines.push(`Origin covered by bridge content-scripts: ${d.originCoveredByBridge ? 'YES' : 'NO ❌'}`);
   lines.push(`Origin covered by externally_connectable: ${d.originCoveredByExternal ? 'YES' : 'NO ❌'}`);
+  // Direct-channel live status — the channel that does NOT need bridge.js.
+  const dp = d.directProbe;
+  if (dp) {
+    lines.push('');
+    lines.push(`Direct externally_connectable channel (works WITHOUT bridge.js): ${dp.lastSuccessAt ? `✅ answered at ${new Date(dp.lastSuccessAt).toLocaleTimeString()}` : 'no answer yet'}`);
+    if (Array.isArray(dp.triedIds) && dp.triedIds.length > 0) {
+      lines.push(`  Tried extension ids: ${dp.triedIds.join(', ')}`);
+    }
+    if (dp.manualId) lines.push(`  Manual id pinned: ${dp.manualId}`);
+    if (dp.lastError) {
+      lines.push(`  Last error: ${dp.lastError}`);
+      if (/does not exist|receiving end/i.test(dp.lastError)) {
+        lines.push(`  → None of the tried ids responded. Copy the REAL id from ${extMgrUrl} → Ecovacs Note Helper → ID`);
+        lines.push(`    and paste it into the "Direct channel" box in Engine Settings, then click Save & Probe.`);
+      }
+    }
+  }
   lines.push(`Expected extension manifest version: ${d.expectedManifestVersion || '(unknown)'}`);
   lines.push(`Running bridge manifest version: ${d.injectedManifestVersion || '(not announced yet)'}`);
   if (d.injectedVersionStale) {
@@ -967,10 +1051,11 @@ function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number)
   if (!d.bridgeInjected) {
     lines.push('');
     lines.push(`Fix checklist (${browserTag}):`);
-    lines.push(`  1. Open ${extMgrUrl} → Developer mode → find Ecovacs Note Helper → 🔄 Reload (do it TWICE on Edge — cache is sticky).`);
-    lines.push(`  2. Hard refresh (Ctrl+Shift+R) THIS Ticket Notes tab.`);
-    lines.push(`  3. If popup was open during reload: close it and re-open it (popup context invalidated too).`);
-    lines.push(`  4. Popup → Bridge → Tabs snapshot → find this vercel row → click 🔬 Injectable? → if YES / Bridge: not loaded yet → click 🚀 Inject bridge now.`);
+    lines.push(`  1. Engine Settings → "Direct channel" box → paste the id from ${extMgrUrl} → Save & Probe (fastest — no reload needed).`);
+    lines.push(`  2. Or: ${extMgrUrl} → Developer mode → find Ecovacs Note Helper → 🔄 Reload (do it TWICE on Edge — cache is sticky).`);
+    lines.push(`  3. Hard refresh (Ctrl+Shift+R) THIS Ticket Notes tab.`);
+    lines.push(`  4. If popup was open during reload: close it and re-open it (popup context invalidated too).`);
+    lines.push(`  5. Popup → Bridge → Tabs snapshot → find this vercel row → click 🔬 Injectable? → if YES / Bridge: not loaded yet → click 🚀 Inject bridge now.`);
   }
   return lines;
 }

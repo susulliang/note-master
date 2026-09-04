@@ -103,6 +103,7 @@ export default function OutputModal({
   const extConn: ExtensionConnectionShape = panelsCtx?.extensionConnection ?? {
     connected: hookBridge.connected,
     requestConnection: hookBridge.requestConnection.bind(hookBridge),
+    setManualExtensionId: hookBridge.setManualExtensionId.bind(hookBridge),
     diagnostics: hookBridge.connectionDiagnostics,
   };
 
@@ -172,6 +173,21 @@ export default function OutputModal({
     }
     lines.push(`Content-script bridge injected: ${d.bridgeInjected ? 'YES' : 'NO'}  (${d.patternsReceivedFromBridge ? 'based on actual runtime handshake' : 'based on no handshake yet; guess from defaults'})`);
     lines.push(`Last handshake: ${d.lastHandshakeAt ? new Date(d.lastHandshakeAt).toLocaleString() : 'never'}`);
+    // Direct externally_connectable channel status — the channel that does
+    // NOT require bridge.js injection at all.
+    const dp = (d as any).directProbe;
+    if (dp) {
+      lines.push('');
+      lines.push(`Direct externally_connectable channel (needs NO bridge.js): ${dp.lastSuccessAt ? `✅ ANSWERED at ${new Date(dp.lastSuccessAt).toLocaleTimeString()} — extension IS reachable, Push works even without bridge.js` : 'no answer yet'}`);
+      if (Array.isArray(dp.triedIds) && dp.triedIds.length > 0) lines.push(`  Tried extension ids: ${dp.triedIds.join(', ')}`);
+      if (dp.manualId) lines.push(`  Manual id pinned: ${dp.manualId}`);
+      if (dp.lastError) {
+        lines.push(`  Last error: ${dp.lastError}`);
+        if (/does not exist|receiving end/i.test(String(dp.lastError))) {
+          lines.push(`  → NONE of the tried ids responded. Fastest fix: ${extMgrUrl} → Ecovacs Note Helper → copy the ID → Engine Settings → paste into the "Direct channel" box → Save & Probe.`);
+        }
+      }
+    }
     if (d.patternsReceivedAt) lines.push(`Runtime-extracted patterns received at: ${new Date(d.patternsReceivedAt).toLocaleString()}`);
     lines.push(`Manifest bridge patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️ — GUESS'}): ${(d.manifestBridgePatterns || []).length === 0 ? '(EMPTY — bridge loaded but no patterns match any ticket-app origin — this is why injection failed)' : d.manifestBridgePatterns.join(',  ')}`);
     lines.push(`Manifest external patterns (${d.patternsReceivedFromBridge ? 'RECEIVED ✅' : 'DEFAULTS ⚠️ — GUESS'}): ${(d.manifestExternalPatterns || []).length === 0 ? '(EMPTY)' : d.manifestExternalPatterns.join(',  ')}`);
