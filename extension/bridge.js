@@ -175,11 +175,32 @@
       }, commonMeta()), '*');
     } catch { /* ignore cross-origin restrictions */ }
   }
+  // Send a `POPUP_DIAG_TRACE` to the background service worker. Extension
+  // popup's Bridge Diagnostics panel surfaces these rows so the user can
+  // definitively see "did the web app's handshake_request probe actually
+  // arrive at bridge.js?". Also logs every boot/ready. Without this, when
+  // patterns cover the origin but bridgeInjected stays NO, you have to
+  // open chrome://inspect/#service-workers and guess whether the probe
+  // was swallowed by a stale content script.
+  function traceDiag(trace, payload) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'POPUP_DIAG_TRACE',
+        origin: typeof location !== 'undefined' ? location.origin : '',
+        href: typeof location !== 'undefined' ? location.href : '',
+        manifestVersion: manifestSnapshot.manifestVersion,
+        fingerprint: manifestSnapshot.fingerprint,
+        trace,
+        payload: typeof payload === 'undefined' ? null : (typeof payload === 'string' ? payload.slice(0, 400) : JSON.stringify(payload ?? null).slice(0, 400)),
+      }, () => { /* lastError ignored */ });
+    } catch { /* never let tracing crash bridge */ }
+  }
 
   // (A) Handshake broadcasts — first pings asap, then DOMContentLoaded, then
   // window load, then a few retries to cover initial SPA mount, then a
   // persistent 10s heartbeat so late listeners (user clicks "Generate Note"
   // 5 minutes into a long call) still see connected=true.
+  traceDiag('bridge:boot');
   broadcastReady();
   broadcastDiagnostics();
   document.addEventListener('DOMContentLoaded', broadcastReady);
@@ -188,16 +209,16 @@
   window.addEventListener('load', broadcastDiagnostics);
   // Short ramp-up to cover early listener races (React mounts inside 2s
   // often but dev builds can be slower).
-  setTimeout(broadcastReady, 300);
-  setTimeout(broadcastDiagnostics, 400);
-  setTimeout(broadcastReady, 900);
-  setTimeout(broadcastReady, 2200);
-  setTimeout(broadcastDiagnostics, 2300);
-  setTimeout(broadcastReady, 5500);
+  setTimeout(() => { traceDiag('bridge:ready-heartbeat', '300ms'); broadcastReady(); }, 300);
+  setTimeout(() => { broadcastDiagnostics(); traceDiag('bridge:diagnostics-broadcast', '400ms'); }, 400);
+  setTimeout(() => { traceDiag('bridge:ready-heartbeat', '900ms'); broadcastReady(); }, 900);
+  setTimeout(() => { traceDiag('bridge:ready-heartbeat', '2200ms'); broadcastReady(); }, 2200);
+  setTimeout(() => { broadcastDiagnostics(); }, 2300);
+  setTimeout(() => { broadcastReady(); }, 5500);
   // Persistent heartbeat (10 s interval for :ready, 25s for :diagnostics
   // since payload is bigger and version/patterns rarely change).
-  setInterval(broadcastReady, 10_000);
-  setInterval(broadcastDiagnostics, 25_000);
+  setInterval(() => { traceDiag('bridge:ready-heartbeat', '10s interval'); broadcastReady(); }, 10_000);
+  setInterval(() => { broadcastDiagnostics(); }, 25_000);
 
   // (B) Reverse handshake: page can proactively ask "is bridge alive?" and
   // we reply synchronously so even a listener that mounted AFTER all
@@ -206,9 +227,14 @@
     const d = event.data;
     if (!d || typeof d !== 'object') return;
     if (d.source === 'ecovacs-ccp-extension:handshake_request') {
+      traceDiag('bridge:handshake_request_received', {
+        fromOrigin: event.origin || null,
+        requestKeys: Object.keys(d || {}).slice(0, 20),
+      });
       broadcastReady();
       broadcastDiagnostics();
       broadcastHandshakeReply();
+      traceDiag('bridge:handshake_reply_sent', { sentAt: Date.now() });
     }
     if (d.source === 'ecovacs-ccp-extension:request') {
       try {

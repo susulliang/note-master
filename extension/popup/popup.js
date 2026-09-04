@@ -787,6 +787,145 @@ async function bootstrap() {
     // manually paint one more time at +750 ms regardless, as belt-and-braces:
     void refreshState(true, 1);
     setTimeout(() => refreshState(true, 0), 750);
+    // Bridge / Push Trace panel boot:
+    try {
+      const btnBridgeRefresh = document.getElementById('btnBridgeRefresh');
+      const btnBridgeClear = document.getElementById('btnBridgeClear');
+      const elBridgeCount = document.getElementById('bridgeCount');
+      const elBridgeSummary = document.getElementById('bridgeSummary');
+      const elEvlog = document.getElementById('evlog');
+      const elTabsSnap = document.getElementById('tabsSnap');
+      const elPlBridge = document.getElementById('plBridge');
+      const elPlExternal = document.getElementById('plExternal');
+      // Tab switching
+      document.querySelectorAll('.bridge__tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.getAttribute('data-tab');
+          document.querySelectorAll('.bridge__tab').forEach((b) => b.classList.toggle('is-active', b === btn));
+          document.querySelectorAll('.bridge__pane').forEach((p) => {
+            p.hidden = p.getAttribute('data-pane') !== tab;
+          });
+        });
+      });
+      // Open the Event log pane immediately when the details opens (the
+      // default HTML hidden on panes still means first paint hides the
+      // is-active-linked log pane unless we flip it once).
+      document.querySelectorAll('.bridge__tab.is-active').forEach((btn) => {
+        const tab = btn.getAttribute('data-tab');
+        document.querySelectorAll('.bridge__pane').forEach((p) => {
+          if (p.getAttribute('data-pane') === tab) p.hidden = false;
+        });
+      });
+
+      function formatDetailString(rawDetail) {
+        if (typeof rawDetail !== 'string') return escHtml(String(rawDetail ?? ''));
+        // The diag log stores either a plain string OR JSON.stringify(details).
+        // Try to parse as JSON; if successful, pretty-print as a short
+        // object literal so you can read wasSectionFound / error easily.
+        try {
+          const parsed = JSON.parse(rawDetail);
+          if (parsed && typeof parsed === 'object') return `<pre class="djson">${escHtml(JSON.stringify(parsed, null, 2)).replace(/\n/g, '<br/>')}</pre>`;
+        } catch { /* fall through to original */ }
+        return escHtml(rawDetail);
+      }
+      async function refreshBridgePanel() {
+        if (!chrome.runtime?.sendMessage) return;
+        let r;
+        try { r = await chrome.runtime.sendMessage({ type: 'POPUP_DIAG_QUERY_LOG' }); }
+        catch (err) {
+          if (elBridgeSummary) elBridgeSummary.innerHTML = `<span class="pane__hint" style="color:var(--err)"><strong>Service worker not reachable</strong> (${escHtml(String(err?.message || err))}). Click Scan Salesforce &amp; CCP once (wakes SW via scripting.executeScript), then Refresh.</span>`;
+          return;
+        }
+        if (!r || !r.ok) {
+          if (elBridgeSummary) elBridgeSummary.textContent = `Failed to read log: ${String(r?.error || 'unknown error')}`;
+          return;
+        }
+        const entries = Array.isArray(r.entries) ? r.entries : [];
+        if (elBridgeCount) elBridgeCount.textContent = String(entries.length);
+        const counts = Object.create(null);
+        entries.forEach((e) => { counts[e.cat] = (counts[e.cat] || 0) + 1; });
+        const handshakeCount = entries.filter((e) => String(e.cat).startsWith('bridge:')).length;
+        const extInCount = entries.filter((e) => String(e.cat) === 'external:in').length;
+        const pushOk = entries.filter((e) => String(e.cat) === 'push:ok').length;
+        const sfApplyOk = entries.filter((e) => String(e.cat) === 'sf:apply:ok').length;
+        const sfApplyNonOk = entries.filter((e) => String(e.cat) === 'sf:apply:nonOk' || String(e.cat) === 'sf:apply:error' || String(e.cat) === 'sf:apply:throw').length;
+        if (elBridgeSummary) {
+          elBridgeSummary.innerHTML = `
+            <div class="summ__grid">
+              <div class="summ__k"><span class="dot dot--ok"></span> Extension manifest version</div>
+              <div class="summ__v"><code>${escHtml(String(r.manifestVersion ?? ''))}</code></div>
+              <div class="summ__k">Bridge events (boot, probes, handshakes)</div>
+              <div class="summ__v">${handshakeCount}</div>
+              <div class="summ__k">External (Ticket Notes app) API calls received</div>
+              <div class="summ__v">${extInCount}</div>
+              <div class="summ__k">Popup pushes to Ticket Notes (ack OK)</div>
+              <div class="summ__v">${pushOk}</div>
+              <div class="summ__k">Salesforce Case field writes OK / non-OK</div>
+              <div class="summ__v">${sfApplyOk} / <span style="color:${sfApplyNonOk > 0 ? 'var(--err)' : 'inherit'}">${sfApplyNonOk}</span></div>
+              <div class="summ__k">Category counts (top)</div>
+              <div class="summ__v">${Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `<code>${escHtml(k)}</code> × ${v}`).join(' · ') || '(none)'}</div>
+            </div>
+          `;
+        }
+        if (elEvlog) {
+          if (entries.length === 0) {
+            elEvlog.innerHTML = '<li class="empty">Log empty. Try: Probe in the Ticket Notes app Diagnostics panel, then Refresh here. Or click Scan or Push and then Refresh.</li>';
+          } else {
+            elEvlog.innerHTML = entries.slice(0, 100).map((e) => {
+              const cat = String(e.cat || '');
+              const isWarn = cat.includes('error') || cat.includes('nonOk') || cat.includes('throw') || cat.includes('unknown') || cat.includes('no_reply');
+              const isOk = cat.includes(':ok') || cat.includes('start') || cat.includes(':trace') || cat.includes('boot') || cat.includes('received');
+              const cls = isWarn ? 'is-warn' : (isOk ? 'is-ok' : '');
+              return `<li class="${cls}">
+                <div class="ev__hd">
+                  <span class="ev__ts">${escHtml(new Date(e.ts).toLocaleTimeString())}</span>
+                  <span class="ev__cat ${cls ? '' : ''}"><code>${escHtml(cat)}</code></span>
+                </div>
+                <div class="ev__detail">${formatDetailString(e.detail)}</div>
+              </li>`;
+            }).join('');
+          }
+        }
+        if (elTabsSnap) {
+          const group = (arr, title, emptyMsg) => {
+            if (!arr || arr.length === 0) return `<h4 class="shead">${escHtml(title)}</h4><div class="empty">${escHtml(emptyMsg)}</div>`;
+            return `<h4 class="shead">${escHtml(title)} · ${arr.length}</h4>
+              <ul class="tlist">${arr.map((t) => `
+                <li>
+                  <div class="tlist__title"><a href="${escHtml(t.url || '#')}" target="_blank" rel="noreferrer">${escHtml(String(t.title || t.url || '(no title)'))}</a></div>
+                  <div class="tlist__meta">${t.status || '?'}${t.discarded ? ' · discarded (content scripts will NOT load until activated)' : ''} · tab id ${t.id}</div>
+                  <div class="tlist__url">${escHtml(String(t.url || ''))}</div>
+                </li>`).join('')}</ul>`;
+          };
+          elTabsSnap.innerHTML = [
+            group(r.ticketAppTabs, 'Ticket Notes tabs', 'No ticket notes tabs open. Open note-master-roan.vercel.app or localhost first.'),
+            group(r.salesforceTabs, 'Salesforce / Lightning tabs', 'No SF tabs open (patterns: *.lightning.force.com / *.salesforce.com / *.my.salesforce.com).'),
+            group(r.ccpTabs, 'CCP / Phone Panel tabs', 'No CCP panel tabs open. Extension uses broad URL patterns; your SF Console-embedded phone panel may appear under Salesforce tabs instead.'),
+          ].join('');
+        }
+        if (elPlBridge) elPlBridge.innerHTML = (Array.isArray(r.manifestBridgePatterns) && r.manifestBridgePatterns.length > 0)
+          ? r.manifestBridgePatterns.map((p) => `<li><code>${escHtml(String(p))}</code></li>`).join('')
+          : '<li class="empty">Empty — bridge content script has no matches. Chrome will never inject bridge.js anywhere.</li>';
+        if (elPlExternal) elPlExternal.innerHTML = (Array.isArray(r.manifestExternalPatterns) && r.manifestExternalPatterns.length > 0)
+          ? r.manifestExternalPatterns.map((p) => `<li><code>${escHtml(String(p))}</code></li>`).join('')
+          : '<li class="empty">Empty — no externally_connectable matches. chrome.runtime.sendMessage(EXT_ID) from any origin is blocked.</li>';
+      }
+      btnBridgeRefresh?.addEventListener('click', () => {
+        void refreshBridgePanel();
+      });
+      btnBridgeClear?.addEventListener('click', async () => {
+        try { await chrome.runtime.sendMessage({ type: 'POPUP_DIAG_CLEAR' }); }
+        catch (err) { toast('Service worker not reachable for clear: ' + String(err?.message || err), 'err'); }
+        await refreshBridgePanel();
+        toast('Bridge log cleared. Next probe/push/scan will log into a fresh log.', 'ok');
+      });
+      // Auto-open Bridge details when the Bootstrap header button is clicked
+      // is optional; instead just refresh once on boot and every 7s.
+      void refreshBridgePanel();
+      setInterval(() => refreshBridgePanel(), 7000);
+    } catch (panelBootErr) {
+      toast('Bridge panel failed to wire up: ' + String(panelBootErr?.message || panelBootErr), 'err');
+    }
   } catch (bootErr) {
     try { toast(`Boot error: ${String(bootErr?.message || bootErr)}`, 'err'); } catch { /* ignore */ }
     if (elDiag) {

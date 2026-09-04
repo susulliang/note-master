@@ -47,7 +47,59 @@ const TICKET_APP_HOST_PATTERNS = [
   /^https?:\/\/127\.0\.0\.1(:\d+)?\/?$/i,
   /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app\/?$/i,
   /^https:\/\/note-master\.vercel\.app\/?$/i,
+  /^https:\/\/note-master-roan\.vercel\.app\/?$/i,
 ];
+
+// ---------------------------------------------------------------------------
+//  Unified diagnostics event log (circular, 250 entries).
+//
+//  Every "extension-side" thing the user cares about ends up here:
+//    - bridge handshakes (from ticket-app bridge.js)
+//    - externally_connectable messages arriving at background
+//    - :handshake_request / :ready broadcasts tunneled via bridge
+//    - salesforce content script scrape / APPLY_CASE_FIELDS steps
+//    - popup button actions (scan / push / reload)
+//    - every push attempt to Ticket Notes
+//  Popup reads this log via POPUP_DIAG_QUERY_LOG and renders a Bridge
+//  diagnostics panel so the user can answer "did the ticket app's PROBE
+//  ever arrive at the extension?" without opening chrome://inspect/#service-workers.
+// ---------------------------------------------------------------------------
+const DIAG_LOG_MAX = 250;
+const diagLog = [];
+function diagRecord(category, details) {
+  try {
+    const entry = {
+      ts: new Date().toISOString(),
+      cat: String(category || 'general').slice(0, 40),
+      detail: typeof details === 'string'
+        ? details.slice(0, 1600)
+        : JSON.stringify(details ?? null).slice(0, 1600),
+    };
+    diagLog.unshift(entry);
+    if (diagLog.length > DIAG_LOG_MAX) diagLog.length = DIAG_LOG_MAX;
+    // Also persist to storage.local so SW wake-ups preserve the last log.
+    try {
+      chrome.storage?.local?.set({ __ecovacs_diag_log: diagLog }).catch(() => {});
+    } catch { /* ignore */ }
+  } catch { /* never let diag crash worker */ }
+}
+(async function diagBootLoad() {
+  try {
+    const stored = await chrome.storage?.local?.get({ __ecovacs_diag_log: [] });
+    if (Array.isArray(stored?.__ecovacs_diag_log) && stored.__ecovacs_diag_log.length > 0) {
+      // Merge stored below the (tiny) set of already-pushed records, then cap.
+      const merged = [...diagLog, ...stored.__ecovacs_diag_log];
+      diagLog.length = 0;
+      for (const e of merged) if (diagLog.length < DIAG_LOG_MAX) diagLog.push(e);
+    }
+  } catch { /* ignore */ }
+  diagRecord('sw:boot', { version: chrome.runtime.getManifest?.().version ?? 'unknown' });
+})();
+function diagClear() {
+  diagLog.length = 0;
+  try { chrome.storage?.local?.set({ __ecovacs_diag_log: [] }).catch(() => {}); } catch { /* ignore */ }
+  diagRecord('diag:clear', { ok: true });
+}
 
 // ---------------------------------------------------------------------------
 //  State helpers
@@ -1188,11 +1240,17 @@ function keyFieldsEqual(a, b) {
  *    - bypasses change detection
  *    - payload.mode = 'manual' (app applies immediately, same as today) */
 async function pushToTicketApp(force = false) {
-  if (!force && !state.settings.autoPush) return { ok: false, skipped: 'autoPush disabled' };
+  if (!force && !state.settings.autoPush) {
+    diagRecord('push:skipped', { force, reason: 'autoPush disabled' });
+    return { ok: false, skipped: 'autoPush disabled' };
+  }
   const ticketTab = await findTab(TICKET_APP_HOST_PATTERNS.concat(
     (state.settings.extraTicketHosts || []).map((h) => new RegExp(h.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*'), 'i'))
   ));
-  if (!ticketTab) return { ok: false, skipped: 'No open Ticket Notes web-app tab found.' };
+  if (!ticketTab) {
+    diagRecord('push:error', { force, error: 'No open Ticket Notes tab found. Ticket app patterns = [' + TICKET_APP_HOST_PATTERNS.map((r) => String(r)).join(', ') + ']' });
+    return { ok: false, skipped: 'No open Ticket Notes web-app tab found.' };
+  }
 
   let fields, mode;
   let keyFields = null;
@@ -1224,9 +1282,17 @@ async function pushToTicketApp(force = false) {
     source: 'ecovacs-ccp-scraper',
   };
   let reply;
+  diagRecord('push:start', {
+    force,
+    mode,
+    ticketTabId: ticketTab.id,
+    ticketTabUrl: ticketTab.url,
+    mergedFieldsProvided: Object.keys(fields || {}).length,
+  });
   try {
     reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
-  } catch {
+  } catch (err) {
+    diagRecord('push:bridge_throw', { tabId: ticketTab.id, url: ticketTab.url, error: String(err?.message || err) });
     reply = null;
   }
   if (reply?.ok) {
@@ -1236,8 +1302,10 @@ async function pushToTicketApp(force = false) {
       state.lastPushedKeyFields = keyFields;
       await saveState();
     }
+    diagRecord('push:ok', { tabId: ticketTab.id, url: ticketTab.url, mode });
     return reply;
   }
+  diagRecord('push:no_reply', { tabId: ticketTab.id, url: ticketTab.url, bridgeReply: reply ?? null, error: 'Ticket app bridge did not reply (missing content script on this origin, or listener not attached yet).' });
   return { ok: false, error: 'Ticket app bridge did not reply.' };
 }
 
@@ -1245,7 +1313,7 @@ async function pushToTicketApp(force = false) {
 //  Message routing
 // ---------------------------------------------------------------------------
 
-/** Messages from content scripts (CCP / SF) */
+/** Messages from content scripts (CCP / SF / bridge.js on Ticket Notes page) */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // IMPORTANT — gate strictly to messages coming FROM content scripts (i.e.
   // a tab ran our injected scraper). Without this gate the popup's own
@@ -1262,6 +1330,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       const t = msg?.type;
+      diagRecord('content-msg:in', {
+        type: t ?? null,
+        tabId: sender.tab.id,
+        tabUrl: sender.tab.url ?? null,
+        tabTitle: sender.tab.title ?? null,
+      });
       if (t === 'CCP_SCRAPED') {
         state.ccp = {
           capturedAt: nowISO(),
@@ -1273,6 +1347,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await saveState();
         if (state.settings.autoPush) void pushToTicketApp(false);
         sendResponse({ ok: true, stored: state.ccp });
+        diagRecord('content-msg:ok', { type: t, tabId: sender.tab.id, fields: Object.keys(msg.data ?? {}).length });
         return;
       }
       if (t === 'SF_SCRAPED') {
@@ -1286,12 +1361,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await saveState();
         if (state.settings.autoPush) void pushToTicketApp(false);
         sendResponse({ ok: true, stored: state.sf });
+        diagRecord('content-msg:ok', { type: t, tabId: sender.tab.id, fields: Object.keys(msg.data ?? {}).length });
         return;
       }
-      if (t === 'PING') { sendResponse({ ok: true, version: chrome.runtime.getManifest?.().version ?? '0.1.0' }); return; }
+      // Ticket Notes bridge.js sends POPUP_DIAG_TRACE events when the user
+      // presses PROBE on the web app side — lets the extension log that
+      // bridge.js actually received the probe and which origin was on it.
+      if (t === 'POPUP_DIAG_TRACE') {
+        diagRecord('bridge:trace', {
+          fromTabId: sender.tab.id,
+          origin: msg?.origin ?? null,
+          href: msg?.href ?? null,
+          manifestVersion: msg?.manifestVersion ?? null,
+          fingerprint: msg?.fingerprint ?? null,
+          trace: String(msg?.trace ?? '').slice(0, 400),
+        });
+        sendResponse({ ok: true });
+        return;
+      }
+      if (t === 'PING') {
+        sendResponse({ ok: true, version: chrome.runtime.getManifest?.().version ?? '0.1.0' });
+        diagRecord('content-msg:ping', { tabId: sender.tab.id, url: sender.tab.url ?? null });
+        return;
+      }
       sendResponse({ ok: false, error: `Unknown message type: ${t}` });
+      diagRecord('content-msg:unknown', { type: t ?? null, tabId: sender.tab.id });
     } catch (e) {
       sendResponse({ ok: false, error: String(e?.message || e) });
+      diagRecord('content-msg:error', { type: msg?.type ?? null, tabId: sender.tab?.id ?? null, error: String(e?.message || e) });
     }
   })();
   return true; // keep message channel open for async reply
@@ -1342,11 +1439,82 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
-  if (t === 'POPUP_SCRAPE_CCP') { (async () => sendResponse(await refreshCcpTab()))(); return true; }
-  if (t === 'POPUP_SCRAPE_SF')  { (async () => sendResponse(await refreshSalesforceTab()))(); return true; }
-  if (t === 'POPUP_SCRAPE_ALL') { (async () => sendResponse(await scrapeAll()))(); return true; }
-  if (t === 'POPUP_SCRAPE_ACTIVE') { (async () => sendResponse(await scrapeActiveTab()))(); return true; }
-  if (t === 'POPUP_PUSH')       { (async () => sendResponse(await pushToTicketApp(true)))(); return true; }
+  if (t === 'POPUP_SCRAPE_CCP') {
+    (async () => {
+      diagRecord('popup:action', { type: t });
+      const r = await refreshCcpTab();
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null, capturedAt: r?.capturedAt ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_SCRAPE_SF')  {
+    (async () => {
+      diagRecord('popup:action', { type: t });
+      const r = await refreshSalesforceTab();
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_SCRAPE_ALL') {
+    (async () => {
+      diagRecord('popup:action', { type: t });
+      const r = await scrapeAll();
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_SCRAPE_ACTIVE') {
+    (async () => {
+      diagRecord('popup:action', { type: t });
+      const r = await scrapeActiveTab();
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_PUSH')       {
+    (async () => {
+      diagRecord('popup:action', { type: t, force: true });
+      const r = await pushToTicketApp(true);
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_DIAG_QUERY_LOG') {
+    (async () => {
+      const manifestVersion = chrome.runtime.getManifest?.().version ?? '0.1.0';
+      // Snapshot of open ticket app tabs + sf/ccp tabs so the popup Bridge
+      // panel can answer "Is there even a vercel app tab open?"
+      const [ticketTabs, sfTabs, ccpTabs] = await Promise.all([
+        (async () => {
+          try { return (await chrome.tabs.query({ url: ['http://localhost:*/*', 'https://localhost:*/*', 'http://127.0.0.1:*/*', 'https://127.0.0.1:*/*', 'https://*.vercel.app/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); }
+          catch { return []; }
+        })(),
+        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*', 'https://*.salesforce.com/*', 'https://*.my.salesforce.com/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); } catch { return []; } })(),
+        (async () => { try { return (await chrome.tabs.query({ url: ['https://*.lightning.force.com/*/ccp*', 'https://*.my.connect.salesforce.com/*', 'https://*.amazonaws.com/*/connect/*'] })).map((t) => ({ id: t.id, url: t.url, title: t.title, discarded: t.discarded ?? false, status: t.status ?? null })); } catch { return []; } })(),
+      ]);
+      sendResponse({
+        ok: true,
+        entries: diagLog.slice(),
+        manifestVersion,
+        ticketAppTabs: ticketTabs,
+        salesforceTabs: sfTabs,
+        ccpTabs,
+        manifestBridgePatterns: (chrome.runtime.getManifest?.()?.content_scripts || []).flatMap((cs) => Array.isArray(cs.matches) ? cs.matches : []).filter((x) => typeof x === 'string') || [],
+        manifestExternalPatterns: (chrome.runtime.getManifest?.()?.externally_connectable?.matches) || [],
+      });
+    })();
+    return true;
+  }
+  if (t === 'POPUP_DIAG_CLEAR') {
+    diagClear();
+    sendResponse({ ok: true, entries: diagLog.slice() });
+    return true;
+  }
   if (t === 'POPUP_UPDATE_SETTINGS') {
     (async () => {
       state.settings = { ...state.settings, ...(msg.settings ?? {}) };
@@ -1380,25 +1548,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   (async () => {
     const t = msg?.type;
+    diagRecord('external:in', {
+      type: t ?? null,
+      origin: (sender && sender.url) ? (new URL(sender.url).origin) : null,
+      senderUrl: sender?.url ?? null,
+      id: sender?.id ?? null,
+      // Most of the externally_connectable messages carry a large note
+      // body. Only echo back field names, not the content.
+      payloadKeys: Array.isArray(msg?.fields) ? null : (msg && typeof msg === 'object' && !Array.isArray(msg))
+        ? Object.keys(msg).filter((k) => typeof msg[k] !== 'object' || msg[k] === null).slice(0, 12)
+        : null,
+    });
     try {
       if (t === 'EXT_HELLO') {
         // The web app says hello on boot; confirm extension is present and
         // hand back the current snapshot of merged fields so existing tabs
         // catch up immediately.
         sendResponse({ ok: true, version: chrome.runtime.getManifest?.().version ?? '0.1.0', merged: buildMergedFields(), state });
+        diagRecord('external:ok', { type: t, mergedFields: Object.keys(buildMergedFields() || {}).length });
         return;
       }
-      if (t === 'EXT_SCRAPE_ALL') { sendResponse(await scrapeAll()); return; }
-      if (t === 'EXT_SCRAPE_CCP') { sendResponse(await scrapeCcpTab()); return; }
-      if (t === 'EXT_SCRAPE_SF')  { sendResponse(await scrapeSalesforceTab()); return; }
+      if (t === 'EXT_SCRAPE_ALL') {
+        const r = await scrapeAll();
+        sendResponse(r); diagRecord('external:ok', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+        return;
+      }
+      if (t === 'EXT_SCRAPE_CCP') {
+        const r = await scrapeCcpTab();
+        sendResponse(r); diagRecord('external:ok', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+        return;
+      }
+      if (t === 'EXT_SCRAPE_SF')  {
+        const r = await scrapeSalesforceTab();
+        sendResponse(r); diagRecord('external:ok', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+        return;
+      }
       if (t === 'EXT_GET_STATE') {
         sendResponse({ ok: true, merged: buildMergedFields(), state });
+        diagRecord('external:ok', { type: t });
         return;
       }
       if (t === 'EXT_PUSH_CONFIRM') {
         // The web app confirms it received a prior push — nothing to do,
         // but keeping the hook lets us surface a "received" badge later.
         sendResponse({ ok: true });
+        diagRecord('external:ok', { type: t, mergedKeys: Object.keys(msg || {}).filter((k) => k !== 'type').slice(0, 10) });
         return;
       }
       if (t === 'EXT_OPEN_CASE') {
@@ -1410,6 +1604,13 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
           newTab:     Boolean(msg?.newTab ?? false),
         });
         sendResponse(resp);
+        diagRecord('external:ok', {
+          type: t,
+          caseNumber: msg?.caseNumber ?? null,
+          directUrl: typeof msg?.directUrl === 'string' ? new URL(msg.directUrl).pathname : null,
+          navResult: resp?.ok ? resp.navigated : null,
+          error: resp?.error ?? null,
+        });
         return;
       }
       if (t === 'EXT_APPLY_CASE_FIELDS') {
@@ -1424,28 +1625,66 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
         //     customerName, accountName, amrModelNo}, summary: {ok, okCount} }
         const suggestedTabId = typeof msg?.tabId === 'number' ? msg.tabId : null;
         const saveEach = msg?.saveEach === false ? false : true;
+        diagRecord('sf:apply:start', { suggestedTabId, saveEach, fieldsProvided: Object.keys(msg?.fields ?? {}).filter((k) => String(msg.fields[k] ?? '').trim() !== '').length });
         try {
           const tab = await findOrSuggestSalesforceTab(suggestedTabId);
           if (!tab || typeof tab.id !== 'number') {
+            diagRecord('sf:apply:error', { error: 'No open SF tab found' });
             sendResponse({ ok: false, error: 'No open Salesforce Case tab found. Please open any Ecovacs Lightning Case tab first, then retry Push.' });
             return;
           }
+          diagRecord('sf:apply:targetTab', { tabId: tab.id, url: tab.url ?? null, title: tab.title ?? null });
           const fields = msg?.fields ?? {};
           const result = await chrome.tabs.sendMessage(tab.id, {
             type: 'APPLY_CASE_FIELDS',
             fields,
             saveEach,
           });
-          if (result?.ok) sendResponse({ ok: true, tab: { id: tab.id, url: tab.url, title: tab.title }, ...result });
-          else sendResponse({ ok: false, error: result?.error || 'Content script returned non-ok for APPLY_CASE_FIELDS.', detail: result ?? null });
+          if (result?.ok) {
+            const summary = {
+              ok: true,
+              tab: { id: tab.id, url: tab.url, title: tab.title },
+              postBodyOk: Boolean(result.postBody?.ok),
+              postBodyTabFound: result.postBody?.tabFound ?? null,
+              postBodyEditorFound: result.postBody?.editorFound ?? null,
+              postBodyChars: result.postBody?.length ?? null,
+              postBodyPublished: result.postBody?.publishClicked ?? null,
+              fieldSummary: Object.fromEntries(
+                Object.entries(result?.fields ?? {}).map(([k, s]) => [k, {
+                  ok: s && typeof s === 'object' ? Boolean(s.ok) : null,
+                  skipped: s && typeof s === 'object' ? Boolean(s.skipped) : null,
+                  wasSectionFound: !!s,
+                  error: s && typeof s === 'object' ? (s.error ? String(s.error).slice(0, 200) : null) : 'layout section not found',
+                }])
+              ),
+            };
+            sendResponse({ ok: true, tab: { id: tab.id, url: tab.url, title: tab.title }, ...result });
+            diagRecord('sf:apply:ok', summary);
+          } else {
+            sendResponse({ ok: false, error: result?.error || 'Content script returned non-ok for APPLY_CASE_FIELDS.', detail: result ?? null });
+            diagRecord('sf:apply:nonOk', {
+              error: result?.error ?? null,
+              fieldSummary: Object.fromEntries(
+                Object.entries(result?.fields ?? {}).map(([k, s]) => [k, {
+                  ok: s && typeof s === 'object' ? Boolean(s.ok) : null,
+                  skipped: s && typeof s === 'object' ? Boolean(s.skipped) : null,
+                  wasSectionFound: !!s,
+                  error: s && typeof s === 'object' ? (s.error ? String(s.error).slice(0, 200) : null) : 'layout section not found',
+                }])
+              ),
+            });
+          }
         } catch (e) {
           sendResponse({ ok: false, error: String(e?.message || e) });
+          diagRecord('sf:apply:throw', { error: String(e?.message || e) });
         }
         return;
       }
       sendResponse({ ok: false, error: `Unknown external type: ${t}` });
+      diagRecord('external:unknown', { type: t ?? null });
     } catch (e) {
       sendResponse({ ok: false, error: String(e?.message || e) });
+      diagRecord('external:error', { type: t ?? null, error: String(e?.message || e) });
     }
   })();
   return true;

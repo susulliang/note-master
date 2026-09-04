@@ -101,12 +101,72 @@
 
     <!-- ==========================  DIAGNOSTIC  ============================ -->
     <section class="diag">
-      <details class="card diag__card">
+      <details class="card diag__card" id="detailsDiag">
         <summary class="card__hd">
           <span class="dot"></span>
           <h2 class="card__tl">Diagnostic · why it's not scraping</h2>
         </summary>
         <ul class="kv" id="diagBox"><li class="empty">Loading…</li></ul>
+      </details>
+
+      <details class="card diag__card" id="detailsBridge">
+        <summary class="card__hd">
+          <span class="dot dot--accent"></span>
+          <h2 class="card__tl">Bridge · Ticket App &amp; Push traces</h2>
+          <span class="bdg bdg--muted" id="bridgeCount" title="Log entries in memory">0</span>
+          <button
+            class="btn btn-ghost btn--sm"
+            id="btnBridgeRefresh"
+            type="button"
+            title="Refresh event log from service worker"
+          >
+            Refresh
+          </button>
+          <button
+            class="btn btn-ghost btn--sm btn--danger"
+            id="btnBridgeClear"
+            type="button"
+            title="Clear event log (next push / handshake / scrape → starts empty)"
+          >
+            Clear
+          </button>
+        </summary>
+        <div class="diag__bridge">
+          <div class="summ" id="bridgeSummary">Loading extension-side bridge trace…</div>
+          <div class="bridge__tabs-wrap">
+            <div class="bridge__tabs" role="tablist">
+              <button class="bridge__tab is-active" role="tab" data-tab="log" type="button">Event log (received probes + pushes)</button>
+              <button class="bridge__tab" role="tab" data-tab="tabs" type="button">Open tabs snapshot</button>
+              <button class="bridge__tab" role="tab" data-tab="patterns" type="button">Manifest patterns</button>
+              <button class="bridge__tab" role="tab" data-tab="guide" type="button">Fix "bridge not connected"</button>
+            </div>
+            <section class="bridge__pane" data-pane="log" hidden>
+              <div class="pane__hint"><strong>What this shows:</strong> every handshake probe received from the Ticket Notes web-app, every externally_connectable call, SF scrape, push attempt, field writes + Post tab editor steps. This is data the extension-side actually saw. If you click Probe on the Ticket Notes page but no <code>bridge:handshake_request_received</code> row shows up within 2s, then bridge.js content script is NOT running on that tab (Chrome cached old registration or manifest pattern not matched — go to <code>chrome://extensions</code> 🔄 Reload, refresh the page, try again).</div>
+              <ul class="evlog" id="evlog"><li class="empty">No events yet. Click Probe on the Ticket Notes page or Scan/Push in this popup.</li></ul>
+            </section>
+            <section class="bridge__pane" data-pane="tabs" hidden>
+              <p class="pane__hint">Ticket-app / Salesforce / CCP tabs currently open in Chrome (as seen by the extension, via chrome.tabs.query patterns below):</p>
+              <div id="tabsSnap" class="tabs-snap"><div class="empty">Loading…</div></div>
+            </section>
+            <section class="bridge__pane" data-pane="patterns" hidden>
+              <p class="pane__hint">Patterns loaded DIRECTLY from the installed extension manifest. These are the patterns Chrome actually uses when deciding whether to inject bridge.js (content_scripts) and whether chrome.runtime.sendMessage(EXT_ID) is allowed (externally_connectable). If a pattern isn't listed here, Chrome won't inject/connect.</p>
+              <h3 class="shead">content_scripts → bridge.js → matches</h3>
+              <ul class="pl" id="plBridge"><li class="empty">—</li></ul>
+              <h3 class="shead">externally_connectable → matches</h3>
+              <ul class="pl" id="plExternal"><li class="empty">—</li></ul>
+            </section>
+            <section class="bridge__pane" data-pane="guide" hidden>
+              <ol class="guided">
+                <li>Open a browser tab with <code>https://note-master-roan.vercel.app/</code>.
+                <li>Open Ecovacs Note Helper extension popup on ANY tab.
+                <li>Switch to this Bridge → Event log panel.
+                <li>On the Ticket Notes page click Hang Up → 🔎 <strong>Diagnostics</strong> → click its <strong>🔁 Try probing bridge again</strong> action.
+                <li>Back in popup Bridge → Event log, click Refresh. Within 2s you should see a row <code>bridge:handshake_request_received</code> → that means bridge.js content script is injected on vercel and the roundtrip works. If you do NOT see that row: the content script isn't running → go to <code>chrome://extensions</code>, click 🔄 <strong>Reload</strong> on Ecovacs Note Helper, refresh note-master-roan.vercel.app, repeat.
+                <li>For Salesforce field-writes: click 📤 <strong>Push to Salesforce Case</strong>. Within seconds Bridge → Event log will show <code>sf:apply:start</code> → <code>sf:apply:targetTab</code> → then per-field <code>wasSectionFound: false</code> with the exact reason (layout not found / inline-edit missing / read-only). Copy/paste that row into a bug report and we can tune the selectors.
+              </ol>
+            </section>
+          </div>
+        </div>
       </details>
     </section>
 
