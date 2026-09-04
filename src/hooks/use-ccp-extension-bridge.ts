@@ -183,6 +183,14 @@ export interface CcpExtensionBridge {
      *  expectedManifestVersion (the "you need to 🔄 reload extension at
      *  chrome://extensions" case). false / null otherwise. */
     injectedVersionStale: boolean;
+    /** True when bridge.js explicitly posted :context_invalidated OR a
+     *  chrome.runtime.sendMessage call on this tab threw 'Extension
+     *  context invalidated' → browser extension was reloaded/updated under
+     *  this tab without the tab refreshing. Mandatory user action: REFRESH
+     *  the Ticket Notes tab (NOT just the extension). */
+    contextInvalidatedSeen: boolean;
+    /** ISO timestamp of when a :context_invalidated signal was last seen. */
+    contextInvalidatedSeenAt: string | null;
   };
 
   /** Probe the bridge right now. Useful when the UI shows "disconnected"
@@ -297,7 +305,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.27';
+  const EXPECTED_MANIFEST_VERSION = '0.1.28';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -306,6 +314,7 @@ export function useCcpExtensionBridge({
   const [lastHandshakeAt, setLastHandshakeAt] = useState<string | null>(null);
   const [handshakeRequested, setHandshakeRequested] = useState(false);
   const [lastExternalError, setLastExternalError] = useState<string | null>(null);
+  const [contextInvalidatedSeenAt, setContextInvalidatedSeenAt] = useState<string | null>(null);
 
   /** Chrome/Chromium match-pattern matcher (simplified, covers the patterns
    *  we actually emit: * (any path), <scheme>://<host with wildcards>:<port>/*.
@@ -510,6 +519,34 @@ export function useCcpExtensionBridge({
         }
         return;
       }
+      if (src === 'ecovacs-ccp-extension:context_invalidated') {
+        // Bridge.js / external sendMessage tells us: the MV3 background /
+        // content-script context the page was previously talking to was
+        // replaced (extension was reloaded / updated) without the Ticket
+        // Notes tab being refreshed. Two consequences:
+        //   1. Old chrome.runtime.sendMessage handles inside the page throw
+        //      'Extension context invalidated' forever until F5.
+        //   2. bridge.js listeners are gone until page refresh as well.
+        // Fix is deterministic: user MUST refresh the Ticket Notes tab.
+        // We reset connected = false, clear cached ids so next retries don't
+        // use staled handles, and mark a visible diagnostics flag so all
+        // push / scrape toasts surface explicit guidance instead of the old
+        // misleading "Open a Lightning Case tab".
+        bridgeReadyRef.current = false;
+        setConnected(false);
+        setBridgeInjected(false);
+        extIdRef.current = null;
+        setExtensionId(null);
+        try { if (typeof localStorage !== 'undefined') localStorage.removeItem(EXT_ID_LS_KEY); } catch { /* ignore */ }
+        const ts = new Date().toISOString();
+        setContextInvalidatedSeenAt(ts);
+        const errText = [
+          `Extension context invalidated seen at ${new Date(ts).toLocaleTimeString()} (when: ${String(data?.when || 'unknown')}).`,
+          (typeof data?.error === 'string' && data.error ? `Error: ${data.error}` : ''),
+        ].filter(Boolean).join(' ');
+        setLastExternalError(errText);
+        return;
+      }
       if (src === 'ecovacs-ccp-extension:push') {
         // Background service worker pushed merged fields via bridge.
         // Every push surfaces the bottom-right "review these fields?"
@@ -709,46 +746,175 @@ export function useCcpExtensionBridge({
   //  fall back to bridge postMessage tunnel.
   // -------------------------------------------------------------------------
   const sendRequest = useCallback(async (request: any): Promise<any> => {
-    // Channel 1: direct chrome.runtime.sendMessage if origin matches the
-    // extension's externally_connectable manifest AND we know the ext id.
-    const id = extIdRef.current || (DEFAULT_EXT_ID_CANDIDATE as string);
-    if (id && typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
+    function classifyError(e: any): { raw: any; isContextInvalidated: boolean; isExtensionMissing: boolean; isExternalDenied: boolean; normalizedMessage: string } {
+      const msg = String(e?.message ?? e ?? '');
+      const isContextInvalidated = /extension context invalidated/i.test(msg)
+        // When chrome.* bindings themselves are stale (old content script
+        // context, extension reloaded under the same tab session), direct
+        // access to chrome.runtime inside an MV3 page throws synchronously
+        // or via lastError with this string.
+        || (typeof (globalThis as any).chrome !== 'undefined' && (globalThis as any).chrome?.runtime?.id == null && typeof (globalThis as any).chrome?.runtime !== 'undefined');
+      const isExtensionMissing = !!(e?.message && /does not exist|unknown extension id|receiving end does not exist|extension and webpage have different|extension not installed/i.test(msg));
+      const isExternalDenied = /cannot access a chrome:\/\//i.test(msg) || /Incorrect extension id|extensionsDisabledByPolicy|the extensions client is disabled|origin not listed in externally_connectable/i.test(msg)
+        || !!((e?.message || '').match(/Could not establish connection/));
+      return { raw: e, isContextInvalidated, isExtensionMissing, isExternalDenied, normalizedMessage: msg };
+    }
+    async function channelExternal(id: string, payload: any): Promise<{ ok: boolean; value: any; error?: any }> {
       try {
-        return await new Promise<any>((resolve, reject) => {
-          (globalThis as any).chrome.runtime.sendMessage(id, request, (reply: any) => {
-            const err = (globalThis as any).chrome?.runtime?.lastError;
-            if (err) reject(err);
-            else resolve(reply);
+        // MV3 extension context can be "invalidated" synchronously when we
+        // even just TOUCH chrome.runtime.sendMessage (old handle after a
+        // reload). Wrap in try/catch so a bad property read doesn't kill
+        // the whole chain — we need to fall through.
+        const chromeRt = (globalThis as any).chrome?.runtime;
+        if (!chromeRt || typeof chromeRt.sendMessage !== 'function') {
+          return { ok: false, value: null, error: new Error('chrome.runtime.sendMessage not available.') };
+        }
+        try {
+          const reply = await new Promise<any>((resolve, reject) => {
+            try {
+              chromeRt.sendMessage(id, payload, (r: any) => {
+                const lastErr = chromeRt.lastError;
+                if (lastErr) reject(lastErr);
+                else resolve(r);
+              });
+            } catch (sendInnerErr) {
+              reject(sendInnerErr);
+            }
           });
-        });
-      } catch (e: any) {
-        // Remember the external-path error for diagnostics. It usually
-        // means either the extension id guessed is wrong, or the app
-        // origin isn't listed in manifest.externally_connectable.
-        setLastExternalError(String(e?.message || e));
-        // Fall through to the bridge path.
+          return { ok: true, value: reply };
+        } catch (err) {
+          return { ok: false, value: null, error: err };
+        }
+      } catch (outerSyncErr) {
+        return { ok: false, value: null, error: outerSyncErr };
       }
     }
-    // Channel 2: bridge.js content script tunnel via window.postMessage.
-    if (typeof window !== 'undefined') {
+    async function channelBridge(payload: any): Promise<{ ok: boolean; value: any; error?: any }> {
+      if (typeof window === 'undefined') return { ok: false, value: null, error: new Error('window not available') };
       const reqId = requestCounterRef.current += 1;
-      return await new Promise<any>((resolve) => {
-        pendingReqRef.current[reqId] = resolve;
-        // Timeout: 8s (covers SW cold wake + SF lazy DOM settle)
-        window.setTimeout(() => {
-          if (pendingReqRef.current[reqId]) {
-            delete pendingReqRef.current[reqId];
-            resolve({ ok: false, error: 'Extension request timed out.' });
+      try {
+        const result = await new Promise<any>((resolve) => {
+          let timedOut = false;
+          const timer = window.setTimeout(() => {
+            timedOut = true;
+            resolve({ ok: false, error: 'Extension bridge request timed out.' });
+          }, 12000);
+          pendingReqRef.current[reqId] = (v: any) => {
+            if (timedOut) return;
+            clearTimeout(timer);
+            resolve(v);
+          };
+          try {
+            window.postMessage({
+              source: 'ecovacs-ccp-extension:request',
+              id: reqId,
+              request: payload,
+            }, '*');
+          } catch (postErr) {
+            if (!timedOut) clearTimeout(timer);
+            resolve({ ok: false, error: String((postErr as any)?.message || postErr) });
           }
-        }, 8000);
-        window.postMessage({
-          source: 'ecovacs-ccp-extension:request',
-          id: reqId,
-          request,
-        }, '*');
-      });
+        });
+        // After bridge roundtrip: if bridge returned a context-invalidated
+        // signal via error field, unwrap it so caller can show the tailored
+        // remediation toast instead of "open a Lightning Case tab".
+        if (result?.ok === false && typeof result?.error === 'string' && /Extension context invalidated/i.test(result.error)) {
+          return { ok: false, value: null, error: new Error(result.error) };
+        }
+        return { ok: true, value: result };
+      } catch (e) {
+        return { ok: false, value: null, error: e };
+      } finally {
+        delete pendingReqRef.current[reqId];
+      }
     }
-    setLastExternalError('No bridge channel available.');
+
+    // -- Channel 1: direct externally_connectable --------------------------
+    let id = extIdRef.current || (DEFAULT_EXT_ID_CANDIDATE as string);
+    const extIdLs = (() => { try { return (typeof localStorage !== 'undefined' ? (localStorage.getItem(EXT_ID_LS_KEY) || null) : null); } catch { return null; } })();
+    if (!id && extIdLs) id = extIdLs;
+    let firstExternalError: any = null;
+    if (id && typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
+      const attempt1 = await channelExternal(id, request);
+      if (attempt1.ok) return attempt1.value;
+      const cls = classifyError(attempt1.error);
+      firstExternalError = cls;
+      if (cls.isContextInvalidated) {
+        // First remediate: extension reload under a stale page context
+        // almost always kills the direct handle, but the bridge post
+        // route is still alive IF the injected copy of bridge.js still has
+        // chrome.runtime.sendMessage. If that too fails, we fall back with
+        // explicit remediation.
+        setBridgeInjected(false);
+        setLastExternalError(cls.normalizedMessage);
+        try { if (typeof localStorage !== 'undefined') localStorage.removeItem(EXT_ID_LS_KEY); } catch { /* ignore */ }
+        extIdRef.current = null;
+        setExtensionId(null);
+        // Ask bridge for handshake again — if bridge isn't invalidated we'll
+        // pick up the new extension id broadcasted by the reload extension.
+        try {
+          if (typeof window !== 'undefined') {
+            window.postMessage({ source: 'ecovacs-ccp-extension:handshake_request' }, '*');
+          }
+        } catch { /* ignore */ }
+        // Sleep a bit so the fresh bridge (if any) can reply.
+        await new Promise((r) => setTimeout(r, 650));
+        // Retry channel 1 ONCE with the potentially-refreshed extension id.
+        const retryId = extIdRef.current || (DEFAULT_EXT_ID_CANDIDATE as string);
+        if (retryId && typeof (globalThis as any).chrome?.runtime?.sendMessage === 'function') {
+          const retry1 = await channelExternal(retryId, request);
+          if (retry1.ok) return retry1.value;
+          const cls2 = classifyError(retry1.error);
+          if (cls2.isContextInvalidated) firstExternalError = cls2; else firstExternalError = cls2;
+        }
+      }
+    }
+
+    // -- Channel 2: bridge tunnel -----------------------------------------
+    if (typeof window !== 'undefined') {
+      const attempt2 = await channelBridge(request);
+      if (attempt2.ok) return attempt2.value;
+      const clsBridge = classifyError(attempt2.error);
+      // Context invalidated on bridge path trumps external-channel errors
+      // in the final message because it tells the user exactly what to do.
+      if (clsBridge.isContextInvalidated || clsBridge.normalizedMessage.toLowerCase().includes('extension context invalidated')) {
+        setBridgeInjected(false);
+        setLastExternalError(clsBridge.normalizedMessage);
+        const surfaceErr = new Error(
+          'Extension context invalidated (bridge tunnel). The browser extension was reloaded or updated AFTER this ticket notes tab was opened. Fix: (1) refresh THIS ticket notes tab once. (2) Reload Ecovacs Note Helper at edge://extensions / chrome://extensions if issue persists.'
+        );
+        (surfaceErr as any).isContextInvalidated = true;
+        throw surfaceErr;
+      }
+      // If external channel previously reported context-invalidated,
+      // surface that now (bridge tunnel didn't help either).
+      if (firstExternalError?.isContextInvalidated) {
+        const surfaceErr = new Error(
+          'Extension context invalidated. The browser extension was reloaded or updated AFTER this ticket notes tab was opened. Fix: (1) refresh THIS ticket notes tab once. (2) Reload Ecovacs Note Helper at edge://extensions / chrome://extensions if issue persists.'
+        );
+        (surfaceErr as any).isContextInvalidated = true;
+        (surfaceErr as any).contextInvalidatedRetryHint = 'Refresh the Ticket Notes tab first, then push again. If still failing: open Ecovacs Note Helper popup → Bridge → Event log and confirm extension-side v0.1.28 is installed and bridge.js has been re-injected.';
+        setLastExternalError(firstExternalError.normalizedMessage);
+        throw surfaceErr;
+      }
+      // Bridge error might be OK — fallback to last external classification
+      // if it is more specific (e.g. extension missing).
+      const chosenCls = firstExternalError && !clsBridge.normalizedMessage.includes('timed out')
+        ? firstExternalError
+        : clsBridge;
+      setLastExternalError(chosenCls.normalizedMessage);
+      if (attempt2.value && typeof attempt2.value === 'object' && attempt2.value !== null && typeof (attempt2.value as any).ok === 'boolean') {
+        return attempt2.value;
+      }
+      return { ok: false, error: clsBridge.normalizedMessage || 'Extension bridge did not reply.' };
+    }
+    // -- Nothing available --------------------------------------------------
+    setLastExternalError(firstExternalError?.normalizedMessage || 'No extension message channel available.');
+    if (firstExternalError?.isContextInvalidated) {
+      const surfaceErr = new Error(firstExternalError.normalizedMessage || 'Extension context invalidated.');
+      (surfaceErr as any).isContextInvalidated = true;
+      throw surfaceErr;
+    }
     return { ok: false, error: 'Extension bridge unavailable.' };
   }, []);
 
@@ -864,6 +1030,8 @@ export function useCcpExtensionBridge({
       patternsReceivedAt: receivedBridgePatternsAt,
       injectedVersionMatchesExpected,
       injectedVersionStale,
+      contextInvalidatedSeen: contextInvalidatedSeenAt != null,
+      contextInvalidatedSeenAt,
     },
     requestConnection,
   };

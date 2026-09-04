@@ -207,7 +207,14 @@ export default function OutputModal({
     }
     if (d.lastExternalError) lines.push(`\nChrome.runtime sendMessage error: "${d.lastExternalError.slice(0, 220)}"`);
     lines.push('');
-    lines.push(`Checklist (${browserTag}): (1) Popup shows v0.1.27 or newer. (2) Patterns tab shows both host_permissions + content_scripts containing vercel patterns. (3) Tabs snapshot → vercel row → 🔬 Injectable? = YES → then click 🚀 Inject bridge now as the universal fallback.`);
+    lines.push(`Checklist (${browserTag}): (1) Popup shows v0.1.28 or newer. (2) Patterns tab shows both host_permissions + content_scripts containing vercel patterns. (3) Tabs snapshot → vercel row → 🔬 Injectable? = YES → then click 🚀 Inject bridge now as the universal fallback.`);
+    if (d.contextInvalidatedSeen) {
+      lines.unshift('');
+      lines.unshift('🚨🚨 EXTENSION CONTEXT INVALIDATED — this is why Push says "Extension context invalidated". 🚨🚨');
+      lines.unshift(`Last seen: ${new Date(d.contextInvalidatedSeenAt || Date.now()).toLocaleString()}.`);
+      lines.unshift(`The browser extension was RELOADED / UPDATED AFTER the ${browserTag} tab loaded this Ticket Notes page. The message handles chrome.runtime bound to the OLD extension context no longer work. Refreshing JUST the extension WILL NOT FIX THIS — you MUST refresh THIS tab too.`);
+      lines.unshift(`Step 1: Ctrl+Shift+R (hard refresh) THIS ticket notes tab. Step 2: only if still failing → reload Ecovacs Note Helper at ${extMgrUrl}, then Step 1 again.`);
+    }
     return lines;
   }, [extConn]);
 
@@ -326,16 +333,81 @@ export default function OutputModal({
           bodyLen: f.postBody?.length ?? 0,
         };
       } catch { /* ignore */ }
-      const r = await applyCaseFields({
-        fields: {
-          postBody: f.postBody,
-          postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
-          amrModelNo: f.amrModelNo,
-          customerName: f.customerName,
-          accountName: f.accountName,
-          contactPhone: f.contactPhone,
-        },
-      });
+      let r: any;
+      try {
+        r = await applyCaseFields({
+          fields: {
+            postBody: f.postBody,
+            postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
+            amrModelNo: f.amrModelNo,
+            customerName: f.customerName,
+            accountName: f.accountName,
+            contactPhone: f.contactPhone,
+          },
+        });
+      } catch (eApply: any) {
+        const msgRaw = String(eApply?.message || eApply || 'Push failed.');
+        const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+        const isEdge = /Edg\//i.test(ua);
+        const extMgrUrl = isEdge ? 'edge://extensions' : 'chrome://extensions';
+        // sendRequest throws with isContextInvalidated = true ONLY when both
+        // channels (external chrome.runtime.sendMessage AND bridge post
+        // tunnel) report Extension context invalidated. There is zero
+        // recovery without a refresh — content-script + MV3 runtime handles
+        // inside the page are bound to the original extension context and
+        // Chrome/Edge revokes them immediately on reload/update. Don't show
+        // the generic "open a Lightning Case tab" — that just confused the
+        // user. Instead show an explicit fix path.
+        const looksCtxInvalid = Boolean((eApply as any)?.isContextInvalidated)
+          || /extension context invalidated/i.test(msgRaw)
+          || Boolean(extConn?.diagnostics?.contextInvalidatedSeen);
+        const ctxRemediationLines = [
+          'Fix (2 steps, in this order):',
+          '  1. Press Ctrl+Shift+R (hard refresh) on the TICKET NOTES TAB you are looking at.',
+          `     (The bridge content script in this tab became stale because the extension was reloaded/updated without you refreshing the tab. Refreshing JUST the extension at ${extMgrUrl} without refreshing THIS TAB → will still fail.)`,
+          `  2. Only if step (1) still fails → open ${extMgrUrl} → find Ecovacs Note Helper → click 🔄 Reload, then return here and repeat step (1).`,
+        ];
+        try {
+          (window as any).__debug = (window as any).__debug || {};
+          (window as any).__debug.lastPushError = {
+            ts: new Date().toISOString(),
+            raw: msgRaw,
+            looksCtxInvalid,
+            diagnostics: extConn?.diagnostics ?? null,
+            stack: String((eApply as any)?.stack || ''),
+          };
+        } catch { /* ignore */ }
+        if (looksCtxInvalid) {
+          try {
+            toast.error(
+              'Extension context invalidated. The Ecovacs Note Helper extension was reloaded/updated without this Ticket Notes tab being refreshed.',
+              {
+                description: `Hard-refresh (Ctrl+Shift+R) the Ticket Notes tab first. If still failing: reload extension at ${extMgrUrl} and refresh this tab again.`,
+                duration: 18_000,
+                action: { label: '🔎 See diagnostics', onClick: () => showDiagnosticsToast() },
+              },
+            );
+          } catch { /* ignore */ }
+          try {
+            window.alert(
+              'Push to Salesforce failed: EXTENSION CONTEXT INVALIDATED\n\n' +
+              `What happened: you (or Chrome/Edge) reloaded or updated Ecovacs Note Helper AFTER this note-master tab was opened. All internal chrome.runtime / bridge message handles bound to the OLD extension context are now dead. There is no programmatic recovery.\n\n` +
+              `${ctxRemediationLines.join('\n')}\n\n` +
+              `Once you have refreshed this page and it loads again, go to Hang Up → try the Push button. The new bridge will pick up the freshly-loaded extension context.\n\n` +
+              `Debug context: ${msgRaw}\n` +
+              (extConn?.diagnostics?.contextInvalidatedSeenAt
+                ? `Last context-invalidation signal seen at ${new Date(extConn.diagnostics.contextInvalidatedSeenAt).toLocaleString()}.`
+                : `No explicit bridge signal received (error came through the external sendMessage path.)`)
+            );
+          } catch { /* ignore */ }
+          return;
+        }
+        // Non-context failure (generic).
+        try { toast.error(msgRaw, { description: 'Retry after opening any Lightning Case tab.', duration: 10_000 }); }
+        catch { /* ignore */ }
+        try { window.alert(`Push to Salesforce failed:\n\n${msgRaw}\n\nOpen a Lightning Case tab, then try again.`); } catch { /* ignore */ }
+        return;
+      }
       if (!r.ok) {
         const msg = r.error || 'Push failed.';
         try { toast.error(msg, { description: 'Retry after opening any Lightning Case tab.', duration: 10_000 }); } catch { /* ignore */ }

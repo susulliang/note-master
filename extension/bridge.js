@@ -184,6 +184,20 @@
   // was swallowed by a stale content script.
   function traceDiag(trace, payload) {
     try {
+      if (!chrome?.runtime?.id || !chrome?.runtime?.sendMessage) {
+        // Extension context was invalidated (user reloaded extension under
+        // this tab without refreshing). Surface the error to the page so it
+        // can stop queuing sendMessage attempts and show a clear banner.
+        try {
+          window.postMessage({
+            source: 'ecovacs-ccp-extension:context_invalidated',
+            when: 'traceDiag',
+            trace,
+            ts: Date.now(),
+          }, '*');
+        } catch { /* ignore */ }
+        return;
+      }
       chrome.runtime.sendMessage({
         type: 'POPUP_DIAG_TRACE',
         origin: typeof location !== 'undefined' ? location.origin : '',
@@ -192,8 +206,25 @@
         fingerprint: manifestSnapshot.fingerprint,
         trace,
         payload: typeof payload === 'undefined' ? null : (typeof payload === 'string' ? payload.slice(0, 400) : JSON.stringify(payload ?? null).slice(0, 400)),
-      }, () => { /* lastError ignored */ });
-    } catch { /* never let tracing crash bridge */ }
+      }, () => {
+        // Clear lastError silently (MV3 complains if nobody reads it).
+        if (chrome?.runtime?.lastError) void chrome.runtime.lastError;
+      });
+    } catch (e) {
+      // Classic MV3 throw: chrome.runtime.sendMessage on a content script
+      // whose background context has been replaced throws 'Extension
+      // context invalidated' synchronously. We don't want that bubbling up
+      // and killing the bridge. Instead, tell the page.
+      try {
+        window.postMessage({
+          source: 'ecovacs-ccp-extension:context_invalidated',
+          when: 'traceDiagThrow',
+          error: String(e?.message || e).slice(0, 300),
+          trace,
+          ts: Date.now(),
+        }, '*');
+      } catch { /* ignore */ }
+    }
   }
 
   // (A) Handshake broadcasts — first pings asap, then DOMContentLoaded, then
@@ -238,12 +269,34 @@
     }
     if (d.source === 'ecovacs-ccp-extension:request') {
       try {
-        chrome.runtime.sendMessage(d.request, (reply) => {
-          try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply }, '*'); }
-          catch { /* ignore cross-origin restrictions */ }
-        });
-      } catch (e) {
-        try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply: { ok: false, error: String(e?.message || e) } }, '*'); }
+        if (!chrome?.runtime?.id || !chrome?.runtime?.sendMessage) {
+          try {
+            window.postMessage({ source: 'ecovacs-ccp-extension:context_invalidated', when: 'request:pre', ts: Date.now() }, '*');
+          } catch { /* ignore */ }
+          try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply: { ok: false, error: 'Extension context invalidated. Refresh the Ticket Notes tab, then try again.' } }, '*'); }
+          catch { /* ignore */ }
+          return;
+        }
+        try {
+          chrome.runtime.sendMessage(d.request, (reply) => {
+            try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply }, '*'); }
+            catch { /* ignore cross-origin restrictions */ }
+          });
+        } catch (e) {
+          const msg = String(e?.message || e);
+          try {
+            window.postMessage({
+              source: 'ecovacs-ccp-extension:context_invalidated',
+              when: 'request:sendThrow',
+              error: msg.slice(0, 300),
+              ts: Date.now(),
+            }, '*');
+          } catch { /* ignore */ }
+          try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply: { ok: false, error: msg || 'Extension context invalidated.' } }, '*'); }
+          catch { /* ignore */ }
+        }
+      } catch (eOuter) {
+        try { window.postMessage({ source: 'ecovacs-ccp-extension:response', id: d.id, reply: { ok: false, error: String(eOuter?.message || eOuter) || 'Extension context invalidated.' } }, '*'); }
         catch { /* ignore */ }
       }
     }
@@ -251,14 +304,37 @@
 
   // Background says "push merged fields to the Ticket Notes page" — relay
   // into the page's main world via window.postMessage.
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type !== 'TICKET_APP_BRIDGE') return false;
+  try {
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+      if (msg?.type !== 'TICKET_APP_BRIDGE') return false;
+      try {
+        if (!window?.postMessage) {
+          try { sendResponse({ ok: false, error: 'window unavailable' }); } catch { /* ignore */ }
+          return true;
+        }
+        try {
+          window.postMessage(Object.assign({ source: 'ecovacs-ccp-extension:push', payload: msg.payload }, commonMeta()), '*');
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        }
+      } catch (eOuter) {
+        try { sendResponse({ ok: false, error: String(eOuter?.message || eOuter) }); }
+        catch { /* ignore */ }
+      }
+      return true;
+    });
+  } catch (eInitOnMsg) {
+    // Extension context invalidated before we even attached onMessage. Tell
+    // the page immediately so it doesn't wait for pushes that will never
+    // arrive.
     try {
-      window.postMessage(Object.assign({ source: 'ecovacs-ccp-extension:push', payload: msg.payload }, commonMeta()), '*');
-      sendResponse({ ok: true });
-    } catch (e) {
-      sendResponse({ ok: false, error: String(e?.message || e) });
-    }
-    return true;
-  });
+      window.postMessage({
+        source: 'ecovacs-ccp-extension:context_invalidated',
+        when: 'onMessage:init',
+        error: String((eInitOnMsg as any)?.message || eInitOnMsg).slice(0, 300),
+        ts: Date.now(),
+      }, '*');
+    } catch { /* ignore */ }
+  }
 })();

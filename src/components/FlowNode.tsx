@@ -119,6 +119,15 @@ export interface TicketPanelsContextShape {
       /** True when installed is clearly older than expected (Chrome
        *  cached stale content script → user must reload extension) */
       injectedVersionStale: boolean;
+      /** True when bridge or external sendMessage detected MV3 'Extension
+       *  context invalidated' → the browser extension was reloaded or
+       *  updated AFTER the Ticket Notes tab was opened. Mandatory fix: the
+       *  USER MUST REFRESH the Ticket Notes tab (reloading the extension
+       *  alone is insufficient — the content script handles are stale until
+       *  a navigation). */
+      contextInvalidatedSeen: boolean;
+      /** ISO timestamp of the last context invalidation signal we saw. */
+      contextInvalidatedSeenAt: string | null;
     };
   };
 }

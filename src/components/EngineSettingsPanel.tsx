@@ -247,6 +247,8 @@ export default function EngineSettingsPanel({
   const extInjected = ext?.diagnostics?.injectedManifestVersion ?? null;
   const extBridgeOk = Boolean(ext?.connected);
   const extVersionMismatch = ext?.diagnostics?.injectedVersionMatchesExpected === false;
+  const contextInvalidatedSeen = Boolean(ext?.diagnostics?.contextInvalidatedSeen);
+  const contextInvalidatedAt = ext?.diagnostics?.contextInvalidatedSeenAt ?? null;
   const [showLlmDebug, setShowLlmDebug] = useState(false);
   const [showJsonWindow, setShowJsonWindow] = useState(false);
   const [jsonCopied, setJsonCopied] = useState(false);
@@ -823,6 +825,13 @@ export default function EngineSettingsPanel({
             {extVersionMismatch && (
               <div className="mt-0.5 text-red-400">
                 ⚠ Mismatch — go to edge://extensions (or chrome://extensions) → 🔄 Reload Ecovacs Note Helper.
+              </div>
+            )}
+            {contextInvalidatedSeen && (
+              <div className="mt-0.5 rounded-sm border border-red-400/40 bg-red-500/10 px-1.5 py-1 text-[10.5px] font-medium text-red-400">
+                🚨 Extension context invalidated (last seen: {contextInvalidatedAt ? new Date(contextInvalidatedAt).toLocaleString() : 'recently'}).<br />
+                Bridge handles are stale because the extension was reloaded/updated AFTER this tab loaded. There is no recovery without a page refresh.<br />
+                Fix: press <strong>Ctrl+Shift+R</strong> (hard refresh) on this Ticket Notes tab, then try Push again.
               </div>
             )}
           </div>
