@@ -94,11 +94,43 @@ export default function ProductLookupPanel({
     };
   }, [manualQuery]);
 
+  // --- Debounced model/issue props --------------------------------------------
+  // The robot model combobox + issue description inputs live on the main
+  // form and change on every keystroke. Feeding those raw values straight
+  // into findModels / freeSearch re-runs fuzzy matching on every render,
+  // which is what agents describe as "laggy" when typing the model. We
+  // debounce here instead of in the form so SF-scrape / LLM / combobox
+  // selection (the three main write paths to these fields) update the
+  // panel promptly — only live keystrokes get the 300ms debounce.
+  const modelDebounceRef = useRef<number | null>(null);
+  const [robotModelDebounced, setRobotModelDebounced] = useState(robotModel);
+  useEffect(() => {
+    if (modelDebounceRef.current !== null) window.clearTimeout(modelDebounceRef.current);
+    modelDebounceRef.current = window.setTimeout(() => setRobotModelDebounced(robotModel), 300);
+    return () => {
+      if (modelDebounceRef.current !== null) window.clearTimeout(modelDebounceRef.current);
+    };
+  }, [robotModel]);
+
+  const issueDebounceRef = useRef<number | null>(null);
+  const [issueTypeDebounced, setIssueTypeDebounced] = useState(issueType);
+  const [issueDescDebounced, setIssueDescDebounced] = useState(issueDescription);
+  useEffect(() => {
+    if (issueDebounceRef.current !== null) window.clearTimeout(issueDebounceRef.current);
+    issueDebounceRef.current = window.setTimeout(() => {
+      setIssueTypeDebounced(issueType);
+      setIssueDescDebounced(issueDescription);
+    }, 300);
+    return () => {
+      if (issueDebounceRef.current !== null) window.clearTimeout(issueDebounceRef.current);
+    };
+  }, [issueType, issueDescription]);
+
   // --- Auto-search: combine robot model + issue text + manual query ----------
   const effectiveQuery = useMemo(() => {
-    const parts = [robotModel, issueType, issueDescription, manualQueryDebounced].filter(Boolean);
+    const parts = [robotModelDebounced, issueTypeDebounced, issueDescDebounced, manualQueryDebounced].filter(Boolean);
     return parts.join(' ');
-  }, [robotModel, issueType, issueDescription, manualQueryDebounced]);
+  }, [robotModelDebounced, issueTypeDebounced, issueDescDebounced, manualQueryDebounced]);
 
   // --- Error code extraction -------------------------------------------------
   useEffect(() => {
@@ -108,10 +140,10 @@ export default function ProductLookupPanel({
 
   // --- Model matches ---------------------------------------------------------
   const modelHits: ModelMatch[] = useMemo(() => {
-    const primaryQuery = pinnedModel ?? robotModel;
+    const primaryQuery = pinnedModel ?? robotModelDebounced;
     const q = pinnedModel ? pinnedModel : primaryQuery || manualQueryDebounced;
     return findModels(index, q, 12);
-  }, [index, pinnedModel, robotModel, manualQueryDebounced]);
+  }, [index, pinnedModel, robotModelDebounced, manualQueryDebounced]);
 
   const selectedModelName = useMemo(() => {
     if (pinnedModel) return pinnedModel;
@@ -228,14 +260,14 @@ export default function ProductLookupPanel({
 
   // --- Free search hits -------------------------------------------------------
   const freeHits: FreeSearchHit[] = useMemo(
-    () => freeSearch(index, manualQueryDebounced || `${robotModel} ${issueType} ${issueDescription}`, 6),
-    [index, manualQueryDebounced, robotModel, issueType, issueDescription]
+    () => freeSearch(index, manualQueryDebounced || `${robotModelDebounced} ${issueTypeDebounced} ${issueDescDebounced}`, 6),
+    [index, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
   );
 
   // --- FAQ search hits --------------------------------------------------------
   const faqHits: FaqSearchHit[] = useMemo(() => {
-    const activeModel = pinnedModel ?? robotModel;
-    const query = manualQueryDebounced || `${issueType} ${issueDescription}`;
+    const activeModel = pinnedModel ?? robotModelDebounced;
+    const query = manualQueryDebounced || `${issueTypeDebounced} ${issueDescDebounced}`;
     if (!activeModel && !query.trim()) {
       // Browse case: show 15 newest/most relevant FAQs across the index
       return index.faqs && index.faqs.length
@@ -247,7 +279,7 @@ export default function ProductLookupPanel({
         : [];
     }
     return searchFaqs(index, { model: activeModel, query, limit: 25 });
-  }, [index, pinnedModel, robotModel, manualQueryDebounced, issueType, issueDescription]);
+  }, [index, pinnedModel, robotModelDebounced, manualQueryDebounced, issueTypeDebounced, issueDescDebounced]);
 
   const counts = useMemo<Record<TabKind, number>>(
     () => ({

@@ -76,7 +76,7 @@ export default function SopPanel({
   const detailedIssue = String(formData[detailedIssueId] ?? '').trim();
   const purchaseInfo = String(formData[purchaseInfoId] ?? '').trim();
 
-  // Keep a debounced (250ms) snapshot of keyword candidates so typing
+  // Keep a debounced (350ms) snapshot of keyword candidates so typing
   // into the issue textarea doesn't thrash scoring on every keystroke.
   const [query, setQuery] = useState(() => `${issueType}\n${detailedIssue}\n${purchaseInfo}`);
   const debounceRef = useRef<number | null>(null);
@@ -84,7 +84,7 @@ export default function SopPanel({
     const next = `${issueType}\n${detailedIssue}\n${purchaseInfo}`;
     if (next === query) return;
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => setQuery(next), 250);
+    debounceRef.current = window.setTimeout(() => setQuery(next), 350);
     return () => {
       if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
     };

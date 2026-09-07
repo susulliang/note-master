@@ -347,11 +347,15 @@ function ComboboxField({
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
-            setOpen(true);
+            // Open dropdown on first keystroke so filtering is visible,
+            // but NOT on focus — clicking the input should immediately
+            // let the agent start typing (no Popover steal-focus flash,
+            // which felt like a "second click" in practice).
+            if (!open) setOpen(true);
           }}
           onFocus={() => {
             onFocus();
-            setOpen(true);
+            // Don't auto-open here — chevron click or first keystroke open it.
           }}
           onBlur={onBlur}
           onKeyDown={(e) => {
