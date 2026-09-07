@@ -42,6 +42,8 @@ interface SopPanelProps {
   /** Trigger the local parser load if not warmed up (only used when
    *  `cloudGenerate` is unavailable). */
   warmLlm?: () => Promise<unknown>;
+  /** Hide candidate chips / clickable quick-picks during voice capture */
+  quickInsertHidden?: boolean;
 }
 
 
@@ -62,6 +64,7 @@ export default function SopPanel({
   llmStatus = 'disabled',
   llmIsReady = false,
   warmLlm,
+  quickInsertHidden = false,
 }: SopPanelProps) {
   // --- index -----------------------------------------------------------
   const sections = useMemo<SopSection[]>(() => indexSopMarkdown(sopRaw), []);
@@ -332,7 +335,8 @@ export default function SopPanel({
         </div>
       )}
 
-      {/* Candidate chips (Top N keyword) */}
+      {/* Candidate chips (Top N keyword) — hidden during voice capture */}
+      {!quickInsertHidden && (
       <div>
         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
           Closest matches by issue details
@@ -372,6 +376,7 @@ export default function SopPanel({
           })}
         </div>
       </div>
+      )}
 
       {/* Manual section picker (combobox-ish) */}
       <div className="relative">

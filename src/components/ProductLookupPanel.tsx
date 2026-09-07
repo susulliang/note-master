@@ -39,6 +39,8 @@ interface ProductLookupPanelProps {
    */
   issueDescription?: string;
   issueType?: string;
+  /** Hide clickable quick-pick model chips during voice capture */
+  quickInsertHidden?: boolean;
 }
 
 type TabKind = 'specs' | 'errors' | 'faq' | 'scientist' | 'free' | 'selling';
@@ -76,6 +78,7 @@ export default function ProductLookupPanel({
   robotModel,
   issueDescription = '',
   issueType = '',
+  quickInsertHidden = false,
 }: ProductLookupPanelProps) {
   const index = useMemo(() => getProductIndex(), []);
   const [manualQuery, setManualQuery] = useState('');
@@ -341,8 +344,8 @@ export default function ProductLookupPanel({
         )}
       </div>
 
-      {/* --- Quick-pick model chips --- */}
-      {modelHits.length > 0 && (
+      {/* --- Quick-pick model chips — hidden during voice capture --- */}
+      {!quickInsertHidden && modelHits.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 rounded-lg border border-foreground/5 bg-foreground/[0.02] px-2 py-1.5">
           <span className="mr-1 inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
             <Package className="size-3" />

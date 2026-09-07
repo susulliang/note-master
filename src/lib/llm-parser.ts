@@ -938,20 +938,42 @@ function isPlaceholderFor(fieldId: string, value: string): boolean {
   return patterns.some((re) => re.test(trimmed));
 }
 
-/** Normalize a phone number read out digit-by-digit-ish ("two one two five…")
+/** Normalize a phone number.
  *
- *  LLM-first: spoken word-digits are converted FIRST, then formatting runs on
- *  whatever digit content came out (US 10-digit → (xxx) xxx-xxxx). Anything
- *  that doesn't perfectly format (international, extensions, partial reads)
- *  returns the cleaned conversion — with real digits where the LLM read
- *  words — instead of being dropped. */
+ * Strategy: wordsToDigits first (spoken "two one two five" → 2125), then
+ * strip everything that isn't a digit, then take the FIRST contiguous digit
+ * run and pull out exactly 10 meaningful US digits (area + exchange + line).
+ *
+ * A leading `1` or `+1` country code is recognised and stripped so we land
+ * on 10 real subscriber digits — if the raw has ≥11 digits and starts with
+ * `1`, we skip index 0 and grab the next 10. Any trailing garbage (extension
+ * digits, "after 3pm", "please call") is silently dropped — we only keep
+ * what fits a US number shape.
+ *
+ * Formatted output: `+1 XXX-XXX-XXXX`. If fewer than 7 real digits exist we
+ * still return a cleaned digit run (no words, no garbage) so the agent can
+ * see what the LLM read instead of a silent erasure. */
 function sanitizePhone(value: string): string {
   const converted = wordsToDigits(value);
-  const digits = converted.replace(/[^\d]/g, '');
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  // Grab the first contiguous digit run — everything after it (extensions,
+  // "after 3pm", etc.) is dropped by construction.
+  const firstRunMatch = converted.match(/\d+/);
+  if (!firstRunMatch) return converted.replace(/\s+/g, ' ').trim();
+  let digits = firstRunMatch[0];
+
+  // Trim a leading US country code `1` — "+1 203-843-8744" or
+  // "1-203-843-8744" both collapse to the same 10 subscriber digits.
+  if (digits.length >= 11 && digits.startsWith('1')) {
+    digits = digits.slice(1);
   }
-  return converted.replace(/\s+/g, ' ').trim();
+
+  if (digits.length >= 10) {
+    const d = digits.slice(0, 10);
+    return `+1 ${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  }
+  // Short — still return plain digits (cleaned of letters/garbage) so the
+  // agent sees something useful instead of a blank.
+  return digits;
 }
 
 /** Normalize a spoken email ("john at gmail dot com") */

@@ -64,6 +64,8 @@ interface FlowchartCanvasProps {
    * If undefined all nodes are treated as visible (default).
    */
   hiddenNodes?: Set<string>;
+  /** Hide quick-insert chips while voice transcription is active */
+  quickInsertHidden?: boolean;
 }
 
 // Layout constants (px) — compact spacing
@@ -332,6 +334,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   onLayoutReset,
   parsedFields,
   hiddenNodes,
+  quickInsertHidden = false,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -695,6 +698,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             enablePinBubble={node.pinFromValue}
             panelContent={node.panelContent}
             hangUpLoading={node.type === 'hangup' ? hangUpLoading : undefined}
+            quickInsertHidden={quickInsertHidden}
           />
         ))}
       </div>

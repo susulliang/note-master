@@ -1734,6 +1734,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   llmStatus={llmParser.status}
                   llmIsReady={llmParser.isReady}
                   warmLlm={llmParser.load}
+                  quickInsertHidden={call.isCapturing}
                 />
               ),
               productContent: (
@@ -1741,6 +1742,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   robotModel={String(formData[NODE_IDS.DEEBOT_MODEL] ?? '')}
                   issueDescription={String(formData[NODE_IDS.DETAILED_ISSUE] ?? '')}
                   issueType={String(formData[NODE_IDS.ISSUE_TYPE] ?? '')}
+                  quickInsertHidden={call.isCapturing}
                 />
               ),
             }}
@@ -1760,6 +1762,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               onLayoutReset={handleLayoutReset}
               parsedFields={parsedFields}
               hiddenNodes={hiddenNodesSet}
+              quickInsertHidden={call.isCapturing}
             />
           </TicketPanelsContext.Provider>
         </main>

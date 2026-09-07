@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext,
   memo,
   useContext,
@@ -205,6 +205,9 @@ export interface FlowNodeProps {
    * smooth animation, covering neighbouring nodes (no layout reflow).
    */
   quickTextGroups?: QuickTextGroup[];
+  /** When voice capture is active, quick-insert chips auto-hide. A tiny
+   *  toggle row replaces them so the agent can still reveal per-field. */
+  quickInsertHidden?: boolean;
   /** Subset of quickTexts that were user-added (rendered with a remove button) */
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
@@ -481,6 +484,7 @@ function FlowNodeComponent({
   icon: Icon,
   quickTexts,
   quickTextGroups,
+  quickInsertHidden = false,
   customQuickTexts,
   onAddQuickText,
   onRemoveQuickText,
@@ -499,6 +503,10 @@ function FlowNodeComponent({
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+  // Per-field opt-out so the agent can reveal chips on one node even when
+  // capture hides them globally.
+  const [quickInsertOverride, setQuickInsertOverride] = useState<Record<string, boolean>>({});
+  const showQuickInserts = !quickInsertHidden || quickInsertOverride[id];
   // HIDDEN PIN bubble: press-and-hold the field → PIN derived from its value
   const [showPin, setShowPin] = useState(false);
   const pinPressTimerRef = useRef<number | null>(null);
@@ -935,7 +943,7 @@ function FlowNodeComponent({
             )}
           </div>
         )}
-        {quickTextGroups ? (
+        {showQuickInserts && quickTextGroups ? (
           /* Grouped quick inserts — collapsed preview row; hovering expands
              the node box itself in place (no popup), and the node turns
              much frostier for readability while expanded */
@@ -1030,7 +1038,7 @@ function FlowNodeComponent({
               </div>
             )}
           </div>
-        ) : quickTexts ? (
+        ) : showQuickInserts && quickTexts ? (
           /* Flat quick inserts (e.g. Resolution Summary, Purchase info) */
           <div className="mt-1.5 border-t border-border/30 pt-1.5">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1082,6 +1090,27 @@ function FlowNodeComponent({
             )}
           </div>
         ) : null}
+        {!showQuickInserts && (quickTextGroups || quickTexts) && (
+          <button
+            type="button"
+            onClick={() => setQuickInsertOverride((prev) => ({ ...prev, [id]: true }))}
+            className="mt-1.5 flex w-full items-center gap-1 border-t border-border/20 pt-1 text-[10px] font-medium text-muted-foreground/60 transition-colors hover:text-accent"
+            title="Show quick inserts"
+          >
+            <Plus className="size-2.5" />
+            <span>Show quick inserts</span>
+            {quickTextGroups && (
+              <span className="ml-auto rounded-full bg-foreground/5 px-1 text-[9px]">
+                {groupedTotal}
+              </span>
+            )}
+            {!quickTextGroups && quickTexts && (
+              <span className="ml-auto rounded-full bg-foreground/5 px-1 text-[9px]">
+                {quickTexts.length}
+              </span>
+            )}
+          </button>
+        )}
       </div>
     );
   };
