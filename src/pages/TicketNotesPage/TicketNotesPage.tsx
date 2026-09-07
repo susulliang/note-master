@@ -420,17 +420,26 @@ export function mergeAutoFill(
     }
     return { next: curTrimmed, base: null };
   }
+  if (source === 'dom-ext') {
+    // Salesforce scrape is authoritative — overwrite whatever was there
+    // (usually empty, but sometimes a stale LLM fill from a previous session)
+    return { next: value, base: null };
+  }
   if (priorSource === 'llm') {
     // Replace the machine-written portion; the human base stays in front
-    return { next: humanBase ? `${humanBase} -> ${value}` : value, base: humanBase };
+    return { next: humanBase ? `${humanBase}\n${value}` : value, base: humanBase };
   }
   if (priorSource === 'regex' || priorSource === 'regex-grow' || priorSource === 'paraphrase') {
     // LLM supersedes the provisional pattern-matched / paraphrased value
     return { next: value, base: '' };
   }
-  // Human-typed text — append, never overwrite
-  const sep = curTrimmed.endsWith('->') ? ' ' : ' -> ';
-  return { next: `${curTrimmed}${sep}${value}`, base: curTrimmed };
+  // Human-typed text: for identity/short fields the caller will have
+  // already guarded (see handleAutoFill's IDENTITY_NODE_IDS check). The
+  // remaining case is LLM appending to human-authored long text
+  // (issue description, resolution summary) — here we APPEND rather than
+  // replace, because the LLM output is meant to add new clauses the
+  // human didn't type. Use a newline separator (cleaner than " -> ").
+  return { next: `${curTrimmed}\n${value}`, base: curTrimmed };
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,6 +1106,34 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       const current = formData[nodeId];
       const curTrimmed = typeof current === 'string' ? current.trimEnd() : '';
       const priorSource = parsedFields[nodeId];
+
+      // --- Guard: identity + device fields are "owned" by SF scrape/CCP ---
+      // Once Salesforce scrape (dom-ext) or CCP regex has filled these,
+      // LLM / paraphrase / regex-grow / any later engine MUST NOT touch
+      // them — the form already knows the real value, and the LLM has
+      // been told to echo them verbatim but sometimes still mangles or
+      // masks them ("John -> ****", "+1 437-922-9504 -> ***").
+      // Exception: dom-ext itself can overwrite dom-ext (fresh scrape wins).
+      const IDENTITY_NODE_IDS: Set<string> = new Set([
+        NODE_IDS.CUSTOMER_NAME,
+        NODE_IDS.CONTACT_NUMBER,
+        NODE_IDS.EMAIL_ADDRESS,
+        NODE_IDS.SHIPPING_ADDRESS,
+        NODE_IDS.DEEBOT_MODEL,
+        NODE_IDS.SKU_NUMBER,
+        NODE_IDS.SERIAL_NUMBER,
+        NODE_IDS.PURCHASE_INFO,
+      ]);
+      if (IDENTITY_NODE_IDS.has(nodeId) && curTrimmed.length > 0) {
+        const writtenByIdentityEngine =
+          priorSource === 'dom-ext' || priorSource === 'regex';
+        const isLLMOrParaphrase =
+          source === 'llm' || source === 'paraphrase' || source === 'regex-grow';
+        if (writtenByIdentityEngine && isLLMOrParaphrase) return;
+        // Also guard: if a human typed it (priorSource undefined), don't
+        // let LLM overwrite their typing either
+        if (!priorSource && isLLMOrParaphrase) return;
+      }
 
       // REGEX (relegated) only ever fills EMPTY fields
       if (source === 'regex' && curTrimmed.length > 0) return;

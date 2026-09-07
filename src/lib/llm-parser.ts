@@ -1001,6 +1001,17 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
     if (isBlank(cleaned)) continue;
     const rawBeforeClean = cleaned; // used by placeholder checks against the unmolested value
 
+    // --- Strip masking the model sometimes adds despite prompt rules ------
+    // "John Smith -> ****"  /  "+1 437-922-9504 -> ***"  /  "(masked)"
+    // The priorIdentity prompt tells the model to echo pre-filled fields
+    // verbatim but it still occasionally appends a masking suffix — chop
+    // anything after " -> " (masking arrow) and standalone masked markers.
+    cleaned = cleaned
+      .replace(/\s*(?:->|→)\s*\*+\s*$/g, '')
+      .replace(/\s*\(masked\)\s*$/gi, '')
+      .replace(/\s*\[\s*masked\s*\]\s*$/gi, '')
+      .trim();
+
     switch (fieldId) {
       case 'deebotModel': {
         // Canonicalize onto the fleet list when the model's naming maps
