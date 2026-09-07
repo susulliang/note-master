@@ -1,4 +1,67 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+
+// ---------------------------------------------------------------------------
+// Typewriter animation for auto-filled fields
+// ---------------------------------------------------------------------------
+// When SF scrape / LLM / regex fills a field, we don't just slam the value
+// into the input — we stream it character-by-character so the agent sees
+// the field "come alive". Fast enough (~12ms per char) that it doesn't get
+// in the way, but slow enough to feel like the app is helping you rather
+// than replacing you.
+//
+// The real value + side effects (undo, llmBasesRef, parsedFields) are
+// applied IMMEDIATELY — only the visual display is delayed. This keeps
+// Hang Up, LLM, and the form state consistent even mid-animation.
+
+type TypewriterHandle = { cancel: () => void };
+
+function startTypewriter(
+  setFormData: React.Dispatch<React.SetStateAction<Record<string, string | string[]>>>,
+  nodeId: string,
+  target: string,
+  opts?: { skipUnderChars?: number; stepMs?: number }
+): TypewriterHandle {
+  const skipUnder = opts?.skipUnderChars ?? 20;
+  const stepMs = opts?.stepMs ?? 10;
+  // Short values (phone, name, model) — just set instantly, no animation
+  if (target.length < skipUnder) {
+    setFormData((prev) => ({ ...prev, [nodeId]: target }));
+    return { cancel: () => {} };
+  }
+  let cancelled = false;
+  let rafId: number | null = null;
+  let written = 0;
+  const total = target.length;
+  // Characters per frame — faster for long text so we don't spend forever
+  const perFrame = Math.max(1, Math.round(total / 120)); // ~120 frames max
+
+  const tick = () => {
+    if (cancelled) return;
+    written = Math.min(total, written + perFrame);
+    setFormData((prev) => {
+      const cur = prev[nodeId];
+      // If a human edited the field mid-animation, their value won't match
+      // what we last wrote — abort (the next setFormData call here will
+      // still run, but only if we haven't been cancelled yet).
+      if (typeof cur === 'string' && cur !== target.slice(0, written - perFrame) && written > perFrame) {
+        // Looks like a human edit — abort gracefully, leave their value alone
+        cancelled = true;
+        return prev;
+      }
+      return { ...prev, [nodeId]: target.slice(0, written) };
+    });
+    if (written < total && !cancelled) {
+      rafId = window.setTimeout(tick, stepMs) as unknown as number;
+    }
+  };
+  rafId = window.setTimeout(tick, stepMs) as unknown as number;
+  return {
+    cancel: () => {
+      cancelled = true;
+      if (rafId !== null) { window.clearTimeout(rafId); rafId = null; }
+    },
+  };
+}
 import { Toaster, toast } from 'sonner';
 import {
   User,
@@ -644,6 +707,9 @@ export default function TicketNotesPage() {
    * front of every later LLM value instead of the appends piling up.
    */
   const llmBasesRef = useRef<Record<string, string>>({});
+  /** Per-field handles of running typewriter animations — cancelled when a
+   *  human edits the field or when a new animation for the same field starts */
+  const typewriterRef = useRef<Record<string, TypewriterHandle>>({});
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -710,6 +776,10 @@ export default function TicketNotesPage() {
 
   const handleFieldChange = useCallback(
     (id: string, value: string | string[], discrete?: boolean) => {
+      // Human edit — immediately cancel any running typewriter for this
+      // field so we don't race the user's keystrokes.
+      typewriterRef.current[id]?.cancel();
+      delete typewriterRef.current[id];
       if (UNDO_FIELDS.has(id) && typeof value === 'string') {
         const prev = formData[id];
         if (typeof prev === 'string') pushUndo(id, prev, Boolean(discrete));
@@ -1053,23 +1123,32 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       const base = llmBasesRef.current[nodeId] ?? '';
       const plan = mergeAutoFill(curTrimmed, priorSource, base, value, source);
 
-      setFormData((prev) => {
-        const cur = prev[nodeId];
-        const latest = typeof cur === 'string' ? cur.trimEnd() : '';
-        const merged =
-          latest === curTrimmed
-            ? plan
-            : mergeAutoFill(latest, priorSource, base, value, source);
-        if (merged.next === latest) return prev;
-        const nextState = { ...prev, [nodeId]: merged.next };
-        // Synchronously mirror the new state into formDataRef right here
-        // (inside the setState updater) instead of waiting for the useEffect
-        // that runs AFTER paint. This guarantees that the Hang Up handler
-        // can read fully-populated form data immediately after
-        // `await call.finalize()` resolves — no second-click needed.
-        formDataRef.current = nextState;
-        return nextState;
-      });
+      // Compute what the merged value WILL be, immediately, so we can:
+      //  1. Update formDataRef.current synchronously (Hang Up / LLM sees
+      //     the final value even mid-animation)
+      //  2. Start a typewriter for the visual fill on top of it
+      let merged = plan;
+      if (typeof current === 'string' && current.trimEnd() !== curTrimmed) {
+        merged = mergeAutoFill(current.trimEnd(), priorSource, base, value, source);
+      }
+      if (merged.next !== curTrimmed) {
+        // Cancel any previous typewriter on this field
+        typewriterRef.current[nodeId]?.cancel();
+        delete typewriterRef.current[nodeId];
+
+        // Update the live formDataRef IMMEDIATELY — Hang Up, LLM, and
+        // other consumers read from here, not from React state.
+        formDataRef.current = { ...formDataRef.current, [nodeId]: merged.next };
+
+        // Visual typewriter animation. Short values (< 20 chars — phone,
+        // name, model, sku) skip animation and set instantly. Long text
+        // (issue description, resolution) streams character by character.
+        const handle = startTypewriter(setFormData, nodeId, merged.next, {
+          skipUnderChars: 20,
+          stepMs: 8,
+        });
+        typewriterRef.current[nodeId] = handle;
+      }
 
       if (plan.base !== null) llmBasesRef.current[nodeId] = plan.base;
       // 'regex-grow' is the same engine as 'regex' (one badge); the
