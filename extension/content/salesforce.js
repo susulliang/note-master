@@ -142,11 +142,44 @@
     }
     return null;
   }
+  /**
+   * Normalize any extracted phone number into +1 XXX-XXX-XXXX.
+   * Strips everything non-digit, drops trailing digits beyond the 10-digit
+   * NANP body, and prefixes +1 when a US/CA country code is implied.
+   * Examples:
+   *   "+12506138156"        → "+1 250-613-8156"
+   *   "(415) 555-1234"      → "+1 415-555-1234"
+   *   "437-922-9504x123"    → "+1 437-922-9504"
+   *   "1 800 555 0199"      → "+1 800-555-0199"
+   *   "020 7946 0958"       → "" (non-NANP, leave untouched)
+   */
+  function normalizePhone(raw) {
+    if (!raw) return '';
+    const digits = String(raw).replace(/\D/g, '');
+    if (digits.length < 10) return '';
+    let body = digits;
+    // Strip a leading US/CA country code "1" when present (common in SF)
+    if (body.startsWith('1')) body = body.slice(1);
+    // Take the FIRST 10 digits — trailing digits are extensions / garbage
+    // (e.g. "437-922-9504x123" → body = "4379229504")
+    if (body.length > 10) body = body.slice(0, 10);
+    if (body.length !== 10) return '';
+    // NANP guard: area code first digit must be 2-9 (UK "020 7946 0958" →
+    // body "0207946095" fails here, so we don't silently mangle foreign
+    // numbers; they just stay untouched in the raw extractor).
+    if (!/^[2-9]/.test(body)) return '';
+    return `+1 ${body.slice(0, 3)}-${body.slice(3, 6)}-${body.slice(6, 10)}`;
+  }
   function assignOnce(acc, field, value) {
     if (!value) return;
     if (Array.isArray(value)) value = value.map(clean).filter(Boolean).join(' / ');
     else value = clean(value);
     if (!value) return;
+    if (field === 'contactNumber') {
+      const norm = normalizePhone(value);
+      if (norm) value = norm;
+      else return; // non-NANP — don't silently mangle a foreign number
+    }
     if (acc[field]) return; // first-write wins
     acc[field] = value;
   }

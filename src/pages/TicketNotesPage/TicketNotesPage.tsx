@@ -1154,7 +1154,13 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   //  CCP tab-audio capture → local Whisper → auto-fill.
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
-  const call = useCallCapture(handleAutoFill, localWhisper, llmParser, cloudParser);
+  const call = useCallCapture(
+    handleAutoFill,
+    localWhisper,
+    llmParser,
+    cloudParser,
+    () => formDataRef.current as Record<string, string>
+  );
 
   // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.

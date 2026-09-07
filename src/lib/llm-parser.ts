@@ -389,6 +389,18 @@ export interface PriorLlmValues {
    *  with newly described symptoms/details; replaces it only when the
    *  conversation shows it was wrong */
   issueDescription?: string;
+  // --- Identity / device fields already known from SF / CCP scrape --------
+  // These arrive pre-filled in the form; the model must KEEP THEM EXACTLY
+  // as given and NOT add any masking (e.g. "John -> ****") or invent
+  // variants. Emitted by buildPriorValues when the form already carries
+  // a non-empty, non-placeholder value.
+  customerName?: string;
+  contactNumber?: string;
+  emailAddress?: string;
+  deebotModel?: string;
+  skuNumber?: string;
+  serialNumber?: string;
+  purchaseInfo?: string;
 }
 
 /**
@@ -463,12 +475,25 @@ export function buildParsePrompt(
     wanted.length > 0
       ? PROMPT_FIELD_ORDER.filter((id) => (wanted as readonly string[]).includes(id))
       : [...PROMPT_FIELD_ORDER];
-  // Seed the EVOLVING fields with their prior values: the model only has
-  // to EDIT the structure it is handed (append new clauses) instead of
-  // re-deriving the whole list from prose instructions. Field data showed
-  // prose-only carry-forward froze both boxes on the small models — they
-  // either echoed the prose or dropped it; a pre-filled skeleton makes the
-  // old clauses part of the reply's own structure.
+  // Seed the skeleton with prior values. Evolving free-text fields
+  // (issueDescription / resolutionSummary) are carried forward as
+  // append-only clauses. Identity + device fields (customerName,
+  // contactNumber, emailAddress, deebotModel, …) are also seeded when
+  // the form already knows them — the model must echo them EXACTLY as
+  // given and MUST NOT mask / annotate / invent variants (the previous
+  // "John -> ****" bug came from handing the model an empty skeleton for
+  // fields the form had already filled from SF scrape).
+  const priorIdentity = prior && (prior.customerName || prior.contactNumber || prior.emailAddress)
+    ? {
+        ...(prior.customerName ? { customerName: prior.customerName } : {}),
+        ...(prior.contactNumber ? { contactNumber: prior.contactNumber } : {}),
+        ...(prior.emailAddress ? { emailAddress: prior.emailAddress } : {}),
+        ...(prior.deebotModel ? { deebotModel: prior.deebotModel } : {}),
+        ...(prior.skuNumber ? { skuNumber: prior.skuNumber } : {}),
+        ...(prior.serialNumber ? { serialNumber: prior.serialNumber } : {}),
+        ...(prior.purchaseInfo ? { purchaseInfo: prior.purchaseInfo } : {}),
+      }
+    : null;
   const skeleton = Object.fromEntries(
     order.map((id) => [
       id,
@@ -476,7 +501,9 @@ export function buildParsePrompt(
         ? prior.issueDescription
         : id === 'resolutionSummary' && prior?.resolutionSummary
           ? prior.resolutionSummary
-          : '',
+          : priorIdentity && (priorIdentity as Record<string, string>)[id]
+            ? (priorIdentity as Record<string, string>)[id]
+            : '',
     ])
   );
   const concise = mode === 'concise';
@@ -510,11 +537,22 @@ export function buildParsePrompt(
       concise
         ? 'Rules: values in condensed note style, never invented. 100% ACCURATE: only keep clauses the transcript directly supports; DROP every clause that is minor, ruled-out, tangential, purely diagnostic without an outcome, or a dead-end suggestion. Keep the exact 2–4 main complaint sentences and 2–4 main resolution sentences, bold the pivotal ones. Do NOT restate or embellish. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.'
         : 'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.',
+      // Identity fields the form already knows (SF scrape / CCP capture).
+      // The model MUST echo them EXACTLY and never add masking.
+      priorIdentity
+        ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
+        : null,
       ...(strict
         ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
         : []),
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
+    if (priorIdentity) {
+      userLines.push('', 'Fields already known from the form — ECHO THESE EXACTLY, do not invent or mask:');
+      for (const [k, v] of Object.entries(priorIdentity)) {
+        userLines.push(`  ${k}: ${v}`);
+      }
+    }
     if (prior?.issueDescription) {
       userLines.push('', 'issueDescription currently:', prior.issueDescription);
       if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary complaint clauses only.)');
@@ -543,14 +581,24 @@ export function buildParsePrompt(
     concise
       ? '7. resolutionSummary (CONCISE MODE): ONLY the 2–4 AGENT actions that MATTERED — confirmed fix steps, accepted next actions, confirmed part orders / returns / replacement decisions, or the final failed-outcome step if the call ended without a resolution. EXCLUDE every purely diagnostic question ("checked power state?") that went nowhere, every suggestion the customer declined, all small-talk. Keep the output 2–4 short phrases joined with " -> ". RICH TEXT RULE: wrap the SINGLE confirmed effective step / final success sentence in **…** markdown bold inside the JSON string. 100% accurate to transcript; never invent step wording.'
       : '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
+    // Identity fields already known from SF / CCP — echo verbatim, never mask
+    priorIdentity
+      ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
+      : null,
     ...(strict
       ? [
           'CRITICAL: output ONLY the compact JSON object — every value at most a few words, the whole reply as short as possible, no text before or after it. Preserve literal **double-asterisk** bold markers inside string values exactly as written by the model.',
         ]
       : []),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
+  if (priorIdentity) {
+    userLines.push('', 'Fields already known from the form — ECHO THESE EXACTLY in your JSON, do not invent or mask:');
+    for (const [k, v] of Object.entries(priorIdentity)) {
+      userLines.push(`  ${k}: ${v}`);
+    }
+  }
   if (prior?.issueDescription) {
     userLines.push(
       '',

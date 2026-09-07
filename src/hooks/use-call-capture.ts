@@ -8,7 +8,7 @@ import {
   type Speaker,
   type TranscriptEntry,
 } from '@/lib/field-extraction';
-import type { ParaphraseInput } from '@/lib/llm-parser';
+import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
 import type { CallTranscriber } from './use-local-transcriber';
 
 // Re-exported for components that consume capture state (VoiceCaptionPanel).
@@ -34,7 +34,7 @@ export interface CallCaptureLlmParser {
     entries: TranscriptEntry[],
     missingFieldIds: readonly string[],
     /** Previously extracted values the model must carry forward / refine */
-    prior?: { resolutionSummary?: string; issueDescription?: string }
+    prior?: PriorLlmValues
   ) => Promise<ExtractedField[]>;
   /** Condense the verbatim clause lists into concise note style */
   paraphrase: (input: ParaphraseInput) => Promise<ExtractedField[]>;
@@ -51,7 +51,7 @@ export interface CallCaptureCloudParser {
    */
   parse: (
     entries: TranscriptEntry[],
-    prior?: { resolutionSummary?: string; issueDescription?: string },
+    prior?: PriorLlmValues,
     mode?: 'full' | 'concise'
   ) => Promise<ExtractedField[]>;
 }
@@ -178,7 +178,12 @@ export function useCallCapture(
   onAutoFill: (fieldId: string, value: string, source: AutoFillSource) => void,
   transcriber: CallTranscriber,
   llmParser?: CallCaptureLlmParser,
-  cloudParser?: CallCaptureCloudParser
+  cloudParser?: CallCaptureCloudParser,
+  /** Callback that returns the current form data snapshot — used so
+   *  pre-filled identity / device fields (from SF scrape, CCP, or
+   *  prior LLM runs) can be echoed verbatim in the parse prompt instead
+   *  of being guessed or masked by the model. */
+  getFormData?: () => Record<string, string>
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -569,14 +574,29 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
    *    parse folds the new details into the description already on the
    *    ticket.
    */
-  const buildPriorValues = useCallback((): { resolutionSummary?: string; issueDescription?: string } => {
+  const buildPriorValues = useCallback((): PriorLlmValues => {
     const resolutionSummary = llmSuggestionsRef.current.get('resolutionSummary')?.value;
     const issueDescription = llmSuggestionsRef.current.get('issueDescription')?.value;
-    return {
-      ...(resolutionSummary ? { resolutionSummary } : {}),
-      ...(issueDescription ? { issueDescription } : {}),
-    };
-  }, []);
+    const prior: PriorLlmValues = {};
+    if (resolutionSummary) prior.resolutionSummary = resolutionSummary;
+    if (issueDescription) prior.issueDescription = issueDescription;
+    // Identity / device fields — echo from the live form. These may have
+    // been filled by SF scrape (dom-ext), CCP regex, or the LLM itself.
+    // The LLM prompt will receive these as "already known, echo exactly".
+    const fd = getFormData?.() ?? null;
+    if (fd) {
+      const IDENTITY_FIELDS = ['customerName', 'contactNumber', 'emailAddress', 'deebotModel', 'skuNumber', 'serialNumber', 'purchaseInfo'] as const;
+      for (const f of IDENTITY_FIELDS) {
+        const v = String(fd[f] ?? '').trim();
+        // Skip pure placeholders / empty so we don't seed the skeleton
+        // with garbage the model would then echo verbatim.
+        if (!v) continue;
+        if (/^(n\/?a|unknown|none|tbd|pending)$/i.test(v)) continue;
+        (prior as Record<string, string>)[f] = v;
+      }
+    }
+    return prior;
+  }, [getFormData]);
 
   const runLlmParse = useCallback(async (): Promise<void> => {
     const parser = llmParserRef.current;
