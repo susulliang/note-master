@@ -1,4 +1,4 @@
-import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem } from 'lucide-react';
+import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem, Leaf } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
@@ -14,7 +14,8 @@ export type ThemeId =
   | 'evening'
   | 'midnight'
   | 'zinc-dark'
-  | 'amethyst';
+  | 'amethyst'
+  | 'moss';
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -34,6 +35,7 @@ export const THEMES: ThemeMeta[] = [
   { id: 'midnight', label: 'Midnight', icon: Moon, toaster: 'dark' },
   { id: 'zinc-dark', label: 'Zinc (Dark)', icon: CloudMoon, toaster: 'dark' },
   { id: 'amethyst', label: 'Amethyst', icon: Gem, toaster: 'dark' },
+  { id: 'moss', label: 'Moss', icon: Leaf, toaster: 'light' },
 ];
 
 /** Accepts raw persisted values (incl. legacy 'dark'/'light') and returns a valid ThemeId */

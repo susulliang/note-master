@@ -277,6 +277,47 @@
   --scrollbar-thumb-hover: hsl(0 0% 38%);
 }
 
+/* Moss — light grey-white theme (neutral template) accented with forest
+   greens. Built around #4CAF50 (primary moss), #98FB98 (pale mint), and
+   #8FBC8F (dark sea green). Background stays achromatic grey so the green
+   reads as foliage accent rather than washing the whole UI. */
+:root[data-theme="moss"] {
+  color-scheme: light;
+  --background: hsl(120 8% 86%);
+  --foreground: hsl(120 12% 14%);
+  --card: hsl(120 8% 92%);
+  --card-foreground: hsl(120 12% 14%);
+  --popover: hsl(120 8% 92%);
+  --popover-foreground: hsl(120 12% 14%);
+  --primary: hsl(122 39% 49%);          /* #4CAF50 */
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(120 25% 65%);        /* #8FBC8F */
+  --secondary-foreground: hsl(120 30% 14%);
+  --muted: hsl(120 8% 78%);
+  --muted-foreground: hsl(120 10% 32%);
+  --accent: hsl(122 44% 40%);           /* darker moss for focus/links */
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(199 80% 42%);
+  --info-foreground: hsl(210 100% 98%);
+  --destructive: hsl(0 72% 46%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(122 42% 40%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(120 10% 72%);
+  --input: hsl(120 8% 80%);
+  --ring: hsl(122 39% 49%);            /* #4CAF50 */
+  --chart-1: hsl(122 39% 49%);
+  --chart-2: hsl(120 25% 65%);
+  --chart-3: hsl(120 93% 72%);
+  --chart-4: hsl(140 35% 45%);
+  --chart-5: hsl(90 40% 48%);
+  --scrollbar-track: hsl(120 8% 78%);
+  --scrollbar-thumb: hsl(120 10% 60%);
+  --scrollbar-thumb-hover: hsl(120 12% 46%);
+}
+
 /* Evening — dim dark (dusk) */
 :root[data-theme="evening"] {
   color-scheme: dark;
@@ -623,6 +664,17 @@ body[data-ui-scale="small"] {
   }
   :root[data-theme="neutral"] .glass-orb-3 {
     background: radial-gradient(circle, hsl(0 0% 90% / 0.45), transparent 65%);
+  }
+
+  /* Moss: soft moss/mint green halos on the grey-white base */
+  :root[data-theme="moss"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(122 39% 55% / 0.4), transparent 65%);
+  }
+  :root[data-theme="moss"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(120 93% 80% / 0.35), transparent 65%);
+  }
+  :root[data-theme="moss"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(120 25% 65% / 0.4), transparent 65%);
   }
 
   /* Zinc (Dark): subtle low-light grey halos, pure-neutral */
