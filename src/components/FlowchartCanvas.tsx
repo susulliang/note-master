@@ -652,18 +652,18 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               </feMerge>
             </filter>
           </defs>
-          {/* Group container rectangles — dotted / dashed outlines that
-              visually chunk the flow into Customer Info and Robot & Issue
-              Info. Each group spans the bounding box of its visible nodes. */}
+          {/* Group container rectangles — dotted outlines that visually chunk
+              the flow into Customer Info and Robot & Issue Info. Each group
+              spans the bounding box of its visible nodes. */}
           {NODE_GROUPS.map((group) => {
             const visibleNodes = group.nodeIds
               .filter((id) => !hiddenNodes?.has(id))
               .map((id) => ({ id, pos: effectivePositions[id], node: effectiveNodes.find((n) => n.id === id) }))
               .filter((x) => x.pos && x.node);
             if (visibleNodes.length < 2) return null;
-            const padX = 14;
-            const padTop = 28; // room for the title pill
-            const padBottom = 14;
+            const padX = 16;
+            const padTop = 22; // room for the title pill
+            const padBottom = 16;
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             for (const { pos, node } of visibleNodes) {
               minX = Math.min(minX, pos.x);
@@ -675,8 +675,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             const by = minY - padTop;
             const bw = maxX - minX + padX * 2;
             const bh = maxY - minY + padTop + padBottom;
-            const accent = group.accent ?? 'var(--border)';
             const titleWidth = group.title.length * 7.5 + 16;
+            const borderColor = 'var(--border)';
             return (
               <g key={group.id} className="transition-all duration-300">
                 <rect
@@ -686,11 +686,11 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   height={bh}
                   rx={10}
                   ry={10}
-                  fill="color-mix(in_oklab, var(--card) 15%, transparent)"
-                  stroke={accent}
-                  strokeOpacity={0.55}
-                  strokeWidth={1.25}
-                  strokeDasharray={group.borderDash ?? '4 4'}
+                  fill="none"
+                  stroke={borderColor}
+                  strokeWidth={3}
+                  strokeDasharray={group.borderDash ?? '2 4'}
+                  strokeLinecap="round"
                 />
                 {/* Title pill */}
                 <rect
@@ -700,10 +700,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   height={20}
                   rx={10}
                   ry={10}
-                  fill={accent}
-                  fillOpacity={0.18}
-                  stroke={accent}
-                  strokeOpacity={0.7}
+                  fill="var(--background)"
+                  stroke={borderColor}
+                  strokeOpacity={0.8}
                   strokeWidth={1}
                 />
                 <text
@@ -712,7 +711,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   fontSize={11}
                   fontWeight={600}
                   fontFamily="JetBrains Mono, monospace"
-                  fill={accent}
+                  fill="var(--muted-foreground)"
                   style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}
                 >
                   {group.title}

@@ -58,7 +58,7 @@ export interface CallCaptureCloudParser {
 
 /** Seconds of audio per transcription request — small enough for snappy
  *  near-live captions, large enough to amortize per-segment overhead. */
-const SEGMENT_MS = 15_000;
+const SEGMENT_MS = 8_000;
 
 /** Pause between recorder segments (stop → start cycle) */
 const RESTART_DELAY_MS = 250;

@@ -1147,14 +1147,18 @@ export const MAX_HISTORY_ENTRIES = 50;
  * textareas never cause rows to overlap.
  */
 export const NODE_LAYOUT_ROWS: string[][] = [
-  // Opening row sits horizontally to save vertical space
+  // --- Customer Info group (kept contiguous so its group box doesn't
+  //     overlap the Robot & Issue Info group box) ---
   [NODE_IDS.START, NODE_IDS.CUSTOMER_NAME, NODE_IDS.CONTACT_NUMBER, NODE_IDS.TRANSITION],
+  [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS],
+  // --- Robot & Issue Info group ---
   [NODE_IDS.DEEBOT_MODEL, NODE_IDS.SKU_NUMBER, NODE_IDS.SERIAL_NUMBER],
   [NODE_IDS.ISSUE_TYPE, NODE_IDS.DETAILED_ISSUE, NODE_IDS.PURCHASE_INFO],
   // Fuzzy-matched AMR templates get their own grid box
   [NODE_IDS.TEMPLATE_MATCHES],
-  [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS, NODE_IDS.RESOLUTION_SUMMARY],
+  [NODE_IDS.RESOLUTION_SUMMARY],
   [NODE_IDS.ADDITIONAL_NOTES],
+  // --- Closing flow ---
   [NODE_IDS.CALL_SCRIPT],
   [NODE_IDS.HANG_UP],
   // Side tool panels: live transcript + 24h ticket tracker. Both draggable
@@ -1169,21 +1173,20 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // issue details (keyword) then reranked by the local LLM against the
   // formatted final note. Own wide row because it renders long MD bodies.
   [NODE_IDS.SOP_PANEL],
-  [NODE_IDS.HANG_UP],
 ];
 
-/** Semantic groups — each group is rendered on the canvas as a dashed / dotted
+/** Semantic groups — each group is rendered on the canvas as a dotted
  *  container rectangle spanning its nodes' bounding box, with a label at
  *  the top-left. Groups let the agent "chunk" the flow visually instead of
- *  reading an undifferentiated stack of form boxes. */
+ *  reading an undifferentiated stack of form boxes.
+ *
+ *  Style: transparent fill, 3px dotted border in the theme border color. */
 export interface NodeGroup {
   id: string;
   title: string;
   nodeIds: string[];
-  /** CSS border style for the container outline */
+  /** SVG stroke-dasharray — all groups render as a dotted line */
   borderDash?: string;
-  /** HSL-ish accent hue used for the title + border */
-  accent?: string;
 }
 
 export const NODE_GROUPS: NodeGroup[] = [
@@ -1198,8 +1201,7 @@ export const NODE_GROUPS: NodeGroup[] = [
       NODE_IDS.EMAIL_ADDRESS,
       NODE_IDS.SHIPPING_ADDRESS,
     ],
-    borderDash: '6 4',
-    accent: '#58a6ff',
+    borderDash: '2 4',
   },
   {
     id: 'robot-issue',
@@ -1215,8 +1217,7 @@ export const NODE_GROUPS: NodeGroup[] = [
       NODE_IDS.RESOLUTION_SUMMARY,
       NODE_IDS.ADDITIONAL_NOTES,
     ],
-    borderDash: '2 3',
-    accent: '#238636',
+    borderDash: '2 4',
   },
 ];
 
