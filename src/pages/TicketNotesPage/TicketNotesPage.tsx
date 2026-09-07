@@ -307,6 +307,12 @@ const NODES: NodeConfig[] = [
     icon: StickyNote,
   },
   {
+    id: NODE_IDS.CALL_SCRIPT,
+    type: 'agent',
+    text: "🙋 Is there anything else I can help you with?",
+    accent: 'blue',
+  },
+  {
     id: NODE_IDS.HANG_UP,
     type: 'hangup',
     accent: 'red',
@@ -618,6 +624,13 @@ export default function TicketNotesPage() {
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
     INITIAL_FORM_DATA
+  );
+  // Per-call counter: how many times the agent has addressed the customer by
+  // name. Drives the Customer Name node's lifecycle glow (red → yellow →
+  // green). Resets when the form resets.
+  const [customerAddressCount, setCustomerAddressCount] = useScopedState<number>(
+    'ecovacs_ticket_customer_address_count',
+    0
   );
   // Node positions are stored as per-node drag overrides — nodes without an
   // override follow the responsive default layout computed from canvas size.
@@ -1536,6 +1549,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     // Clear drag overrides so all nodes return to the responsive default layout
     setPositions({});
     setActiveNodeId(null);
+    // Reset per-call lifecycle counters too
+    setCustomerAddressCount(0);
     // Proofreading glows are per-run — a fresh form starts clean
     setParsedFields({});
     llmBasesRef.current = {};
@@ -1734,7 +1749,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   llmStatus={llmParser.status}
                   llmIsReady={llmParser.isReady}
                   warmLlm={llmParser.load}
-                  quickInsertHidden={call.isCapturing}
+                  quickInsertHidden={true}
                 />
               ),
               productContent: (
@@ -1742,7 +1757,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   robotModel={String(formData[NODE_IDS.DEEBOT_MODEL] ?? '')}
                   issueDescription={String(formData[NODE_IDS.DETAILED_ISSUE] ?? '')}
                   issueType={String(formData[NODE_IDS.ISSUE_TYPE] ?? '')}
-                  quickInsertHidden={call.isCapturing}
+                  quickInsertHidden={true}
                 />
               ),
             }}
@@ -1762,7 +1777,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               onLayoutReset={handleLayoutReset}
               parsedFields={parsedFields}
               hiddenNodes={hiddenNodesSet}
-              quickInsertHidden={call.isCapturing}
+              quickInsertHidden={true}
+              customerAddressCount={customerAddressCount}
+              onIncrementCustomerAddressCount={() => setCustomerAddressCount((c) => c + 1)}
             />
           </TicketPanelsContext.Provider>
         </main>

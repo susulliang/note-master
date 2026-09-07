@@ -722,6 +722,28 @@ body[data-ui-scale="small"] {
       0 0 26px color-mix(in oklab, #fbbf24 30%, transparent);
   }
 
+  /* Customer name "address count" lifecycle glow — the node color tracks
+     how many times the agent has addressed the customer by name during the
+     call: 0 → pink (not yet), 1 → yellow (once), 2+ → green (done). */
+  .glass-address-red {
+    --glass-border: color-mix(in oklab, #f472b6 60%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #f472b6 55%, transparent),
+      0 0 26px color-mix(in oklab, #ec4899 35%, transparent);
+  }
+  .glass-address-yellow {
+    --glass-border: color-mix(in oklab, #facc15 60%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #facc15 55%, transparent),
+      0 0 26px color-mix(in oklab, #eab308 35%, transparent);
+  }
+  .glass-address-green {
+    --glass-border: color-mix(in oklab, var(--primary) 55%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, var(--primary) 55%, transparent),
+      0 0 26px color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+
   /* REGEX-parsed field — cool blue glow, distinctly different from the AI
      parser's yellow: blue = provisional pattern match (the AI may still
      replace it), yellow = the LLM's full-context reading. Same precedence

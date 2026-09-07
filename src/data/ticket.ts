@@ -1121,6 +1121,7 @@ export const NODE_IDS = {
   SHIPPING_ADDRESS: 'shippingAddress',
   RESOLUTION_SUMMARY: 'resolutionSummary',
   ADDITIONAL_NOTES: 'additionalNotes',
+  CALL_SCRIPT: 'callScript',
   HANG_UP: 'hangUp',
   TRANSCRIPT_PANEL: 'transcriptPanel',
   TICKET_TRACKER: 'ticketTracker',
@@ -1154,6 +1155,8 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   [NODE_IDS.TEMPLATE_MATCHES],
   [NODE_IDS.EMAIL_ADDRESS, NODE_IDS.SHIPPING_ADDRESS, NODE_IDS.RESOLUTION_SUMMARY],
   [NODE_IDS.ADDITIONAL_NOTES],
+  [NODE_IDS.CALL_SCRIPT],
+  [NODE_IDS.HANG_UP],
   // Side tool panels: live transcript + 24h ticket tracker. Both draggable
   // boxes on the canvas so the agent can reposition them around the flow.
   [NODE_IDS.TRANSCRIPT_PANEL, NODE_IDS.TICKET_TRACKER],
@@ -1167,6 +1170,54 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // formatted final note. Own wide row because it renders long MD bodies.
   [NODE_IDS.SOP_PANEL],
   [NODE_IDS.HANG_UP],
+];
+
+/** Semantic groups — each group is rendered on the canvas as a dashed / dotted
+ *  container rectangle spanning its nodes' bounding box, with a label at
+ *  the top-left. Groups let the agent "chunk" the flow visually instead of
+ *  reading an undifferentiated stack of form boxes. */
+export interface NodeGroup {
+  id: string;
+  title: string;
+  nodeIds: string[];
+  /** CSS border style for the container outline */
+  borderDash?: string;
+  /** HSL-ish accent hue used for the title + border */
+  accent?: string;
+}
+
+export const NODE_GROUPS: NodeGroup[] = [
+  {
+    id: 'customer-info',
+    title: 'Customer Info',
+    nodeIds: [
+      NODE_IDS.START,
+      NODE_IDS.CUSTOMER_NAME,
+      NODE_IDS.CONTACT_NUMBER,
+      NODE_IDS.TRANSITION,
+      NODE_IDS.EMAIL_ADDRESS,
+      NODE_IDS.SHIPPING_ADDRESS,
+    ],
+    borderDash: '6 4',
+    accent: '#58a6ff',
+  },
+  {
+    id: 'robot-issue',
+    title: 'Robot & Issue Info',
+    nodeIds: [
+      NODE_IDS.DEEBOT_MODEL,
+      NODE_IDS.SKU_NUMBER,
+      NODE_IDS.SERIAL_NUMBER,
+      NODE_IDS.PURCHASE_INFO,
+      NODE_IDS.ISSUE_TYPE,
+      NODE_IDS.DETAILED_ISSUE,
+      NODE_IDS.TEMPLATE_MATCHES,
+      NODE_IDS.RESOLUTION_SUMMARY,
+      NODE_IDS.ADDITIONAL_NOTES,
+    ],
+    borderDash: '2 3',
+    accent: '#238636',
+  },
 ];
 
 // Connection definitions: from -> to[]
@@ -1191,7 +1242,8 @@ export const NODE_CONNECTIONS: Array<{ from: string; to: string }> = [
   { from: NODE_IDS.EMAIL_ADDRESS, to: NODE_IDS.ADDITIONAL_NOTES },
   { from: NODE_IDS.SHIPPING_ADDRESS, to: NODE_IDS.ADDITIONAL_NOTES },
   { from: NODE_IDS.RESOLUTION_SUMMARY, to: NODE_IDS.ADDITIONAL_NOTES },
-  { from: NODE_IDS.ADDITIONAL_NOTES, to: NODE_IDS.HANG_UP },
+  { from: NODE_IDS.ADDITIONAL_NOTES, to: NODE_IDS.CALL_SCRIPT },
+  { from: NODE_IDS.CALL_SCRIPT, to: NODE_IDS.HANG_UP },
   // SOP reader: driven by issue inputs + issue description + purchase
   // channel/date, and it also feeds Hang Up as a last-step reference.
   { from: NODE_IDS.ISSUE_TYPE, to: NODE_IDS.SOP_PANEL },

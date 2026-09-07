@@ -245,7 +245,12 @@ export interface FlowNodeProps {
    * giving the agent visual feedback while capture / LLM drain runs.
    */
   hangUpLoading?: boolean;
-}
+   /** Optional "customer address count" tracker — drives the lifecycle
+    *  glow (red→yellow→green) that guides the agent to address the customer
+    *  by name at least twice during the call. */
+   addressCount?: number;
+   onIncrementAddressCount?: () => void;
+ }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
 // accentBorders = resting glass with a faint tinted edge; accentGlows = active
@@ -496,6 +501,8 @@ function FlowNodeComponent({
   enablePinBubble = false,
   panelContent,
   hangUpLoading = false,
+  addressCount,
+  onIncrementAddressCount,
 }: FlowNodeProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -1152,6 +1159,11 @@ function FlowNodeComponent({
         parsedSource === 'llm' && !isPanelNode && 'glass-parsed',
         parsedSource === 'dom-ext' && !isPanelNode && 'glass-parsed-dom',
         parsedSource && parsedSource !== 'llm' && parsedSource !== 'dom-ext' && !isPanelNode && 'glass-parsed-regex',
+        // Customer name address-count lifecycle glow: 0 → pink, 1 → yellow,
+        // 2+ → green. Later in stylesheet so it overrides accent skins.
+        typeof addressCount === 'number' && addressCount === 0 && 'glass-address-red animate-pulse-slow',
+        typeof addressCount === 'number' && addressCount === 1 && 'glass-address-yellow',
+        typeof addressCount === 'number' && addressCount >= 2 && 'glass-address-green',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
@@ -1190,6 +1202,36 @@ function FlowNodeComponent({
                 ? 'Salesforce'
                 : 'auto parsed'}
         </span>
+      )}
+      {/* Customer-address counter chip — only rendered when the prop is
+       *  wired up (currently the Customer Name node). Click = "I just said
+       *  their name" → increments counter → glow transitions. */}
+      {typeof addressCount === 'number' && onIncrementAddressCount && (
+        <button
+          type="button"
+          onClick={onIncrementAddressCount}
+          className={cn(
+            'mt-1.5 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-all hover:scale-105',
+            addressCount === 0 && 'border-pink-400/40 bg-pink-400/15 text-pink-300 hover:bg-pink-400/25',
+            addressCount === 1 && 'border-amber-400/40 bg-amber-400/15 text-amber-300 hover:bg-amber-400/25',
+            addressCount >= 2 && 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25',
+          )}
+          title="Click each time you address the customer by name"
+        >
+          <span
+            className={cn(
+              'size-1.5 rounded-full',
+              addressCount === 0 && 'bg-pink-400',
+              addressCount === 1 && 'bg-amber-400',
+              addressCount >= 2 && 'bg-emerald-400',
+            )}
+          />
+          <span>
+            {addressCount === 0 && 'Tap: I said their name'}
+            {addressCount === 1 && '1x — almost there'}
+            {addressCount >= 2 && '✅ addressed 2x'}
+          </span>
+        </button>
       )}
       {renderContent()}
     </div>
