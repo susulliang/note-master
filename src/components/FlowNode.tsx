@@ -1189,6 +1189,10 @@ function FlowNodeComponent({
         typeof addressCount === 'number' && addressCount === 0 && 'glass-address-red animate-pulse-slow',
         typeof addressCount === 'number' && addressCount === 1 && 'glass-address-yellow',
         typeof addressCount === 'number' && addressCount >= 2 && 'glass-address-green',
+        // Customer Name is still blank — ambient amber breath to nudge the
+        // agent to capture it. (addressCount is only ever passed for the
+        // Customer Name node, so this guards the marker cheaply.)
+        typeof addressCount === 'number' && !String(value ?? '').trim() && 'glass-name-empty',
         // Email prompt glow — blue (needs email) or green (already filled),
         // triggered when the resolution summary mentions "email".
         emailGlow === 'need' && 'glass-email-need',

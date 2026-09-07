@@ -1,3 +1,14 @@
+/* Register --glass-glow as an animatable shadow so the email / empty-name
+ * prompt glows can pulse smoothly without clobbering the rest of the node's
+ * box-shadow (inset specular edge + floating ambient shadows). Without this
+ * registration, animating box-shadow directly would wipe the base layers and
+ * look like a single flash instead of a continuous breath. */
+@property --glass-glow {
+  syntax: '<shadow>';
+  inherits: true;
+  initial-value: 0 0 0 transparent;
+}
+
 :root {
   color-scheme: dark;
   --button-outline: rgba(0,0,0, .10);
@@ -746,28 +757,36 @@ body[data-ui-scale="small"] {
 
   /* Email prompt glow — triggered when the resolution summary mentions
      "email". Bright blue = email field still needs filling (auto-scrolls
-     the agent to it); green slow pulse = email already captured. */
+     the agent to it); green slow pulse = email already captured.
+     Animates --glass-glow directly (registered @property above) so the
+     node keeps its inset edge + floating shadows and only the glow
+     breathes — continuous, not a one-shot flash. */
   .glass-email-need {
     --glass-border: color-mix(in oklab, var(--accent) 70%, transparent);
-    --glass-glow:
-      0 0 3px color-mix(in oklab, var(--accent) 65%, transparent),
-      0 0 30px color-mix(in oklab, var(--accent) 45%, transparent);
-    animation: pulse-blue 2s ease-in-out infinite;
+    animation: pulse-glow-blue 1.8s ease-in-out infinite;
   }
   .glass-email-done {
     --glass-border: color-mix(in oklab, var(--primary) 60%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, var(--primary) 55%, transparent),
-      0 0 22px color-mix(in oklab, var(--primary) 30%, transparent);
-    animation: pulse-green 2.6s ease-in-out infinite;
+    animation: pulse-glow-green 3s ease-in-out infinite;
   }
-  @keyframes pulse-blue {
-    0%, 100% { box-shadow: 0 0 3px color-mix(in oklab, var(--accent) 65%, transparent), 0 0 22px color-mix(in oklab, var(--accent) 40%, transparent); }
-    50%      { box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 80%, transparent), 0 0 40px color-mix(in oklab, var(--accent) 60%, transparent); }
+  @keyframes pulse-glow-blue {
+    0%, 100% { --glass-glow: 0 0 3px color-mix(in oklab, var(--accent) 50%, transparent), 0 0 14px color-mix(in oklab, var(--accent) 25%, transparent); }
+    50%      { --glass-glow: 0 0 6px color-mix(in oklab, var(--accent) 80%, transparent), 0 0 34px color-mix(in oklab, var(--accent) 55%, transparent); }
   }
-  @keyframes pulse-green {
-    0%, 100% { box-shadow: 0 0 2px color-mix(in oklab, var(--primary) 50%, transparent), 0 0 16px color-mix(in oklab, var(--primary) 25%, transparent); }
-    50%      { box-shadow: 0 0 4px color-mix(in oklab, var(--primary) 65%, transparent), 0 0 30px color-mix(in oklab, var(--primary) 40%, transparent); }
+  @keyframes pulse-glow-green {
+    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent), 0 0 12px color-mix(in oklab, var(--primary) 20%, transparent); }
+    50%      { --glass-glow: 0 0 4px color-mix(in oklab, var(--primary) 65%, transparent), 0 0 26px color-mix(in oklab, var(--primary) 40%, transparent); }
+  }
+
+  /* Customer-name empty pulse — when the Customer Name field is still blank,
+   * the box breathes a soft amber-red to nudge the agent to capture it.
+   * Slow (4s) so it reads as ambient rather than urgent. */
+  .glass-name-empty {
+    animation: pulse-glow-amber 4s ease-in-out infinite;
+  }
+  @keyframes pulse-glow-amber {
+    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, #f97316 40%, transparent), 0 0 10px color-mix(in oklab, #f97316 16%, transparent); }
+    50%      { --glass-glow: 0 0 4px color-mix(in oklab, #f97316 60%, transparent), 0 0 22px color-mix(in oklab, #ef4444 30%, transparent); }
   }
 
   /* REGEX-parsed field — cool blue glow, distinctly different from the AI

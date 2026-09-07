@@ -82,7 +82,7 @@ const ROW_GAP = 32;
 /** Extra vertical gap inserted between semantic groups (Customer Info →
  *  Robot & Issue Info) so the two dotted boxes never overlap and read as
  *  distinct zones. */
-const GROUP_EXTRA_GAP = 96;
+const GROUP_EXTRA_GAP = 48;
 /** Gap between wrapped lines inside one semantic row */
 const LINE_GAP = 20;
 /** Vertical gap between stacked panels inside the left-side column */
