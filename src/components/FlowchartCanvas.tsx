@@ -73,6 +73,9 @@ interface FlowchartCanvasProps {
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
+/** Vertical clearance above the first flow node so the Customer Info group
+ *  box + its title pill never get clipped by the canvas top edge. */
+const GROUP_TOP_PAD = 40;
 const ROW_GAP = 32;
 /** Gap between wrapped lines inside one semantic row */
 const LINE_GAP = 20;
@@ -244,18 +247,16 @@ function computeDefaultLayout(
   const flowAvailWidth = Math.max(160, mainMaxRight - mainAvailLeft);
 
   // 1) WIDE: stack the five reference panels top → bottom in the left col.
-  let yCursor = CANVAS_MARGIN;
+  let yCursor = CANVAS_MARGIN + GROUP_TOP_PAD;
   if (isWide) {
-    let leftY = CANVAS_MARGIN;
+    let leftY = CANVAS_MARGIN + GROUP_TOP_PAD;
     for (const n of leftColNodesVisible) {
       positions[n.id] = { x: CANVAS_MARGIN, y: leftY };
       leftY += heightOf(n) + LEFT_COL_STACK_GAP;
     }
-    // Main flow y starts at CANVAS_MARGIN (same top as the Transcript),
-    // regardless of how tall the left column stacks, so the START node
-    // stays visually aligned with the top of the page — the left column
-    // can freely grow below without pushing the flow down.
-    yCursor = CANVAS_MARGIN;
+    // Main flow y starts level with the left column's top (after the group
+    // title clearance pad), regardless of how tall the left column stacks.
+    yCursor = CANVAS_MARGIN + GROUP_TOP_PAD;
   }
 
   const leftColSetWide = isWide ? new Set(LEFT_COL_IDS) : new Set<string>();
@@ -674,73 +675,80 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               </feMerge>
             </filter>
           </defs>
-          {/* Group container rectangles — dotted outlines that visually chunk
-              the flow into Customer Info and Robot & Issue Info. Each group
-              spans the bounding box of its visible nodes. */}
-          {NODE_GROUPS.map((group) => {
-            const visibleNodes = group.nodeIds
-              .filter((id) => !hiddenNodes?.has(id))
-              .map((id) => ({ id, pos: effectivePositions[id], node: effectiveNodes.find((n) => n.id === id) }))
-              .filter((x) => x.pos && x.node);
-            if (visibleNodes.length < 2) return null;
-            const padX = 16;
-            const padTop = 22; // room for the title pill
-            const padBottom = 16;
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const { pos, node } of visibleNodes) {
-              minX = Math.min(minX, pos.x);
-              minY = Math.min(minY, pos.y);
-              maxX = Math.max(maxX, pos.x + node.width);
-              maxY = Math.max(maxY, pos.y + heightOf(node));
-            }
-            const bx = minX - padX;
-            const by = minY - padTop;
-            const bw = maxX - minX + padX * 2;
-            const bh = maxY - minY + padTop + padBottom;
-            const titleWidth = group.title.length * 7.5 + 16;
-            const borderColor = 'var(--border)';
-            return (
-              <g key={group.id} className="transition-all duration-300">
-                <rect
-                  x={bx}
-                  y={by}
-                  width={bw}
-                  height={bh}
-                  rx={10}
-                  ry={10}
-                  fill="none"
-                  stroke={borderColor}
-                  strokeWidth={3}
-                  strokeDasharray={group.borderDash ?? '2 4'}
-                  strokeLinecap="round"
-                />
-                {/* Title pill */}
-                <rect
-                  x={bx + 10}
-                  y={by - 10}
-                  width={titleWidth}
-                  height={20}
-                  rx={10}
-                  ry={10}
-                  fill="var(--background)"
-                  stroke={borderColor}
-                  strokeOpacity={0.8}
-                  strokeWidth={1}
-                />
-                <text
-                  x={bx + 18}
-                  y={by + 4}
-                  fontSize={11}
-                  fontWeight={600}
-                  fontFamily="JetBrains Mono, monospace"
-                  fill="var(--muted-foreground)"
-                  style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}
-                >
-                  {group.title}
-                </text>
-              </g>
-            );
-          })}
+          {/* Group container rectangles — sparse dotted outlines that chunk
+              the flow into Customer Info and Robot & Issue Info. Both groups
+              share one common width (the widest natural group) so they line
+              up cleanly; the title sits inside the top-left, dim, in
+              Bahnschrift. */}
+          {(() => {
+            // Pass 1: natural bounding box per group
+            const boxes = NODE_GROUPS.map((group) => {
+              const visibleNodes = group.nodeIds
+                .filter((id) => !hiddenNodes?.has(id))
+                .map((id) => ({ id, pos: effectivePositions[id], node: effectiveNodes.find((n) => n.id === id) }))
+                .filter((x) => x.pos && x.node);
+              if (visibleNodes.length < 2) return null;
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              for (const { pos, node } of visibleNodes) {
+                minX = Math.min(minX, pos.x);
+                minY = Math.min(minY, pos.y);
+                maxX = Math.max(maxX, pos.x + node.width);
+                maxY = Math.max(maxY, pos.y + heightOf(node));
+              }
+              return { group, minX, minY, maxX, maxY };
+            }).filter((b): b is NonNullable<typeof b> => b !== null);
+            if (boxes.length === 0) return null;
+            // Common width = the widest natural group, so all boxes align.
+            const commonWidth = Math.max(...boxes.map((b) => b.maxX - b.minX));
+            const padX = 18;
+            const padTop = 30;   // room for the in-box title
+            const padBottom = 18;
+            const gapBetween = 28; // extra vertical separation between groups
+            const borderColor = 'color-mix(in oklab, var(--border) 55%, transparent)';
+            // Sparse dots: tiny dash, long gap
+            const dashArray = '1 10';
+            return boxes.map(({ group, minX, minY, maxX, maxY }, i) => {
+              // Center each box on the common width (anchored at the group's
+              // own left edge so rows still line up with their content).
+              const naturalW = maxX - minX;
+              const extra = (commonWidth - naturalW) / 2;
+              const bx = minX - padX - extra;
+              const by = minY - padTop + (i === 0 ? 0 : gapBetween / 2);
+              const bw = commonWidth + padX * 2;
+              const bh = maxY - minY + padTop + padBottom + (i < boxes.length - 1 ? gapBetween / 2 : 0);
+              const title = group.title;
+              return (
+                <g key={group.id} className="transition-all duration-300">
+                  <rect
+                    x={bx}
+                    y={by}
+                    width={bw}
+                    height={bh}
+                    rx={12}
+                    ry={12}
+                    fill="none"
+                    stroke={borderColor}
+                    strokeWidth={2}
+                    strokeDasharray={dashArray}
+                    strokeLinecap="round"
+                  />
+                  {/* Title — inside the box, top-left, very dim, Bahnschrift */}
+                  <text
+                    x={bx + 16}
+                    y={by + 20}
+                    fontSize={11}
+                    fontWeight={400}
+                    fontFamily="Bahnschrift, 'Segoe UI', system-ui, sans-serif"
+                    fill="var(--muted-foreground)"
+                    fillOpacity={0.45}
+                    style={{ letterSpacing: '0.12em', textTransform: 'uppercase' }}
+                  >
+                    {title}
+                  </text>
+                </g>
+              );
+            });
+          })()}
         </svg>
 
         {/* Nodes layer */}

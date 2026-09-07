@@ -577,6 +577,11 @@ function FlowNodeComponent({
         next = `${current} -> ${quickText}`;
       }
       onChange(next, true);
+      // Fold the quick-inserts back up after a chip is used — the agent
+      // gets one tap-in, then the panel collapses to keep the flow clean.
+      if (quickInsertOverride[id]) {
+        setQuickInsertOverride((prev) => ({ ...prev, [id]: false }));
+      }
       // Refocus the textarea and place the caret at the end for continued typing
       requestAnimationFrame(() => {
         const el = textareaRef.current;
@@ -586,7 +591,7 @@ function FlowNodeComponent({
         }
       });
     },
-    [value, onChange]
+    [value, onChange, quickInsertOverride, id]
   );
 
   const handleAddQuickTextSubmit = useCallback(() => {
@@ -902,7 +907,21 @@ function FlowNodeComponent({
         {label && (
           <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {Icon && <Icon className="size-3.5 text-accent/70" />}
-            {label}
+            {typeof addressCount === 'number' && onIncrementAddressCount ? (
+              <button
+                type="button"
+                onClick={onIncrementAddressCount}
+                title="I've addressed"
+                className="cursor-pointer rounded transition-colors hover:text-accent hover:underline"
+              >
+                {label}
+                <span className="ml-1 text-[9px] font-normal normal-case text-muted-foreground/70">
+                  ({addressCount}/2)
+                </span>
+              </button>
+            ) : (
+              label
+            )}
           </div>
         )}
         {inputType === 'textarea' ? (
@@ -1202,25 +1221,6 @@ function FlowNodeComponent({
                 ? 'Salesforce'
                 : 'auto parsed'}
         </span>
-      )}
-      {/* Customer-address counter — a turquoise dot that the agent taps to
-       *  manually bump the "I addressed the customer by name" count. The
-       *  node's border glow tracks the count (red → yellow → green); the
-       *  dot itself stays turquoise as the manual affordance. */}
-      {typeof addressCount === 'number' && onIncrementAddressCount && (
-        <button
-          type="button"
-          onClick={onIncrementAddressCount}
-          className="mt-1 inline-flex items-center gap-1.5 transition-transform hover:scale-110"
-          title="Tap each time you address the customer by name"
-        >
-          <span
-            className="size-3 rounded-full bg-cyan-400 ring-2 ring-cyan-400/40 shadow-[0_0_8px_rgba(34,211,238,0.7)]"
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {addressCount}/2
-          </span>
-        </button>
       )}
       {renderContent()}
     </div>
