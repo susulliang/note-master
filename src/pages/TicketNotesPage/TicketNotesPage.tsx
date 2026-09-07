@@ -22,43 +22,71 @@ function startTypewriter(
   opts?: { skipUnderChars?: number; stepMs?: number }
 ): TypewriterHandle {
   const skipUnder = opts?.skipUnderChars ?? 20;
-  const stepMs = opts?.stepMs ?? 10;
+  const stepMs = opts?.stepMs ?? 12;
   // Short values (phone, name, model) — just set instantly, no animation
   if (target.length < skipUnder) {
     setFormData((prev) => ({ ...prev, [nodeId]: target }));
     return { cancel: () => {} };
   }
+
+  // Find the <input> or <textarea> for this nodeId — we'll drive the
+  // animation by directly mutating its DOM value so React never sees
+  // 120 intermediate state updates (each of which would cascade into
+  // ProductLookupPanel / SopPanel / TemplatePanel searches). Only the
+  // final setState call below triggers one single search pass.
+  const $el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `[data-field-id="${CSS.escape(nodeId)}"]`
+  );
+  if (!$el) {
+    // DOM not mounted yet — fall back to a single setState
+    setFormData((prev) => ({ ...prev, [nodeId]: target }));
+    return { cancel: () => {} };
+  }
+
   let cancelled = false;
-  let rafId: number | null = null;
+  let timerId: number | null = null;
   let written = 0;
   const total = target.length;
-  // Characters per frame — faster for long text so we don't spend forever
-  const perFrame = Math.max(1, Math.round(total / 120)); // ~120 frames max
+  const perFrame = Math.max(1, Math.round(total / 100)); // ~100 frames max
 
   const tick = () => {
     if (cancelled) return;
     written = Math.min(total, written + perFrame);
-    setFormData((prev) => {
-      const cur = prev[nodeId];
-      // If a human edited the field mid-animation, their value won't match
-      // what we last wrote — abort (the next setFormData call here will
-      // still run, but only if we haven't been cancelled yet).
-      if (typeof cur === 'string' && cur !== target.slice(0, written - perFrame) && written > perFrame) {
-        // Looks like a human edit — abort gracefully, leave their value alone
-        cancelled = true;
-        return prev;
+
+    // --- DOM-only visual update (no React re-render) ---
+    // Directly set the input's value — this skips React's virtual DOM
+    // diff entirely, so ProductLookupPanel / SopPanel / etc. never
+    // re-render mid-animation. The cursor also naturally moves to the
+    // end of the text since we're using native .value assignment.
+    try {
+      const prevLen = $el.value.length;
+      $el.value = target.slice(0, written);
+      // Fire a lightweight input event so any native listeners (e.g.
+      // char counter) update — but NOT React's onChange, which calls
+      // setFormData and would break the whole point of this animation.
+      $el.dispatchEvent(new Event('input', { bubbles: false }));
+      // If the element had focus, keep caret at end
+      if (document.activeElement === $el && prevLen !== written) {
+        $el.setSelectionRange($el.value.length, $el.value.length);
       }
-      return { ...prev, [nodeId]: target.slice(0, written) };
-    });
+    } catch { /* element removed from DOM mid-animation */ }
+
     if (written < total && !cancelled) {
-      rafId = window.setTimeout(tick, stepMs) as unknown as number;
+      timerId = window.setTimeout(tick, stepMs) as unknown as number;
+    } else if (!cancelled) {
+      // --- Done: ONE React setState for the final value ---
+      setFormData((prev) => ({ ...prev, [nodeId]: target }));
     }
   };
-  rafId = window.setTimeout(tick, stepMs) as unknown as number;
+
+  timerId = window.setTimeout(tick, stepMs) as unknown as number;
   return {
     cancel: () => {
       cancelled = true;
-      if (rafId !== null) { window.clearTimeout(rafId); rafId = null; }
+      if (timerId !== null) { window.clearTimeout(timerId); timerId = null; }
+      // Don't call setState here — the caller (handleFieldChange for
+      // human edits, or handleAutoFill for a newer value) is about to
+      // overwrite with the right thing.
     },
   };
 }
