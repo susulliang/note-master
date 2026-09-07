@@ -932,8 +932,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 return (
                   <div
                     key={`pull-${node.id}`}
-                    className="pull-panel-slide"
-                    style={{ width: panelWidth }}
+                    className="pull-panel-slide pull-tab-panel absolute rounded-xl"
+                    style={{
+                      width: panelWidth,
+                      height: panelHeight,
+                      top,
+                      left: 0,
+                    }}
                   >
                     <FlowNode
                       id={node.id}
@@ -945,7 +950,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                       onFocus={onNodeFocus}
                       onBlur={onNodeBlur}
                       isActive={activeNodeId === node.id}
-                      position={{ x: 0, y: top }}
+                      position={{ x: 0, y: 0 }}
                       zIndex={30}
                       onDragStart={handleDragStart}
                       onHeightChange={handleNodeHeightChange}

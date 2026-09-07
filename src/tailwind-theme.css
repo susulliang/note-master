@@ -814,6 +814,15 @@ body[data-ui-scale="small"] {
       var(--glass-glow);
   }
 
+  /* Pull-tab bookmark panels float over the canvas, so they need a much
+     frostier, more opaque surface than regular flow nodes — otherwise the
+     flowchart lines/nodes show through and hurt text readability. */
+  .pull-tab-panel {
+    background: color-mix(in oklab, var(--card) 96%, transparent);
+    backdrop-filter: blur(26px) saturate(1.5);
+    -webkit-backdrop-filter: blur(26px) saturate(1.5);
+  }
+
   .glass-accent-green {
     --glass-border: color-mix(in oklab, var(--primary) 50%, transparent);
     --glass-glow: 0 0 12px color-mix(in oklab, var(--primary) 16%, transparent);
