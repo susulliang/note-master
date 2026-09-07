@@ -632,6 +632,36 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_customer_address_count',
     0
   );
+  // Email prompt: when the resolution summary mentions "email", the email
+  // address node glows — blue (needs filling) or green (already filled).
+  // Scanned every 3s. When "need", auto-scroll the agent to the email node.
+  const [emailGlow, setEmailGlow] = useState<'none' | 'need' | 'done'>('none');
+  const lastEmailGlowRef = useRef<'none' | 'need' | 'done'>('none');
+  useEffect(() => {
+    const tick = () => {
+      const resolution = String(formData[NODE_IDS.RESOLUTION_SUMMARY] ?? '').toLowerCase();
+      const hasEmail = /\bemail\b/.test(resolution);
+      const next: 'none' | 'need' | 'done' = !hasEmail
+        ? 'none'
+        : String(formData[NODE_IDS.EMAIL_ADDRESS] ?? '').trim().length > 0
+          ? 'done'
+          : 'need';
+      const prev = lastEmailGlowRef.current;
+      if (prev !== next) {
+        lastEmailGlowRef.current = next;
+        setEmailGlow(next);
+        // Auto-scroll to the email node ONLY on the transition into 'need'
+        // so we don't yank the agent's scroll every 3 seconds.
+        if (next === 'need') {
+          const el = document.querySelector(`[data-node-id="${NODE_IDS.EMAIL_ADDRESS}"]`);
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 3000);
+    return () => window.clearInterval(id);
+  }, [formData]);
   // Node positions are stored as per-node drag overrides — nodes without an
   // override follow the responsive default layout computed from canvas size.
   // Resizing the window clears the overrides so the grid re-aligns.
@@ -1781,6 +1811,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               quickInsertHidden={true}
               customerAddressCount={customerAddressCount}
               onIncrementCustomerAddressCount={() => setCustomerAddressCount((c) => c + 1)}
+              emailGlow={emailGlow === 'none' ? undefined : emailGlow}
             />
           </TicketPanelsContext.Provider>
         </main>

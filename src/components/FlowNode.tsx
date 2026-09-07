@@ -250,6 +250,10 @@ export interface FlowNodeProps {
     *  by name at least twice during the call. */
    addressCount?: number;
    onIncrementAddressCount?: () => void;
+   /** Email-prompt glow — set when the resolution summary mentions "email".
+    *  'need' = bright blue pulse (email not yet captured), 'done' = green
+    *  slow pulse (email already filled). */
+   emailGlow?: 'need' | 'done';
  }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -503,6 +507,7 @@ function FlowNodeComponent({
   hangUpLoading = false,
   addressCount,
   onIncrementAddressCount,
+  emailGlow,
 }: FlowNodeProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -1150,6 +1155,7 @@ function FlowNodeComponent({
   return (
     <div
       ref={nodeRef}
+      data-node-id={id}
       style={{
         left: position.x,
         top: position.y,
@@ -1183,6 +1189,10 @@ function FlowNodeComponent({
         typeof addressCount === 'number' && addressCount === 0 && 'glass-address-red animate-pulse-slow',
         typeof addressCount === 'number' && addressCount === 1 && 'glass-address-yellow',
         typeof addressCount === 'number' && addressCount >= 2 && 'glass-address-green',
+        // Email prompt glow — blue (needs email) or green (already filled),
+        // triggered when the resolution summary mentions "email".
+        emailGlow === 'need' && 'glass-email-need',
+        emailGlow === 'done' && 'glass-email-done',
         // Expanded (in-flow) quick-inserts: node grows over neighbours and
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'

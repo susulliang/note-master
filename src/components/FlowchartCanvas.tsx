@@ -69,14 +69,20 @@ interface FlowchartCanvasProps {
   /** Per-call customer-name address count (drives Customer Name node glow) */
   customerAddressCount?: number;
   onIncrementCustomerAddressCount?: () => void;
+  /** Email-prompt glow for the email address node */
+  emailGlow?: 'need' | 'done';
 }
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
 /** Vertical clearance above the first flow node so the Customer Info group
- *  box + its title pill never get clipped by the canvas top edge. */
+ *  box + its title never get clipped by the canvas top edge. */
 const GROUP_TOP_PAD = 40;
 const ROW_GAP = 32;
+/** Extra vertical gap inserted between semantic groups (Customer Info →
+ *  Robot & Issue Info) so the two dotted boxes never overlap and read as
+ *  distinct zones. */
+const GROUP_EXTRA_GAP = 96;
 /** Gap between wrapped lines inside one semantic row */
 const LINE_GAP = 20;
 /** Vertical gap between stacked panels inside the left-side column */
@@ -261,7 +267,17 @@ function computeDefaultLayout(
 
   const leftColSetWide = isWide ? new Set(LEFT_COL_IDS) : new Set<string>();
 
+  // Map nodeId → group id, so we can detect when a semantic row crosses
+  // from one group to the next and insert extra vertical separation.
+  const nodeGroupId = new Map<string, string>();
+  for (const g of NODE_GROUPS) for (const id of g.nodeIds) nodeGroupId.set(id, g.id);
+  const rowGroup = (row: string[]) => {
+    for (const id of row) if (nodeGroupId.has(id)) return nodeGroupId.get(id)!;
+    return null;
+  };
+
   let y = yCursor;
+  let prevGroup: string | null = null;
   for (const row of NODE_LAYOUT_ROWS) {
     const rowNodes = row
       .map((id) => nodeById.get(id))
@@ -270,6 +286,15 @@ function computeDefaultLayout(
       .filter((n) => !leftColSetWide.has(n.id))
       .filter((n) => !hiddenNodes?.has(n.id));
     if (rowNodes.length === 0) continue;
+
+    // Insert a large gap when this row starts a NEW semantic group — keeps
+    // the two dotted container boxes from overlapping and gives the layout
+    // a clear two-zone rhythm.
+    const g = rowGroup(row);
+    if (g && prevGroup && g !== prevGroup) {
+      y += GROUP_EXTRA_GAP;
+    }
+    prevGroup = g;
 
     // Greedy packing inside the flow pane's horizontal width.
     const lines: NodeConfig[][] = [];
@@ -341,6 +366,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   quickInsertHidden = false,
   customerAddressCount,
   onIncrementCustomerAddressCount,
+  emailGlow,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -703,19 +729,18 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             const padX = 18;
             const padTop = 30;   // room for the in-box title
             const padBottom = 18;
-            const gapBetween = 28; // extra vertical separation between groups
             const borderColor = 'color-mix(in oklab, var(--border) 55%, transparent)';
             // Sparse dots: tiny dash, long gap
             const dashArray = '1 10';
-            return boxes.map(({ group, minX, minY, maxX, maxY }, i) => {
+            return boxes.map(({ group, minX, minY, maxX, maxY }) => {
               // Center each box on the common width (anchored at the group's
               // own left edge so rows still line up with their content).
               const naturalW = maxX - minX;
               const extra = (commonWidth - naturalW) / 2;
               const bx = minX - padX - extra;
-              const by = minY - padTop + (i === 0 ? 0 : gapBetween / 2);
+              const by = minY - padTop;
               const bw = commonWidth + padX * 2;
-              const bh = maxY - minY + padTop + padBottom + (i < boxes.length - 1 ? gapBetween / 2 : 0);
+              const bh = maxY - minY + padTop + padBottom;
               const title = group.title;
               return (
                 <g key={group.id} className="transition-all duration-300">
@@ -803,6 +828,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             quickInsertHidden={quickInsertHidden}
             addressCount={node.id === NODE_IDS.CUSTOMER_NAME ? customerAddressCount : undefined}
             onIncrementAddressCount={node.id === NODE_IDS.CUSTOMER_NAME ? onIncrementCustomerAddressCount : undefined}
+            emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
           />
         ))}
       </div>
