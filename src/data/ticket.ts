@@ -1154,25 +1154,16 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // --- Robot & Issue Info group ---
   [NODE_IDS.DEEBOT_MODEL, NODE_IDS.SKU_NUMBER, NODE_IDS.SERIAL_NUMBER],
   [NODE_IDS.ISSUE_TYPE, NODE_IDS.DETAILED_ISSUE, NODE_IDS.PURCHASE_INFO],
-  // Fuzzy-matched AMR templates get their own grid box
-  [NODE_IDS.TEMPLATE_MATCHES],
   [NODE_IDS.RESOLUTION_SUMMARY],
   [NODE_IDS.ADDITIONAL_NOTES],
   // --- Closing flow ---
   [NODE_IDS.CALL_SCRIPT],
   [NODE_IDS.HANG_UP],
-  // Side tool panels: live transcript + 24h ticket tracker. Both draggable
-  // boxes on the canvas so the agent can reposition them around the flow.
-  [NODE_IDS.TRANSCRIPT_PANEL, NODE_IDS.TICKET_TRACKER],
-  // Product lookup — DEEBOT/GOAT/WINBOT specs + error codes + FAQ tab +
-  // selling points, auto-fuzzy-matched from model dropdown + live issue text.
-  // Moved ABOVE SOP per user request (product data is referenced earlier in
-  // the call flow than SOP confirmation).
-  [NODE_IDS.PRODUCT_LOOKUP],
-  // SOP reference panel — index of SOP/SOP.md headings, auto-matched by
-  // issue details (keyword) then reranked by the local LLM against the
-  // formatted final note. Own wide row because it renders long MD bodies.
-  [NODE_IDS.SOP_PANEL],
+  // 24h ticket tracker stays in the flow (it's a call-log notepad).
+  [NODE_IDS.TICKET_TRACKER],
+  // NOTE: Transcript / Template Matches / Product Lookup / SOP are NOT
+  // layout rows here — they live as pull-tab bookmarks on the left edge
+  // so they don't consume flow real estate until the agent opens them.
 ];
 
 /** Semantic groups — each group is rendered on the canvas as a dotted
@@ -1213,7 +1204,6 @@ export const NODE_GROUPS: NodeGroup[] = [
       NODE_IDS.PURCHASE_INFO,
       NODE_IDS.ISSUE_TYPE,
       NODE_IDS.DETAILED_ISSUE,
-      NODE_IDS.TEMPLATE_MATCHES,
       NODE_IDS.RESOLUTION_SUMMARY,
       NODE_IDS.ADDITIONAL_NOTES,
     ],

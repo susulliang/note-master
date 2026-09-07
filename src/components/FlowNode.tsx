@@ -9,7 +9,7 @@
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Plus, X, ChevronDown, Check, PhoneOff, Loader2 } from 'lucide-react';
+import { Plus, X, ChevronDown, Check, PhoneOff, Loader2, ChevronLeft } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -254,6 +254,10 @@ export interface FlowNodeProps {
     *  'need' = bright blue pulse (email not yet captured), 'done' = green
     *  slow pulse (email already filled). */
    emailGlow?: 'need' | 'done';
+   /** When set, the node is a pull-tab bookmark panel: render a minimize
+    *  (chevron-left) button in its header that calls this to collapse the
+    *  panel back into its left-edge tab. */
+   onMinimize?: () => void;
  }
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
@@ -508,6 +512,7 @@ function FlowNodeComponent({
   addressCount,
   onIncrementAddressCount,
   emailGlow,
+  onMinimize,
 }: FlowNodeProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -747,11 +752,21 @@ function FlowNodeComponent({
         <div className="px-2.5 py-1.5">
           <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {Icon && <Icon className="size-3.5 text-accent/70" />}
-            {label}
+            <span className="flex-1 truncate">{label}</span>
             {matches.length > 0 && (
               <span className="rounded-full bg-accent/15 px-1.5 text-[9px] font-semibold text-accent">
                 {matches.length}
               </span>
+            )}
+            {onMinimize && (
+              <button
+                type="button"
+                onClick={onMinimize}
+                title="Minimize to tab"
+                className="ml-auto -mr-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent/10 hover:text-accent"
+              >
+                <ChevronLeft className="size-3.5" />
+              </button>
             )}
           </div>
           {matches.length > 0 && onOpenTemplate ? (
@@ -822,8 +837,19 @@ function FlowNodeComponent({
       return (
         <div className="px-2.5 py-1.5">
           {label && (
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {label}
+            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {Icon && <Icon className="size-3.5 text-accent/70" />}
+              <span className="flex-1 truncate">{label}</span>
+              {onMinimize && (
+                <button
+                  type="button"
+                  onClick={onMinimize}
+                  title="Minimize to tab"
+                  className="-mr-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent/10 hover:text-accent"
+                >
+                  <ChevronLeft className="size-3.5" />
+                </button>
+              )}
             </div>
           )}
           <div data-panel-body className="min-h-0">

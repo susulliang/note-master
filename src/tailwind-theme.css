@@ -351,39 +351,39 @@
    lavender foreground so the purple CTA reads as the jewel of the UI. */
 :root[data-theme="amethyst"] {
   color-scheme: dark;
-  --background: hsl(270 22% 7%);
-  --foreground: hsl(270 14% 84%);
-  --card: hsl(270 20% 11%);
-  --card-foreground: hsl(270 14% 84%);
-  --popover: hsl(270 20% 11%);
-  --popover-foreground: hsl(270 14% 84%);
-  --primary: hsl(270 50% 60%);          /* #9966CC */
+  --background: hsl(270 22% 11%);
+  --foreground: hsl(270 16% 90%);
+  --card: hsl(270 20% 15%);
+  --card-foreground: hsl(270 16% 90%);
+  --popover: hsl(270 20% 15%);
+  --popover-foreground: hsl(270 16% 90%);
+  --primary: hsl(270 55% 64%);          /* #9966CC brightened */
   --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(308 35% 50%);       /* #8E4585 lifted */
+  --secondary: hsl(308 40% 55%);        /* #8E4585 lifted */
   --secondary-foreground: hsl(0 0% 100%);
-  --muted: hsl(270 18% 14%);
-  --muted-foreground: hsl(270 10% 64%);
-  --accent: hsl(308 35% 41%);          /* #8E4585 */
+  --muted: hsl(270 18% 18%);
+  --muted-foreground: hsl(270 12% 72%);
+  --accent: hsl(308 38% 48%);           /* #8E4585 */
   --accent-foreground: hsl(0 0% 100%);
-  --info: hsl(270 70% 62%);
+  --info: hsl(270 75% 66%);
   --info-foreground: hsl(230 100% 98%);
-  --destructive: hsl(0 76% 60%);
+  --destructive: hsl(0 78% 62%);
   --destructive-foreground: hsl(0 0% 100%);
-  --success: hsl(145 50% 47%);
+  --success: hsl(145 55% 50%);
   --success-foreground: hsl(115 77% 97%);
-  --warning: hsl(35 86% 54%);
+  --warning: hsl(35 90% 56%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(270 16% 26%);
-  --input: hsl(270 18% 13%);
-  --ring: hsl(270 50% 60%);            /* #9966CC */
-  --chart-1: hsl(270 50% 60%);
-  --chart-2: hsl(308 35% 45%);
-  --chart-3: hsl(250 50% 55%);
-  --chart-4: hsl(285 45% 50%);
-  --chart-5: hsl(320 40% 52%);
-  --scrollbar-track: hsl(270 18% 13%);
-  --scrollbar-thumb: hsl(270 16% 30%);
-  --scrollbar-thumb-hover: hsl(270 16% 42%);
+  --border: hsl(270 18% 32%);
+  --input: hsl(270 18% 17%);
+  --ring: hsl(270 55% 64%);            /* #9966CC */
+  --chart-1: hsl(270 55% 64%);
+  --chart-2: hsl(308 40% 50%);
+  --chart-3: hsl(250 55% 60%);
+  --chart-4: hsl(285 50% 55%);
+  --chart-5: hsl(320 45% 58%);
+  --scrollbar-track: hsl(270 18% 17%);
+  --scrollbar-thumb: hsl(270 18% 36%);
+  --scrollbar-thumb-hover: hsl(270 18% 48%);
 }
 
 /* ------------------------------------------------------------------ */
@@ -516,6 +516,15 @@ body[data-ui-scale="small"] {
   /*  behind every translucent surface so the backdrop blur has       */
   /*  something to refract.                                           */
   /* ---------------------------------------------------------------- */
+  /* Pull-tab panel slide-in — a panel animates out from the left edge
+     when its bookmark tab is opened. */
+  @keyframes pull-panel-slide-in {
+    0%   { transform: translateX(-24px); opacity: 0; }
+    100% { transform: translateX(0);      opacity: 1; }
+  }
+  .pull-panel-slide {
+    animation: pull-panel-slide-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
   @keyframes orb-drift-1 {
     0% { transform: translate(0, 0) scale(1); }
     100% { transform: translate(140px, 90px) scale(1.15); }

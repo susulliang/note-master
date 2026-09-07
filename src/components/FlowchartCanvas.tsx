@@ -4,6 +4,7 @@ import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import type { AutoFillSource } from '@/lib/field-extraction';
+import { cn } from '@/lib/utils';
 
 interface NodeConfig {
   id: string;
@@ -222,12 +223,10 @@ function computeDefaultLayout(
   //                      SOP box  | 24H Ticket Tracker
   //   Right (4/7 width): all other flowchart gridboxes + Hang Up button.
   // Ordered top → bottom as they appear stacked under the Live Transcript.
+  // (Transcript / Template Matches / Product Lookup / SOP are NOT here —
+  //  they're pull-tab bookmark panels rendered in their own floating layer.)
   // -------------------------------------------------------------------------
   const LEFT_COL_IDS: Array<string> = [
-    NODE_IDS.TRANSCRIPT_PANEL,
-    NODE_IDS.TEMPLATE_MATCHES,
-    NODE_IDS.PRODUCT_LOOKUP,
-    NODE_IDS.SOP_PANEL,
     NODE_IDS.TICKET_TRACKER,
   ];
   const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
@@ -370,6 +369,41 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
+
+  // Pull-tab bookmark panels — these float free of the flow layout. Each is
+  // collapsed (only its left-edge tab shows) until the agent clicks the tab,
+  // at which point the box slides out into the canvas. Transcript defaults
+  // open because the agent needs it live during a call.
+  const PULL_TAB_PANEL_IDS = useMemo(
+    () => [
+      NODE_IDS.TRANSCRIPT_PANEL,
+      NODE_IDS.TEMPLATE_MATCHES,
+      NODE_IDS.PRODUCT_LOOKUP,
+      NODE_IDS.SOP_PANEL,
+    ],
+    []
+  );
+  const pullTabSet = useMemo(() => new Set<string>(PULL_TAB_PANEL_IDS), [PULL_TAB_PANEL_IDS]);
+  const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({
+    [NODE_IDS.TRANSCRIPT_PANEL]: false,
+    [NODE_IDS.TEMPLATE_MATCHES]: true,
+    [NODE_IDS.PRODUCT_LOOKUP]: true,
+    [NODE_IDS.SOP_PANEL]: true,
+  });
+  const togglePanel = useCallback((id: string) => {
+    setCollapsedPanels((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+  const minimizePanel = useCallback((id: string) => {
+    setCollapsedPanels((prev) => ({ ...prev, [id]: true }));
+  }, []);
+  const pullTabNodes = useMemo(
+    () => nodes.filter((n) => pullTabSet.has(n.id)),
+    [nodes, pullTabSet]
+  );
+  const expandedPullTabNodes = useMemo(
+    () => pullTabNodes.filter((n) => !collapsedPanels[n.id]),
+    [pullTabNodes, collapsedPanels]
+  );
   // Real rendered node heights reported by FlowNode ResizeObservers — the
   // layout uses these (falling back to estimates) so space adjusts
   // dynamically when nodes expand/collapse or content grows
@@ -424,10 +458,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // width (fulfilling "match all left boxes to the max column width").
   // -------------------------------------------------------------------------
   const LEFT_COL_IDS_WIDE: Array<string> = [
-    NODE_IDS.TRANSCRIPT_PANEL,
-    NODE_IDS.TEMPLATE_MATCHES,
-    NODE_IDS.PRODUCT_LOOKUP,
-    NODE_IDS.SOP_PANEL,
     NODE_IDS.TICKET_TRACKER,
   ];
   const totalInset = CANVAS_MARGIN * 2 + MIN_COL_GAP;
@@ -463,7 +493,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const effectiveNodes = useMemo(() => {
     const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
     const clamped = nodes
-      .filter((n) => !hiddenNodes?.has(n.id))
+      // Pull-tab panels are rendered in their own floating layer, never in
+      // the main flow grid.
+      .filter((n) => !hiddenNodes?.has(n.id) && !pullTabSet.has(n.id))
       .map((n) => {
         const rawW = widthOverrides[n.id] ?? n.width ?? 240;
         const clampedMax = isWideLayout && LEFT_COL_IDS_WIDE.includes(n.id)
@@ -831,6 +863,101 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
           />
         ))}
+
+        {/* Pull-tab bookmark layer — Transcript / Template Matches /
+            Product Lookup / SOP live here as free-floating panels. A
+            vertical stack of tabs sticks out from the left edge; clicking
+            one slides its panel out into the canvas. */}
+        <div
+          className="sticky left-0 top-4 z-40 flex flex-col gap-1.5"
+          style={{ width: 0 }}
+        >
+          {pullTabNodes.map((node) => {
+            const isCollapsed = collapsedPanels[node.id] ?? true;
+            const Icon = node.icon;
+            return (
+              <button
+                key={`tab-${node.id}`}
+                type="button"
+                onClick={() => togglePanel(node.id)}
+                title={node.label}
+                className={cn(
+                  'group relative flex h-14 w-11 items-center justify-center rounded-r-xl border border-l-0 transition-all duration-200',
+                  'glass-panel',
+                  isCollapsed
+                    ? 'hover:translate-x-1'
+                    : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
+                )}
+              >
+                {Icon && <Icon className="size-4 text-accent" />}
+                {/* vertical label */}
+                <span
+                  className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[9px] font-semibold uppercase tracking-wider text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  {node.label}
+                </span>
+                {!isCollapsed && (
+                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Expanded pull-tab panels — stacked in a floating column just to
+            the right of the tabs. Each slides in from the left on open. */}
+        {expandedPullTabNodes.length > 0 && (
+          <div
+            className="absolute left-[52px] top-4 z-30 flex flex-col gap-4"
+          >
+            {expandedPullTabNodes.map((node) => {
+              const panelWidth = node.width ?? 380;
+              return (
+                <div
+                  key={`pull-${node.id}`}
+                  className="pull-panel-slide"
+                  style={{ width: panelWidth }}
+                >
+                  <FlowNode
+                    id={node.id}
+                    type={node.type}
+                    label={node.label}
+                    text={node.text}
+                    value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
+                    onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
+                    onFocus={onNodeFocus}
+                    onBlur={onNodeBlur}
+                    isActive={activeNodeId === node.id}
+                    position={{ x: 0, y: 0 }}
+                    zIndex={30}
+                    onDragStart={handleDragStart}
+                    onHeightChange={handleNodeHeightChange}
+                    options={node.options}
+                    accent={node.accent}
+                    inputType={node.inputType}
+                    width={panelWidth}
+                    textareaRows={node.textareaRows}
+                    autoFocus={false}
+                    icon={node.icon}
+                    quickTexts={node.quickTexts}
+                    quickTextGroups={node.quickTextGroups}
+                    customQuickTexts={node.customQuickTexts}
+                    onAddQuickText={node.onAddQuickText}
+                    onRemoveQuickText={node.onRemoveQuickText}
+                    templateMatches={node.templateMatches}
+                    onOpenTemplate={node.onOpenTemplate}
+                    parsedSource={parsedFields?.[node.id] ?? null}
+                    enablePinBubble={node.pinFromValue}
+                    panelContent={node.panelContent}
+                    hangUpLoading={undefined}
+                    quickInsertHidden={quickInsertHidden}
+                    onMinimize={() => minimizePanel(node.id)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
