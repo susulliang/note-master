@@ -223,12 +223,11 @@ function computeDefaultLayout(
   //                      SOP box  | 24H Ticket Tracker
   //   Right (4/7 width): all other flowchart gridboxes + Hang Up button.
   // Ordered top → bottom as they appear stacked under the Live Transcript.
-  // (Transcript / Template Matches / Product Lookup / SOP are NOT here —
-  //  they're pull-tab bookmark panels rendered in their own floating layer.)
+  // (Transcript / Template Matches / Product Lookup / SOP / 24H Ticket
+  //  Tracker are NOT here — they're pull-tab bookmark panels rendered in
+  //  their own floating layer.)
   // -------------------------------------------------------------------------
-  const LEFT_COL_IDS: Array<string> = [
-    NODE_IDS.TICKET_TRACKER,
-  ];
+  const LEFT_COL_IDS: Array<string> = [];
   const leftColNodesVisible: NodeConfig[] = LEFT_COL_IDS
     .map((id) => (!hiddenNodes?.has(id) ? nodeById.get(id) ?? null : null))
     .filter((n): n is NodeConfig => Boolean(n));
@@ -377,6 +376,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const PULL_TAB_PANEL_IDS = useMemo(
     () => [
       NODE_IDS.TRANSCRIPT_PANEL,
+      NODE_IDS.TICKET_TRACKER,
       NODE_IDS.TEMPLATE_MATCHES,
       NODE_IDS.PRODUCT_LOOKUP,
       NODE_IDS.SOP_PANEL,
@@ -386,6 +386,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const pullTabSet = useMemo(() => new Set<string>(PULL_TAB_PANEL_IDS), [PULL_TAB_PANEL_IDS]);
   const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({
     [NODE_IDS.TRANSCRIPT_PANEL]: false,
+    [NODE_IDS.TICKET_TRACKER]: true,
     [NODE_IDS.TEMPLATE_MATCHES]: true,
     [NODE_IDS.PRODUCT_LOOKUP]: true,
     [NODE_IDS.SOP_PANEL]: true,
@@ -457,9 +458,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // forces every LEFT_COL_ID node to render at the exact uniform column
   // width (fulfilling "match all left boxes to the max column width").
   // -------------------------------------------------------------------------
-  const LEFT_COL_IDS_WIDE: Array<string> = [
-    NODE_IDS.TICKET_TRACKER,
-  ];
+  const LEFT_COL_IDS_WIDE: Array<string> = [];
   const totalInset = CANVAS_MARGIN * 2 + MIN_COL_GAP;
   const usableWidth = Math.max(0, containerWidth - totalInset);
   const leftColumnWidthPxRaw = (usableWidth * LEFT_COL_RATIO_NUM) / RATIO_DENOM;
@@ -586,8 +585,18 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       const p = effectivePositions[n.id];
       if (p) h = Math.max(h, p.y + heightOf(n) + 80);
     }
+    // Also make room for expanded pull-tab panels stacked at top-left so
+    // they're never clipped by the canvas bottom.
+    if (expandedPullTabNodes.length > 0) {
+      const gap = 16;
+      let total = 16; // top-4 offset
+      for (const n of expandedPullTabNodes) {
+        total += (measuredHeights[n.id] ?? heightOf(n)) + gap;
+      }
+      h = Math.max(h, total + 40);
+    }
     return h;
-  }, [effectiveNodes, effectivePositions, heightOf]);
+  }, [effectiveNodes, effectivePositions, heightOf, expandedPullTabNodes, measuredHeights]);
 
   const handleDragStart = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -875,6 +884,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           {pullTabNodes.map((node) => {
             const isCollapsed = collapsedPanels[node.id] ?? true;
             const Icon = node.icon;
+            // Short label for the tab — take the first word or up to 6 chars
+            const shortLabel = (node.label ?? '')
+              .split(/[\s·]/)[0]
+              .slice(0, 7);
             return (
               <button
                 key={`tab-${node.id}`}
@@ -882,7 +895,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 onClick={() => togglePanel(node.id)}
                 title={node.label}
                 className={cn(
-                  'group relative flex h-14 w-11 items-center justify-center rounded-r-xl border border-l-0 transition-all duration-200',
+                  'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
                   'glass-panel',
                   isCollapsed
                     ? 'hover:translate-x-1'
@@ -890,11 +903,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 )}
               >
                 {Icon && <Icon className="size-4 text-accent" />}
-                {/* vertical label */}
-                <span
-                  className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[9px] font-semibold uppercase tracking-wider text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  {node.label}
+                <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
+                  {shortLabel}
                 </span>
                 {!isCollapsed && (
                   <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
@@ -904,58 +914,66 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           })}
         </div>
 
-        {/* Expanded pull-tab panels — stacked in a floating column just to
-            the right of the tabs. Each slides in from the left on open. */}
+        {/* Expanded pull-tab panels — stacked vertically to the right of the
+            tabs. Each FlowNode is position:absolute, so we compute a running
+            top offset from the previous panel's measured (or estimated)
+            height + a gap — they never overlap. */}
         {expandedPullTabNodes.length > 0 && (
-          <div
-            className="absolute left-[52px] top-4 z-30 flex flex-col gap-4"
-          >
-            {expandedPullTabNodes.map((node) => {
-              const panelWidth = node.width ?? 380;
-              return (
-                <div
-                  key={`pull-${node.id}`}
-                  className="pull-panel-slide"
-                  style={{ width: panelWidth }}
-                >
-                  <FlowNode
-                    id={node.id}
-                    type={node.type}
-                    label={node.label}
-                    text={node.text}
-                    value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
-                    onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
-                    onFocus={onNodeFocus}
-                    onBlur={onNodeBlur}
-                    isActive={activeNodeId === node.id}
-                    position={{ x: 0, y: 0 }}
-                    zIndex={30}
-                    onDragStart={handleDragStart}
-                    onHeightChange={handleNodeHeightChange}
-                    options={node.options}
-                    accent={node.accent}
-                    inputType={node.inputType}
-                    width={panelWidth}
-                    textareaRows={node.textareaRows}
-                    autoFocus={false}
-                    icon={node.icon}
-                    quickTexts={node.quickTexts}
-                    quickTextGroups={node.quickTextGroups}
-                    customQuickTexts={node.customQuickTexts}
-                    onAddQuickText={node.onAddQuickText}
-                    onRemoveQuickText={node.onRemoveQuickText}
-                    templateMatches={node.templateMatches}
-                    onOpenTemplate={node.onOpenTemplate}
-                    parsedSource={parsedFields?.[node.id] ?? null}
-                    enablePinBubble={node.pinFromValue}
-                    panelContent={node.panelContent}
-                    hangUpLoading={undefined}
-                    quickInsertHidden={quickInsertHidden}
-                    onMinimize={() => minimizePanel(node.id)}
-                  />
-                </div>
-              );
-            })}
+          <div className="absolute left-[52px] top-4 z-30">
+            {(() => {
+              const gap = 16;
+              let cursorY = 0;
+              return expandedPullTabNodes.map((node) => {
+                const panelWidth = node.width ?? 380;
+                const panelHeight =
+                  measuredHeights[node.id] ?? heightOf(node);
+                const top = cursorY;
+                cursorY += panelHeight + gap;
+                return (
+                  <div
+                    key={`pull-${node.id}`}
+                    className="pull-panel-slide"
+                    style={{ width: panelWidth }}
+                  >
+                    <FlowNode
+                      id={node.id}
+                      type={node.type}
+                      label={node.label}
+                      text={node.text}
+                      value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
+                      onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
+                      onFocus={onNodeFocus}
+                      onBlur={onNodeBlur}
+                      isActive={activeNodeId === node.id}
+                      position={{ x: 0, y: top }}
+                      zIndex={30}
+                      onDragStart={handleDragStart}
+                      onHeightChange={handleNodeHeightChange}
+                      options={node.options}
+                      accent={node.accent}
+                      inputType={node.inputType}
+                      width={panelWidth}
+                      textareaRows={node.textareaRows}
+                      autoFocus={false}
+                      icon={node.icon}
+                      quickTexts={node.quickTexts}
+                      quickTextGroups={node.quickTextGroups}
+                      customQuickTexts={node.customQuickTexts}
+                      onAddQuickText={node.onAddQuickText}
+                      onRemoveQuickText={node.onRemoveQuickText}
+                      templateMatches={node.templateMatches}
+                      onOpenTemplate={node.onOpenTemplate}
+                      parsedSource={parsedFields?.[node.id] ?? null}
+                      enablePinBubble={node.pinFromValue}
+                      panelContent={node.panelContent}
+                      hangUpLoading={undefined}
+                      quickInsertHidden={quickInsertHidden}
+                      onMinimize={() => minimizePanel(node.id)}
+                    />
+                  </div>
+                );
+              });
+            })()}
           </div>
         )}
       </div>

@@ -1159,11 +1159,9 @@ export const NODE_LAYOUT_ROWS: string[][] = [
   // --- Closing flow ---
   [NODE_IDS.CALL_SCRIPT],
   [NODE_IDS.HANG_UP],
-  // 24h ticket tracker stays in the flow (it's a call-log notepad).
-  [NODE_IDS.TICKET_TRACKER],
-  // NOTE: Transcript / Template Matches / Product Lookup / SOP are NOT
-  // layout rows here — they live as pull-tab bookmarks on the left edge
-  // so they don't consume flow real estate until the agent opens them.
+  // NOTE: Transcript / Template Matches / Product Lookup / SOP / 24H Ticket
+  // Tracker are NOT layout rows here — they live as pull-tab bookmarks on
+  // the left edge so they don't consume flow real estate until opened.
 ];
 
 /** Semantic groups — each group is rendered on the canvas as a dotted

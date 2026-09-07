@@ -106,6 +106,10 @@ import {
   ShoppingBag,
   FileSearch,
   Package,
+  Mic,
+  ListTodo,
+  BookOpen,
+  Search,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import FloatingControls from '@/components/FloatingControls';
@@ -327,24 +331,28 @@ const NODES: NodeConfig[] = [
     id: NODE_IDS.TRANSCRIPT_PANEL,
     type: 'transcript',
     label: 'Live Call Transcript',
+    icon: Mic,
     width: 640,
   },
   {
     id: NODE_IDS.TICKET_TRACKER,
     type: 'ticketTracker',
     label: '24H Ticket Tracker',
+    icon: ListTodo,
     width: 380,
   },
   {
     id: NODE_IDS.SOP_PANEL,
     type: 'sop',
     label: 'SOP · Standard Operating Procedure Match',
+    icon: BookOpen,
     width: 760,
   },
   {
     id: NODE_IDS.PRODUCT_LOOKUP,
     type: 'productLookup',
     label: 'Product · Specs / Error Codes / Selling Points',
+    icon: Search,
     width: 760,
   },
 ];
