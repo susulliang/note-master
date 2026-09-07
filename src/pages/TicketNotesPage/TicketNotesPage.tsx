@@ -1316,7 +1316,8 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     localWhisper,
     llmParser,
     cloudParser,
-    () => formDataRef.current as Record<string, string>
+    () => formDataRef.current as Record<string, string>,
+    (count) => setCustomerAddressCount(count)
   );
 
   // -------------------------------------------------------------------------

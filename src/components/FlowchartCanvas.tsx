@@ -429,9 +429,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // still extend the canvas on purpose). When a node has a layout-wide
   // override, the OVERRIDE is the effective width (the layout engine is
   // responsible for sizing it to still-fit within its column).
+  //
+  // Per-row uniform width: every node in a semantic row shares that row's
+  // widest natural width so the grid looks balanced (no ragged right edges
+  // inside a group). Left-column panels are excluded.
   const effectiveNodes = useMemo(() => {
     const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
-    return nodes
+    const clamped = nodes
       .filter((n) => !hiddenNodes?.has(n.id))
       .map((n) => {
         const rawW = widthOverrides[n.id] ?? n.width ?? 240;
@@ -441,6 +445,24 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         const w = Math.min(rawW, clampedMax);
         return w !== n.width ? { ...n, width: w } : n;
       });
+    // Build id -> node lookup for the uniform-width pass
+    const byId = new Map(clamped.map((n) => [n.id, n]));
+    const leftColSet = isWideLayout ? new Set(LEFT_COL_IDS_WIDE) : new Set<string>();
+    const uniformById = new Map<string, number>();
+    for (const row of NODE_LAYOUT_ROWS) {
+      const rowNodes = row
+        .map((id) => byId.get(id))
+        .filter((n): n is NodeConfig => Boolean(n))
+        .filter((n) => !leftColSet.has(n.id));
+      if (rowNodes.length < 2) continue;
+      const rowMax = Math.max(...rowNodes.map((n) => n.width ?? 240));
+      for (const n of rowNodes) uniformById.set(n.id, rowMax);
+    }
+    if (uniformById.size === 0) return clamped;
+    return clamped.map((n) => {
+      const u = uniformById.get(n.id);
+      return u && u !== n.width ? { ...n, width: u } : n;
+    });
   }, [nodes, containerWidth, hiddenNodes, widthOverrides, isWideLayout]);
 
   // Measured height with estimate fallback

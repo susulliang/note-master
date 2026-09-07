@@ -1203,33 +1203,22 @@ function FlowNodeComponent({
                 : 'auto parsed'}
         </span>
       )}
-      {/* Customer-address counter chip — only rendered when the prop is
-       *  wired up (currently the Customer Name node). Click = "I just said
-       *  their name" → increments counter → glow transitions. */}
+      {/* Customer-address counter — a turquoise dot that the agent taps to
+       *  manually bump the "I addressed the customer by name" count. The
+       *  node's border glow tracks the count (red → yellow → green); the
+       *  dot itself stays turquoise as the manual affordance. */}
       {typeof addressCount === 'number' && onIncrementAddressCount && (
         <button
           type="button"
           onClick={onIncrementAddressCount}
-          className={cn(
-            'mt-1.5 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-all hover:scale-105',
-            addressCount === 0 && 'border-pink-400/40 bg-pink-400/15 text-pink-300 hover:bg-pink-400/25',
-            addressCount === 1 && 'border-amber-400/40 bg-amber-400/15 text-amber-300 hover:bg-amber-400/25',
-            addressCount >= 2 && 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25',
-          )}
-          title="Click each time you address the customer by name"
+          className="mt-1 inline-flex items-center gap-1.5 transition-transform hover:scale-110"
+          title="Tap each time you address the customer by name"
         >
           <span
-            className={cn(
-              'size-1.5 rounded-full',
-              addressCount === 0 && 'bg-pink-400',
-              addressCount === 1 && 'bg-amber-400',
-              addressCount >= 2 && 'bg-emerald-400',
-            )}
+            className="size-3 rounded-full bg-cyan-400 ring-2 ring-cyan-400/40 shadow-[0_0_8px_rgba(34,211,238,0.7)]"
           />
-          <span>
-            {addressCount === 0 && 'Tap: I said their name'}
-            {addressCount === 1 && '1x — almost there'}
-            {addressCount >= 2 && '✅ addressed 2x'}
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {addressCount}/2
           </span>
         </button>
       )}

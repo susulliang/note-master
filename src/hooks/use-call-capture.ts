@@ -26,6 +26,7 @@ const PARSEABLE_FIELD_IDS = [
   'issueDescription',
   'issueType',
   'resolutionSummary',
+  'customerNameAddressCount',
 ] as const;
 
 /** Structural slice of useLlmParser() the capture hook needs */
@@ -183,7 +184,11 @@ export function useCallCapture(
    *  pre-filled identity / device fields (from SF scrape, CCP, or
    *  prior LLM runs) can be echoed verbatim in the parse prompt instead
    *  of being guessed or masked by the model. */
-  getFormData?: () => Record<string, string>
+  getFormData?: () => Record<string, string>,
+  /** Optional: receives the LLM's fuzzy count of how many times the agent
+   *  addressed the customer by name during the call. Drives the Customer
+   *  Name node's lifecycle glow (red → yellow → green). */
+  onCustomerAddressCount?: (count: number) => void
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -224,6 +229,7 @@ export function useCallCapture(
   /** Latest LLM-extracted field per id (drives the suggestion chips) */
   const llmSuggestionsRef = useRef(new Map<string, ExtractedField>());
   const onAutoFillRef = useRef(onAutoFill);
+  const onCustomerAddressCountRef = useRef(onCustomerAddressCount);
   const transcriberRef = useRef(transcriber);
   const llmParserRef = useRef(llmParser);
   const cloudParserRef = useRef(cloudParser);
@@ -282,10 +288,11 @@ export function useCallCapture(
 
   useEffect(() => {
     onAutoFillRef.current = onAutoFill;
+    onCustomerAddressCountRef.current = onCustomerAddressCount;
     transcriberRef.current = transcriber;
     llmParserRef.current = llmParser;
     cloudParserRef.current = cloudParser;
-  }, [onAutoFill, transcriber, llmParser, cloudParser]);
+  }, [onAutoFill, onCustomerAddressCount, transcriber, llmParser, cloudParser]);
 
   // -----------------------------------------------------------------
   //  Field parsing — LLM-first; regex is a provisional stopgap
@@ -526,6 +533,14 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     if (fields.length === 0) return;
     const applied: ExtractedField[] = [];
     for (const field of fields) {
+      // Meta-count field: never written to formData / suggestions. Instead
+      // forward it to the page so the Customer Name node's lifecycle glow
+      // (red → yellow → green) updates automatically.
+      if (field.fieldId === 'customerNameAddressCount') {
+        const n = parseInt(field.value, 10);
+        if (Number.isFinite(n)) onCustomerAddressCountRef.current?.(n);
+        continue;
+      }
       llmConfirmedRef.current.add(field.fieldId);
       // APPEND GUARD: never let a partial re-read shrink the cumulative
       // boxes — merge the model's new clauses ONTO what's already there

@@ -249,6 +249,7 @@ const LLM_FIELD_IDS = [
   'issueDescription',
   'issueType',
   'resolutionSummary',
+  'customerNameAddressCount',
 ] as const;
 
 export type LlmFieldId = (typeof LLM_FIELD_IDS)[number];
@@ -436,6 +437,7 @@ const PROMPT_FIELD_ORDER = [
   'skuNumber',
   'serialNumber',
   'purchaseInfo',
+  'customerNameAddressCount',
 ] as const;
 
 export function buildParsePrompt(
@@ -534,6 +536,7 @@ export function buildParsePrompt(
       issueDescRule,
       'issueType: <"Category::Item" or short phrase, or empty>',
       resolutionRule,
+      'customerNameAddressCount: <a WHOLE NUMBER — how many times the AGENT said the CUSTOMER\'S NAME out loud during the call. Count FUZZILY: if the name is "Sarah" and the agent said "Sara", "Saruh", "Sa-rah" etc., each still counts as one address. Only count the AGENT saying the name, not the customer saying their own name. 0 if never.>',
       concise
         ? 'Rules: values in condensed note style, never invented. 100% ACCURATE: only keep clauses the transcript directly supports; DROP every clause that is minor, ruled-out, tangential, purely diagnostic without an outcome, or a dead-end suggestion. Keep the exact 2–4 main complaint sentences and 2–4 main resolution sentences, bold the pivotal ones. Do NOT restate or embellish. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.'
         : 'Rules: values in condensed note style, never invented; keep every clause of a field whose current value is given in the input; append new points after them. The **markdown bold markers on the issueDescription / resolutionSummary lines are structural output — do not remove them, do not convert them to any other format.',
@@ -543,7 +546,7 @@ export function buildParsePrompt(
         ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
         : null,
       ...(strict
-        ? ['CRITICAL: only the eleven lines, as short as possible, nothing else.']
+        ? ['CRITICAL: only the twelve lines, as short as possible, nothing else.']
         : []),
     ].filter(Boolean).join('\n');
     const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
@@ -561,7 +564,7 @@ export function buildParsePrompt(
       userLines.push('', 'resolutionSummary currently:', prior.resolutionSummary);
       if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary fix / outcome steps only.)');
     }
-    userLines.push('', `Reply with the eleven lines now, one per field.${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`);
+    userLines.push('', `Reply with the twelve lines now, one per field.${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`);
     return { system, user: userLines.join('\n') };
   }
 
@@ -581,6 +584,7 @@ export function buildParsePrompt(
     concise
       ? '7. resolutionSummary (CONCISE MODE): ONLY the 2–4 AGENT actions that MATTERED — confirmed fix steps, accepted next actions, confirmed part orders / returns / replacement decisions, or the final failed-outcome step if the call ended without a resolution. EXCLUDE every purely diagnostic question ("checked power state?") that went nowhere, every suggestion the customer declined, all small-talk. Keep the output 2–4 short phrases joined with " -> ". RICH TEXT RULE: wrap the SINGLE confirmed effective step / final success sentence in **…** markdown bold inside the JSON string. 100% accurate to transcript; never invent step wording.'
       : '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
+    '8. customerNameAddressCount: a whole NUMBER (as a string) — how many times the AGENT said the CUSTOMER\'S NAME out loud during the call. Count FUZZILY: pronunciation variants / ASR misspellings of the same name still each count as one address (e.g. "Sarah", "Sara", "Saruh" are all the same name). Only count the AGENT, never the customer saying their own name. "0" if the agent never used the name.',
     // Identity fields already known from SF / CCP — echo verbatim, never mask
     priorIdentity
       ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
@@ -1115,6 +1119,14 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
           .map((w) => (w.length > 1 ? w[0].toUpperCase() + w.slice(1) : w))
           .join(' ');
         if (cleaned.length < 2) continue;
+        break;
+      }
+      case 'customerNameAddressCount': {
+        // Meta-count: how many times the agent said the customer's name.
+        // Parse the first integer the model returned; clamp to 0..20.
+        const n = parseInt(cleaned.replace(/[^\d-]/g, ''), 10);
+        if (!Number.isFinite(n)) continue;
+        cleaned = String(Math.max(0, Math.min(20, n)));
         break;
       }
       default:
