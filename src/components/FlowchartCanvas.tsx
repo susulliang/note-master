@@ -729,6 +729,11 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       ref={canvasRef}
       className="custom-scrollbar relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
     >
+      {/* Height anchor — wraps both views so `h-full` on each resolves
+          against the canvas's full height even when Call Notes' own
+          content is absent (Case Trak only). The anchor is `min-h-full`
+          so Call Notes' large canvasHeight still drives scroll. */}
+      <div className="relative min-h-full">
       {/* Call Notes canvas — rendered only in the Call Notes view so the
           Case Trak board can occupy its own separate canvas. */}
       {activeView === 'callNotes' && (
@@ -890,10 +895,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       </div>
       )}
 
-      {/* Case Trak board — solid bg to cover the canvas dot grid, fills
-          full canvas height/width. */}
+      {/* Case Trak board — shares the canvas' dotted bg, fills full
+          canvas height/width via h-full on the min-h-full anchor. */}
       {activeView === 'caseTrak' && (
-        <div className="h-full min-h-full w-full bg-background pl-[100px]">
+        <div className="h-full w-full pl-[100px]">
           {caseTrakContent}
         </div>
       )}
@@ -1052,6 +1057,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             });
           })()}
         </div>
+      </div>
     </div>
   );
 });
