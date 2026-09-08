@@ -895,11 +895,14 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       </div>
       )}
 
-      {/* Case Trak board — its own canvas, fills the available area.
-          Left padding clears the shared left-edge pill + bookmark rail. */}
+      {/* Case Trak board — fills the canvas absolutely so it gets 100% of
+          the viewport real estate with no padding offsets, no bg bleed, and
+          no dependency on scroll-container height chains. */}
       {activeView === 'caseTrak' && (
-        <div className="h-full min-h-full w-full pl-[112px]">
-          {caseTrakContent}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="h-full w-full pl-[100px] pt-0 pb-0">
+            {caseTrakContent}
+          </div>
         </div>
       )}
 

@@ -288,10 +288,10 @@ export default function CaseTrakBoard() {
   }, [items]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className="flex h-full min-h-full flex-col gap-3 bg-background p-4">
       {/* Header — no page title (the left-edge pill already says Case Trak).
           Just a count badge + Copy status + Clear board actions. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
           {totalCount} case{totalCount === 1 ? '' : 's'}
         </span>
@@ -325,7 +325,7 @@ export default function CaseTrakBoard() {
       </div>
 
       {/* Paste / add area */}
-      <div className="rounded-lg border border-border/60 bg-card/40 p-2.5 backdrop-blur-sm">
+      <div className="shrink-0 rounded-lg border border-border/60 bg-card/40 p-2.5 backdrop-blur-sm">
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -355,7 +355,7 @@ export default function CaseTrakBoard() {
         </p>
       </div>
 
-      {/* Board — 5 columns, horizontally scrollable */}
+      {/* Board — 5 responsive columns that fill the viewport width/height */}
       <div className="custom-scrollbar flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
         {CASE_STATUS_COLUMNS.map((col) => {
           const colItems = byStatus.get(col.id) ?? [];
@@ -367,7 +367,7 @@ export default function CaseTrakBoard() {
               onDragLeave={() => setDragOverCol((prev) => (prev === col.id ? null : prev))}
               onDrop={(e) => onDropCol(e, col.id)}
               className={cn(
-                'flex min-h-0 w-[280px] shrink-0 flex-col rounded-xl border transition-colors',
+                'flex min-h-0 min-w-[200px] flex-1 flex-col rounded-xl border transition-colors',
                 isOver
                   ? 'border-accent/60 bg-accent/[0.06]'
                   : 'border-border/60 bg-card/20'
