@@ -1608,7 +1608,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
         {/* Main canvas area */}
-        <main className="relative flex-1 min-w-0">
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <FloatingControls
             theme={theme}
             onCycleTheme={handleCycleTheme}
