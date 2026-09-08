@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Mic, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
 import type { ExtractedField } from '@/hooks/use-voice-transcription';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
@@ -178,9 +177,6 @@ function SpeakerMeter({ label, level, tone }: { label: string; level: number; to
     </span>
   );
 }
-
-const fieldLabel = (fieldId: string) =>
-  FIELD_PATTERNS.find((p) => p.fieldId === fieldId)?.label ?? fieldId;
 
 /**
  * One tiny engine-progress row: label, hairline activity bar, status text.
@@ -436,19 +432,13 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
           )}
         </div>
 
-        {/* Cloud parse status: failures and the last round-trip timing */}
-        {cloud && (cloud.error || (cloud.lastResult && !cloud.isParsing)) && (
+        {/* Cloud parse error readout */}
+        {cloud && cloud.error && (
           <p
-            className={cn(
-              'mt-1 truncate text-[10px] leading-snug',
-              cloud.error ? 'text-destructive/90' : 'text-muted-foreground/70'
-            )}
-            title={cloud.error ?? undefined}
+            className="mt-1 truncate text-[10px] leading-snug text-destructive/90"
+            title={cloud.error}
           >
-            {cloud.error ??
-              (cloud.isDefault
-                ? `AI${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`
-                : `DeepSeek${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`)}
+            {cloud.error}
           </p>
         )}
 
@@ -692,30 +682,6 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                 }
               />
             )}
-          </div>
-        )}
-
-        {/* Extracted fields */}
-        {suggestions.length > 0 && (
-          <div className="mt-2 border-t border-border/30 pt-2">
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Auto-filled fields ({suggestions.length})
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {suggestions.map((field, i) => (
-                <span
-                  key={`${field.fieldId}-${i}`}
-                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-green-500/15 px-2 py-1 text-[10px] font-medium leading-none text-green-600 dark:text-green-400"
-                  title={`${fieldLabel(field.fieldId)}: ${field.value}`}
-                >
-                  <span className="shrink-0 opacity-70">{fieldLabel(field.fieldId)}</span>
-                  <span className="truncate font-semibold">
-                    {field.value.length > 22 ? `${field.value.slice(0, 22)}…` : field.value}
-                  </span>
-                  <span className="shrink-0 text-[8px] opacity-70">&#10003;</span>
-                </span>
-              ))}
-            </div>
           </div>
         )}
     </div>
