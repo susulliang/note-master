@@ -288,7 +288,7 @@ export default function CaseTrakBoard() {
   }, [items]);
 
   return (
-    <div className="flex h-full min-h-full flex-col gap-3 bg-background p-4">
+    <div className="flex h-full min-h-full flex-col gap-3 p-4">
       {/* Header — no page title (the left-edge pill already says Case Trak).
           Just a count badge + Copy status + Clear board actions. */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
