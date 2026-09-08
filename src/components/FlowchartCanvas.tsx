@@ -72,7 +72,16 @@ interface FlowchartCanvasProps {
   onIncrementCustomerAddressCount?: () => void;
   /** Email-prompt glow for the email address node */
   emailGlow?: 'need' | 'done';
+  /** Top-level work view: the Call Notes flowchart canvas, or the Case Trak board. */
+  activeView?: 'callNotes' | 'caseTrak';
+  /** Switch between Call Notes and Case Trak. */
+  onViewChange?: (view: 'callNotes' | 'caseTrak') => void;
+  /** Content rendered in the canvas area when activeView === 'caseTrak'. */
+  caseTrakContent?: React.ReactNode;
 }
+
+/** Top-level work views switchable from the left-edge vertical tab pills. */
+export type WorkView = 'callNotes' | 'caseTrak';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -365,6 +374,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   customerAddressCount,
   onIncrementCustomerAddressCount,
   emailGlow,
+  activeView = 'callNotes',
+  onViewChange,
+  caseTrakContent,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -873,114 +885,164 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           />
         ))}
 
-        {/* Pull-tab bookmark layer — Transcript / Template Matches /
-            Product Lookup / SOP live here as free-floating panels. A
-            vertical stack of tabs sticks out from the left edge; clicking
-            one slides its panel out into the canvas. */}
+        {/* Left-edge vertical rail: top = work-view pills (Call Notes /
+            Case Trak) with a sliding highlight; below = pull-tab bookmark
+            tabs (only shown in Call Notes mode). */}
         <div
-          className="sticky left-0 top-4 z-40 flex flex-col gap-1.5"
+          className="sticky left-0 top-4 z-40 flex flex-col gap-2"
           style={{ width: 0 }}
         >
-          {pullTabNodes.map((node) => {
-            const isCollapsed = collapsedPanels[node.id] ?? true;
-            const Icon = node.icon;
-            // Short label for the tab — take the first word or up to 6 chars
-            const shortLabel = (node.label ?? '')
-              .split(/[\s·]/)[0]
-              .slice(0, 7);
-            return (
-              <button
-                key={`tab-${node.id}`}
-                type="button"
-                onClick={() => togglePanel(node.id)}
-                title={node.label}
-                className={cn(
-                  'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
-                  'glass-panel',
-                  isCollapsed
-                    ? 'hover:translate-x-1'
-                    : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
-                )}
-              >
-                {Icon && <Icon className="size-4 text-accent" />}
-                <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
-                  {shortLabel}
-                </span>
-                {!isCollapsed && (
-                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
-                )}
-              </button>
-            );
-          })}
+          {/* Work-view pills */}
+          <div className="relative flex flex-col gap-1 rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
+            {(['callNotes', 'caseTrak'] as const).map((view, i) => {
+              const active = activeView === view;
+              const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
+              return (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => onViewChange?.(view)}
+                  className={cn(
+                    'relative z-10 flex h-9 w-[88px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] font-bold tracking-wide transition-colors duration-200',
+                    active
+                      ? 'text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  title={`Switch to ${label}`}
+                >
+                  {view === 'callNotes' ? (
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                  ) : (
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+                  )}
+                  {label}
+                  {/* Sliding highlight */}
+                  {active && (
+                    <span
+                      className="absolute inset-0 -z-10 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+                      style={{
+                        transform: `translateY(${i === 0 ? 0 : 'calc(100% + 4px)'})`,
+                        transition: 'transform 200ms ease',
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Pull-tab bookmark tabs — only in Call Notes mode */}
+          {activeView === 'callNotes' && (
+            <div className="flex flex-col gap-1.5">
+              {pullTabNodes.map((node) => {
+                const isCollapsed = collapsedPanels[node.id] ?? true;
+                const Icon = node.icon;
+                const shortLabel = (node.label ?? '')
+                  .split(/[\s·]/)[0]
+                  .slice(0, 7);
+                return (
+                  <button
+                    key={`tab-${node.id}`}
+                    type="button"
+                    onClick={() => togglePanel(node.id)}
+                    title={node.label}
+                    className={cn(
+                      'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
+                      'glass-panel',
+                      isCollapsed
+                        ? 'hover:translate-x-1'
+                        : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
+                    )}
+                  >
+                    {Icon && <Icon className="size-4 text-accent" />}
+                    <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
+                      {shortLabel}
+                    </span>
+                    {!isCollapsed && (
+                      <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Expanded pull-tab panels — stacked vertically to the right of the
-            tabs. Each FlowNode is position:absolute, so we compute a running
-            top offset from the previous panel's measured (or estimated)
-            height + a gap — they never overlap. */}
-        {expandedPullTabNodes.length > 0 && (
-          <div className="absolute left-[52px] top-4 z-30">
-            {(() => {
-              const gap = 16;
-              let cursorY = 0;
-              return expandedPullTabNodes.map((node) => {
-                const panelWidth = node.width ?? 380;
-                const panelHeight =
-                  measuredHeights[node.id] ?? heightOf(node);
-                const top = cursorY;
-                cursorY += panelHeight + gap;
-                return (
-                  <div
-                    key={`pull-${node.id}`}
-                    className="pull-panel-slide pull-tab-panel absolute rounded-xl"
-                    style={{
-                      width: panelWidth,
-                      height: panelHeight,
-                      top,
-                      left: 0,
-                    }}
-                  >
-                    <FlowNode
-                      id={node.id}
-                      type={node.type}
-                      label={node.label}
-                      text={node.text}
-                      value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
-                      onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
-                      onFocus={onNodeFocus}
-                      onBlur={onNodeBlur}
-                      isActive={activeNodeId === node.id}
-                      position={{ x: 0, y: 0 }}
-                      zIndex={30}
-                      onDragStart={handleDragStart}
-                      onHeightChange={handleNodeHeightChange}
-                      options={node.options}
-                      accent={node.accent}
-                      inputType={node.inputType}
-                      width={panelWidth}
-                      textareaRows={node.textareaRows}
-                      autoFocus={false}
-                      icon={node.icon}
-                      quickTexts={node.quickTexts}
-                      quickTextGroups={node.quickTextGroups}
-                      customQuickTexts={node.customQuickTexts}
-                      onAddQuickText={node.onAddQuickText}
-                      onRemoveQuickText={node.onRemoveQuickText}
-                      templateMatches={node.templateMatches}
-                      onOpenTemplate={node.onOpenTemplate}
-                      parsedSource={parsedFields?.[node.id] ?? null}
-                      enablePinBubble={node.pinFromValue}
-                      panelContent={node.panelContent}
-                      hangUpLoading={undefined}
-                      quickInsertHidden={quickInsertHidden}
-                      onMinimize={() => minimizePanel(node.id)}
-                    />
-                  </div>
-                );
-              });
-            })()}
+        {/* Case Trak board — overlays the canvas area when active. */}
+        {activeView === 'caseTrak' && (
+          <div className="absolute inset-0 z-20 overflow-auto bg-background/40 backdrop-blur-[1px]">
+            {caseTrakContent}
           </div>
         )}
+
+        {/* Pull-tab panels — ALL are kept mounted (collapsed ones get
+            display:none) so their data loads on page render instead of
+            waiting for the agent to expand the bookmark. Expanded panels
+            stack vertically; collapsed ones take no visual space but stay
+            mounted so e.g. the Product Lookup index is ready instantly. */}
+        <div className="absolute left-[52px] top-4 z-30">
+          {(() => {
+            const gap = 16;
+            let cursorY = 0;
+            return pullTabNodes.map((node) => {
+              const isCollapsed = collapsedPanels[node.id] ?? true;
+              const panelWidth = node.width ?? 380;
+              const panelHeight =
+                measuredHeights[node.id] ?? heightOf(node);
+              const top = isCollapsed ? 0 : cursorY;
+              if (!isCollapsed) cursorY += panelHeight + gap;
+              return (
+                <div
+                  key={`pull-${node.id}`}
+                  className="pull-panel-slide pull-tab-panel absolute rounded-xl"
+                  style={{
+                    width: panelWidth,
+                    height: panelHeight,
+                    top,
+                    left: 0,
+                    display: isCollapsed ? 'none' : undefined,
+                  }}
+                >
+                  <FlowNode
+                    id={node.id}
+                    type={node.type}
+                    label={node.label}
+                    text={node.text}
+                    value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
+                    onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
+                    onFocus={onNodeFocus}
+                    onBlur={onNodeBlur}
+                    isActive={activeNodeId === node.id}
+                    position={{ x: 0, y: 0 }}
+                    zIndex={30}
+                    onDragStart={handleDragStart}
+                    onHeightChange={handleNodeHeightChange}
+                    options={node.options}
+                    accent={node.accent}
+                    inputType={node.inputType}
+                    width={panelWidth}
+                    textareaRows={node.textareaRows}
+                    autoFocus={false}
+                    icon={node.icon}
+                    quickTexts={node.quickTexts}
+                    quickTextGroups={node.quickTextGroups}
+                    customQuickTexts={node.customQuickTexts}
+                    onAddQuickText={node.onAddQuickText}
+                    onRemoveQuickText={node.onRemoveQuickText}
+                    templateMatches={node.templateMatches}
+                    onOpenTemplate={node.onOpenTemplate}
+                    parsedSource={parsedFields?.[node.id] ?? null}
+                    enablePinBubble={node.pinFromValue}
+                    panelContent={node.panelContent}
+                    hangUpLoading={undefined}
+                    quickInsertHidden={quickInsertHidden}
+                    onMinimize={() => minimizePanel(node.id)}
+                  />
+                </div>
+              );
+            });
+          })()}
+        </div>
       </div>
     </div>
   );

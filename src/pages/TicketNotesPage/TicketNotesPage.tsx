@@ -117,6 +117,7 @@ import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
+import CaseTrakBoard from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
@@ -770,6 +771,8 @@ export default function TicketNotesPage() {
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  /** Top-level work view: Call Notes flowchart (default) or Case Trak board. */
+  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak'>('callNotes');
   const [showOutput, setShowOutput] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
@@ -1820,6 +1823,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               customerAddressCount={customerAddressCount}
               onIncrementCustomerAddressCount={() => setCustomerAddressCount((c) => c + 1)}
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
+              activeView={workView}
+              onViewChange={setWorkView}
+              caseTrakContent={<CaseTrakBoard />}
             />
           </TicketPanelsContext.Provider>
         </main>
