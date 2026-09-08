@@ -13,9 +13,76 @@
       href="https://fonts.googleapis.com/css2?family=Elms+Sans:ital,wght@0,100..900;1,100..900&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* Full-screen loading overlay — visible before React mounts.
+         Centered absolute above everything, with an indeterminate bar. */
+      .app-boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background: #0d1117;
+        font-family: Bahnschrift, 'Elms Sans', 'Segoe UI', system-ui, sans-serif;
+        color: #8b949e;
+        transition: opacity 250ms ease, visibility 250ms ease;
+      }
+      .app-boot-splash.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .app-boot-title {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #c9d1d9;
+      }
+      .app-boot-bar-track {
+        width: 220px;
+        height: 3px;
+        border-radius: 3px;
+        background: #21262d;
+        overflow: hidden;
+      }
+      .app-boot-bar-fill {
+        height: 100%;
+        width: 40%;
+        background: #238636;
+        border-radius: 3px;
+        animation: app-boot-sweep 1.4s ease-in-out infinite;
+        box-shadow: 0 0 12px rgba(35, 134, 54, 0.55);
+      }
+      @keyframes app-boot-sweep {
+        0%   { transform: translateX(-120%); }
+        100% { transform: translateX(420%); }
+      }
+    </style>
   </head>
   <body>
+    <div id="appBootSplash" class="app-boot-splash" aria-hidden="false">
+      <div class="app-boot-title">Ecovacs Ticket Notes</div>
+      <div class="app-boot-bar-track">
+        <div class="app-boot-bar-fill"></div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
+    <script>
+      // Hide splash immediately when the window finishes loading, or give
+      // React up to 8s to hide it (whichever happens first).
+      window.addEventListener('load', function () {
+        var el = document.getElementById('appBootSplash');
+        if (el) el.classList.add('hidden');
+      });
+      setTimeout(function () {
+        var el = document.getElementById('appBootSplash');
+        if (el) el.classList.add('hidden');
+      }, 8000);
+    </script>
   </body>
 </html>

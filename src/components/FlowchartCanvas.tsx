@@ -397,7 +397,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   );
   const pullTabSet = useMemo(() => new Set<string>(PULL_TAB_PANEL_IDS), [PULL_TAB_PANEL_IDS]);
   const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({
-    [NODE_IDS.TRANSCRIPT_PANEL]: false,
+    [NODE_IDS.TRANSCRIPT_PANEL]: true,
     [NODE_IDS.TICKET_TRACKER]: true,
     [NODE_IDS.TEMPLATE_MATCHES]: true,
     [NODE_IDS.PRODUCT_LOOKUP]: true,
@@ -895,10 +895,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       </div>
       )}
 
-      {/* Case Trak board — lives inside the normal canvas flow (not absolute),
-          so the h-full height chain works and the board renders reliably. */}
+      {/* Case Trak board — absolutely fills the canvas viewport (not the
+          scrollable content area). The canvas is the nearest positioned
+          ancestor, so inset:0 gives us exactly the viewport height regardless
+          of the scroll container's content height. */}
       {activeView === 'caseTrak' && (
-        <div className="h-full min-h-full w-full pl-[100px]">
+        <div className="absolute inset-0 bg-background pl-[100px]">
           {caseTrakContent}
         </div>
       )}

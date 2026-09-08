@@ -121,3 +121,11 @@ createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </StrictMode>,
 );
+// Hide the boot splash as soon as React finishes mounting.
+// The splash is rendered directly in index.html so it shows during the
+// ~1-3s of JS bundle evaluation, then React takes over and fades it out.
+const bootSplash = document.getElementById('appBootSplash');
+if (bootSplash) {
+  // requestAnimationFrame so the initial paint happens before fade-out
+  requestAnimationFrame(() => bootSplash.classList.add('hidden'));
+}
