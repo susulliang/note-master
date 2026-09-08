@@ -206,7 +206,7 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
   };
 
   return (
-    <div className="flex min-h-[340px] flex-col overflow-hidden">
+    <div className="flex h-full min-h-[340px] flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-foreground/10 px-3 py-2.5">
         <div className="flex items-center gap-2">

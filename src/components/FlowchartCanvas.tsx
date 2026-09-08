@@ -1001,8 +1001,14 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             return pullTabNodes.map((node) => {
               const isCollapsed = collapsedPanels[node.id] ?? true;
               const panelWidth = node.width ?? 380;
+              // The 24H case tracker is a working surface that agents keep
+              // open alongside the call — give it the full viewport height
+              // instead of the content-sized estimate that turned it into a
+              // thin scrollable slit at the top of the canvas.
               const panelHeight =
-                measuredHeights[node.id] ?? heightOf(node);
+                node.type === 'ticketTracker'
+                  ? Math.max(360, (typeof window !== 'undefined' ? window.innerHeight : 800) - 48)
+                  : measuredHeights[node.id] ?? heightOf(node);
               const top = isCollapsed ? 0 : cursorY;
               if (!isCollapsed) cursorY += panelHeight + gap;
               return (

@@ -835,9 +835,9 @@ function FlowNodeComponent({
               ? panelsCtx?.sopContent
               : panelsCtx?.productContent) ?? panelContent;
       return (
-        <div className="px-2.5 py-1.5">
+        <div className="flex h-full flex-col px-2.5 py-1.5">
           {label && type !== 'transcript' && (
-            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {Icon && <Icon className="size-3.5 text-accent/70" />}
               <span className="flex-1 truncate">{label}</span>
               {onMinimize && (
@@ -852,7 +852,7 @@ function FlowNodeComponent({
               )}
             </div>
           )}
-          <div data-panel-body className="min-h-0">
+          <div data-panel-body className="min-h-0 flex-1">
             {content}
           </div>
         </div>
@@ -1190,6 +1190,11 @@ function FlowNodeComponent({
       }}
       className={cn(
         'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
+        // Panel nodes (transcript / 24h tracker / SOP / product lookup)
+        // live in a fixed-height pull-tab container — fill that height so
+        // their inner scroll areas can grow instead of collapsing into a
+        // slit at the top.
+        isPanelNode && 'h-full',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         // Embedded panel nodes (transcript / 24h tracker) carry the same
         // glass-card frame + accent border + active glow as every other
