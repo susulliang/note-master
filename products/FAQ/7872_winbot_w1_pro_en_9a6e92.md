@@ -1,0 +1,27 @@
+---
+category: WINBOT
+model: FAQ basic data - W1 PRO (EN
+model_slug: w1_pro
+lang: en
+source: FAQ/WINBOT/Winbot W1 Pro/FAQ basic data - W1 PRO (EN).XLSX
+source_sheet: EN
+kind: faq
+version: 1
+---
+
+# The drving threads clean itself during the use of the product. Where does the dust on the drving threads go after cleaning?
+
+> **产品线**：WINBOT　**语言**：en
+>
+
+## 问题 / Question
+
+The drving threads clean itself during the use of the product. Where does the dust on the drving threads go after cleaning?
+
+## 答案 / Answer
+
+W00098
+
+Product feature
+
+The drving threads do not collect dust easily, and the residual dust will be absorbed by the cleaning brush.

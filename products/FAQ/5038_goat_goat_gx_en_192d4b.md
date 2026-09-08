@@ -1,0 +1,27 @@
+---
+category: GOAT
+model: FAQ - GOAT GX 2024.06.06
+model_slug: goat_gx
+lang: en
+source: FAQ/GOAT/FAQ - GOAT GX 2024.06.06.xlsx
+source_sheet: 售后文件 - G1 for EU
+kind: faq
+version: 1
+---
+
+# Will grass be cut during map learning?
+
+> **产品线**：GOAT　**语言**：en
+>
+
+## 问题 / Question
+
+Will grass be cut during map learning?
+
+## 答案 / Answer
+
+G00063
+
+Mapping
+
+The GOAT won’t enable the cutter during map learning

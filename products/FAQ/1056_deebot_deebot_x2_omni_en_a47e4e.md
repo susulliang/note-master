@@ -1,0 +1,32 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT X2 OMNI
+model_slug: deebot_x2_omni
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT X2 OMNI.XLSX
+source_sheet: KO
+kind: faq
+version: 1
+---
+
+# DEEBOT이 카펫을 아예 인식하지 못하거나 가끔 카펫을 바닥으로 인식하지 못하는 이유는 무엇입니까?
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+DEEBOT이 카펫을 아예 인식하지 못하거나 가끔 카펫을 바닥으로 인식하지 못하는 이유는 무엇입니까?
+
+## 答案 / Answer
+
+D20425
+
+Cleaning
+
+현재 카펫의 일부 특수 소재와 사양으로 인해 로봇의 인식에 어려움이 있을 수 있습니다. 예:
+1. 경도가 매우 높은 카펫(목재 바닥의 경도와 유사)
+2. 모 길이가 2mm 미만인 카펫
+3. PVC 또는 기타 특수 소재
+
+앱을 열어서 지도 관리-지도 편집-카펫 추가를 탭하여 관련 설정을 지정할 수도 있습니다.

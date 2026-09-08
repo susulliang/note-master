@@ -1,0 +1,35 @@
+---
+category: GOAT
+model: GOAT HQ support faq basic data _20230214
+model_slug: goat_hq_support
+lang: en
+source: FAQ/GOAT/GOAT HQ support faq basic data _20230214.xlsx
+source_sheet: CN
+kind: faq
+version: 1
+---
+
+# 割草时经常遇到卡困？
+
+> **产品线**：GOAT　**语言**：en
+>
+
+## 问题 / Question
+
+割草时经常遇到卡困？
+
+## 答案 / Answer
+
+G00081
+
+Enable
+
+割草相关
+
+（1）割草前建议先将草坪用普通割草机割至10cm以下
+（2）割草前建议先清理草坪上容易造成卡困的杂物，如：大量落叶、石块、小玩具、果实、线绳等
+（3）可检查卡困处是否有小坑洞，建议将坑洞进行填补
+（4）尽量在草坪干燥时进行除草（您可以打开雨淋感应并设置延时），潮湿的草地容易造成卡困
+（5）频繁造成卡困的区域可以设置为禁区，后续可在空闲时用手动模式遥控GOAT进行补割
+
+24

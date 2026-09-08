@@ -1,0 +1,113 @@
+#!/bin/sh
+# ecovacs ticket-notes: pre-push hook
+#
+# Guarantees every `git push` strictly increases the LAST digit of the shared
+# version number (package.json + extension/ + Engine Settings Panel footer).
+#
+# Algorithm (critical edge: Git resolves the pushed-ref SHA BEFORE invoking
+# pre-push. A commit made INSIDE pre-push but AFTER ref resolution was
+# previously NOT uploaded — we saw exactly this in practice: our bump-
+# commit landed only on the local tip. Fix: when we do bump, we ABORT the
+# current push attempt (exit 1 from inside hook would print "pre-push
+# refused"), then RE-LAUNCH `git push …` ourselves from within the hook
+# with the ECOVACS_PRE_PUSH_BUMPED=1 sentinel so the nested call is a pure
+# pass-through and the brand-new tip (bump-commit on top) actually uploads.)
+#
+# Flow:
+#   1. Bypass: SKIP_GIT_HOOKS=1 → no-op.
+#   2. Re-entry sentinel: ECOVACS_PRE_PUSH_BUMPED=1 → no-op (nested call).
+#   3. Run bump-version.mjs --pre-push. It prints a "skipping auto bump"
+#      line if HEAD already carries a newer version than the upstream
+#      tracking ref (falls back to origin/main when the branch lacks @{u}).
+#   4. If the script actually wrote changes → stage 5 canonical version
+#      files → `git commit -m "chore(version): auto bump <ver>"`.
+#   5. If we made a bump commit → re-launch `git push <remote>` via
+#      exec(1) so the shell process becomes Git itself (pid reuse = clean).
+#      The nested call skips the bump due to the sentinel and uploads the
+#      new tip.
+#   6. Otherwise (no bump needed) → pass-through exit 0, Git proceeds.
+#
+# Bypass manually:   SKIP_GIT_HOOKS=1  git push …
+[ "$SKIP_GIT_HOOKS" = "1" ] && exit 0
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# Sentinel for the self-relaunch below — must never nest.
+if [ "$ECOVACS_PRE_PUSH_BUMPED" = "1" ]; then
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 1 — run bump (may be a no-op). All stdout chatter goes to stderr so
+# Git doesn't close our output fd mid-hook (the "Bad file descriptor" we
+# saw in prior runs).
+# ---------------------------------------------------------------------------
+OUTPUT="$(node scripts/bump-version.mjs --pre-push 2>&1)"
+STATUS=$?
+printf '%s\n' "$OUTPUT" >&2
+if [ "$STATUS" -ne 0 ]; then
+  echo "✗ pre-push: version bump failed (see above)" >&2
+  exit 1
+fi
+
+case "$OUTPUT" in
+  *skipping*)
+    # Local already has a bump vs upstream — pass-through.
+    exit 0
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Step 2 — stage exactly the 5 canonical version files + commit
+# ---------------------------------------------------------------------------
+git add \
+  extension/version.json \
+  extension/manifest.json \
+  extension/docs/install.html \
+  extension/popup/popup.html \
+  package.json \
+  2>/dev/null
+
+if git diff --cached --quiet; then
+  # Script reported a bump but no files staged — no-op.
+  exit 0
+fi
+
+NEW_VER="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('extension/version.json','utf8')).version)}catch(e){process.exit(1)}" 2>/dev/null || echo "patch")"
+if ! git commit -m "chore(version): auto bump $NEW_VER" >&2; then
+  echo "✗ pre-push: could not commit the auto-bump. Stage+commit version files manually, then retry." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Step 3 — re-launch `git push` with sentinel so the bump commit uploads.
+#
+# Git's pre-push argv when invoked from inside a `git push <r>` session:
+#   $1 = remote NAME  – e.g. "origin"  (never empty)
+#   $2 = remote URL   – the full URL associated with that name (e.g.
+#                       https://github.com/…/note-master.git). Empty only in
+#                       the theoretical case Git had no URL mapping.
+#
+# Importantly: `git push NAME URL` is WRONG — the second positional arg to
+# `git push` is a refspec, not a URL. Passing the URL as the second arg
+# causes fatal: invalid refspec '<url>'. So the rule is:
+#   - If $2 is a URL (http(s)://, ssh://, git@…:…)  → push USING the URL as
+#     the sole target (git push "<remote_url>").
+#   - Otherwise (no URL in $2)                         → git push "<name>".
+# ---------------------------------------------------------------------------
+REMOTE_NAME="${1:-origin}"
+REMOTE_URL="${2:-}"
+
+echo "" >&2
+echo "✓ Pre-push bumped to $NEW_VER — re-launching push with the new tip." >&2
+
+TARGET="$REMOTE_NAME"
+case "$REMOTE_URL" in
+  http://*|https://*|ssh://*|git@*:*|file:///*)
+    TARGET="$REMOTE_URL"
+    ;;
+esac
+
+export ECOVACS_PRE_PUSH_BUMPED=1
+exec git push "$TARGET"

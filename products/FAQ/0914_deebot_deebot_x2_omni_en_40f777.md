@@ -1,0 +1,37 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT X2 OMNI
+model_slug: deebot_x2_omni
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT X2 OMNI.XLSX
+source_sheet: IT
+kind: faq
+version: 1
+---
+
+# Come si crea rapidamente una mappa?
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+Come si crea rapidamente una mappa?
+
+## 答案 / Answer
+
+D20435
+
+Mapping
+
+Preparativi per creare una mappa 
+1. Aprire le porte delle stanze che si desidera mappare e rimuovere gli ostacoli che si ritiene possano essere d'intralcio durante la pulizia. Assicurarsi che l'illuminazione sia sufficiente affinché la mappa possa coprire l'intero ambiente domestico. 
+2. Accendere il robot (rimuovere la copertura superiore e ruotare l'interruttore su "I") e posizionarlo direttamente di fronte alla stazione. 
+3. Toccare il pulsante di richiamo/uscita sulla stazione per fare in modo che il robot torni a caricarsi. Una volta raggiunta la stazione, il robot inizia a caricarsi. 
+
+Mappatura rapida 
+1. Tramite l'assistente vocale: 
+È possibile dire al robot "OK YIKO, esegui la mappatura rapida". 
+2. Tramite l'app: 
+Assicurarsi che il robot sia collegato all'app ECOVACS HOME e online. Aprire l'app ECOVACS HOME e selezionare Pulizia intelligente ＞ Avvia mappatura.
+3. Al termine della mappatura, il robot comunica il completamento dell'operazione. Ciò significa che la mappa è stata creata.

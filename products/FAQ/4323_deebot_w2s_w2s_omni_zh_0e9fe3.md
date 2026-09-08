@@ -1,0 +1,25 @@
+---
+category: DEEBOT
+model: FAQ 2.0】W2S&W2S OMNI海外
+model_slug: w2s_w2s_omni
+lang: zh
+source: FAQ/DEEBOT/【FAQ 2.0】W2S&W2S OMNI海外.xlsx
+source_sheet: W2S OMNI EN
+kind: faq
+version: 1
+---
+
+# 25
+
+> **产品线**：DEEBOT　**语言**：zh
+>
+
+## 问题 / Question
+
+25
+
+## 答案 / Answer
+
+How Many Times Can the 80ml Water Tank Spray?
+
+Under ECOVACS lab conditions, a full tank can clean approximately 55㎡ of glass (based on 1m × 1m panels).

@@ -1,0 +1,187 @@
+Skip to NavigationSkip to Main Content
+43 new notifications
+AMR Service
+Cases
+Press Spacebar to reorder tabs.
+Case
+04057968 | Case
+Case
+04058011 | Case
+Case
+04044258 | Case
+
+Account Details
+Account Name
+Cong Ta
+Account Code
+App Device Info
+appVersion: 3.15.1
+model: iPad13,8
+systemVersion: 26.6
+deviceType: 2
+deviceTypeName: IOS
+marketName: iPad Pro (12.9-inch, 5th generation)
+Case Number
+04044258
+Case Owner
+Dezzy VII
+Status
+Open
+Subject
+Connected Phone Call from: Caller +15103651598
+DTC Conversation Id
+Account Name
+Cong Ta
+Contact Name
+Help Contact Name
+Brand
+ecovacs
+Case Origin
+Inbound Call
+Chat Unavailable Reason
+Country
+United States
+Case Tag
+Edit Case Tag
+Contact Taggings
+Tagging Remark
+Sender IP
+209.85.208.176
+Sender IP Country
+Voice Record
+Click here to hear recording
+Request Description
+Edit Request Description
+First Pending Timestamp
+8/29/2026, 12:34 PM
+Last Pending Timestamp
+9/1/2026, 8:52 PM
+Follow Up Date
+
+Date
+Format: Dec 31, 2024
+Time
+AI Agent
+  Not a troubleshooting scenario.
+
+
+Summary
+  issue type：
+
+summary:
+
+1. 风险提示：低风险
+
+Related Files
+Issue Type1 Primary Classification
+Aftersale-Service inquiry
+Issue Type1 Second Classification
+Urging Return/Refund
+Issue Type2 Primary Classification
+Failure
+Issue Type2 Second Classification
+Device offline after network setup
+Issue Type3 Primary Classification
+Issue Type3 Second Classification
+AMR Model No.
+DEEBOT N20 PRO PLUS
+Serial Number
+E08A35582F1FPN2P0175
+Station Serial Number
+Purchasing Channel
+
+Select Purchasing Channel
+Order Number
+Purchase Date
+Escalation Type
+Edit Escalation Type
+Is un-authorized seller
+FalseIs un-authorized seller
+
+Contact Details
+Name
+Cong Ta
+Account Name
+Cong Ta
+Phone
++1 510 365 1598
+Email
+congbangta2001@gmail.com
+City
+Salt Lake City
+Address
+765 North 400 West
+Province
+UT
+Postal Code
+84103
+Files (3)
+
+Actions
+
+IMG_2551
+IMG_2551
+2026年9月2日 · 245.5KB · .png
+
+Milestones
+No milestones to show.
+
+Case
+04044258
+Case Owner
+
+Dezzy VII
+Status
+
+Open
+Country
+
+United States
+Subject
+
+Connected Phone Call from: Caller +15103651598
+Date/Time Opened
+
+8/29/2026, 12:28 PM
+Case Tag
+
+Merged Cases(1)
+
+04054483
+9/1/2026, 02:33 PM
+Re: Ecovacs-Your Requested Replacement Has Been Sent
+04044258
+Tabs
+Tabs
+Interaction
+Bookmarked Messages
+Post with images
+Related Info
+Chat Info
+Interface Log
+Email
+Frequently Used Email Templates
+Search templates
+Email
+Post
+Most Recent Activity
+Search this feed...
+All Updates
+Customer Interaction
+Text Posts
+Status Changes
+Skip Feed
+Click to expand post
+System
+September 1, 2026 at 1:47 PM
+Case updated
+Click to expand post
+
+Start of Dialog
+Phone
+
+_
+Salesforce Help
+Notifications
+Favorites list
+Global Actions

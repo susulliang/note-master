@@ -1,0 +1,34 @@
+---
+category: DEEBOT
+model: FAQ】N20 Series（multi-language）
+model_slug: n20_series
+lang: multi
+source: FAQ/DEEBOT/【FAQ】N20 Series（multi-language）.xlsx
+source_sheet: FR
+kind: faq
+version: 1
+---
+
+# Comment démarrer le nettoyage localisé ?
+1. Placer le robot dans la zone à nettoyer ;
+2. Appuyer manuellement sur le bouton de nettoyage fixe ;
+3. Une fois le nettoyage terminé, la machine retourne à la station.
+
+> **产品线**：DEEBOT　**语言**：multi
+>
+
+## 问题 / Question
+
+Comment démarrer le nettoyage localisé ?
+1. Placer le robot dans la zone à nettoyer ;
+2. Appuyer manuellement sur le bouton de nettoyage fixe ;
+3. Une fois le nettoyage terminé, la machine retourne à la station.
+
+## 答案 / Answer
+
+Comment démarrer le nettoyage localisé ?
+
+Comment démarrer le nettoyage localisé ?
+1. Placer le robot dans la zone à nettoyer ;
+2. Appuyer manuellement sur le bouton de nettoyage fixe ;
+3. Une fois le nettoyage terminé, la machine retourne à la station.

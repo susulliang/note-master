@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ecovacs Note Helper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <!-- =============================  HEADER  ============================= -->
+    <header class="hd">
+      <div class="hd__brand">
+        <img src="../icons/icon-32.png" alt="Ecovacs" class="hd__icon" />
+        <div class="hd__titles">
+          <h1 class="hd__title">Ecovacs Note Helper</h1>
+          <p class="hd__sub">
+            Scrapes Salesforce + CCP fields and pushes them to Ticket Notes.
+          </p>
+        </div>
+      </div>
+      <div class="hd__right">
+        <span class="bdg" id="badgeConnect">—</span>
+        <span class="hd__ver" id="ver">v0.1.0 · warming up…</span>
+      </div>
+    </header>
+
+    <!-- ====================  CAPTURED-FIELD SUMMARIES  ==================== -->
+    <section class="row card-row">
+      <!-- CCP (phone popup) capture card -->
+      <article class="card ccp" id="cardCcp">
+        <header class="card__hd">
+          <span class="dot"></span>
+          <h2 class="card__tl">CCP · Phone Panel</h2>
+          <button
+            class="btn btn-ghost"
+            id="btnCcp"
+            type="button"
+            title="Re-scrape the CCP / embedded phone panel tab(s)"
+          >
+            Refresh
+          </button>
+        </header>
+        <p class="card__meta" id="ccpMeta">Not captured yet.</p>
+        <ul class="kv" id="ccpKv"></ul>
+      </article>
+
+      <!-- Salesforce capture card -->
+      <article class="card sf" id="cardSf">
+        <header class="card__hd">
+          <span class="dot"></span>
+          <h2 class="card__tl">Salesforce · Case</h2>
+          <button
+            class="btn btn-ghost"
+            id="btnSf"
+            type="button"
+            title="Re-scrape the current Salesforce Case tab(s)"
+          >
+            Refresh
+          </button>
+        </header>
+        <p class="card__meta" id="sfMeta">Not captured yet.</p>
+        <ul class="kv" id="sfKv"></ul>
+      </article>
+    </section>
+
+    <!-- ========================  PRIMARY ACTIONS  ========================= -->
+    <section class="row action-row">
+      <!--
+        Single unified SCAN button.
+        Tiered fallback pipeline baked into onClickScan:
+          Tier 1 → SW sendMessage POPUP_SCRAPE_ALL
+          Tier 2 → After 3.5 s: fall back to popup-side Self-Extract (bypasses
+                     the SW entirely — for zombied SW scenarios we used to
+                     need a separate Self-Extract button.)
+          Tier 3 → Popup then shows the active-tab specific fallback under
+                     the hood — onClickScanActive's previous self-extract
+                     path covers the "I'm looking at the tab right now" case.
+        Why ONE button: user explicitly asked to combine all scrape/SCAN
+        buttons so the popup UI has a single "Scan Salesforce + CCP" entry
+        with automatic (invisible to user) fallbacks.
+      -->
+      <button class="btn btn-primary" id="btnScan" type="button">
+        <span class="btn__icon">🔦</span>
+        Scan Salesforce &amp; CCP
+      </button>
+      <!--
+        Push fields to Ticket Notes app. Renamed from "Push to open Ticket
+        Notes". "Push info to Ticket Notes" clearly describes what happens.
+      -->
+      <button class="btn btn-accent" id="btnPush" type="button">
+        <span class="btn__icon">📤</span>
+        Push info to Ticket Notes
+      </button>
+    </section>
+
+    <!-- ==========================  DIAGNOSTIC  ============================ -->
+    <section class="diag">
+      <details class="card diag__card" id="detailsDiag">
+        <summary class="card__hd">
+          <span class="dot"></span>
+          <h2 class="card__tl">Diagnostic · why it's not scraping</h2>
+        </summary>
+        <ul class="kv" id="diagBox"><li class="empty">Loading…</li></ul>
+      </details>
+
+      <details class="card diag__card" id="detailsBridge">
+        <summary class="card__hd">
+          <span class="dot dot--accent"></span>
+          <h2 class="card__tl">Bridge · Ticket App &amp; Push traces</h2>
+          <span class="bdg bdg--muted" id="bridgeCount" title="Log entries in memory">0</span>
+          <button
+            class="btn btn-ghost btn--sm"
+            id="btnBridgeRefresh"
+            type="button"
+            title="Refresh event log from service worker"
+          >
+            Refresh
+          </button>
+          <button
+            class="btn btn-ghost btn--sm btn--danger"
+            id="btnBridgeClear"
+            type="button"
+            title="Clear event log (next push / handshake / scrape → starts empty)"
+          >
+            Clear
+          </button>
+        </summary>
+        <div class="diag__bridge">
+          <div class="summ" id="bridgeSummary">Loading extension-side bridge trace…</div>
+          <div class="bridge__tabs-wrap">
+            <div class="bridge__tabs" role="tablist">
+              <button class="bridge__tab is-active" role="tab" data-tab="log" type="button">Event log (received probes + pushes)</button>
+              <button class="bridge__tab" role="tab" data-tab="tabs" type="button">Open tabs snapshot</button>
+              <button class="bridge__tab" role="tab" data-tab="patterns" type="button">Manifest patterns</button>
+              <button class="bridge__tab" role="tab" data-tab="guide" type="button">Fix "bridge not connected"</button>
+            </div>
+            <section class="bridge__pane" data-pane="log" hidden>
+              <div class="pane__hint"><strong>What this shows:</strong> every handshake probe received from the Ticket Notes web-app, every externally_connectable call, SF scrape, push attempt, field writes + Post tab editor steps. This is data the extension-side actually saw. If you click Probe on the Ticket Notes page but no <code>bridge:handshake_request_received</code> row shows up within 2s, then bridge.js content script is NOT running on that tab (browser cached old registration or manifest pattern not matched — open <code id="extMgrUrlHint">edge://extensions</code> 🔄 Reload, refresh the page, try again). Go to the <em>Tabs snapshot</em> tab and click <strong>🔬 Injectable?</strong> on any ticket-app row to get a browser-level ground-truth.</div>
+              <ul class="evlog" id="evlog"><li class="empty">No events yet. Click Probe on the Ticket Notes page or Scan/Push in this popup.</li></ul>
+            </section>
+            <section class="bridge__pane" data-pane="tabs" hidden>
+              <p class="pane__hint">Ticket-app / Salesforce / CCP tabs currently open in this browser window, plus a LIVE "Injectable now?" ground-truth probe per tab. If a tab shows "Injectable: YES" but "bridge version: null" → click <strong>Inject bridge now</strong> on that row (bypasses cached content-script registrations; injects bridge.js immediately).</p>
+              <div id="tabsSnap" class="tabs-snap"><div class="empty">Loading…</div></div>
+            </section>
+            <section class="bridge__pane" data-pane="patterns" hidden>
+              <p class="pane__hint">Patterns loaded DIRECTLY from the installed extension manifest. These are the patterns the browser actually uses when deciding whether to inject bridge.js (content_scripts) and whether <code>chrome.runtime.sendMessage(EXT_ID)</code> is allowed (externally_connectable). If a pattern isn't listed here, the browser won't inject/connect — the DEFAULTS you see on the web-app page are guesses, not source of truth.</p>
+              <h3 class="shead">host_permissions (grants scripting.executeScript for live probe / inject bridge now)</h3>
+              <ul class="pl" id="plHost"><li class="empty">—</li></ul>
+              <h3 class="shead">content_scripts → bridge.js → matches</h3>
+              <ul class="pl" id="plBridge"><li class="empty">—</li></ul>
+              <h3 class="shead">externally_connectable → matches</h3>
+              <ul class="pl" id="plExternal"><li class="empty">—</li></ul>
+            </section>
+            <section class="bridge__pane" data-pane="guide" hidden>
+              <h3 class="shead">You are running: <span id="agentBadge">—</span></h3>
+              <ol class="guided">
+                <li>Open the extensions manager at:
+                  <ul style="margin:4px 0 0 18px; padding:0; list-style:disc;">
+                    <li><strong>Edge</strong>: type <code>edge://extensions</code> in the address bar.</li>
+                    <li><strong>Chrome</strong>: type <code>chrome://extensions</code> in the address bar.</li>
+                  </ul>
+                <li>Toggle <strong>Developer mode</strong> top-right. On the Ecovacs Note Helper card click <strong>🔄 Reload</strong>. The card should now show <strong>v0.1.27</strong> or newer.
+                <li>Open a tab at <code>https://note-master-roan.vercel.app/</code> and leave it active (not discarded).
+                <li>Open this popup → Bridge → Tabs snapshot → find the vercel row → click <strong>🔬 Injectable?</strong>. Within 2s it flips to YES/NO.
+                <li>If Injectable is YES but <code>bridge version: null</code> → cache issue. Click <strong>🚀 Inject bridge now</strong> (uses scripting.executeScript, bypasses document_start content-script registration) → wait 3s → re-click 🔬 Injectable? and it should now show bridge version 0.1.27. The web app Push button goes green within 10s (next heartbeat).
+                <li>If Injectable is BLOCKED:host-permissions → the installed manifest <strong>is not</strong> the one you just edited (browser still has an older loaded build), OR the optional_host_permissions all_urls wasn't granted for this origin. Go to Details → Site access on the extension card and confirm.
+                <li>For Salesforce "nothing auto-fills": with a full Lightning Case tab open (not inline-console), click 📤 Push to Salesforce Case on the Ticket Notes page. Then come to Bridge → Event log → you will see sf:apply:start / targetTab / ok+fieldSummary with per-field wasSectionFound. Copy the red rows if 0 fields wrote.
+              </ol>
+            </section>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ============================  SETTINGS  ============================ -->
+    <section class="row row--settings">
+      <label class="tg">
+        <input type="checkbox" id="cbAuto" />
+        <span>Auto-push new scrapes to Ticket Notes.</span>
+      </label>
+    </section>
+
+    <!-- ==============================  FOOTER  =========================== -->
+    <footer class="ft">
+      <div class="ft__left">
+        Extension ID:
+        <code id="extId" title="Click to copy">…</code>
+      </div>
+      <a id="docsLink" href="../docs/install.html" target="_blank" rel="noreferrer">Install guide</a>
+    </footer>
+
+    <div class="toast" id="toast" aria-live="polite"></div>
+    <script src="popup.js" type="module"></script>
+    <!-- BUILD_STAMP>0.1.54@2026-09-07T23:06Z<END_BUILD_STAMP -->
+  </body>
+</html>

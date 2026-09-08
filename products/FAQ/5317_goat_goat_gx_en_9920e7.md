@@ -1,0 +1,34 @@
+---
+category: GOAT
+model: FAQ - GOAT GX 2024.06.06
+model_slug: goat_gx
+lang: en
+source: FAQ/GOAT/FAQ - GOAT GX 2024.06.06.xlsx
+source_sheet: 售后文件 - GX for EU
+kind: faq
+version: 1
+---
+
+# Why does the GOAT not start mowing automatically at the scheduled time?
+
+> **产品线**：GOAT　**语言**：en
+>
+
+## 问题 / Question
+
+Why does the GOAT not start mowing automatically at the scheduled time?
+
+## 答案 / Answer
+
+33
+
+Mowing
+
+This may be due to the following reasons: 
+ (1) The GOAT is not powered on. 
+ (2) The GOAT will not respond to scheduled tasks when it is in animal protection mode. 
+ (3) The GOAT will not respond to scheduled tasks when the rain sensor is turned on. 
+ (4) The GOAT will not execute tasks when its battery is low. 
+ (5) The GOAT is currently executing another manually triggered temporary task. 
+ (6) The scheduled tasks may not be correctly set up or saved. Please check them in the App. 
+ (7) Please check whether the time zone set up in the App is the correct time zone where the GOAT is located.

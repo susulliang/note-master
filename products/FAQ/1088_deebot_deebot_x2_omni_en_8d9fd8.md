@@ -1,0 +1,32 @@
+---
+category: DEEBOT
+model: FAQ basic data - DEEBOT X2 OMNI
+model_slug: deebot_x2_omni
+lang: en
+source: FAQ/DEEBOT/FAQ basic data - DEEBOT X2 OMNI.XLSX
+source_sheet: KO
+kind: faq
+version: 1
+---
+
+# 로봇과 스테이션의 연결이 해제되었다는 메시지가 앱에 표시됩니다. 또는 스테이션에서 로봇이 제어되지 않습니다.
+
+> **产品线**：DEEBOT　**语言**：en
+>
+
+## 问题 / Question
+
+로봇과 스테이션의 연결이 해제되었다는 메시지가 앱에 표시됩니다. 또는 스테이션에서 로봇이 제어되지 않습니다.
+
+## 答案 / Answer
+
+D20440
+
+Station
+
+DEEBOT이 베이스 스테이션과 연결이 끊어졌거나 베이스 스테이션에서 DEEBOT을 제어할 수 없습니다:
+
+1. 베이스 스테이션을 전원 공급 장치와 분리하고 DEEBOT 덮개를 제거한 다음 DEEBOT 전원을 끄고("O"로 전환) 5-10초 동안 기다립니다.
+2. 베이스 스테이션에 전원 공급 장치를 다시 연결하고 베이스 스테이션 패널의 표시등이 켜져 있는지 확인합니다.
+3. DEEBOT의 전원을 다시 켜고("I"로 전환) 전원 켜짐 신호음이 들리는지 확인합니다.
+4. DEEBOT 본체의 자동 시작 버튼을 길게 눌러 자동으로 베이스 스테이션으로 복귀하게 합니다(또는 수동으로 DEEBOT의 가장 뒷부분을 베이스 스테이션 청소 싱크로 밀어 넣습니다). 그러면 DEEBOT이 올바르게 도킹되고 충전 접촉부가 올바르게 정렬됩니다. 10-15초 후 스테이션의 시작/일시 중지 버튼을 탭하여 확인합니다.

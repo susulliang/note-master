@@ -1,0 +1,143 @@
+{
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnmIZrVCK1Ai/Wl62LoyEiklEiPrQ8gYybXGdhqCyN3OkbzQSmYu1h8dSfpK5ZL7DOBtyUEUT6wI1CklDYAOuihgS0aDqA8ap+BsCf+oWEeR9r9le4CcNLZdI7PMQQqtMTURVxRFw3oHw5s1RvW0N2ajydk9OzZ8Jv2Ryzb5uoOxo5OK0yknA485vVS3mv4C0Hy7BB/6HLyB3Zvs63kFQgUoGMQYhmkk0+eiNpvo9ENB+dMktS+9aJ+UHz/XDEmR3Q5qvPszB+n71sM1EpjaDnfjg9Zu0uOqXLBnGGurvJuBXW1+/0mxURbm2r9c/WVNYE6h7I58LJ8ArVZipve1QHwIDAQAB",
+  "name": "Ecovacs Note Helper",
+  "short_name": "Note Helper",
+  "version": "0.1.54",
+  "description": "Tier-2 browser extension for Ecovacs NA agents: scrapes the Salesforce Case tab (and embedded CCP phone panel) for customer/device fields, then pushes them straight into the Ticket Notes web app with a one-click confirm gate.",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Ecovacs Note Helper",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.my.connect.aws/*",
+    "https://*.connect.aws.a2z.com/*",
+    "https://*.awsapps.com/connect/*",
+    "https://*.cc.amazonaws.com/*",
+    "https://*.lightning.force.com/*",
+    "https://*.my.salesforce.com/*",
+    "https://*.salesforce.com/*",
+    "https://*.visual.force.com/*",
+    "https://*.cloudfront.net/*",
+    "https://*.vercel.app/*",
+    "https://note-master.vercel.app/*",
+    "https://note-master-roan.vercel.app/*",
+    "http://localhost/*",
+    "http://localhost:*/*",
+    "https://localhost/*",
+    "https://localhost:*/*",
+    "http://127.0.0.1/*",
+    "http://127.0.0.1:*/*",
+    "https://127.0.0.1/*",
+    "https://127.0.0.1:*/*",
+    "http://[::1]/*",
+    "http://[::1]:*/*",
+    "https://[::1]/*",
+    "https://[::1]:*/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "externally_connectable": {
+    "ids": [],
+    "matches": [
+      "http://localhost:*/*",
+      "https://localhost:*/*",
+      "http://127.0.0.1:*/*",
+      "https://127.0.0.1:*/*",
+      "http://[::1]:*/*",
+      "https://[::1]:*/*",
+      "https://*.vercel.app/*",
+      "https://note-master.vercel.app/*",
+      "https://note-master-roan.vercel.app/*"
+    ],
+    "accepts_tls_channel_id": false
+  },
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.my.connect.aws/*",
+        "https://*.connect.aws.a2z.com/*",
+        "https://*.awsapps.com/connect/*",
+        "https://*.cc.amazonaws.com/*",
+        "https://*.five9.com/*",
+        "https://*.genesys.com/*",
+        "https://*.genesyscloud.com/*",
+        "https://*.talkdesk.com/*",
+        "https://*.zendesk.com/*",
+        "https://*.freshdesk.com/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.lightning.force.com/*",
+        "https://*.my.salesforce.com/*",
+        "https://*.salesforce.com/*",
+        "https://*.visual.force.com/*",
+        "https://*.force.com/*"
+      ],
+      "js": [
+        "content/salesforce.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "*://localhost:*/*",
+        "*://127.0.0.1:*/*",
+        "*://[::1]:*/*",
+        "https://*.vercel.app/*",
+        "https://note-master.vercel.app/*",
+        "https://note-master-roan.vercel.app/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "bridge.js",
+        "content/*",
+        "popup/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'"
+  }
+}

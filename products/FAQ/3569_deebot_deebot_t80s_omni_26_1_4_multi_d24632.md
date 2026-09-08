@@ -1,0 +1,25 @@
+---
+category: DEEBOT
+model: FAQ 2.0】DEEBOT T80S OMNI 26.1.4_6 languages
+model_slug: deebot_t80s_omni_26_1_4
+lang: multi
+source: FAQ/DEEBOT/【FAQ 2.0】DEEBOT T80S OMNI 26.1.4_6 languages.xlsx
+source_sheet: fr-FR
+kind: faq
+version: 1
+---
+
+# 32
+
+> **产品线**：DEEBOT　**语言**：multi
+>
+
+## 问题 / Question
+
+32
+
+## 答案 / Answer
+
+I. Dysfonctionnement du capteur laser
+1. Remuez délicatement le laser et faites pivoter la lentille en verre du radar vers l'avant. Nettoyez-le légèrement avec une petite brosse ou un chiffon propre.
+2. Éteignez et redémarrez l'appareil pour observer.

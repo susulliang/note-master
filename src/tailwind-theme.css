@@ -1,0 +1,1120 @@
+/* Register --glass-glow as an animatable shadow so the email / empty-name
+ * prompt glows can pulse smoothly without clobbering the rest of the node's
+ * box-shadow (inset specular edge + floating ambient shadows). Without this
+ * registration, animating box-shadow directly would wipe the base layers and
+ * look like a single flash instead of a continuous breath. */
+@property --glass-glow {
+  syntax: '<shadow>';
+  inherits: true;
+  initial-value: 0 0 0 transparent;
+}
+
+:root {
+  color-scheme: dark;
+  --button-outline: rgba(0,0,0, .10);
+  --badge-outline: rgba(0,0,0, .05);
+
+  /* Automatic computation of border around primary / danger buttons */
+  --opaque-button-border-intensity: -8; /* In terms of percentages */
+
+  /* Backgrounds applied on top of other backgrounds when hovered/active */
+  --elevate-1: rgba(0,0,0, .03);
+  --elevate-2: rgba(0,0,0, .08);
+
+  --background: hsl(210 18% 8%);
+  --foreground: hsl(210 17% 79%);
+  --card: hsl(215 21% 11%);
+  --card-foreground: hsl(210 17% 79%);
+  --popover: hsl(215 21% 11%);
+  --popover-foreground: hsl(210 17% 79%);
+  --primary: hsl(137 55% 36%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 92% 62%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(215 21% 11%);
+  --muted-foreground: hsl(212 9% 55%);
+  --accent: hsl(212 92% 62%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 83% 53%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 54% 42%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 90% 49%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(215 12% 27%);
+  --input: hsl(215 21% 11%);
+  --ring: hsl(137 55% 36%);
+  --chart-1: hsl(137 55% 36%);
+  --chart-2: hsl(167 55% 36%);
+  --chart-3: hsl(197 55% 36%);
+  --chart-4: hsl(227 55% 36%);
+  --chart-5: hsl(257 55% 36%);
+  --sidebar: hsl(220 14% 96%);
+  --sidebar-foreground: hsl(220 14% 14%);
+  --sidebar-primary: hsl(221 83% 53%);
+  --sidebar-primary-foreground: hsl(220 14% 98%);
+  --sidebar-accent: hsl(222 100% 94%);
+  --sidebar-accent-foreground: hsl(221 83% 53%);
+  --sidebar-border: hsl(220 14% 89%);
+  --sidebar-ring: hsl(221 83% 53%);
+
+  /* Computed borders using hsl relative color syntax */
+  --primary-border: hsl(from hsl(221 83% 53%) h s calc(l + var(--opaque-button-border-intensity)));
+  --secondary-border: hsl(from hsl(220 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
+  --destructive-border: hsl(from hsl(2 84% 62%) h s calc(l + var(--opaque-button-border-intensity)));
+  --accent-border: hsl(from hsl(220 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
+  --muted-border: hsl(from hsl(220 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
+  --font-sans:
+    'Elms Sans', 'Bahnschrift', 'LarkHackSafariFont', 'LarkEmojiFont',
+    'LarkChineseQuote', '-apple-system', 'BlinkMacSystemFont',
+    'Helvetica Neue', 'Tahoma', 'PingFang SC', 'Microsoft Yahei', 'Arial',
+    'Hiragino Sans GB', 'sans-serif', 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-serif:
+    'Geist', 'Geist Fallback', ui-serif, Georgia, Cambria, 'Times New Roman',
+    Times, serif;
+  --font-mono: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius: 0.75rem;
+  --shadow-x: 0px;
+  --shadow-y: 2px;
+  --shadow-blur: 12px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.02;
+  --shadow-color: #000000;
+  --shadow-2xs: 0px 2px 12px 0px hsl(0 0% 0% / 0.01);
+  --shadow-xs: 0px 2px 12px 0px hsl(0 0% 0% / 0.01);
+  --shadow-sm:
+    0px 2px 12px 0px hsl(0 0% 0% / 0.02), 0px 1px 2px -1px hsl(0 0% 0% / 0.02);
+  --shadow:
+    0px 2px 12px 0px hsl(0 0% 0% / 0.02), 0px 1px 2px -1px hsl(0 0% 0% / 0.02);
+  --shadow-md:
+    0px 2px 12px 0px hsl(0 0% 0% / 0.02), 0px 2px 4px -1px hsl(0 0% 0% / 0.02);
+  --shadow-lg:
+    0px 2px 12px 0px hsl(0 0% 0% / 0.02), 0px 4px 6px -1px hsl(0 0% 0% / 0.02);
+  --shadow-xl:
+    0px 2px 12px 0px hsl(0 0% 0% / 0.02), 0px 8px 10px -1px hsl(0 0% 0% / 0.02);
+  --shadow-2xl: 0px 2px 12px 0px hsl(0 0% 0% / 0.05);
+  --shadow-2xl: 0px 2px 12px 0px hsl(0 0% 0% / 0.05);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Scrollbar - dark theme */
+  --scrollbar-track: hsl(215 21% 11%);
+  --scrollbar-thumb: hsl(215 12% 27%);
+  --scrollbar-thumb-hover: hsl(215 10% 38%);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Theme scale — 5 steps from bright to dark, suitable for any work   */
+/*  time of day. :root (no override) is the deepest step: Midnight.    */
+/* ------------------------------------------------------------------ */
+
+/* Daylight — bright neutral white (morning / full-sun hours) */
+:root[data-theme="daylight"] {
+  color-scheme: light;
+  --background: hsl(0 0% 98%);
+  --foreground: hsl(220 9% 16%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(220 9% 16%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(220 9% 16%);
+  --primary: hsl(137 55% 32%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 92% 48%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(220 14% 96%);
+  --muted-foreground: hsl(220 9% 46%);
+  --accent: hsl(212 92% 48%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 83% 53%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 84% 55%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 54% 42%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 90% 49%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(220 13% 91%);
+  --input: hsl(220 14% 96%);
+  --ring: hsl(137 55% 32%);
+  --scrollbar-track: hsl(220 14% 96%);
+  --scrollbar-thumb: hsl(220 13% 85%);
+  --scrollbar-thumb-hover: hsl(220 10% 70%);
+}
+
+/* Morning — warm cream (early hours) */
+:root[data-theme="morning"] {
+  color-scheme: light;
+  --background: hsl(42 45% 94%);
+  --foreground: hsl(30 12% 16%);
+  --card: hsl(42 40% 98%);
+  --card-foreground: hsl(30 12% 16%);
+  --popover: hsl(42 40% 98%);
+  --popover-foreground: hsl(30 12% 16%);
+  --primary: hsl(137 52% 30%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 80% 44%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(42 30% 90%);
+  --muted-foreground: hsl(30 8% 40%);
+  --accent: hsl(212 80% 44%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 46%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 48%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 36%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(40 20% 82%);
+  --input: hsl(42 30% 90%);
+  --ring: hsl(137 52% 30%);
+  --scrollbar-track: hsl(42 30% 90%);
+  --scrollbar-thumb: hsl(40 16% 76%);
+  --scrollbar-thumb-hover: hsl(40 12% 64%);
+}
+
+/* Afternoon — soft overcast gray (late day, reduced glare) */
+:root[data-theme="afternoon"] {
+  color-scheme: light;
+  --background: hsl(215 12% 86%);
+  --foreground: hsl(215 12% 18%);
+  --card: hsl(215 12% 92%);
+  --card-foreground: hsl(215 12% 18%);
+  --popover: hsl(215 12% 92%);
+  --popover-foreground: hsl(215 12% 18%);
+  --primary: hsl(137 50% 30%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 80% 44%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(215 10% 80%);
+  --muted-foreground: hsl(215 9% 38%);
+  --accent: hsl(212 80% 44%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 46%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 48%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 36%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(215 10% 74%);
+  --input: hsl(215 10% 80%);
+  --ring: hsl(137 50% 30%);
+  --scrollbar-track: hsl(215 10% 80%);
+  --scrollbar-thumb: hsl(215 10% 68%);
+  --scrollbar-thumb-hover: hsl(215 10% 58%);
+}
+
+/* Slate (Light) — cool pale slate grey, very slightly desaturated.
+   Between Daylight (0% 98%) and Afternoon (12% 86%) on the HSL scale. */
+:root[data-theme="slate-light"] {
+  color-scheme: light;
+  --background: hsl(210 14% 94%);
+  --foreground: hsl(215 14% 18%);
+  --card: hsl(210 12% 97%);
+  --card-foreground: hsl(215 14% 18%);
+  --popover: hsl(210 12% 97%);
+  --popover-foreground: hsl(215 14% 18%);
+  --primary: hsl(137 52% 31%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 46%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(210 10% 90%);
+  --muted-foreground: hsl(215 10% 42%);
+  --accent: hsl(212 85% 46%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 78% 48%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 76% 50%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 52% 38%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 46%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(210 11% 85%);
+  --input: hsl(210 10% 90%);
+  --ring: hsl(137 52% 31%);
+  --scrollbar-track: hsl(210 10% 90%);
+  --scrollbar-thumb: hsl(210 10% 78%);
+  --scrollbar-thumb-hover: hsl(210 10% 66%);
+}
+
+/* Neutral Grey — achromatic middle grey, no cool/warm cast. */
+:root[data-theme="neutral"] {
+  color-scheme: light;
+  --background: hsl(0 0% 70%);
+  --foreground: hsl(0 0% 12%);
+  --card: hsl(0 0% 78%);
+  --card-foreground: hsl(0 0% 12%);
+  --popover: hsl(0 0% 78%);
+  --popover-foreground: hsl(0 0% 12%);
+  --primary: hsl(137 52% 28%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 42%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(0 0% 63%);
+  --muted-foreground: hsl(0 0% 28%);
+  --accent: hsl(212 85% 42%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 78% 44%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 72% 44%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 34%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 42%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(0 0% 55%);
+  --input: hsl(0 0% 63%);
+  --ring: hsl(137 52% 28%);
+  --scrollbar-track: hsl(0 0% 63%);
+  --scrollbar-thumb: hsl(0 0% 50%);
+  --scrollbar-thumb-hover: hsl(0 0% 38%);
+}
+
+/* Moss — light grey-white theme (neutral template) accented with forest
+   greens. Built around #4CAF50 (primary moss), #98FB98 (pale mint), and
+   #8FBC8F (dark sea green). Background stays achromatic grey so the green
+   reads as foliage accent rather than washing the whole UI. */
+:root[data-theme="moss"] {
+  color-scheme: light;
+  --background: hsl(120 8% 86%);
+  --foreground: hsl(120 12% 14%);
+  --card: hsl(120 8% 92%);
+  --card-foreground: hsl(120 12% 14%);
+  --popover: hsl(120 8% 92%);
+  --popover-foreground: hsl(120 12% 14%);
+  --primary: hsl(122 39% 49%);          /* #4CAF50 */
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(120 25% 65%);        /* #8FBC8F */
+  --secondary-foreground: hsl(120 30% 14%);
+  --muted: hsl(120 8% 78%);
+  --muted-foreground: hsl(120 10% 32%);
+  --accent: hsl(122 44% 40%);           /* darker moss for focus/links */
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(199 80% 42%);
+  --info-foreground: hsl(210 100% 98%);
+  --destructive: hsl(0 72% 46%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(122 42% 40%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 44%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(120 10% 72%);
+  --input: hsl(120 8% 80%);
+  --ring: hsl(122 39% 49%);            /* #4CAF50 */
+  --chart-1: hsl(122 39% 49%);
+  --chart-2: hsl(120 25% 65%);
+  --chart-3: hsl(120 93% 72%);
+  --chart-4: hsl(140 35% 45%);
+  --chart-5: hsl(90 40% 48%);
+  --scrollbar-track: hsl(120 8% 78%);
+  --scrollbar-thumb: hsl(120 10% 60%);
+  --scrollbar-thumb-hover: hsl(120 12% 46%);
+}
+
+/* Evening — dim dark (dusk) */
+:root[data-theme="evening"] {
+  color-scheme: dark;
+  --background: hsl(220 14% 15%);
+  --foreground: hsl(215 12% 78%);
+  --card: hsl(220 13% 19%);
+  --card-foreground: hsl(215 12% 78%);
+  --popover: hsl(220 13% 19%);
+  --popover-foreground: hsl(215 12% 78%);
+  --primary: hsl(137 50% 40%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 85% 60%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(220 13% 19%);
+  --muted-foreground: hsl(215 9% 62%);
+  --accent: hsl(212 85% 60%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 75% 58%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 75% 58%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 45%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 85% 52%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(215 10% 30%);
+  --input: hsl(220 13% 19%);
+  --ring: hsl(137 50% 40%);
+  --scrollbar-track: hsl(220 13% 19%);
+  --scrollbar-thumb: hsl(215 10% 32%);
+  --scrollbar-thumb-hover: hsl(215 10% 42%);
+}
+
+/* Midnight = :root defaults above (deepest dark) */
+
+/* Zinc (Dark) — warm-neutral near-black (zinc hue, 240° 4% sat).
+   Slightly lighter than Midnight so subtle typography still reads. */
+:root[data-theme="zinc-dark"] {
+  color-scheme: dark;
+  --background: hsl(240 4% 12%);
+  --foreground: hsl(60 2% 82%);
+  --card: hsl(240 4% 16%);
+  --card-foreground: hsl(60 2% 82%);
+  --popover: hsl(240 4% 16%);
+  --popover-foreground: hsl(60 2% 82%);
+  --primary: hsl(137 48% 42%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(212 82% 62%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(240 4% 18%);
+  --muted-foreground: hsl(60 3% 64%);
+  --accent: hsl(212 82% 62%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(221 76% 60%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 76% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(130 50% 47%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(26 86% 54%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(240 4% 26%);
+  --input: hsl(240 4% 18%);
+  --ring: hsl(137 48% 42%);
+  --scrollbar-track: hsl(240 4% 18%);
+  --scrollbar-thumb: hsl(240 4% 30%);
+  --scrollbar-thumb-hover: hsl(240 4% 40%);
+}
+
+/* Amethyst — deep purple-tinted dark theme built around #9966CC (primary
+   amethyst) and #8E4585 (deeper plum accent). Cool violet background with
+   lavender foreground so the purple CTA reads as the jewel of the UI. */
+:root[data-theme="amethyst"] {
+  color-scheme: dark;
+  --background: hsl(270 22% 11%);
+  --foreground: hsl(270 16% 90%);
+  --card: hsl(270 20% 15%);
+  --card-foreground: hsl(270 16% 90%);
+  --popover: hsl(270 20% 15%);
+  --popover-foreground: hsl(270 16% 90%);
+  --primary: hsl(270 55% 64%);          /* #9966CC brightened */
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(308 40% 55%);        /* #8E4585 lifted */
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(270 18% 18%);
+  --muted-foreground: hsl(270 12% 72%);
+  --accent: hsl(308 38% 48%);           /* #8E4585 */
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(270 75% 66%);
+  --info-foreground: hsl(230 100% 98%);
+  --destructive: hsl(0 78% 62%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(145 55% 50%);
+  --success-foreground: hsl(115 77% 97%);
+  --warning: hsl(35 90% 56%);
+  --warning-foreground: hsl(33 100% 96%);
+  --border: hsl(270 18% 32%);
+  --input: hsl(270 18% 17%);
+  --ring: hsl(270 55% 64%);            /* #9966CC */
+  --chart-1: hsl(270 55% 64%);
+  --chart-2: hsl(308 40% 50%);
+  --chart-3: hsl(250 55% 60%);
+  --chart-4: hsl(285 50% 55%);
+  --chart-5: hsl(320 45% 58%);
+  --scrollbar-track: hsl(270 18% 17%);
+  --scrollbar-thumb: hsl(270 18% 36%);
+  --scrollbar-thumb-hover: hsl(270 18% 48%);
+}
+
+/* ------------------------------------------------------------------ */
+/*  UI scale ("old people mode") — zoom the whole app 1.25x.           */
+/*  Percent heights on html/body keep the full-viewport app layout     */
+/*  correct under zoom (h-screen would overflow).                      */
+/* ------------------------------------------------------------------ */
+html,
+body {
+  height: 100%;
+}
+
+body[data-ui-scale="large"] {
+  zoom: 1.25; /* keep in sync with LARGE_UI_ZOOM in src/lib/themes.ts */
+}
+
+/* Narrow screens: one size down so wide UI fits without scrollbars */
+body[data-ui-scale="small"] {
+  zoom: 0.875; /* keep in sync with SMALL_UI_ZOOM in src/lib/themes.ts */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: 'Elms Sans', 'Bahnschrift', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+/**
+ * Using the elevate system.
+ * Automatic contrast adjustment.
+ *
+ * <element className="hover-elevate" />
+ * <element className="active-elevate-2" />
+ *
+ * // Using the tailwind utility when a data attribute is "on"
+ * <element className="toggle-elevate data-[state=on]:toggle-elevated" />
+ * // Or manually controlling the toggle state
+ * <element className="toggle-elevate toggle-elevated" />
+ *
+ * Elevation systems have to handle many states.
+ * - not-hovered, vs. hovered vs. active  (three mutually exclusive states)
+ * - toggled or not
+ * - focused or not (this is not handled with these utilities)
+ *
+ * Even without handling focused or not, this is six possible combinations that
+ * need to be distinguished from eachother visually.
+ */
+@layer utilities {
+  @keyframes pulse-slow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 2.5s ease-in-out infinite;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Mini progress bars — the tiny engine strips under the transcript */
+  /*  (Whisper recognition + LLM parsing). 'run' is the indeterminate  */
+  /*  mode for work that has no natural percentage: WASM inference    */
+  /*  finishes when it finishes, so a short segment slides across the  */
+  /*  track instead of faking a fill level.                            */
+  /* ---------------------------------------------------------------- */
+  @keyframes mini-bar-run {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(340%); }
+  }
+
+  .mini-bar-run {
+    width: 30%;
+    animation: mini-bar-run 1.1s ease-in-out infinite;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Glassmorphism ambience — slow-drifting color orbs that sit      */
+  /*  behind every translucent surface so the backdrop blur has       */
+  /*  something to refract.                                           */
+  /* ---------------------------------------------------------------- */
+  /* Pull-tab panel slide-in — a panel animates out from the left edge
+     when its bookmark tab is opened. */
+  @keyframes pull-panel-slide-in {
+    0%   { transform: translateX(-24px); opacity: 0; }
+    100% { transform: translateX(0);      opacity: 1; }
+  }
+  .pull-panel-slide {
+    animation: pull-panel-slide-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes orb-drift-1 {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(140px, 90px) scale(1.15); }
+  }
+  @keyframes orb-drift-2 {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(-150px, 110px) scale(0.9); }
+  }
+  @keyframes orb-drift-3 {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(110px, -130px) scale(1.12); }
+  }
+
+  .glass-orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(110px);
+    pointer-events: none;
+    will-change: transform;
+  }
+  .glass-orb-1 {
+    top: -12%;
+    left: -8%;
+    width: 44rem;
+    height: 44rem;
+    background: radial-gradient(circle, hsl(137 60% 32% / 0.55), transparent 65%);
+    animation: orb-drift-1 28s ease-in-out infinite alternate;
+  }
+  .glass-orb-2 {
+    top: 28%;
+    right: -12%;
+    width: 38rem;
+    height: 38rem;
+    background: radial-gradient(circle, hsl(212 90% 55% / 0.42), transparent 65%);
+    animation: orb-drift-2 36s ease-in-out infinite alternate;
+  }
+  .glass-orb-3 {
+    bottom: -16%;
+    left: 22%;
+    width: 42rem;
+    height: 42rem;
+    background: radial-gradient(circle, hsl(167 60% 40% / 0.35), transparent 65%);
+    animation: orb-drift-3 44s ease-in-out infinite alternate;
+  }
+
+  /* Softer orbs for the light themes */
+  :root[data-theme="daylight"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(137 70% 72% / 0.55), transparent 65%);
+  }
+  :root[data-theme="daylight"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(212 95% 78% / 0.5), transparent 65%);
+  }
+  :root[data-theme="daylight"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(167 70% 75% / 0.45), transparent 65%);
+  }
+
+  /* Morning: warm sunrise tones */
+  :root[data-theme="morning"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(45 90% 74% / 0.55), transparent 65%);
+  }
+  :root[data-theme="morning"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(210 85% 80% / 0.45), transparent 65%);
+  }
+  :root[data-theme="morning"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(90 55% 75% / 0.4), transparent 65%);
+  }
+
+  /* Afternoon: muted overcast tones */
+  :root[data-theme="afternoon"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(210 35% 82% / 0.5), transparent 65%);
+  }
+  :root[data-theme="afternoon"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(215 30% 85% / 0.45), transparent 65%);
+  }
+  :root[data-theme="afternoon"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(200 25% 80% / 0.4), transparent 65%);
+  }
+
+  /* Slate (Light): muted cool slate gradients, almost no chroma */
+  :root[data-theme="slate-light"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(212 25% 86% / 0.55), transparent 65%);
+  }
+  :root[data-theme="slate-light"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(215 20% 88% / 0.5), transparent 65%);
+  }
+  :root[data-theme="slate-light"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(205 18% 86% / 0.45), transparent 65%);
+  }
+
+  /* Neutral Grey: fully achromatic greyscales */
+  :root[data-theme="neutral"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(0 0% 82% / 0.55), transparent 65%);
+  }
+  :root[data-theme="neutral"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(0 0% 86% / 0.5), transparent 65%);
+  }
+  :root[data-theme="neutral"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(0 0% 90% / 0.45), transparent 65%);
+  }
+
+  /* Moss: soft moss/mint green halos on the grey-white base */
+  :root[data-theme="moss"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(122 39% 55% / 0.4), transparent 65%);
+  }
+  :root[data-theme="moss"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(120 93% 80% / 0.35), transparent 65%);
+  }
+  :root[data-theme="moss"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(120 25% 65% / 0.4), transparent 65%);
+  }
+
+  /* Zinc (Dark): subtle low-light grey halos, pure-neutral */
+  :root[data-theme="zinc-dark"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(240 4% 30% / 0.5), transparent 65%);
+  }
+  :root[data-theme="zinc-dark"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(240 4% 26% / 0.45), transparent 65%);
+  }
+  :root[data-theme="zinc-dark"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(240 4% 22% / 0.4), transparent 65%);
+  }
+
+  /* Amethyst: layered violet / plum halos matching the theme jewels */
+  :root[data-theme="amethyst"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(270 50% 50% / 0.5), transparent 65%);
+  }
+  :root[data-theme="amethyst"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(308 35% 40% / 0.42), transparent 65%);
+  }
+  :root[data-theme="amethyst"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(250 45% 45% / 0.38), transparent 65%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glass-orb {
+      animation: none !important;
+    }
+  }
+
+  /* Custom scrollbar - follows theme via CSS vars */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+    border-radius: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  /* Global scrollbar for the page */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 5px;
+    border: 2px solid var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  /* Hide platform floating widget / bubble (enterprise app — no AI assistants) */
+  [data-miaoda-widget],
+  [class*="miaoda"],
+  [id*="miaoda"],
+  [data-openclaw-widget],
+  [class*="openclaw"],
+  [id*="openclaw"],
+  [data-doubao-widget],
+  [class*="doubao"],
+  [id*="doubao"],
+  [class*="douboe"],
+  [id*="douboe"],
+  [data-ai-assistant-widget],
+  [class*="ai-assistant-bubble"],
+  [id*="ai-assistant-bubble"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  /* Hide ugly search cancel button in Chrome until we can style it properly */
+  input[type="search"]::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  /* Placeholder styling for contentEditable div */
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted-foreground);
+    pointer-events: none;
+  }
+
+  /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of
+   * buttons/badges can remove the automatic brightness adjustment on interactions
+   * and program their own. */
+  .no-default-hover-elevate {}
+  .no-default-active-elevate {}
+
+  /* ---------------------------------------------------------------- */
+  /*  iOS-26-style liquid glass — flat frosted content area with a    */
+  /*  subtle edge-only protrusion (thin specular edge bevel + light   */
+  /*  floating shadows). Barely visible borders throughout.           */
+  /*  Accent/active variants only retune the CSS vars.                */
+  /* ---------------------------------------------------------------- */
+  .glass-panel {
+    --glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+    --glass-glow: 0 0 0 transparent;
+    /* flat frosted surface — visibly frosty, no surface curvature */
+    background: color-mix(in oklab, var(--card) 78%, transparent);
+    backdrop-filter: blur(18px) saturate(1.35);
+    -webkit-backdrop-filter: blur(18px) saturate(1.35);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      /* edge-only protrusion: thin specular top edge, faint bottom catch */
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+      /* floating: soft, reduced contact + ambient shadows */
+      0 1px 1px rgba(0, 0, 0, 0.07),
+      0 4px 10px rgba(0, 0, 0, 0.1),
+      0 12px 28px rgba(0, 0, 0, 0.14),
+      var(--glass-glow);
+  }
+
+  /* Pull-tab bookmark panels float over the canvas, so they need a much
+     frostier, more opaque surface than regular flow nodes — otherwise the
+     flowchart lines/nodes show through and hurt text readability. */
+  .pull-tab-panel {
+    background: color-mix(in oklab, var(--card) 96%, transparent);
+    backdrop-filter: blur(26px) saturate(1.5);
+    -webkit-backdrop-filter: blur(26px) saturate(1.5);
+  }
+
+  .glass-accent-green {
+    --glass-border: color-mix(in oklab, var(--primary) 50%, transparent);
+    --glass-glow: 0 0 12px color-mix(in oklab, var(--primary) 16%, transparent);
+  }
+  .glass-accent-blue {
+    --glass-border: color-mix(in oklab, var(--info) 50%, transparent);
+    --glass-glow: 0 0 12px color-mix(in oklab, var(--info) 16%, transparent);
+  }
+  .glass-accent-red {
+    --glass-border: color-mix(in oklab, var(--destructive) 50%, transparent);
+    --glass-glow: 0 0 12px color-mix(in oklab, var(--destructive) 16%, transparent);
+  }
+
+  /* Active/focused node — edge lights up, surface stays flat */
+  .glass-active {
+    --glass-glow:
+      0 0 2px color-mix(in oklab, var(--glass-border) 55%, transparent),
+      0 0 22px color-mix(in oklab, var(--glass-border) 22%, transparent);
+    background: color-mix(in oklab, var(--card) 70%, transparent);
+  }
+
+  /* Auto-parsed field — warm yellow "proofread me" glow. Applied on top of
+     the resting/active glass skin (source order gives it precedence over
+     accents); the page removes it as soon as the agent edits the field. */
+  .glass-parsed {
+    --glass-border: color-mix(in oklab, #fbbf24 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #fbbf24 55%, transparent),
+      0 0 26px color-mix(in oklab, #fbbf24 30%, transparent);
+  }
+
+  /* Customer name "address count" lifecycle glow — the node color tracks
+     how many times the agent has addressed the customer by name during the
+     call: 0 → amber-red (not yet), 1 → yellow (once), 2+ → green (done). */
+  .glass-address-red {
+    --glass-border: color-mix(in oklab, #f97316 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #f97316 60%, transparent),
+      0 0 28px color-mix(in oklab, #ef4444 40%, transparent);
+  }
+  .glass-address-yellow {
+    --glass-border: color-mix(in oklab, #facc15 60%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #facc15 55%, transparent),
+      0 0 26px color-mix(in oklab, #eab308 35%, transparent);
+  }
+  .glass-address-green {
+    --glass-border: color-mix(in oklab, var(--primary) 55%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, var(--primary) 55%, transparent),
+      0 0 26px color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+
+  /* Email prompt glow — triggered when the resolution summary mentions
+     "email". Bright blue = email field still needs filling (auto-scrolls
+     the agent to it); green slow pulse = email already captured.
+     Animates --glass-glow directly (registered @property above) so the
+     node keeps its inset edge + floating shadows and only the glow
+     breathes — continuous, not a one-shot flash. */
+  .glass-email-need {
+    --glass-border: color-mix(in oklab, var(--accent) 70%, transparent);
+    animation: pulse-glow-blue 1.8s ease-in-out infinite;
+  }
+  .glass-email-done {
+    --glass-border: color-mix(in oklab, var(--primary) 60%, transparent);
+    animation: pulse-glow-green 3s ease-in-out infinite;
+  }
+  @keyframes pulse-glow-blue {
+    0%, 100% { --glass-glow: 0 0 3px color-mix(in oklab, var(--accent) 50%, transparent), 0 0 14px color-mix(in oklab, var(--accent) 25%, transparent); }
+    50%      { --glass-glow: 0 0 6px color-mix(in oklab, var(--accent) 80%, transparent), 0 0 34px color-mix(in oklab, var(--accent) 55%, transparent); }
+  }
+  @keyframes pulse-glow-green {
+    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent), 0 0 12px color-mix(in oklab, var(--primary) 20%, transparent); }
+    50%      { --glass-glow: 0 0 4px color-mix(in oklab, var(--primary) 65%, transparent), 0 0 26px color-mix(in oklab, var(--primary) 40%, transparent); }
+  }
+
+  /* Customer-name empty pulse — when the Customer Name field is still blank,
+   * the box breathes a soft amber-red to nudge the agent to capture it.
+   * Slow (4s) so it reads as ambient rather than urgent. */
+  .glass-name-empty {
+    animation: pulse-glow-amber 4s ease-in-out infinite;
+  }
+  @keyframes pulse-glow-amber {
+    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, #f97316 40%, transparent), 0 0 10px color-mix(in oklab, #f97316 16%, transparent); }
+    50%      { --glass-glow: 0 0 4px color-mix(in oklab, #f97316 60%, transparent), 0 0 22px color-mix(in oklab, #ef4444 30%, transparent); }
+  }
+
+  /* REGEX-parsed field — cool blue glow, distinctly different from the AI
+     parser's yellow: blue = provisional pattern match (the AI may still
+     replace it), yellow = the LLM's full-context reading. Same precedence
+     rules as .glass-parsed. */
+  .glass-parsed-regex {
+    --glass-border: color-mix(in oklab, #58a6ff 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #58a6ff 55%, transparent),
+      0 0 26px color-mix(in oklab, #58a6ff 30%, transparent);
+  }
+
+  /* Salesforce DOM-filled fields — cool turquoise. Distinct from yellow
+     (AI read) and blue (regex provisional): when an agent sees this glow
+     they know the value came straight from the Case/SF tab via the
+     extension scrape and needs review before moving on. */
+  .glass-parsed-dom {
+    --glass-border: color-mix(in oklab, #22d3ee 65%, transparent);
+    --glass-glow:
+      0 0 2px color-mix(in oklab, #22d3ee 55%, transparent),
+      0 0 28px color-mix(in oklab, #22d3ee 32%, transparent);
+  }
+
+  /* Idle dimming (toolbar): almost no frost, no shadow */
+  .glass-dim {
+    background: color-mix(in oklab, var(--card) 10%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    box-shadow: none;
+    border-color: color-mix(in oklab, var(--foreground) 5%, transparent);
+  }
+
+  /* Expanded node (hovered quick-insert panel): much frostier, near-opaque
+     so the in-flow expanded content reads clearly over the busy canvas */
+  .glass-expanded {
+    background: color-mix(in oklab, var(--card) 90%, transparent);
+    backdrop-filter: blur(22px) saturate(1.45);
+    -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  }
+
+  /* Recessed glass for text fields */
+  .glass-field {
+    background: color-mix(in oklab, var(--foreground) 5%, transparent);
+    backdrop-filter: blur(10px) saturate(1.35);
+    -webkit-backdrop-filter: blur(10px) saturate(1.35);
+    border: 1px solid color-mix(in oklab, var(--foreground) 11%, transparent);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.16),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.07),
+      0 1px 0 rgba(255, 255, 255, 0.05);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .glass-field:hover {
+    border-color: color-mix(in oklab, var(--ring) 35%, transparent);
+  }
+  .glass-field:focus,
+  .glass-field:focus-visible {
+    outline: none;
+    border-color: color-mix(in oklab, var(--ring) 55%, transparent);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.12),
+      0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent),
+      0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Small glass chips (quick inserts, template matches, handle bar) */
+  .glass-chip {
+    border: 1px solid color-mix(in oklab, var(--foreground) 11%, transparent);
+    background: color-mix(in oklab, var(--card) 45%, transparent);
+    color: var(--muted-foreground);
+    backdrop-filter: blur(6px) saturate(1.15);
+    -webkit-backdrop-filter: blur(6px) saturate(1.15);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.08);
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .glass-chip:hover {
+    border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+    background: color-mix(in oklab, var(--primary) 16%, transparent);
+    color: var(--primary);
+  }
+  .glass-chip-accent {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+  .glass-chip-accent:hover {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 24%, transparent);
+  }
+
+  /* Glass buttons — flat tinted surfaces with a soft edge bevel */
+  .glass-btn {
+    --glass-fill: color-mix(in oklab, var(--card) 62%, transparent);
+    --glass-border: color-mix(in oklab, var(--foreground) 12%, transparent);
+    --glass-btn-glow: transparent;
+    background: var(--glass-fill);
+    backdrop-filter: blur(10px) saturate(1.25);
+    -webkit-backdrop-filter: blur(10px) saturate(1.25);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+      0 1px 2px rgba(0, 0, 0, 0.1),
+      0 4px 10px var(--glass-btn-glow);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      filter 0.15s ease;
+  }
+  .glass-btn:hover {
+    filter: brightness(1.06);
+  }
+  .glass-btn:active {
+    transform: scale(0.98);
+    filter: brightness(0.96);
+  }
+  .glass-btn-primary {
+    --glass-fill: color-mix(in oklab, white 6%, var(--primary));
+    --glass-border: color-mix(in oklab, white 18%, var(--primary));
+    --glass-btn-glow: color-mix(in oklab, var(--primary) 26%, transparent);
+  }
+  .glass-btn-destructive {
+    --glass-fill: color-mix(in oklab, white 6%, var(--destructive));
+    --glass-border: color-mix(in oklab, white 18%, var(--destructive));
+    --glass-btn-glow: color-mix(in oklab, var(--destructive) 26%, transparent);
+  }
+  .glass-btn-secondary {
+    --glass-fill: color-mix(in oklab, var(--secondary) 24%, transparent);
+    --glass-border: color-mix(in oklab, var(--secondary) 45%, transparent);
+  }
+
+
+  /**
+   * Toggleable backgrounds go behind the content. Hoverable/active goes on top.
+   * This way they can stack/compound. Both will overlap the parent's borders!
+   * So borders will be automatically adjusted both on toggle, and hover/active,
+   * and they will be compounded.
+   */
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: -1;
+    /* sits behind content but above backdrop */
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  /* Does not work on elements with overflow:hidden!
+   * Wrap in :where() to zero out specificity so Tailwind position utilities (absolute/fixed/sticky) can override */
+  :where(.hover-elevate:not(.no-default-hover-elevate)),
+  :where(.active-elevate:not(.no-default-active-elevate)),
+  :where(.hover-elevate-2:not(.no-default-hover-elevate)),
+  :where(.active-elevate-2:not(.no-default-active-elevate)) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: 999;
+    /* sits in front of content */
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+}
