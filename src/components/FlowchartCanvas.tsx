@@ -727,7 +727,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   return (
     <div
       ref={canvasRef}
-      className="custom-scrollbar relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
+      className={cn(
+        'custom-scrollbar relative h-full w-full overflow-auto',
+        activeView === 'callNotes'
+          ? 'bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]'
+          : 'bg-background'
+      )}
     >
       {/* Call Notes canvas — rendered only in the Call Notes view so the
           Case Trak board can occupy its own separate canvas. */}
@@ -909,10 +914,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               container and animates top/height between pills. Each pill is
               h-9 (36px), parent has p-1 (4px) padding and gap-1 (4px)
               between pills. */}
-          <div className="relative flex flex-col gap-1 rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
-            {/* Sliding highlight — the green pill that moves under the active label */}
+          <div className="relative flex w-[96px] flex-col gap-1 overflow-hidden rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
+            {/* Sliding highlight — single green pill that animates top between
+                the two tabs. Contained to parent with overflow-hidden so it
+                never leaks out as a stray blob. */}
             <span
-              className="absolute left-1 right-1 z-0 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)] transition-[top] duration-200 ease"
+              className="pointer-events-none absolute left-1 right-1 z-0 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)] transition-[top] duration-200 ease-out"
               style={{
                 top: activeView === 'callNotes' ? 4 : 44,
                 height: 36,
@@ -984,8 +991,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             display:none) so their data loads on page render instead of
             waiting for the agent to expand the bookmark. Expanded panels
             stack vertically; collapsed ones take no visual space but stay
-            mounted so e.g. the Product Lookup index is ready instantly. */}
-        <div className="absolute left-[52px] top-4 z-30">
+            mounted so e.g. the Product Lookup index is ready instantly.
+            left-[100px] ducks them clear of the wider work-view pill
+            container (96px) that also lives in the left rail. */}
+        <div className="absolute left-[100px] top-4 z-30">
           {(() => {
             const gap = 16;
             let cursorY = 0;
