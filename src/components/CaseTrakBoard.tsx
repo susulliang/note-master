@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import {
-  ClipboardList,
   Plus,
   ExternalLink,
   Link as LinkIcon,
@@ -271,31 +270,58 @@ export default function CaseTrakBoard() {
 
   const totalCount = items.length;
 
+  /** Export all cases as one "CASE_NUMBER STATUS" line each — the same
+   *  flat-text format the old Over-24h Tracker produced for the report. */
+  const handleCopyStatus = useCallback(async () => {
+    if (items.length === 0) return;
+    const labelFor = (s: CaseStatus) =>
+      CASE_STATUS_COLUMNS.find((c) => c.id === s)?.label ?? s;
+    const text = items
+      .map((c) => `${c.caseNumber} ${labelFor(c.status)}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copied ${items.length} case statuses to clipboard`);
+    } catch {
+      toast.error('Failed to copy. Please select and copy manually.');
+    }
+  }, [items]);
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
-      {/* Header */}
+      {/* Header — no page title (the left-edge pill already says Case Trak).
+          Just a count badge + Copy status + Clear board actions. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+          {totalCount} case{totalCount === 1 ? '' : 's'}
+        </span>
         <div className="flex items-center gap-2">
-          <ClipboardList className="size-5 text-primary" />
-          <h2 className="text-base font-bold tracking-tight text-foreground">Case Trak</h2>
-          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-bold text-primary">
-            {totalCount}
-          </span>
+          {totalCount > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleCopyStatus()}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+              title="Copy every case number + its status, one per line (same format as the old 24h tracker)"
+            >
+              <Copy className="size-3" />
+              Copy status
+            </button>
+          )}
+          {totalCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Clear all ${totalCount} cases from the board?`)) {
+                  setItems([]);
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="size-3" />
+              Clear board
+            </button>
+          )}
         </div>
-        {totalCount > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm(`Clear all ${totalCount} cases from the board?`)) {
-                setItems([]);
-              }
-            }}
-            className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 className="size-3" />
-            Clear board
-          </button>
-        )}
       </div>
 
       {/* Paste / add area */}

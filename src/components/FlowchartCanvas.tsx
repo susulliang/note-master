@@ -729,6 +729,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       ref={canvasRef}
       className="custom-scrollbar relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
     >
+      {/* Call Notes canvas — rendered only in the Call Notes view so the
+          Case Trak board can occupy its own separate canvas. */}
+      {activeView === 'callNotes' && (
       <div
         className="relative"
         style={{ width: canvasWidth, height: canvasHeight }}
@@ -884,10 +887,20 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
           />
         ))}
+      </div>
+      )}
+
+      {/* Case Trak board — its own canvas, fills the available area.
+          Left padding clears the shared left-edge pill + bookmark rail. */}
+      {activeView === 'caseTrak' && (
+        <div className="h-full min-h-full w-full pl-[112px]">
+          {caseTrakContent}
+        </div>
+      )}
 
         {/* Left-edge vertical rail: top = work-view pills (Call Notes /
             Case Trak) with a sliding highlight; below = pull-tab bookmark
-            tabs (only shown in Call Notes mode). */}
+            tabs (shown in both views). */}
         <div
           className="sticky left-0 top-4 z-40 flex flex-col gap-2"
           style={{ width: 0 }}
@@ -931,49 +944,40 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             })}
           </div>
 
-          {/* Pull-tab bookmark tabs — only in Call Notes mode */}
-          {activeView === 'callNotes' && (
-            <div className="flex flex-col gap-1.5">
-              {pullTabNodes.map((node) => {
-                const isCollapsed = collapsedPanels[node.id] ?? true;
-                const Icon = node.icon;
-                const shortLabel = (node.label ?? '')
-                  .split(/[\s·]/)[0]
-                  .slice(0, 7);
-                return (
-                  <button
-                    key={`tab-${node.id}`}
-                    type="button"
-                    onClick={() => togglePanel(node.id)}
-                    title={node.label}
-                    className={cn(
-                      'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
-                      'glass-panel',
-                      isCollapsed
-                        ? 'hover:translate-x-1'
-                        : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
-                    )}
-                  >
-                    {Icon && <Icon className="size-4 text-accent" />}
-                    <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
-                      {shortLabel}
-                    </span>
-                    {!isCollapsed && (
-                      <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Case Trak board — overlays the canvas area when active. */}
-        {activeView === 'caseTrak' && (
-          <div className="absolute inset-0 z-20 overflow-auto bg-background/40 backdrop-blur-[1px]">
-            {caseTrakContent}
+          {/* Pull-tab bookmark tabs — shown in both views */}
+          <div className="flex flex-col gap-1.5">
+            {pullTabNodes.map((node) => {
+              const isCollapsed = collapsedPanels[node.id] ?? true;
+              const Icon = node.icon;
+              const shortLabel = (node.label ?? '')
+                .split(/[\s·]/)[0]
+                .slice(0, 7);
+              return (
+                <button
+                  key={`tab-${node.id}`}
+                  type="button"
+                  onClick={() => togglePanel(node.id)}
+                  title={node.label}
+                  className={cn(
+                    'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
+                    'glass-panel',
+                    isCollapsed
+                      ? 'hover:translate-x-1'
+                      : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
+                  )}
+                >
+                  {Icon && <Icon className="size-4 text-accent" />}
+                  <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
+                    {shortLabel}
+                  </span>
+                  {!isCollapsed && (
+                    <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
+                  )}
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
 
         {/* Pull-tab panels — ALL are kept mounted (collapsed ones get
             display:none) so their data loads on page render instead of
@@ -1043,7 +1047,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             });
           })()}
         </div>
-      </div>
     </div>
   );
 });
