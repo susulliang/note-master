@@ -1606,13 +1606,6 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
-      {/* Ambient color orbs — give the glass surfaces something to refract */}
-      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-        <div className="glass-orb glass-orb-1" />
-        <div className="glass-orb glass-orb-2" />
-        <div className="glass-orb glass-orb-3" />
-      </div>
-
       <div className="flex h-full w-full">
         {/* Main canvas area */}
         <main className="relative flex-1 min-w-0">

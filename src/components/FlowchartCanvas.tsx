@@ -727,13 +727,11 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   return (
     <div
       ref={canvasRef}
-      className="relative h-full w-full"
+      className="custom-scrollbar relative h-full w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
     >
-      {/* Call Notes — its own absolute-inset scroll container + dotted bg.
-          bg lives here so it's removed when Case Trak is active, not
-          swapped at the outer canvas level. */}
+      {/* Call Notes canvas — rendered only in the Call Notes view so the
+          Case Trak board can occupy its own separate canvas. */}
       {activeView === 'callNotes' && (
-      <div className="custom-scrollbar absolute inset-0 overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]">
       <div
         className="relative"
         style={{ width: canvasWidth, height: canvasHeight }}
@@ -890,14 +888,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           />
         ))}
       </div>
-      </div>
       )}
 
-      {/* Case Trak board — absolutely fills the canvas viewport (inset-0
-          to the outer canvas wrapper). No dotted bg, no scroll, just the
-          board's own rendering. */}
+      {/* Case Trak board — solid bg to cover the canvas dot grid, fills
+          full canvas height/width. */}
       {activeView === 'caseTrak' && (
-        <div className="absolute inset-0 pl-[100px]">
+        <div className="h-full min-h-full w-full bg-background pl-[100px]">
           {caseTrakContent}
         </div>
       )}
