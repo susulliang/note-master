@@ -902,12 +902,23 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             Case Trak) with a sliding highlight; below = pull-tab bookmark
             tabs (shown in both views). */}
         <div
-          className="sticky left-0 top-4 z-40 flex flex-col gap-2"
+          className="absolute left-0 top-4 z-40 flex flex-col gap-2"
           style={{ width: 0 }}
         >
-          {/* Work-view pills */}
+          {/* Work-view pills — one sliding highlight lives on the parent
+              container and animates top/height between pills. Each pill is
+              h-9 (36px), parent has p-1 (4px) padding and gap-1 (4px)
+              between pills. */}
           <div className="relative flex flex-col gap-1 rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
-            {(['callNotes', 'caseTrak'] as const).map((view, i) => {
+            {/* Sliding highlight — the green pill that moves under the active label */}
+            <span
+              className="absolute left-1 right-1 z-0 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)] transition-[top] duration-200 ease"
+              style={{
+                top: activeView === 'callNotes' ? 4 : 44,
+                height: 36,
+              }}
+            />
+            {(['callNotes', 'caseTrak'] as const).map((view) => {
               const active = activeView === view;
               const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
               return (
@@ -929,16 +940,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
                   )}
                   {label}
-                  {/* Sliding highlight */}
-                  {active && (
-                    <span
-                      className="absolute inset-0 -z-10 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
-                      style={{
-                        transform: `translateY(${i === 0 ? 0 : 'calc(100% + 4px)'})`,
-                        transition: 'transform 200ms ease',
-                      }}
-                    />
-                  )}
                 </button>
               );
             })}
