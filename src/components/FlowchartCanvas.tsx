@@ -731,9 +731,11 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     >
       {/* Height anchor — wraps both views so `h-full` on each resolves
           against the canvas's full height even when Call Notes' own
-          content is absent (Case Trak only). The anchor is `min-h-full`
-          so Call Notes' large canvasHeight still drives scroll. */}
-      <div className="relative min-h-full">
+          content is absent (Case Trak only). `h-full` gives the anchor a
+          definite height so children's `h-full` (e.g. the Case Trak board)
+          can resolve; `min-h-full` lets Call Notes' large canvasHeight
+          still grow the anchor and drive the canvas scroll. */}
+      <div className="relative h-full min-h-full">
       {/* Call Notes canvas — rendered only in the Call Notes view so the
           Case Trak board can occupy its own separate canvas. */}
       {activeView === 'callNotes' && (
