@@ -41,6 +41,32 @@ export type ExtensionMeta = {
   pushedAt?: string;
 };
 
+/** One case row scraped from the Salesforce "[OVER24]" report by the
+ *  extension popup's "Import Over 24h Report Cases" button. */
+export type ReportCaseRecord = {
+  /** Case number exactly as shown in the report (leading zeros preserved). */
+  caseNumber: string;
+  /** Absolute Lightning Case view URL (from the report hyperlink), if any. */
+  caseUrl?: string | null;
+  caseOwner?: string | null;
+  /** Report column "Contact Account Name" — the customer shown on the card. */
+  contactAccountName?: string | null;
+  dateTimeOpened?: string | null;
+  lastModifiedDate?: string | null;
+  /** Raw Salesforce Status value from the report (e.g. "Open" / "Working"). */
+  status?: string | null;
+  customerLastReplyTime?: string | null;
+};
+
+/** Metadata about an "[OVER24]" report import batch. */
+export type ReportImportMeta = {
+  reportName?: string | null;
+  totalRecords?: number | null;
+  capturedAt?: string | null;
+  url?: string | null;
+  title?: string | null;
+};
+
 export type PendingExtensionPush = {
   /** EXT_TO_NODE_ID → value (already mapped). For auto scope: 4 identity
    *  fields only. For manual scope: full merged set from the extension. */
@@ -292,6 +318,12 @@ export interface UseCcpExtensionBridgeArgs {
    * 'dom-ext' so callers can match against their AutoFillSource type.
    */
   source?: AutoFillSourceLike;
+  /** Called when the extension pushes an "[OVER24]" report case list
+   *  (popup button "Import Over 24h Report Cases"). Receives the full
+   *  batch of scraped case rows + report metadata; the caller routes it
+   *  into the Case Trak board. Delivered via both the bridge push channel
+   *  and the EXT_HELLO direct-channel catch-up (deduped on capturedAt). */
+  onReportCases?: (cases: ReportCaseRecord[], meta: ReportImportMeta) => void;
 }
 
 type AutoFillSourceLike = string;
@@ -299,6 +331,7 @@ type AutoFillSourceLike = string;
 export function useCcpExtensionBridge({
   onApply,
   source = 'dom-ext',
+  onReportCases,
 }: UseCcpExtensionBridgeArgs): CcpExtensionBridge {
   const [connected, setConnected] = useState(false);
   const [extensionId, setExtensionId] = useState<string | null>(null);
@@ -474,6 +507,11 @@ export function useCcpExtensionBridge({
   const requestCounterRef = useRef(1);
   const onApplyRef = useRef(onApply);
   useEffect(() => { onApplyRef.current = onApply; }, [onApply]);
+  const onReportCasesRef = useRef(onReportCases);
+  useEffect(() => { onReportCasesRef.current = onReportCases; }, [onReportCases]);
+  /** capturedAt of the last "[OVER24]" report batch we already delivered —
+   *  dedupes the bridge push channel against the EXT_HELLO catch-up poll. */
+  const lastOver24SeenRef = useRef<string>('');
   const sourceRef = useRef(source);
   useEffect(() => { sourceRef.current = source; }, [source]);
   // Latest-sendRequest / queuePendingPush accessors so earlier useCallbacks
@@ -525,6 +563,28 @@ export function useCcpExtensionBridge({
     } catch { /* ignore */ }
     out.push(...DEFAULT_EXT_ID_CANDIDATES);
     return Array.from(new Set(out.filter(Boolean)));
+  }, []);
+
+  // -------------------------------------------------------------------------
+  //  "[OVER24]" report import delivery. Two arrival paths:
+  //    a) bridge push  — `ecovacs-ccp-extension:push` with payload.reportCases
+  //    b) EXT_HELLO catch-up — the direct externally_connectable poll includes
+  //       the latest cached report snapshot (covers the no-bridge.js Edge case)
+  //  Both dedupe on reportMeta.capturedAt so a batch is delivered once.
+  // -------------------------------------------------------------------------
+  const maybeDeliverOver24 = useCallback((over24: any) => {
+    const o = over24;
+    if (!o || !Array.isArray(o.cases) || o.cases.length === 0) return;
+    const stamp = typeof o.capturedAt === 'string' ? o.capturedAt : '';
+    if (stamp && stamp === lastOver24SeenRef.current) return;
+    if (stamp) lastOver24SeenRef.current = stamp;
+    onReportCasesRef.current?.(o.cases as ReportCaseRecord[], {
+      reportName: o.reportName ?? null,
+      totalRecords: typeof o.totalRecords === 'number' ? o.totalRecords : null,
+      capturedAt: o.capturedAt ?? null,
+      url: o.url ?? null,
+      title: o.title ?? null,
+    });
   }, []);
 
   /**
@@ -581,6 +641,7 @@ export function useCcpExtensionBridge({
               if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
                 queuePendingPushRef.current?.(r.merged, r.state ?? null);
               }
+              maybeDeliverOver24(r.over24);
             }
           }).catch(() => { /* ignore */ });
           return true;
@@ -601,7 +662,7 @@ export function useCcpExtensionBridge({
       }
     }
     return false;
-  }, [getCandidateIds]);
+  }, [getCandidateIds, maybeDeliverOver24]);
 
   const requestConnection = useCallback(() => {
     setHandshakeRequested(true);
@@ -667,6 +728,7 @@ export function useCcpExtensionBridge({
               if (r.merged && typeof r.merged === 'object' && Object.keys(r.merged).length > 0) {
                 queuePendingPush(r.merged, r.state ?? null);
               }
+              maybeDeliverOver24((r as any).over24);
             }
           });
         }
@@ -733,7 +795,25 @@ export function useCcpExtensionBridge({
         //   auto  → 4 identity key fields (scrape-triggered)
         //   manual → full merged field set (popup "Push to open Ticket
         //            Notes" button → still shows the card, no silent apply)
+        //   over24 → "[OVER24]" report case list (popup "Import Over 24h
+        //            Report Cases" button) → routed straight to onReportCases
+        //            (Case Trak board), never through the form-confirm card.
         const payload = data.payload;
+        if (Array.isArray(payload?.reportCases) && payload.reportCases.length > 0) {
+          setConnected(true);
+          const meta = payload.reportMeta ?? {};
+          if (typeof meta.capturedAt === 'string' && meta.capturedAt) {
+            lastOver24SeenRef.current = meta.capturedAt;
+          }
+          onReportCasesRef.current?.(payload.reportCases as ReportCaseRecord[], {
+            reportName: meta.reportName ?? null,
+            totalRecords: typeof meta.totalRecords === 'number' ? meta.totalRecords : null,
+            capturedAt: meta.capturedAt ?? null,
+            url: meta.url ?? null,
+            title: meta.title ?? null,
+          });
+          return;
+        }
         if (payload?.fields && typeof payload.fields === 'object') {
           setConnected(true);
           const mode: unknown = payload.mode;
@@ -778,7 +858,7 @@ export function useCcpExtensionBridge({
       window.clearTimeout(t3);
       if (iv) window.clearInterval(iv);
     };
-  }, [requestConnection, connected]);
+  }, [requestConnection, connected, maybeDeliverOver24]);
 
   /** Build the EXT_TO_NODE_ID-mapped nodeId → string dict that the form
    *  handler understands. Anything unmapped spills into ADDITIONAL_NOTES.
@@ -1120,7 +1200,9 @@ export function useCcpExtensionBridge({
   //  injected — the common Edge case), the extension cannot push scraped
   //  CCP/SF fields into the page. Poll EXT_HELLO every 5s instead and only
   //  enqueue the confirm card when the snapshot actually changed, so
-  //  identical data doesn't re-pop the popup forever.
+  //  identical data doesn't re-pop the popup forever. The same reply also
+  //  carries the latest cached "[OVER24]" report import (maybeDeliverOver24
+  //  dedupes on capturedAt).
   useEffect(() => {
     if (!connected || bridgeInjected) return;
     const tick = () => {
@@ -1134,12 +1216,13 @@ export function useCcpExtensionBridge({
               queuePendingPushRef.current?.(r.merged, r.state ?? null);
             }
           }
+          maybeDeliverOver24(r.over24);
         }
       }).catch(() => { /* ignore */ });
     };
     const iv = window.setInterval(tick, 5000);
     return () => window.clearInterval(iv);
-  }, [connected, bridgeInjected]);
+  }, [connected, bridgeInjected, maybeDeliverOver24]);
 
   const scrapeAll = useCallback(async (): Promise<any> => {
     try {

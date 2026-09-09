@@ -108,6 +108,11 @@ function diagClear() {
 const defaultState = () => ({
   ccp: null,     // { capturedAt, url, title, data: {...} }
   sf: null,      // { capturedAt, url, title, data: {...} }
+  /** Last "[OVER24]" report import (popup button). Shape:
+   *  { capturedAt, url, title, tabId, reportName, totalRecords, cases: [...] }
+   *  cases[] entries: { caseNumber, caseUrl?, caseOwner, contactAccountName,
+   *  dateTimeOpened, lastModifiedDate, status, customerLastReplyTime }. */
+  over24: null,
   settings: {
     /** Optional extra host match patterns the user added in the popup */
     extraTicketHosts: [],
@@ -581,6 +586,150 @@ const INLINE_CCP_EXTRACT = function () {
 const INLINE_EXTRACT_MAP = {
   SCRAPE_SF: INLINE_SF_EXTRACT,
   SCRAPE_CCP: INLINE_CCP_EXTRACT,
+};
+
+/** Inline "[OVER24]" report extractor — self-contained copy of
+ *  scrapeOver24Report() in content/salesforce.js (functions here are
+ *  SERIALIZED and run inside the remote tab, so no outer-scope references
+ *  work). Run via executeScript func() as the last-resort tier when the
+ *  content-script listener isn't reachable. Returns
+ *  { ok, reportName, totalRecords, cases[], error }. */
+// eslint-disable-next-line func-names
+const INLINE_OVER24_EXTRACT = function () {
+  const REPORT_COLUMNS = {
+    'case number': 'caseNumber',
+    'case owner': 'caseOwner',
+    'contact account name': 'contactAccountName',
+    'date/time opened': 'dateTimeOpened',
+    'case last modified date': 'lastModifiedDate',
+    'status': 'status',
+    'customer last reply time': 'customerLastReplyTime',
+  };
+  function _clean(v) {
+    return String(v == null ? '' : v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function _norm(s) { return _clean(s).toLowerCase().replace(/[*:：]+$/, ''); }
+  const cases = [];
+  const seen = new Set();
+  function pushCase(rec, href) {
+    const cn = _clean(rec.caseNumber);
+    if (!/\d{5,}/.test(cn)) return;
+    const key = cn.replace(/\D/g, '');
+    if (seen.has(key)) return;
+    rec.caseNumber = cn;
+    if (href && /^https?:/i.test(href)) rec.caseUrl = href;
+    cases.push(rec);
+  }
+
+  const bodyText = (typeof document !== 'undefined' && document.body && (document.body.innerText || document.body.textContent)) || '';
+  let reportName = '';
+  const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
+  if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
+  let totalRecords = 0;
+  const tr = bodyText.match(/Total\s*Records\s*:?\s*(\d+)/i);
+  if (tr) totalRecords = parseInt(tr[1], 10) || 0;
+
+  // ---- Tier A: DOM grid walk (shadow-piercing) ----
+  function deepQueryAll(sel) {
+    const out = [];
+    const walk = (root, depth) => {
+      if (!root || depth > 10 || out.length > 400) return;
+      let found = [];
+      try { found = Array.from(root.querySelectorAll(sel)); } catch { return; }
+      out.push(...found);
+      try {
+        const all = root.querySelectorAll('*');
+        for (const el of all) {
+          if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
+        }
+      } catch { /* ignore */ }
+    };
+    if (typeof document !== 'undefined') walk(document, 0);
+    return out;
+  }
+  function cellsOf(row) {
+    let cells = Array.from(row.querySelectorAll(
+      ':scope > td, :scope > th, :scope > [role="gridcell"], :scope > [role="columnheader"], :scope > [role="rowheader"]'
+    ));
+    if (cells.length === 0) cells = Array.from(row.children || []);
+    return cells;
+  }
+
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const grid of grids) {
+      let rows = [];
+      try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+      if (rows.length < 2) continue;
+      for (let ri = 0; ri < rows.length; ri += 1) {
+        const headerCells = cellsOf(rows[ri]);
+        const labels = headerCells.map((c) => _norm(c.textContent));
+        const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
+        if (headerHits < 3) continue;
+        const colMap = new Map();
+        labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
+        for (let rj = ri + 1; rj < rows.length; rj += 1) {
+          const dcells = cellsOf(rows[rj]);
+          if (dcells.length < 3) continue;
+          const dlabels = dcells.map((c) => _norm(c.textContent));
+          if (dlabels.filter((l) => REPORT_COLUMNS[l]).length >= 3) continue;
+          const build = (offset) => {
+            const rec = {};
+            colMap.forEach((field, i) => {
+              const cell = dcells[i + offset];
+              if (cell) rec[field] = _clean(cell.textContent);
+            });
+            return rec;
+          };
+          let offset = 0;
+          let rec = build(0);
+          if (!rec.caseNumber || !/\d{5,}/.test(rec.caseNumber)) {
+            const alt = build(1);
+            if (alt.caseNumber && /\d{5,}/.test(alt.caseNumber)) { rec = alt; offset = 1; }
+          }
+          let href = '';
+          const cnEntry = [...colMap.entries()].find(([, f]) => f === 'caseNumber');
+          if (cnEntry) {
+            const cnCell = dcells[cnEntry[0] + offset];
+            const a = cnCell && cnCell.querySelector ? cnCell.querySelector('a[href]') : null;
+            if (a) {
+              try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; }
+            }
+          }
+          pushCase(rec, href);
+        }
+        break;
+      }
+    }
+  }
+
+  // ---- Tier B: innerText line sweep (agent-pasted format) ----
+  if (cases.length === 0) {
+    const ls = bodyText.split(/\r?\n/).map((s) => _clean(s)).filter(Boolean);
+    for (let i = 0; i < ls.length - 7; i += 1) {
+      if (!/^\d{1,4}$/.test(ls[i])) continue;
+      if (!/^\d{6,10}$/.test(ls[i + 1])) continue;
+      pushCase({
+        caseNumber: ls[i + 1],
+        caseOwner: ls[i + 2],
+        contactAccountName: ls[i + 3],
+        dateTimeOpened: ls[i + 4],
+        lastModifiedDate: ls[i + 5],
+        status: ls[i + 6],
+        customerLastReplyTime: ls[i + 7],
+      }, '');
+    }
+  }
+
+  return {
+    ok: cases.length > 0,
+    reportName,
+    totalRecords: totalRecords || cases.length,
+    cases,
+    error: cases.length === 0
+      ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
+      : '',
+  };
 };
 
 async function sendToTab(tabId, payload) {
@@ -1226,6 +1375,14 @@ function keyFieldsEqual(a, b) {
   return keys.every((k) => String((a || {})[k] ?? '') === String((b || {})[k] ?? ''));
 }
 
+/** Find the running Ticket Notes web-app tab (used by pushToTicketApp and by
+ *  the OVER24 report import push). */
+async function findTicketAppTab() {
+  return findTab(TICKET_APP_HOST_PATTERNS.concat(
+    (state.settings.extraTicketHosts || []).map((h) => new RegExp(h.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*'), 'i'))
+  ));
+}
+
 /** Find the running Ticket Notes web-app tab and push merged fields to it.
  *  Used both by the popup's "Push to ticket" button and by autoPush after
  *  every content-script scrape event.
@@ -1244,9 +1401,7 @@ async function pushToTicketApp(force = false) {
     diagRecord('push:skipped', { force, reason: 'autoPush disabled' });
     return { ok: false, skipped: 'autoPush disabled' };
   }
-  const ticketTab = await findTab(TICKET_APP_HOST_PATTERNS.concat(
-    (state.settings.extraTicketHosts || []).map((h) => new RegExp(h.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*'), 'i'))
-  ));
+  const ticketTab = await findTicketAppTab();
   if (!ticketTab) {
     diagRecord('push:error', { force, error: 'No open Ticket Notes tab found. Ticket app patterns = [' + TICKET_APP_HOST_PATTERNS.map((r) => String(r)).join(', ') + ']' });
     return { ok: false, skipped: 'No open Ticket Notes web-app tab found.' };
@@ -1307,6 +1462,182 @@ async function pushToTicketApp(force = false) {
   }
   diagRecord('push:no_reply', { tabId: ticketTab.id, url: ticketTab.url, bridgeReply: reply ?? null, error: 'Ticket app bridge did not reply (missing content script on this origin, or listener not attached yet).' });
   return { ok: false, error: 'Ticket app bridge did not reply.' };
+}
+
+// ---------------------------------------------------------------------------
+//  "[OVER24]" report import → Ticket Notes Case Trak board.
+//
+//  Popup button "Import Over 24h Report Cases" flow:
+//    1. Find the Salesforce tab showing the report (active SF tab → any SF
+//       tab whose title mentions OVER24 → most-recent SF tab).
+//    2. Scrape the report grid via content/salesforce.js
+//       (SCRAPE_OVER24_REPORT), with the usual tiered fallback:
+//         Tier 1  manifest content-script listener
+//         Tier 2  inject salesforce.js then retry the listener
+//         Tier 3  INLINE_OVER24_EXTRACT via chrome.scripting (MAIN world)
+//    3. Store the snapshot in state.over24 (survives SW restarts so the
+//       app's EXT_HELLO catch-up can still pick it up later).
+//    4. Push the full case list to the Ticket Notes tab via the bridge
+//       (TICKET_APP_BRIDGE → bridge.js → window.postMessage). The app's
+//       Case Trak board receives payload.reportCases and renders cards.
+// ---------------------------------------------------------------------------
+
+/** Which Salesforce tab holds the [OVER24] report right now?
+ *  1. The tab the agent is actively looking at (if it's SF — they just
+ *     opened the report and clicked our popup).
+ *  2. Any SF tab whose TITLE mentions OVER24 (the report page title).
+ *  3. Fallback: the most-recently-used SF tab (findTab scoring). */
+async function findOver24ReportTab() {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active?.url && SF_PATTERNS.some((p) => p.test(active.url))) return active;
+  const all = await chrome.tabs.query({});
+  const over24Tabs = all.filter((t) => t.url
+    && SF_PATTERNS.some((p) => p.test(t.url))
+    && /over\s*24/i.test(t.title || ''));
+  if (over24Tabs.length > 0) {
+    const cw = (await chrome.windows.getCurrent({ populate: false }).catch(() => null));
+    const scored = over24Tabs
+      .map((t) => ({
+        t,
+        sort: [
+          t.active && t.windowId === cw?.id ? 0 : 1,
+          -(typeof t.lastAccessed === 'number' ? t.lastAccessed : -Infinity),
+        ],
+      }))
+      .sort((a, b) => (a.sort[0] - b.sort[0]) || (a.sort[1] - b.sort[1]));
+    return scored[0].t;
+  }
+  return findTab(SF_PATTERNS);
+}
+
+/** Tiered [OVER24] report scrape of ONE tab. Returns
+ *  { ok, cases[], reportName, totalRecords, via?, error? }. */
+async function scrapeOver24FromTab(tabId) {
+  let firstError = null;
+  // Tier 1: manifest content-script listener.
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
+    if (r && Array.isArray(r.cases) && r.cases.length > 0) {
+      return { ok: true, cases: r.cases, reportName: r.reportName || '', totalRecords: r.totalRecords || r.cases.length, via: 'listener' };
+    }
+    firstError = (r && r.error) ? String(r.error) : 'Report content script found no cases.';
+  } catch (err) {
+    firstError = String(err?.message || err);
+  }
+  // Tier 2: inject salesforce.js (tab predates the extension load), retry.
+  try {
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: SF_INJECT_FILES });
+    const retry = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
+    if (retry && Array.isArray(retry.cases) && retry.cases.length > 0) {
+      return { ok: true, cases: retry.cases, reportName: retry.reportName || '', totalRecords: retry.totalRecords || retry.cases.length, via: 'inject+listener' };
+    }
+    if (!firstError && retry?.error) firstError = String(retry.error);
+  } catch (err2) {
+    if (!firstError) firstError = String(err2?.message || err2);
+  }
+  // Tier 3: inline executeScript across every frame — keep the frame with
+  // the most cases (the report can live in a sub-frame of the Console).
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: INLINE_OVER24_EXTRACT,
+      world: chrome.scripting.ExecutionWorld ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN',
+    });
+    let best = null;
+    for (const frame of Array.isArray(results) ? results : []) {
+      const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
+      if (!obj) continue;
+      if (!best || ((obj.cases?.length) || 0) > ((best.cases?.length) || 0)) best = obj;
+    }
+    if (best && Array.isArray(best.cases) && best.cases.length > 0) {
+      return { ok: true, cases: best.cases, reportName: best.reportName || '', totalRecords: best.totalRecords || best.cases.length, via: 'inline-executeScript' };
+    }
+    if (!firstError && best?.error) firstError = String(best.error);
+  } catch (err3) {
+    if (!firstError) firstError = String(err3?.message || err3);
+  }
+  return { ok: false, cases: [], error: firstError || 'No report cases found. Open the [OVER24] report in a Salesforce tab, then retry.' };
+}
+
+/** Push the latest over24 snapshot into the Ticket Notes tab (Case Trak). */
+async function pushOver24ToTicketApp() {
+  if (!state.over24) return { ok: false, error: 'No report snapshot to push.' };
+  const ticketTab = await findTicketAppTab();
+  if (!ticketTab) {
+    diagRecord('over24:push:error', { error: 'No open Ticket Notes tab found.' });
+    return { ok: false, error: 'No open Ticket Notes tab found. Open the Ticket Notes web app (localhost or the Vercel site), then retry.' };
+  }
+  const payload = {
+    type: 'TICKET_EXT_PUSH',
+    mode: 'over24',
+    reportCases: state.over24.cases,
+    reportMeta: {
+      capturedAt: state.over24.capturedAt,
+      reportName: state.over24.reportName || '',
+      totalRecords: state.over24.totalRecords || state.over24.cases.length,
+      url: state.over24.url || '',
+      title: state.over24.title || '',
+      count: state.over24.cases.length,
+    },
+    pushedAt: nowISO(),
+    source: 'ecovacs-ccp-scraper',
+  };
+  diagRecord('over24:push:start', { tabId: ticketTab.id, url: ticketTab.url, cases: payload.reportCases.length });
+  try {
+    const reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
+    if (reply?.ok) {
+      diagRecord('over24:push:ok', { tabId: ticketTab.id, url: ticketTab.url, cases: payload.reportCases.length });
+      return { ok: true };
+    }
+    diagRecord('over24:push:no_reply', { tabId: ticketTab.id, url: ticketTab.url, bridgeReply: reply ?? null });
+    return { ok: false, error: 'Ticket app bridge did not reply. Refresh the Ticket Notes tab, then retry.' };
+  } catch (err) {
+    diagRecord('over24:push:throw', { tabId: ticketTab.id, url: ticketTab.url, error: String(err?.message || err) });
+    return { ok: false, error: 'Ticket app bridge did not reply. Refresh the Ticket Notes tab (and confirm the extension is connected), then retry.' };
+  }
+}
+
+/** Full popup flow: scrape the [OVER24] report tab → store → push to Case
+ *  Trak. Reply shape: { ok, count, totalRecords, reportName, via, pushed }. */
+async function importOver24Report() {
+  const tab = await findOver24ReportTab();
+  if (!tab) {
+    return { ok: false, error: 'No Salesforce tab found. Open the [OVER24] report in Salesforce first, then retry.' };
+  }
+  const r = await scrapeOver24FromTab(tab.id);
+  if (!r.ok || !r.cases || r.cases.length === 0) {
+    diagRecord('over24:scrape:fail', { tabId: tab.id, url: tab.url, title: tab.title ?? null, error: r?.error ?? null, cases: r?.cases?.length ?? 0 });
+    return { ok: false, error: r?.error || 'No report cases found on the Salesforce tab. Make sure the [OVER24] report grid is visible, then retry.' };
+  }
+  state.over24 = {
+    capturedAt: nowISO(),
+    url: tab.url,
+    title: tab.title,
+    tabId: tab.id,
+    reportName: r.reportName || '',
+    totalRecords: r.totalRecords || r.cases.length,
+    cases: r.cases,
+  };
+  await saveState();
+  const pushed = await pushOver24ToTicketApp();
+  diagRecord('over24:scrape:ok', {
+    tabId: tab.id,
+    url: tab.url,
+    via: r.via,
+    cases: r.cases.length,
+    totalRecords: state.over24.totalRecords,
+    reportName: state.over24.reportName,
+    pushedOk: Boolean(pushed?.ok),
+    pushedError: pushed?.error ?? null,
+  });
+  return {
+    ok: true,
+    count: r.cases.length,
+    totalRecords: state.over24.totalRecords,
+    reportName: state.over24.reportName,
+    via: r.via,
+    pushed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1480,6 +1811,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       diagRecord('popup:action', { type: t, force: true });
       const r = await pushToTicketApp(true);
       diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+      sendResponse(r);
+    })();
+    return true;
+  }
+  if (t === 'POPUP_SCRAPE_OVER24') {
+    (async () => {
+      diagRecord('popup:action', { type: t });
+      const r = await importOver24Report();
+      diagRecord('popup:action:done', { type: t, ok: Boolean(r?.ok), count: r?.count ?? null, pushedOk: Boolean(r?.pushed?.ok), error: r?.error ?? null });
       sendResponse(r);
     })();
     return true;
@@ -1708,6 +2048,17 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
           externalPatterns: extPatterns,
           fingerprint: [m.version || '', bridgePatterns.length, extPatterns.length].join('|'),
           merged: buildMergedFields(),
+          // Latest [OVER24] report import (popup button). The app's
+          // direct-channel catch-up reads this when bridge.js is not
+          // injected on its tab — dedup happens on capturedAt.
+          over24: state.over24 ? {
+            capturedAt: state.over24.capturedAt,
+            reportName: state.over24.reportName ?? '',
+            totalRecords: state.over24.totalRecords ?? null,
+            url: state.over24.url ?? '',
+            title: state.over24.title ?? '',
+            cases: state.over24.cases ?? [],
+          } : null,
           state,
         });
         diagRecord('external:ok', { type: t, mergedFields: Object.keys(buildMergedFields() || {}).length, bridgePatterns, externalPatterns });

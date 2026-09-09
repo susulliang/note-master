@@ -118,6 +118,7 @@ import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
+import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
@@ -773,6 +774,10 @@ export default function TicketNotesPage() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** Top-level work view: Call Notes flowchart (default) or Case Trak board. */
   const [workView, setWorkView] = useState<'callNotes' | 'caseTrak'>('callNotes');
+  /** "[OVER24]" report batches pushed by the extension (popup button
+   *  "Import Over 24h Report Cases"). Accumulates across imports so the
+   *  Case Trak board can merge every batch whenever it mounts. */
+  const [caseReportImports, setCaseReportImports] = useState<CaseReportImportBatch[]>([]);
   const [showOutput, setShowOutput] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
@@ -1390,6 +1395,18 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       }
       return applied;
     },
+    // "[OVER24]" report batches (extension popup button "Import Over 24h
+    // Report Cases"). Queued here so the board merges them even when the
+    // Case Trak view isn't the active tab; CaseTrakBoard dedupes per batch.
+    onReportCases: (cases, meta) => {
+      setCaseReportImports((prev) => [
+        ...prev,
+        { cases, meta, nonce: prev.length > 0 ? prev[prev.length - 1].nonce + 1 : 1 },
+      ]);
+      if (workView !== 'caseTrak') {
+        toast.info(`Over-24h report: ${cases.length} case${cases.length === 1 ? '' : 's'} received → Case Trak board.`);
+      }
+    },
   });
 
   /** Panel mic-mode toggle (no longer in the toolbar — call capture covers
@@ -1818,7 +1835,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
               onViewChange={setWorkView}
-              caseTrakContent={<CaseTrakBoard />}
+              caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} />}
             />
           </TicketPanelsContext.Provider>
         </main>

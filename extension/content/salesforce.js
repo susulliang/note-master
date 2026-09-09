@@ -625,6 +625,170 @@
     return acc;
   }
 
+  // =========================================================================
+  //  REPORT SCRAPER — "[OVER24]" tabular report (Lightning report viewer)
+  // =========================================================================
+  //
+  //  Layout verified against the agent's Sep 2026 paste:
+  //    Title block:  "Report: Cases" / "[OVER24]" / "Total Records 61"
+  //    Columns:      Case Number | Case Owner | Contact Account Name |
+  //                  Date/Time Opened | Case Last Modified Date | Status |
+  //                  Customer Last Reply Time
+  //    Rows:         bare row-index cell ("1", "2", …) + the 7 data cells;
+  //                  the Case Number cell is a hyperlink to the Case record.
+  //
+  //  Tier A walks every <table> / [role=grid] (piercing open shadow roots)
+  //  looking for a header row containing ≥3 of the 7 known column labels,
+  //  then maps every following row by column index (aligning around the
+  //  header-less row-index column). Tier B falls back to a line sweep of
+  //  body.innerText using the pasted accessibility format (index line,
+  //  case-number line, then 6 value lines).
+  const REPORT_COLUMNS = {
+    'case number': 'caseNumber',
+    'case owner': 'caseOwner',
+    'contact account name': 'contactAccountName',
+    'date/time opened': 'dateTimeOpened',
+    'case last modified date': 'lastModifiedDate',
+    'status': 'status',
+    'customer last reply time': 'customerLastReplyTime',
+  };
+
+  function scrapeOver24Report() {
+    function _clean(v) {
+      return String(v == null ? '' : v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    function _norm(s) { return _clean(s).toLowerCase().replace(/[*:：]+$/, ''); }
+    const cases = [];
+    const seen = new Set();
+    function pushCase(rec, href) {
+      const cn = _clean(rec.caseNumber);
+      if (!/\d{5,}/.test(cn)) return; // drops summary / aggregate / header rows
+      const key = cn.replace(/\D/g, '');
+      if (seen.has(key)) return;
+      rec.caseNumber = cn;
+      if (href && /^https?:/i.test(href)) rec.caseUrl = href;
+      cases.push(rec);
+    }
+
+    const bodyText = (document.body && (document.body.innerText || document.body.textContent)) || '';
+    let reportName = '';
+    const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
+    if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
+    let totalRecords = 0;
+    const tr = bodyText.match(/Total\s*Records\s*:?\s*(\d+)/i);
+    if (tr) totalRecords = parseInt(tr[1], 10) || 0;
+
+    // ---- Tier A: DOM grid walk (shadow-piercing) --------------------------
+    function deepQueryAll(sel) {
+      const out = [];
+      const walk = (root, depth) => {
+        if (!root || depth > 10 || out.length > 400) return;
+        let found = [];
+        try { found = Array.from(root.querySelectorAll(sel)); } catch { return; }
+        out.push(...found);
+        // Lightning LWC grids often live inside open shadow roots.
+        try {
+          const all = root.querySelectorAll('*');
+          for (const el of all) {
+            if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
+          }
+        } catch { /* ignore */ }
+      };
+      walk(document, 0);
+      return out;
+    }
+
+    function cellsOf(row) {
+      let cells = Array.from(row.querySelectorAll(
+        ':scope > td, :scope > th, :scope > [role="gridcell"], :scope > [role="columnheader"], :scope > [role="rowheader"]'
+      ));
+      if (cells.length === 0) {
+        // custom div-based grids: direct element children act as cells
+        cells = Array.from(row.children || []);
+      }
+      return cells;
+    }
+
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const grid of grids) {
+      let rows = [];
+      try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+      if (rows.length < 2) continue;
+      for (let ri = 0; ri < rows.length; ri += 1) {
+        const headerCells = cellsOf(rows[ri]);
+        const labels = headerCells.map((c) => _norm(c.textContent));
+        const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
+        if (headerHits < 3) continue;
+        // column index → field map from THIS header row
+        const colMap = new Map();
+        labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
+        for (let rj = ri + 1; rj < rows.length; rj += 1) {
+          const dcells = cellsOf(rows[rj]);
+          if (dcells.length < 3) continue;
+          const dlabels = dcells.map((c) => _norm(c.textContent));
+          // repeated (sticky) header rows are skipped, not parsed as data
+          if (dlabels.filter((l) => REPORT_COLUMNS[l]).length >= 3) continue;
+          // Alignment: data rows may carry one extra leading row-index cell
+          // that has no header of its own.
+          const build = (offset) => {
+            const rec = {};
+            colMap.forEach((field, i) => {
+              const cell = dcells[i + offset];
+              if (cell) rec[field] = _clean(cell.textContent);
+            });
+            return rec;
+          };
+          let offset = 0;
+          let rec = build(0);
+          if (!rec.caseNumber || !/\d{5,}/.test(rec.caseNumber)) {
+            const alt = build(1);
+            if (alt.caseNumber && /\d{5,}/.test(alt.caseNumber)) { rec = alt; offset = 1; }
+          }
+          // Case hyperlink — first <a href> inside the case-number cell.
+          let href = '';
+          const cnEntry = [...colMap.entries()].find(([, f]) => f === 'caseNumber');
+          if (cnEntry) {
+            const cnCell = dcells[cnEntry[0] + offset];
+            const a = cnCell && cnCell.querySelector ? cnCell.querySelector('a[href]') : null;
+            if (a) {
+              try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; }
+            }
+          }
+          pushCase(rec, href);
+        }
+        break; // one grid is the report; stop after the first header match
+      }
+    }
+
+    // ---- Tier B: innerText line sweep (agent-pasted format) ---------------
+    if (cases.length === 0) {
+      const ls = bodyText.split(/\r?\n/).map((s) => _clean(s)).filter(Boolean);
+      for (let i = 0; i < ls.length - 7; i += 1) {
+        if (!/^\d{1,4}$/.test(ls[i])) continue;       // row index "1", "2", …
+        if (!/^\d{6,10}$/.test(ls[i + 1])) continue;  // case number
+        pushCase({
+          caseNumber: ls[i + 1],
+          caseOwner: ls[i + 2],
+          contactAccountName: ls[i + 3],
+          dateTimeOpened: ls[i + 4],
+          lastModifiedDate: ls[i + 5],
+          status: ls[i + 6],
+          customerLastReplyTime: ls[i + 7],
+        }, '');
+      }
+    }
+
+    return {
+      ok: cases.length > 0,
+      reportName,
+      totalRecords: totalRecords || cases.length,
+      cases,
+      error: cases.length === 0
+        ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
+        : '',
+    };
+  }
+
   // -------------------------------------------------------------------------
   //  Messaging hooks
   // -------------------------------------------------------------------------
@@ -634,6 +798,14 @@
         sendResponse({ ok: true, data: scrapeNow(), url: location.href, title: document.title });
       } catch (e) {
         sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+      return true;
+    }
+    if (msg?.type === 'SCRAPE_OVER24_REPORT') {
+      try {
+        sendResponse({ ...scrapeOver24Report(), url: location.href, title: document.title });
+      } catch (e) {
+        sendResponse({ ok: false, cases: [], error: String(e?.message || e) });
       }
       return true;
     }

@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useScopedState } from '@/hooks/use-scoped-state';
+import type { ReportCaseRecord, ReportImportMeta } from '@/hooks/use-ccp-extension-bridge';
 import { TicketPanelsContext } from './FlowNode';
 import { useContext } from 'react';
 
@@ -38,6 +39,27 @@ export interface CaseTrakItem {
   directCaseUrl?: string | null;
   createdAt: string;
   updatedAt: string;
+  // --- Fields scraped from the Salesforce "[OVER24]" report (extension
+  //     popup button "Import Over 24h Report Cases"). Rendered as tiny
+  //     label/value rows on the card. ---
+  /** Report column "Case Owner" */
+  caseOwner?: string | null;
+  /** Report column "Status" (raw Salesforce value, e.g. Open / Working) */
+  reportStatus?: string | null;
+  /** Report column "Date/Time Opened" */
+  dateTimeOpened?: string | null;
+  /** Report column "Case Last Modified Date" */
+  lastModifiedDate?: string | null;
+  /** Report column "Customer Last Reply Time" */
+  customerLastReplyTime?: string | null;
+}
+
+/** One "[OVER24]" report import batch received from the extension. */
+export interface CaseReportImportBatch {
+  cases: ReportCaseRecord[];
+  meta: ReportImportMeta;
+  /** Monotonic per-batch id so remounts can tell batches apart. */
+  nonce: number;
 }
 
 /** Dedupe key: digits only, so "03741727" and "3741727" are the same case */
@@ -64,6 +86,17 @@ function formatCardTime(iso: string): string {
   }
 }
 
+/** Tiny status color for the report-scraped SF status shown on cards. */
+function reportStatusColor(status: string): string {
+  const s = status.trim().toLowerCase();
+  if (s === 'open') return 'text-sky-300';
+  if (s === 'working') return 'text-violet-300';
+  if (s === 'escalated') return 'text-rose-300';
+  if (s === 'pending' || s === 'pending/done') return 'text-amber-300';
+  if (s === 'closed') return 'text-emerald-300';
+  return 'text-foreground/80';
+}
+
 const STORAGE_KEY = 'ecovacs_case_trak_v1';
 /** Legacy 24h tracker key — we migrate its cases on first load. */
 const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
@@ -75,8 +108,15 @@ const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
  * shows the case number, customer name (when known), and the
  * last-modified / added timestamp. Data persists in localStorage so a
  * refresh mid-shift keeps the board state.
+ *
+ * `reportImports` receives "[OVER24]" report batches scraped by the
+ * browser extension (popup button "Import Over 24h Report Cases"). New
+ * cases land in the Open queue with every scraped label (owner, status,
+ * opened / modified / customer-last-reply timestamps) rendered on the
+ * card in tiny type; existing cards get their report fields refreshed
+ * without touching the agent's chosen board status.
  */
-export default function CaseTrakBoard() {
+export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseReportImportBatch[] }) {
   const [items, setItems] = useScopedState<CaseTrakItem[]>(STORAGE_KEY, []);
   const [input, setInput] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
@@ -120,6 +160,88 @@ export default function CaseTrakBoard() {
       /* ignore malformed legacy data */
     }
   }, [setItems]);
+
+  // --- "[OVER24]" report imports (extension popup button) ----------------
+  // Merge every not-yet-processed batch into the board. New cases go to
+  // the Open queue; existing cards only get their report fields refreshed
+  // (the agent's chosen board status is never overwritten). Re-running a
+  // batch after a remount is idempotent and toast-free because nothing
+  // changes the second time.
+  const processedImportRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    if (!reportImports || reportImports.length === 0) return;
+    const pending = reportImports.filter(
+      (b) => Array.isArray(b.cases) && b.cases.length > 0 && !processedImportRef.current.has(b.nonce)
+    );
+    if (pending.length === 0) return;
+    const now = new Date().toISOString();
+    for (const batch of pending) processedImportRef.current.add(batch.nonce);
+    setItems((prev) => {
+      const next = [...prev];
+      const index = new Map(next.map((c, i) => [c.id, i] as const));
+      const counts = { added: 0, updated: 0 };
+      for (const batch of pending) {
+        for (const rc of batch.cases) {
+          const caseNumber = String(rc.caseNumber ?? '').trim();
+          if (!/\d{5,}/.test(caseNumber)) continue;
+          const id = caseKey(caseNumber);
+          const caseUrl = rc.caseUrl && isValidLightningCaseUrl(rc.caseUrl) ? rc.caseUrl : null;
+          const owner = rc.caseOwner?.trim() || null;
+          const reportStatus = rc.status?.trim() || null;
+          const opened = rc.dateTimeOpened?.trim() || null;
+          const modified = rc.lastModifiedDate?.trim() || null;
+          const lastReply = rc.customerLastReplyTime?.trim() || null;
+          const customer = rc.contactAccountName?.trim() || null;
+          const at = index.get(id);
+          if (at === undefined) {
+            counts.added += 1;
+            index.set(id, next.length);
+            next.push({
+              id,
+              caseNumber,
+              customerName: customer,
+              status: 'open',
+              directCaseUrl: caseUrl,
+              caseOwner: owner,
+              reportStatus,
+              dateTimeOpened: opened,
+              lastModifiedDate: modified,
+              customerLastReplyTime: lastReply,
+              createdAt: now,
+              updatedAt: now,
+            });
+            continue;
+          }
+          const existing = next[at];
+          const merged: CaseTrakItem = { ...existing };
+          let changed = false;
+          const setIf = <K extends keyof CaseTrakItem>(key: K, value: CaseTrakItem[K]) => {
+            if (value && merged[key] !== value) { merged[key] = value; changed = true; }
+          };
+          setIf('customerName', customer);
+          setIf('caseOwner', owner);
+          setIf('reportStatus', reportStatus);
+          setIf('dateTimeOpened', opened);
+          setIf('lastModifiedDate', modified);
+          setIf('customerLastReplyTime', lastReply);
+          // Never overwrite a saved direct URL — only fill it in.
+          if (caseUrl && !merged.directCaseUrl) { merged.directCaseUrl = caseUrl; changed = true; }
+          if (changed) {
+            merged.updatedAt = now;
+            counts.updated += 1;
+            next[at] = merged;
+          }
+        }
+      }
+      if (counts.added > 0 || counts.updated > 0) {
+        const source = pending[0]?.meta?.reportName || 'Over-24h report';
+        toast.success(
+          `${source}: ${counts.added} new case${counts.added === 1 ? '' : 's'} added, ${counts.updated} refreshed on the board.`
+        );
+      }
+      return counts.added > 0 || counts.updated > 0 ? next : prev;
+    });
+  }, [reportImports, setItems]);
 
   const addCases = useCallback((raw: string) => {
     const tokens = raw
@@ -504,6 +626,53 @@ export default function CaseTrakBoard() {
                           </button>
                         )}
                       </div>
+
+                      {/* Report-scraped labels — tiny label/value rows in a
+                          two-column grid (only when any [OVER24] field exists) */}
+                      {(c.caseOwner || c.reportStatus || c.dateTimeOpened || c.lastModifiedDate || c.customerLastReplyTime) && (
+                        <dl className="mt-1.5 grid grid-cols-[auto_1fr] items-baseline gap-x-1.5 gap-y-0.5 text-[9px] leading-tight">
+                          {c.reportStatus && (
+                            <>
+                              <dt className="text-muted-foreground/60">Status</dt>
+                              <dd className={cn('truncate font-bold', reportStatusColor(c.reportStatus))} title={`Status: ${c.reportStatus}`}>
+                                {c.reportStatus}
+                              </dd>
+                            </>
+                          )}
+                          {c.caseOwner && (
+                            <>
+                              <dt className="text-muted-foreground/60">Owner</dt>
+                              <dd className="truncate text-foreground/80" title={`Case Owner: ${c.caseOwner}`}>
+                                {c.caseOwner}
+                              </dd>
+                            </>
+                          )}
+                          {c.customerLastReplyTime && (
+                            <>
+                              <dt className="text-muted-foreground/60">Last reply</dt>
+                              <dd className="truncate text-amber-300/90" title={`Customer Last Reply Time: ${c.customerLastReplyTime}`}>
+                                {c.customerLastReplyTime}
+                              </dd>
+                            </>
+                          )}
+                          {c.dateTimeOpened && (
+                            <>
+                              <dt className="text-muted-foreground/60">Opened</dt>
+                              <dd className="truncate text-foreground/70" title={`Date/Time Opened: ${c.dateTimeOpened}`}>
+                                {c.dateTimeOpened}
+                              </dd>
+                            </>
+                          )}
+                          {c.lastModifiedDate && (
+                            <>
+                              <dt className="text-muted-foreground/60">Modified</dt>
+                              <dd className="truncate text-foreground/70" title={`Case Last Modified Date: ${c.lastModifiedDate}`}>
+                                {c.lastModifiedDate}
+                              </dd>
+                            </>
+                          )}
+                        </dl>
+                      )}
 
                       {/* Timestamp */}
                       <div className="mt-1.5 flex items-center gap-1 text-[9px] text-muted-foreground/60">

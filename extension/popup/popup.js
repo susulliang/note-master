@@ -35,6 +35,8 @@ const btnSf = $('#btnSf');
 // btnScrapeAll, btnScanCurrent, btnSelfExtract)
 const btnScan = document.getElementById('btnScan');
 const btnPush = $('#btnPush');
+// [OVER24] report import → Ticket Notes Case Trak board
+const btnOver24 = $('#btnOver24');
 const cbAuto = $('#cbAuto');
 
 const elToast = $('#toast');
@@ -727,6 +729,29 @@ async function onClickPush() {
   else toast(explainError(r, 'Push failed.'), 'err');
 }
 
+/** "Import Over 24h Report Cases" — SW scrapes the [OVER24] Salesforce
+ *  report tab (tiered fallbacks inside importOver24Report) and pushes the
+ *  full case list into the Ticket Notes app's Case Trak board. The SW
+ *  reply shape: { ok, count, totalRecords, reportName, via, pushed }. */
+async function onClickOver24() {
+  const r = await withLoading(btnOver24, () => sendWithTimeout({ type: 'POPUP_SCRAPE_OVER24' }, 25000));
+  if (r === SEND_TIMED_OUT) {
+    toast('Service worker did not reply — reload the extension at edge://extensions / chrome://extensions, then retry.', 'err');
+    return;
+  }
+  if (r?.ok) {
+    const n = Number(r.count ?? 0);
+    const total = r.totalRecords ? ` of ${r.totalRecords} report rows` : '';
+    if (r.pushed?.ok) {
+      toast(`Imported ${n} case${n === 1 ? '' : 's'}${total} → Case Trak board.`, 'ok');
+    } else {
+      toast(`Scraped ${n} case${n === 1 ? '' : 's'}, but Ticket Notes did not receive them: ${r.pushed?.error || 'bridge not connected'}. They are cached — open/refresh the Ticket Notes tab and click again.`, 'warn');
+    }
+    return;
+  }
+  toast(explainError(r, 'OVER24 report import failed — is the [OVER24] report open in a Salesforce tab?'), 'err');
+}
+
 async function onToggleAuto(e) {
   const checked = e.target.checked;
   const r = await sendWithTimeout({ type: 'POPUP_UPDATE_SETTINGS', settings: { autoPush: checked } }, 4000);
@@ -751,6 +776,7 @@ btnCcp.addEventListener('click', onClickCcp);
 btnSf.addEventListener('click', onClickSf);
 if (btnScan) btnScan.addEventListener('click', onClickScan);
 btnPush.addEventListener('click', onClickPush);
+if (btnOver24) btnOver24.addEventListener('click', onClickOver24);
 cbAuto.addEventListener('change', onToggleAuto);
 elExtId.addEventListener('click', onCopyExtId);
 
