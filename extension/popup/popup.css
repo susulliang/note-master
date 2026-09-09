@@ -374,6 +374,35 @@ body {
   color: #fff3dd;
 }
 
+/* OVER24 scrape preview panel */
+.over24-preview {
+  padding: 10px 12px;
+}
+.over24-meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  word-break: break-word;
+}
+.over24-meta.ok { color: #56d364; }
+.over24-meta.err { color: #f85149; }
+.over24-json {
+  margin: 0;
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .btn-ghost {
   padding: 4px 8px;
   font-size: 11px;

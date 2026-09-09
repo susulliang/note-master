@@ -1399,13 +1399,12 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     // Report Cases"). Queued here so the board merges them even when the
     // Case Trak view isn't the active tab; CaseTrakBoard dedupes per batch.
     onReportCases: (cases, meta) => {
+      console.log('[over24] onReportCases received', cases.length, 'cases');
       setCaseReportImports((prev) => [
         ...prev,
         { cases, meta, nonce: prev.length > 0 ? prev[prev.length - 1].nonce + 1 : 1 },
       ]);
-      if (workView !== 'caseTrak') {
-        toast.info(`Over-24h report: ${cases.length} case${cases.length === 1 ? '' : 's'} received → Case Trak board.`);
-      }
+      toast.info(`Over-24h report: ${cases.length} case${cases.length === 1 ? '' : 's'} received → Case Trak board.`);
     },
   });
 

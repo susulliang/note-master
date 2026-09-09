@@ -611,6 +611,7 @@ const INLINE_OVER24_EXTRACT = function () {
   function _norm(s) { return _clean(s).toLowerCase().replace(/[*:：]+$/, ''); }
   const cases = [];
   const seen = new Set();
+  const debug = { bodyLength: 0, gridCount: 0, tierACases: 0, tierBCases: 0, tierCCases: 0, sample: [] };
   function pushCase(rec, href) {
     const cn = _clean(rec.caseNumber);
     if (!/\d{5,}/.test(cn)) return;
@@ -622,6 +623,7 @@ const INLINE_OVER24_EXTRACT = function () {
   }
 
   const bodyText = (typeof document !== 'undefined' && document.body && (document.body.innerText || document.body.textContent)) || '';
+  debug.bodyLength = bodyText.length;
   let reportName = '';
   const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
   if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
@@ -657,6 +659,7 @@ const INLINE_OVER24_EXTRACT = function () {
 
   if (typeof document !== 'undefined' && document.querySelectorAll) {
     const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    debug.gridCount = grids.length;
     for (const grid of grids) {
       let rows = [];
       try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
@@ -702,8 +705,9 @@ const INLINE_OVER24_EXTRACT = function () {
       }
     }
   }
+  debug.tierACases = cases.length;
 
-  // ---- Tier B: innerText line sweep (agent-pasted format) ----
+  // ---- Tier B: innerText line sweep ----
   if (cases.length === 0) {
     const ls = bodyText.split(/\r?\n/).map((s) => _clean(s)).filter(Boolean);
     for (let i = 0; i < ls.length - 7; i += 1) {
@@ -719,13 +723,52 @@ const INLINE_OVER24_EXTRACT = function () {
         customerLastReplyTime: ls[i + 7],
       }, '');
     }
+    debug.tierBCases = cases.length;
   }
 
+  // ---- Tier C: anchor-based sweep ----
+  if (cases.length === 0) {
+    try {
+      const anchors = deepQueryAll('a[href]');
+      const cnRe = /(?:^|[^A-Za-z0-9])(\d{6,10})(?:[^A-Za-z0-9]|$)/;
+      for (const a of anchors) {
+        const txt = _clean(a.textContent || '');
+        if (!/\d{5,}/.test(txt)) continue;
+        const m = txt.match(cnRe);
+        if (!m) continue;
+        let row = a;
+        for (let up = 0; up < 8 && row && row.parentElement; up += 1) {
+          const tag = (row.tagName || '').toLowerCase();
+          if (tag === 'tr' || row.getAttribute?.('role') === 'row' || row.hasAttribute?.('data-row-key-value')) break;
+          row = row.parentElement;
+        }
+        if (!row) { pushCase({ caseNumber: m[1] }, a.href); continue; }
+        const siblings = Array.from(row.children || []);
+        const cells = siblings.map((c) => _clean(c.textContent || ''));
+        const cnIdx = cells.findIndex((c) => c && c.includes(m[1]));
+        if (cnIdx === -1) { pushCase({ caseNumber: m[1] }, a.href); continue; }
+        const rest = cells.slice(cnIdx + 1).filter(Boolean);
+        pushCase({
+          caseNumber: m[1],
+          caseOwner: rest[0] || '',
+          contactAccountName: rest[1] || '',
+          dateTimeOpened: rest[2] || '',
+          lastModifiedDate: rest[3] || '',
+          status: rest[4] || '',
+          customerLastReplyTime: rest[5] || '',
+        }, a.href);
+      }
+    } catch { /* ignore */ }
+    debug.tierCCases = cases.length;
+  }
+
+  debug.sample = cases.slice(0, 5);
   return {
     ok: cases.length > 0,
     reportName,
     totalRecords: totalRecords || cases.length,
     cases,
+    debug,
     error: cases.length === 0
       ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
       : '',
@@ -1583,31 +1626,44 @@ async function pushOver24ToTicketApp() {
     source: 'ecovacs-ccp-scraper',
   };
   diagRecord('over24:push:start', { tabId: ticketTab.id, url: ticketTab.url, cases: payload.reportCases.length });
+  console.log('[over24] pushOver24ToTicketApp cases=', payload.reportCases.length, 'tab=', ticketTab.url);
+  // Try the bridge message. If bridge.js isn't injected (no listener),
+  // inject it via scripting.executeScript and retry once.
+  let reply = null;
   try {
-    const reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
-    if (reply?.ok) {
-      diagRecord('over24:push:ok', { tabId: ticketTab.id, url: ticketTab.url, cases: payload.reportCases.length });
-      return { ok: true };
-    }
-    diagRecord('over24:push:no_reply', { tabId: ticketTab.id, url: ticketTab.url, bridgeReply: reply ?? null });
-    return { ok: false, error: 'Ticket app bridge did not reply. Refresh the Ticket Notes tab, then retry.' };
+    reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
   } catch (err) {
-    diagRecord('over24:push:throw', { tabId: ticketTab.id, url: ticketTab.url, error: String(err?.message || err) });
-    return { ok: false, error: 'Ticket app bridge did not reply. Refresh the Ticket Notes tab (and confirm the extension is connected), then retry.' };
+    console.warn('[over24] bridge sendMessage failed, injecting bridge.js:', String(err?.message || err));
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: ticketTab.id, allFrames: false }, files: ['bridge.js'] });
+      reply = await chrome.tabs.sendMessage(ticketTab.id, { type: 'TICKET_APP_BRIDGE', payload });
+    } catch (err2) {
+      diagRecord('over24:push:inject_fail', { tabId: ticketTab.id, error: String(err2?.message || err2) });
+      return { ok: false, error: 'Could not inject bridge into the Ticket Notes tab. Refresh the Ticket Notes tab, then retry.' };
+    }
   }
+  if (reply?.ok) {
+    diagRecord('over24:push:ok', { tabId: ticketTab.id, url: ticketTab.url, cases: payload.reportCases.length });
+    return { ok: true };
+  }
+  diagRecord('over24:push:no_reply', { tabId: ticketTab.id, url: ticketTab.url, bridgeReply: reply ?? null });
+  return { ok: false, error: 'Ticket app bridge did not reply. Refresh the Ticket Notes tab, then retry.' };
 }
 
 /** Full popup flow: scrape the [OVER24] report tab → store → push to Case
- *  Trak. Reply shape: { ok, count, totalRecords, reportName, via, pushed }. */
+ *  Trak. Reply shape: { ok, count, totalRecords, reportName, via, pushed,
+ *  sample, debug }. */
 async function importOver24Report() {
   const tab = await findOver24ReportTab();
   if (!tab) {
     return { ok: false, error: 'No Salesforce tab found. Open the [OVER24] report in Salesforce first, then retry.' };
   }
+  console.log('[over24] importOver24Report target tab=', tab.id, tab.url, tab.title);
   const r = await scrapeOver24FromTab(tab.id);
+  console.log('[over24] scrape result via=', r?.via, 'cases=', r?.cases?.length ?? 0, 'error=', r?.error ?? null, 'debug=', JSON.stringify(r?.debug ?? null));
   if (!r.ok || !r.cases || r.cases.length === 0) {
     diagRecord('over24:scrape:fail', { tabId: tab.id, url: tab.url, title: tab.title ?? null, error: r?.error ?? null, cases: r?.cases?.length ?? 0 });
-    return { ok: false, error: r?.error || 'No report cases found on the Salesforce tab. Make sure the [OVER24] report grid is visible, then retry.' };
+    return { ok: false, error: r?.error || 'No report cases found on the Salesforce tab. Make sure the [OVER24] report grid is visible, then retry.', debug: r?.debug ?? null, sample: [] };
   }
   state.over24 = {
     capturedAt: nowISO(),
@@ -1637,6 +1693,8 @@ async function importOver24Report() {
     reportName: state.over24.reportName,
     via: r.via,
     pushed,
+    sample: r.cases.slice(0, 10),
+    debug: r.debug ?? null,
   };
 }
 

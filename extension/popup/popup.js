@@ -37,6 +37,10 @@ const btnScan = document.getElementById('btnScan');
 const btnPush = $('#btnPush');
 // [OVER24] report import → Ticket Notes Case Trak board
 const btnOver24 = $('#btnOver24');
+const elOver24Meta = $('#over24Meta');
+const elOver24Json = $('#over24Json');
+const btnOver24Copy = $('#btnOver24Copy');
+let lastOver24Result = null;
 const cbAuto = $('#cbAuto');
 
 const elToast = $('#toast');
@@ -732,13 +736,17 @@ async function onClickPush() {
 /** "Import Over 24h Report Cases" — SW scrapes the [OVER24] Salesforce
  *  report tab (tiered fallbacks inside importOver24Report) and pushes the
  *  full case list into the Ticket Notes app's Case Trak board. The SW
- *  reply shape: { ok, count, totalRecords, reportName, via, pushed }. */
+ *  reply shape: { ok, count, totalRecords, reportName, via, pushed,
+ *  sample[], debug{} }. */
 async function onClickOver24() {
   const r = await withLoading(btnOver24, () => sendWithTimeout({ type: 'POPUP_SCRAPE_OVER24' }, 25000));
+  lastOver24Result = r;
   if (r === SEND_TIMED_OUT) {
+    renderOver24({ ok: false, error: 'Service worker did not reply — reload the extension, then retry.' });
     toast('Service worker did not reply — reload the extension at edge://extensions / chrome://extensions, then retry.', 'err');
     return;
   }
+  renderOver24(r);
   if (r?.ok) {
     const n = Number(r.count ?? 0);
     const total = r.totalRecords ? ` of ${r.totalRecords} report rows` : '';
@@ -750,6 +758,58 @@ async function onClickOver24() {
     return;
   }
   toast(explainError(r, 'OVER24 report import failed — is the [OVER24] report open in a Salesforce tab?'), 'err');
+}
+
+/** Render the last OVER24 scrape result into the preview panel so the user
+ *  can see exactly what the extension scraped (or why it found nothing). */
+function renderOver24(r) {
+  if (!r || typeof r !== 'object') {
+    elOver24Meta.textContent = 'No result.';
+    elOver24Json.textContent = '// no result';
+    return;
+  }
+  const ok = Boolean(r.ok);
+  const count = r.ok ? Number(r.count ?? 0) : 0;
+  const via = r.via ? ` · via ${r.via}` : '';
+  const reportName = r.reportName ? ` · ${r.reportName}` : '';
+  const pushedOk = r.pushed?.ok ? 'push OK' : (r.pushed ? `push failed: ${r.pushed.error || 'bridge not connected'}` : '');
+  const status = ok ? `OK — ${count} case${count === 1 ? '' : 's'}${via}${reportName}` : `FAILED — ${r.error || 'unknown error'}`;
+  elOver24Meta.textContent = `${status}${pushedOk ? ' · ' + pushedOk : ''}`;
+  elOver24Meta.classList.toggle('ok', ok);
+  elOver24Meta.classList.toggle('err', !ok);
+
+  // Always show the raw payload as JSON (sample of up to 10 cases, plus debug
+  // tier breakdown) so the user can verify what was extracted.
+  const payload = {
+    ok: r.ok ?? false,
+    error: r.error ?? null,
+    count: r.count ?? null,
+    totalRecords: r.totalRecords ?? null,
+    reportName: r.reportName ?? null,
+    via: r.via ?? null,
+    pushed: r.pushed ?? null,
+    debug: r.debug ?? null,
+    sample: (Array.isArray(r.sample) && r.sample.length > 0) ? r.sample : (Array.isArray(r.cases) ? r.cases.slice(0, 10) : []),
+  };
+  try {
+    elOver24Json.textContent = JSON.stringify(payload, null, 2);
+  } catch (e) {
+    elOver24Json.textContent = String(payload);
+  }
+}
+
+function onCopyOver24Json() {
+  if (!lastOver24Result) {
+    toast('Nothing to copy — run a scrape first.', 'warn');
+    return;
+  }
+  try {
+    const text = elOver24Json.textContent || JSON.stringify(lastOver24Result, null, 2);
+    navigator.clipboard.writeText(text).then(
+      () => toast('Scraped JSON copied to clipboard.', 'ok'),
+      () => toast('Clipboard copy failed — select manually.', 'err')
+    );
+  } catch { toast('Clipboard copy failed.', 'err'); }
 }
 
 async function onToggleAuto(e) {
@@ -777,6 +837,7 @@ btnSf.addEventListener('click', onClickSf);
 if (btnScan) btnScan.addEventListener('click', onClickScan);
 btnPush.addEventListener('click', onClickPush);
 if (btnOver24) btnOver24.addEventListener('click', onClickOver24);
+if (btnOver24Copy) btnOver24Copy.addEventListener('click', onCopyOver24Json);
 cbAuto.addEventListener('change', onToggleAuto);
 elExtId.addEventListener('click', onCopyExtId);
 

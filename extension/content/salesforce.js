@@ -660,6 +660,7 @@
     function _norm(s) { return _clean(s).toLowerCase().replace(/[*:：]+$/, ''); }
     const cases = [];
     const seen = new Set();
+    const debug = { bodyLength: 0, gridCount: 0, grids: [], tierACases: 0, tierBCases: 0, tierCCases: 0, sample: [] };
     function pushCase(rec, href) {
       const cn = _clean(rec.caseNumber);
       if (!/\d{5,}/.test(cn)) return; // drops summary / aggregate / header rows
@@ -671,6 +672,12 @@
     }
 
     const bodyText = (document.body && (document.body.innerText || document.body.textContent)) || '';
+    debug.bodyLength = bodyText.length;
+    console.log('[over24] scrapeOver24Report bodyText.length=', bodyText.length);
+    if (bodyText) {
+      const head = bodyText.slice(0, 1200);
+      console.log('[over24] bodyText head:\n' + head);
+    }
     let reportName = '';
     const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
     if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
@@ -710,6 +717,7 @@
     }
 
     const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    debug.gridCount = grids.length;
     for (const grid of grids) {
       let rows = [];
       try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
@@ -718,10 +726,12 @@
         const headerCells = cellsOf(rows[ri]);
         const labels = headerCells.map((c) => _norm(c.textContent));
         const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
+        if (debug.grids.length < 8) debug.grids.push({ rows: rows.length, headerHits, labels });
         if (headerHits < 3) continue;
         // column index → field map from THIS header row
         const colMap = new Map();
         labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
+        console.log('[over24] Tier A grid matched header:', [...colMap.entries()], 'rows=', rows.length);
         for (let rj = ri + 1; rj < rows.length; rj += 1) {
           const dcells = cellsOf(rows[rj]);
           if (dcells.length < 3) continue;
@@ -759,6 +769,8 @@
         break; // one grid is the report; stop after the first header match
       }
     }
+    debug.tierACases = cases.length;
+    console.log('[over24] Tier A cases=', cases.length, 'grids=', debug.gridCount);
 
     // ---- Tier B: innerText line sweep (agent-pasted format) ---------------
     if (cases.length === 0) {
@@ -776,13 +788,60 @@
           customerLastReplyTime: ls[i + 7],
         }, '');
       }
+      debug.tierBCases = cases.length;
+      console.log('[over24] Tier B cases=', cases.length);
     }
 
+    // ---- Tier C: anchor-based sweep (Lightning report renders each Case
+    //      number as an <a href=".../lightning/r/Case/500...">. Walk up to
+    //      the row and grab every sibling cell's text as a fallback when the
+    //      header-row mapping fails). --------------------------------------
+    if (cases.length === 0) {
+      try {
+        const anchors = deepQueryAll('a[href]');
+        const cnRe = /(?:^|[^A-Za-z0-9])(\d{6,10})(?:[^A-Za-z0-9]|$)/;
+        for (const a of anchors) {
+          const txt = _clean(a.textContent || '');
+          if (!/\d{5,}/.test(txt)) continue;
+          const m = txt.match(cnRe);
+          if (!m) continue;
+          // walk up to the nearest row-like ancestor
+          let row = a;
+          for (let up = 0; up < 8 && row && row.parentElement; up += 1) {
+            const tag = (row.tagName || '').toLowerCase();
+            if (tag === 'tr' || row.getAttribute?.('role') === 'row' || row.hasAttribute?.('data-row-key-value')) break;
+            row = row.parentElement;
+          }
+          if (!row) { pushCase({ caseNumber: m[1] }, a.href); continue; }
+          const siblings = Array.from(row.children || []);
+          const cells = siblings.map((c) => _clean(c.textContent || ''));
+          // Find the case number cell index; fields to its right in order.
+          const cnIdx = cells.findIndex((c) => c && c.includes(m[1]));
+          if (cnIdx === -1) { pushCase({ caseNumber: m[1] }, a.href); continue; }
+          const rest = cells.slice(cnIdx + 1).filter(Boolean);
+          pushCase({
+            caseNumber: m[1],
+            caseOwner: rest[0] || '',
+            contactAccountName: rest[1] || '',
+            dateTimeOpened: rest[2] || '',
+            lastModifiedDate: rest[3] || '',
+            status: rest[4] || '',
+            customerLastReplyTime: rest[5] || '',
+          }, a.href);
+        }
+      } catch (e) { console.warn('[over24] Tier C error:', e); }
+      debug.tierCCases = cases.length;
+      console.log('[over24] Tier C cases=', cases.length);
+    }
+
+    debug.sample = cases.slice(0, 5);
+    console.log('[over24] total cases=', cases.length, 'sample=', JSON.stringify(debug.sample));
     return {
       ok: cases.length > 0,
       reportName,
       totalRecords: totalRecords || cases.length,
       cases,
+      debug,
       error: cases.length === 0
         ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
         : '',

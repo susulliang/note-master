@@ -109,6 +109,28 @@
       </button>
     </section>
 
+    <!-- ========================  OVER24 SCRAPE PREVIEW  ========================= -->
+    <section class="diag">
+      <details class="card diag__card" id="detailsOver24">
+        <summary class="card__hd">
+          <span class="dot dot--accent"></span>
+          <h2 class="card__tl">Over 24h scrape · last result</h2>
+          <button
+            class="btn btn-ghost btn--sm"
+            id="btnOver24Copy"
+            type="button"
+            title="Copy the full scraped JSON to clipboard"
+          >
+            Copy JSON
+          </button>
+        </summary>
+        <div class="over24-preview">
+          <p class="over24-meta" id="over24Meta">No scrape yet. Click "Import Over 24h Report Cases" above.</p>
+          <pre class="over24-json" id="over24Json" aria-live="polite">// scraped cases will appear here as JSON</pre>
+        </div>
+      </details>
+    </section>
+
     <!-- ==========================  DIAGNOSTIC  ============================ -->
     <section class="diag">
       <details class="card diag__card" id="detailsDiag">
@@ -207,6 +229,6 @@
 
     <div class="toast" id="toast" aria-live="polite"></div>
     <script src="popup.js" type="module"></script>
-    <!-- BUILD_STAMP>0.1.55@2026-09-09T23:21Z<END_BUILD_STAMP -->
+    <!-- BUILD_STAMP>0.1.56@2026-09-09T23:43Z<END_BUILD_STAMP -->
   </body>
 </html>

@@ -375,7 +375,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.36';
+  const EXPECTED_MANIFEST_VERSION = '0.1.56';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -800,6 +800,8 @@ export function useCcpExtensionBridge({
         //            (Case Trak board), never through the form-confirm card.
         const payload = data.payload;
         if (Array.isArray(payload?.reportCases) && payload.reportCases.length > 0) {
+          console.log('[over24] bridge push received reportCases=', payload.reportCases.length, 'meta=', payload.reportMeta);
+          console.log('[over24] sample=', JSON.stringify(payload.reportCases.slice(0, 5), null, 2));
           setConnected(true);
           const meta = payload.reportMeta ?? {};
           if (typeof meta.capturedAt === 'string' && meta.capturedAt) {
