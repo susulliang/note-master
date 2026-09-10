@@ -122,6 +122,8 @@ import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
+import CatAssistant from '@/components/CatAssistant';
+import { useCatAssistant } from '@/hooks/use-cat-assistant';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { useCallCapture } from '@/hooks/use-call-capture';
@@ -1367,6 +1369,18 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   );
 
   // -------------------------------------------------------------------------
+  //  Cat assistant — the Clippy-style workspace sprite. Pops up tips,
+  //  ambient thoughts, and (when cloud is enabled) live call advice.
+  // -------------------------------------------------------------------------
+  const cat = useCatAssistant({
+    isCapturing: call.isCapturing,
+    transcript: call.transcript,
+    formData,
+    cloudGenerate: sopCloudGenerateEnabled ? sopCloudGenerate : undefined,
+    cloudEnabled: sopCloudGenerateEnabled,
+  });
+
+  // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
   //  The hook has already converted extension flat-keys into form node ids
   //  via EXT_TO_NODE_ID, so we write straight to handleAutoFill using a
@@ -1911,6 +1925,14 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
             toast: 'glass-panel font-sans text-sm !text-foreground',
           },
         }}
+      />
+
+      {/* Clippy-style cat assistant — floats above everything */}
+      <CatAssistant
+        currentThought={cat.currentThought}
+        isCapturing={call.isCapturing}
+        isThinking={cat.isThinking}
+        onDismiss={cat.dismiss}
       />
     </div>
   );

@@ -547,6 +547,18 @@ body[data-ui-scale="small"] {
     100% { transform: translateX(340%); }
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Cat assistant — a gentle idle breathing bob so the sprite       */
+  /*  feels alive even when it has nothing to say.                    */
+  /* ---------------------------------------------------------------- */
+  @keyframes cat-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-3px); }
+  }
+  .animate-cat-bob {
+    animation: cat-bob 2.6s ease-in-out infinite;
+  }
+
   .mini-bar-run {
     width: 30%;
     animation: mini-bar-run 1.1s ease-in-out infinite;
