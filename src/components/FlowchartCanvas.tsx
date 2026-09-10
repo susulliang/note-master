@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { FilePen, LayoutGrid, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { TemplateEntry } from '@/lib/amr-templates';
@@ -85,6 +85,13 @@ export type WorkView = 'callNotes' | 'caseTrak';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
+/** Width of the unified left-edge vertical pill rail (work-view switcher +
+ *  bookmark tabs). Flow content is offset past this so the dotted group
+ *  boxes never slide under the menu. */
+const LEFT_RAIL_WIDTH = 64;
+/** Reserved left space = rail width + breathing room so the group-box
+ *  padding (padX=18) clears the rail edge with a comfortable gap. */
+const LEFT_RAIL_RESERVED = LEFT_RAIL_WIDTH + 28;
 /** Vertical clearance above the first flow node so the Customer Info group
  *  box + its title never get clipped by the canvas top edge. */
 const GROUP_TOP_PAD = 40;
@@ -251,7 +258,7 @@ function computeDefaultLayout(
   // Resolve width for node math inside the layout engine.
   const nodeWidth = (n: NodeConfig): number => widthOverrides[n.id] ?? n.width ?? 240;
 
-  let mainAvailLeft = CANVAS_MARGIN;
+  let mainAvailLeft = CANVAS_MARGIN + LEFT_RAIL_RESERVED;
   const mainMaxRight = canvasWidth - CANVAS_MARGIN;
   if (isWide) {
     const leftColPx = widthOverrides[LEFT_COL_IDS[0]] ?? 700;
@@ -502,7 +509,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // widest natural width so the grid looks balanced (no ragged right edges
   // inside a group). Left-column panels are excluded.
   const effectiveNodes = useMemo(() => {
-    const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2);
+    const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2 - LEFT_RAIL_RESERVED);
     const clamped = nodes
       // Pull-tab panels are rendered in their own floating layer, never in
       // the main flow grid.
@@ -798,7 +805,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               // own left edge so rows still line up with their content).
               const naturalW = maxX - minX;
               const extra = (commonWidth - naturalW) / 2;
-              const bx = minX - padX - extra;
+              // Clamp the box's left edge so the dotted outline never slides
+              // under the left-edge pill rail (the centering `extra` can push
+              // narrower groups further left than their content).
+              const bx = Math.max(LEFT_RAIL_WIDTH + 12, minX - padX - extra);
               const by = minY - padTop;
               const bw = commonWidth + padX * 2;
               const bh = maxY - minY + padTop + padBottom;
@@ -898,62 +908,55 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Case Trak board — shares the canvas' dotted bg, fills full
           canvas height/width via h-full on the min-h-full anchor. */}
       {activeView === 'caseTrak' && (
-        <div className="h-full min-h-full w-full pl-[100px]">
+        <div className="h-full min-h-full w-full pl-[84px]">
           {caseTrakContent}
         </div>
       )}
 
-        {/* Left-edge vertical rail: top = work-view pills (Call Notes /
-            Case Trak) with a sliding highlight; below = pull-tab bookmark
-            tabs (shown in both views). */}
-        <div
-          className="absolute left-0 top-4 z-40 flex flex-col gap-2"
-          style={{ width: 0 }}
-        >
-          {/* Work-view pills — one sliding highlight lives on the parent
-              container and animates top/height between pills. Each pill is
-              h-9 (36px), parent has p-1 (4px) padding and gap-1 (4px)
-              between pills. */}
-          <div className="relative flex w-[96px] flex-col gap-1 overflow-hidden rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
-            {/* Sliding highlight — single green pill that animates top between
-                the two tabs. Contained to parent with overflow-hidden so it
-                never leaks out as a stray blob. */}
+        {/* Left-edge vertical rail — ONE unified pill menu.
+            Work-view switcher (Call Notes / Case Trak) on top, pull-tab
+            bookmarks below. Every pill shares identical dimensions
+            (h-12 x w-14) and icon size (size-5) so the rail reads as a
+            single coherent column. */}
+        <div className="absolute left-0 top-4 z-40 flex flex-col gap-1.5">
+          {/* Work-view pills — sliding green highlight tracks the active view */}
+          <div className="relative flex w-[64px] flex-col gap-1 overflow-hidden rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
             <span
               className="pointer-events-none absolute left-1 right-1 z-0 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)] transition-[top] duration-200 ease-out"
               style={{
-                top: activeView === 'callNotes' ? 4 : 44,
-                height: 36,
+                top: activeView === 'callNotes' ? 4 : 56,
+                height: 48,
               }}
             />
             {(['callNotes', 'caseTrak'] as const).map((view) => {
               const active = activeView === view;
               const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
+              const short = view === 'callNotes' ? 'Notes' : 'Trak';
+              const Icon = view === 'callNotes' ? FilePen : LayoutGrid;
               return (
                 <button
                   key={view}
                   type="button"
                   onClick={() => onViewChange?.(view)}
                   className={cn(
-                    'relative z-10 flex h-9 w-[88px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] font-bold tracking-wide transition-colors duration-200',
+                    'relative z-10 flex h-12 w-[56px] flex-col items-center justify-center gap-0.5 rounded-xl transition-colors duration-200',
                     active
                       ? 'text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground'
                   )}
                   title={`Switch to ${label}`}
                 >
-                  {view === 'callNotes' ? (
-                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                  ) : (
-                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
-                  )}
-                  {label}
+                  <Icon className="size-5" />
+                  <span className="text-[8px] font-bold uppercase leading-tight tracking-tight">
+                    {short}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Pull-tab bookmark tabs — shown in both views */}
-          <div className="flex flex-col gap-1.5">
+          {/* Pull-tab bookmark pills — uniform size/style with the view pills */}
+          <div className="flex w-[64px] flex-col gap-1 rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
             {pullTabNodes.map((node) => {
               const isCollapsed = collapsedPanels[node.id] ?? true;
               const Icon = node.icon;
@@ -967,19 +970,18 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   onClick={() => togglePanel(node.id)}
                   title={node.label}
                   className={cn(
-                    'group relative flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-r-xl border border-l-0 transition-all duration-200',
-                    'glass-panel',
+                    'relative z-10 flex h-12 w-[56px] flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200',
                     isCollapsed
-                      ? 'hover:translate-x-1'
-                      : 'border-accent/50 bg-accent/10 shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
+                      ? 'text-muted-foreground hover:text-foreground hover:bg-accent/5'
+                      : 'bg-accent/10 text-accent shadow-[0_0_10px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
                   )}
                 >
-                  {Icon && <Icon className="size-4 text-accent" />}
+                  {Icon && <Icon className="size-5" />}
                   <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
                     {shortLabel}
                   </span>
                   {!isCollapsed && (
-                    <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
+                    <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent" />
                   )}
                 </button>
               );
@@ -992,9 +994,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             waiting for the agent to expand the bookmark. Expanded panels
             stack vertically; collapsed ones take no visual space but stay
             mounted so e.g. the Product Lookup index is ready instantly.
-            left-[100px] ducks them clear of the wider work-view pill
-            container (96px) that also lives in the left rail. */}
-        <div className="absolute left-[100px] top-4 z-30">
+            Offset to the right of the unified 64px rail. */}
+        <div className="absolute left-[76px] top-4 z-30">
           {(() => {
             const gap = 16;
             let cursorY = 0;
