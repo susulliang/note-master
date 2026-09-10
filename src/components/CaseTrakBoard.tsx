@@ -15,16 +15,39 @@ import type { ReportCaseRecord, ReportImportMeta } from '@/hooks/use-ccp-extensi
 import { TicketPanelsContext } from './FlowNode';
 import { useContext } from 'react';
 
+/** Rotating palette for columns. */
+const COLUMN_PALETTE = [
+  { accent: 'text-sky-300', dot: 'bg-sky-400' },
+  { accent: 'text-amber-300', dot: 'bg-amber-400' },
+  { accent: 'text-rose-300', dot: 'bg-rose-400' },
+  { accent: 'text-violet-300', dot: 'bg-violet-400' },
+  { accent: 'text-emerald-300', dot: 'bg-emerald-400' },
+  { accent: 'text-cyan-300', dot: 'bg-cyan-400' },
+  { accent: 'text-orange-300', dot: 'bg-orange-400' },
+  { accent: 'text-pink-300', dot: 'bg-pink-400' },
+];
+
+/** Default team columns. First column is "hoi"; the rest are team-member
+ *  names so each agent gets a dedicated column. The board wraps these into
+ *  two rows. */
+const DEFAULT_COLUMN_NAMES = [
+  'hoi',
+  'Dagen', 'Ronald', 'Boris', 'Vitto', 'Lynn', 'Jacky', 'TQ', 'Alan',
+  'Dezzy', 'Kevin X', 'Laura', 'Jun', 'Kira', 'Pyro', 'Jim', 'Charsan',
+  'Patrick', 'Ruby', 'Hawks', 'Yison', 'Jason', 'Jenson', 'Kevin W',
+  'Rachel', 'Trent', 'Tony', 'Stanley', 'Jing',
+];
+
 /** Default workflow columns, in left-to-right order. Agents can rename,
  *  add, or delete columns (see header controls); choices persist to
  *  localStorage. */
-export const DEFAULT_CASE_COLUMNS = [
-  { id: 'open', label: 'Open', accent: 'text-sky-300', dot: 'bg-sky-400' },
-  { id: 'pending', label: 'Pending / Done', accent: 'text-amber-300', dot: 'bg-amber-400' },
-  { id: 'escalated', label: 'Escalated', accent: 'text-rose-300', dot: 'bg-rose-400' },
-  { id: 'working', label: 'Working', accent: 'text-violet-300', dot: 'bg-violet-400' },
-  { id: 'closed', label: 'Closed', accent: 'text-emerald-300', dot: 'bg-emerald-400' },
-] as const;
+export const DEFAULT_CASE_COLUMNS: BoardColumn[] = DEFAULT_COLUMN_NAMES.map(
+  (name, i) => ({
+    id: name.toLowerCase().replace(/\s+/g, '_'),
+    label: name,
+    ...COLUMN_PALETTE[i % COLUMN_PALETTE.length],
+  })
+);
 
 /** A board column — `id` is stable (used as the case status), `label` is
  *  user-editable. `accent`/`dot` are Tailwind classes picked from a small
@@ -38,18 +61,6 @@ export interface BoardColumn {
 
 /** Case status is now a free-form string because columns can be added. */
 export type CaseStatus = string;
-
-/** Rotating palette for newly-added columns. */
-const COLUMN_PALETTE = [
-  { accent: 'text-sky-300', dot: 'bg-sky-400' },
-  { accent: 'text-amber-300', dot: 'bg-amber-400' },
-  { accent: 'text-rose-300', dot: 'bg-rose-400' },
-  { accent: 'text-violet-300', dot: 'bg-violet-400' },
-  { accent: 'text-emerald-300', dot: 'bg-emerald-400' },
-  { accent: 'text-cyan-300', dot: 'bg-cyan-400' },
-  { accent: 'text-orange-300', dot: 'bg-orange-400' },
-  { accent: 'text-pink-300', dot: 'bg-pink-400' },
-];
 
 export interface CaseTrakItem {
   /** Stable dedupe key (digits only — leading zeros don't make a new case) */
@@ -674,8 +685,9 @@ export default function CaseTrakBoard({
         </span>
       </div>
 
-      {/* Board — responsive columns that fill the viewport width/height */}
-      <div className="custom-scrollbar flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
+      {/* Board — columns wrap into two rows (29 columns / ~15 per row). */}
+      <div className="custom-scrollbar grid min-h-0 flex-1 auto-rows-fr gap-3 overflow-y-auto pb-2"
+           style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))' }}>
         {columns.map((col) => {
           const colItems = byStatus.get(col.id) ?? [];
           const isOver = dragOverCol === col.id;
@@ -687,7 +699,7 @@ export default function CaseTrakBoard({
               onDragLeave={() => setDragOverCol((prev) => (prev === col.id ? null : prev))}
               onDrop={(e) => onDropCol(e, col.id)}
               className={cn(
-                'flex min-h-0 min-w-[200px] flex-1 flex-col rounded-xl border transition-colors',
+                'flex min-h-0 min-w-0 flex-col rounded-xl border transition-colors',
                 isOver
                   ? 'border-accent/60 bg-accent/[0.06]'
                   : 'border-border/60 bg-card/20'

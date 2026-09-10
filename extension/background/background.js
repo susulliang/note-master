@@ -659,22 +659,6 @@ const INLINE_OVER24_EXTRACT = async function () {
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  function findGridScroller() {
-    if (typeof document === 'undefined') return null;
-    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
-    for (const g of grids) {
-      let el = g;
-      for (let up = 0; up < 14 && el; up += 1) {
-        try {
-          const cs = getComputedStyle(el);
-          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) return el;
-        } catch { /* ignore */ }
-        el = el.parentElement || el.host || null;
-      }
-    }
-    return null;
-  }
-
   /** Extract currently-visible rows from the virtualized grid. Accumulates
    *  into the outer `cases`/`seen`; returns newly added count. */
   function extractVisibleRows() {
@@ -723,27 +707,66 @@ const INLINE_OVER24_EXTRACT = async function () {
     return cases.length - before;
   }
 
-  // Incremental scroll-and-accumulate to defeat row virtualization.
-  const scroller = findGridScroller();
+  // Incremental scroll-and-accumulate to defeat row virtualization. We try
+  // EVERY scrollable container near the grid (piercing shadow roots) because
+  // the first one may not be the real virtualizer.
+  function findAllScrollers() {
+    if (typeof document === 'undefined') return [window];
+    const out = [];
+    const seen = new Set();
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const g of grids) {
+      let el = g;
+      for (let up = 0; up < 16 && el; up += 1) {
+        try {
+          const cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+            if (!seen.has(el)) { seen.add(el); out.push(el); }
+          }
+        } catch { /* ignore */ }
+        el = el.parentElement || el.host || null;
+      }
+    }
+    if (!seen.has(window)) out.push(window);
+    return out;
+  }
+  function fireScroll(el) { try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ } }
+
+  const scrollers = findAllScrollers();
+  debug.scrollerCount = scrollers.length;
   let scrollSteps = 0;
-  if (scroller) {
-    scroller.scrollTop = 0;
-    await sleep(150);
-    let lastScrollTop = -1;
+  for (const scroller of scrollers) {
+    const isWin = scroller === window;
+    const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
+    const getMax = () => isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+    const setTop = (v) => {
+      if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
+      fireScroll(scroller);
+    };
+    const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
+
+    setTop(0);
+    await sleep(200);
     let noNew = 0;
-    while (scrollSteps < 200) {
+    let localSteps = 0;
+    let lastTop = -1;
+    while (localSteps < 400) {
+      localSteps += 1;
       scrollSteps += 1;
       const added = extractVisibleRows();
-      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      const top = getTop();
+      const max = getMax();
+      const view = getViewH();
+      const atBottom = top + view >= max - 2;
       if (added === 0) noNew += 1; else noNew = 0;
-      if (atBottom && noNew >= 2) break;
-      scroller.scrollTop = Math.min(scroller.scrollHeight, scroller.scrollTop + Math.max(40, Math.floor(scroller.clientHeight * 0.85)));
-      await sleep(140);
-      if (scroller.scrollTop === lastScrollTop) break;
-      lastScrollTop = scroller.scrollTop;
+      if (atBottom && noNew >= 3) break;
+      setTop(Math.min(max, top + Math.max(50, Math.floor(view * 0.8))));
+      await sleep(220);
+      const nowTop = getTop();
+      if (nowTop === lastTop && atBottom) break;
+      lastTop = nowTop;
     }
-  } else {
-    extractVisibleRows();
+    if (totalRecords > 0 && cases.length >= totalRecords) break;
   }
   debug.tierACases = cases.length;
   debug.scrollSteps = scrollSteps;

@@ -772,61 +772,88 @@
       return cases.length - before;
     }
 
-    // ---- Find the scrollable container of the report grid ------------------
-    function findGridScroller() {
+    // ---- Find ALL scrollable containers near the report grid ---------------
+    // Salesforce's lightning-datatable virtualizes rows; only ~20 live in the
+    // DOM. The correct scroll container must be advanced so new rows render.
+    // We collect every candidate (piercing shadow roots) and try each.
+    function findAllScrollers() {
+      const out = [];
+      const seen = new Set();
       const grids = deepQueryAll('table, [role="grid"], [role="table"]');
       for (const g of grids) {
         let el = g;
-        for (let up = 0; up < 14 && el; up += 1) {
+        for (let up = 0; up < 16 && el; up += 1) {
           try {
             const cs = getComputedStyle(el);
             const oy = cs.overflowY;
             if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-              return el;
+              if (!seen.has(el)) { seen.add(el); out.push(el); }
             }
           } catch { /* ignore */ }
           el = el.parentElement || el.host || null;
         }
       }
-      return null;
+      // Always include window as a last-resort scroller.
+      if (!seen.has(window)) out.push(window);
+      return out;
+    }
+    function fireScroll(el) {
+      try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ }
     }
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const scroller = findGridScroller();
+    const scrollers = findAllScrollers();
+    debug.scrollerCount = scrollers.length;
 
-    if (scroller) {
-      // Reset to top first so we start from row 0.
-      scroller.scrollTop = 0;
-      await sleep(150);
+    // For each candidate scroller, run an incremental scroll-and-extract
+    // sweep. Cases accumulate across all sweepers (deduped by case number).
+    let steps = 0;
+    for (const scroller of scrollers) {
+      const isWin = scroller === window;
+      const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
+      const getMax = () => isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+      const setTop = (v) => {
+        if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
+        fireScroll(scroller);
+      };
+      const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
 
-      let lastScrollTop = -1;
-      let noNewCount = 0;
-      let steps = 0;
-      // Loop until we hit the bottom (scrollTop stops increasing) and a couple
-      // of consecutive passes add no new cases (last viewport fully captured).
-      while (steps < 200) {
+      // Reset to top.
+      setTop(0);
+      await sleep(200);
+
+      let noNew = 0;
+      let localSteps = 0;
+      let lastTop = -1;
+      // Sweep up to 400 steps per scroller; stop only when bottomed out AND
+      // several consecutive passes yield no new cases.
+      while (localSteps < 400) {
+        localSteps += 1;
         steps += 1;
         const added = extractVisibleRows();
         debug.scrollSteps = steps;
-        const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-        if (added === 0) noNewCount += 1; else noNewCount = 0;
-        if (atBottom && noNewCount >= 2) break;
-        // Advance by ~85% of a viewport so consecutive windows overlap and no
-        // row is missed at the boundary.
-        scroller.scrollTop = Math.min(
-          scroller.scrollHeight,
-          scroller.scrollTop + Math.max(40, Math.floor(scroller.clientHeight * 0.85))
-        );
-        await sleep(140);
-        if (scroller.scrollTop === lastScrollTop) break; // truly stuck
-        lastScrollTop = scroller.scrollTop;
+        const top = getTop();
+        const max = getMax();
+        const view = getViewH();
+        const atBottom = top + view >= max - 2;
+        if (added === 0) noNew += 1; else noNew = 0;
+        if (atBottom && noNew >= 3) break;
+        // Advance by ~80% of a viewport; overlap windows so no row is missed.
+        setTop(Math.min(max, top + Math.max(50, Math.floor(view * 0.8))));
+        await sleep(220);
+        const nowTop = getTop();
+        if (nowTop === lastTop && atBottom) break; // truly stuck at bottom
+        lastTop = nowTop;
       }
-    } else {
-      // No scrollable grid — fall back to a single pass over whatever's there.
-      extractVisibleRows();
+      // If we've already captured the expected total (or there's no total
+      // to compare against and we have a healthy count), stop trying other
+      // scrollers — the right virtualizer was found. Otherwise move on so
+      // every candidate gets a chance to reveal more rows.
+      if (totalRecords > 0 && cases.length >= totalRecords) break;
     }
+
     debug.tierACases = cases.length;
-    console.log('[over24] after incremental scroll cases=', cases.length, 'steps=', debug.scrollSteps);
+    console.log('[over24] after incremental scroll cases=', cases.length, 'steps=', steps, 'scrollers=', scrollers.length);
 
     // ---- Tier B: innerText line sweep (only if grid walk got nothing) ------
     if (cases.length === 0) {
