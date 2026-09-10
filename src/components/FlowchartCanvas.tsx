@@ -78,6 +78,11 @@ interface FlowchartCanvasProps {
   onViewChange?: (view: 'callNotes' | 'caseTrak') => void;
   /** Content rendered in the canvas area when activeView === 'caseTrak'. */
   caseTrakContent?: React.ReactNode;
+  /** Portal target slot at the bottom of the left rail pill. The page
+   *  passes a callback ref here and portals the global toolbar controls
+   *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
+   *  inside the unified pill without breaking FlowchartCanvas memoization. */
+  railBottomSlotRef?: React.Ref<HTMLDivElement>;
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
@@ -384,6 +389,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   activeView = 'callNotes',
   onViewChange,
   caseTrakContent,
+  railBottomSlotRef,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
@@ -807,8 +813,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               const extra = (commonWidth - naturalW) / 2;
               // Clamp the box's left edge so the dotted outline never slides
               // under the left-edge pill rail (the centering `extra` can push
-              // narrower groups further left than their content).
-              const bx = Math.max(LEFT_RAIL_WIDTH + 12, minX - padX - extra);
+              // narrower groups further left than their content). Rail right
+              // edge = left-3 (12px) + w-16 (64px) = 76px; +8px air gap.
+              const bx = Math.max(LEFT_RAIL_WIDTH + 20, minX - padX - extra);
               const by = minY - padTop;
               const bw = commonWidth + padX * 2;
               const bh = maxY - minY + padTop + padBottom;
@@ -908,84 +915,110 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Case Trak board — shares the canvas' dotted bg, fills full
           canvas height/width via h-full on the min-h-full anchor. */}
       {activeView === 'caseTrak' && (
-        <div className="h-full min-h-full w-full pl-[84px]">
+        <div className="h-full min-h-full w-full pl-[92px]">
           {caseTrakContent}
         </div>
       )}
 
-        {/* Left-edge vertical rail — ONE unified pill menu.
-            Work-view switcher (Call Notes / Case Trak) on top, pull-tab
-            bookmarks below. Every pill shares identical dimensions
-            (h-12 x w-14) and icon size (size-5) so the rail reads as a
-            single coherent column. */}
-        <div className="absolute left-0 top-4 z-40 flex flex-col gap-1.5">
-          {/* Work-view pills — sliding green highlight tracks the active view */}
-          <div className="relative flex w-[64px] flex-col gap-1 overflow-hidden rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
-            <span
-              className="pointer-events-none absolute left-1 right-1 z-0 rounded-xl bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_45%,transparent)] transition-[top] duration-200 ease-out"
-              style={{
-                top: activeView === 'callNotes' ? 4 : 56,
-                height: 48,
-              }}
-            />
-            {(['callNotes', 'caseTrak'] as const).map((view) => {
-              const active = activeView === view;
-              const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
-              const short = view === 'callNotes' ? 'Notes' : 'Trak';
-              const Icon = view === 'callNotes' ? FilePen : LayoutGrid;
-              return (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => onViewChange?.(view)}
-                  className={cn(
-                    'relative z-10 flex h-12 w-[56px] flex-col items-center justify-center gap-0.5 rounded-xl transition-colors duration-200',
-                    active
-                      ? 'text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                  title={`Switch to ${label}`}
-                >
-                  <Icon className="size-5" />
-                  <span className="text-[8px] font-bold uppercase leading-tight tracking-tight">
-                    {short}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        {/* Unified left rail — ONE floating vertical pill spanning the full
+            page height. Work-view tabs + bookmarks up top, global toolbar
+            controls portaled into the bottom slot.
+            • The glass surface lives on a SIBLING background layer (not an
+              ancestor of the content) so `fixed` panels/catchers inside the
+              portaled controls stay viewport-anchored (backdrop-filter on an
+              ancestor would trap them).
+            • rounded-full on a tall narrow bar = half-circle caps top and
+              bottom; a right-biased layered shadow "casts" the pill onto
+              the canvas for the protruded look. */}
+        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 animate-in fade-in duration-500">
+          {/* Glass background layer — carries all surface styling */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 animate-in zoom-in-95 fade-in duration-500 rounded-full border border-foreground/10 bg-card/75 backdrop-blur-xl backdrop-saturate-150 transition-shadow duration-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.05),8px_0_24px_-6px_rgba(0,0,0,0.4),20px_0_56px_-12px_rgba(0,0,0,0.3)] group-hover/rail:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(255,255,255,0.06),10px_0_32px_-4px_rgba(0,0,0,0.5),24px_0_72px_-12px_rgba(0,0,0,0.4)]"
+          />
+          {/* Content column */}
+          <div className="relative z-10 flex h-full flex-col items-center py-4">
+            {/* Work-view pills — sliding green highlight tracks the active view */}
+            <div className="relative flex flex-col gap-1">
+              <span
+                className="pointer-events-none absolute inset-x-0 z-0 rounded-full bg-primary shadow-[0_0_14px_color-mix(in_oklab,var(--primary)_50%,transparent)] transition-[top] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+                style={{
+                  top: activeView === 'callNotes' ? 0 : 52,
+                  height: 48,
+                }}
+              />
+              {(['callNotes', 'caseTrak'] as const).map((view) => {
+                const active = activeView === view;
+                const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
+                const short = view === 'callNotes' ? 'Notes' : 'Trak';
+                const Icon = view === 'callNotes' ? FilePen : LayoutGrid;
+                return (
+                  <button
+                    key={view}
+                    type="button"
+                    onClick={() => onViewChange?.(view)}
+                    className={cn(
+                      'relative z-10 flex h-12 w-[52px] flex-col items-center justify-center gap-0.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95',
+                      active
+                        ? 'text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    title={`Switch to ${label}`}
+                  >
+                    <Icon className="size-5" />
+                    <span className="text-[8px] font-bold uppercase leading-tight tracking-tight">
+                      {short}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Pull-tab bookmark pills — uniform size/style with the view pills */}
-          <div className="flex w-[64px] flex-col gap-1 rounded-2xl border border-border/60 bg-card/60 p-1 backdrop-blur-md">
-            {pullTabNodes.map((node) => {
-              const isCollapsed = collapsedPanels[node.id] ?? true;
-              const Icon = node.icon;
-              const shortLabel = (node.label ?? '')
-                .split(/[\s·]/)[0]
-                .slice(0, 7);
-              return (
-                <button
-                  key={`tab-${node.id}`}
-                  type="button"
-                  onClick={() => togglePanel(node.id)}
-                  title={node.label}
-                  className={cn(
-                    'relative z-10 flex h-12 w-[56px] flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200',
-                    isCollapsed
-                      ? 'text-muted-foreground hover:text-foreground hover:bg-accent/5'
-                      : 'bg-accent/10 text-accent shadow-[0_0_10px_color-mix(in_oklab,var(--accent)_30%,transparent)]'
-                  )}
-                >
-                  {Icon && <Icon className="size-5" />}
-                  <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
-                    {shortLabel}
-                  </span>
-                  {!isCollapsed && (
-                    <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent" />
-                  )}
-                </button>
-              );
-            })}
+            {/* Section divider */}
+            <div className="my-2 h-px w-8 shrink-0 bg-foreground/10" aria-hidden="true" />
+
+            {/* Pull-tab bookmark pills — the flexible middle section scrolls
+                silently when the viewport is too short for everything */}
+            <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {pullTabNodes.map((node) => {
+                const isCollapsed = collapsedPanels[node.id] ?? true;
+                const Icon = node.icon;
+                const shortLabel = (node.label ?? '')
+                  .split(/[\s·]/)[0]
+                  .slice(0, 7);
+                return (
+                  <button
+                    key={`tab-${node.id}`}
+                    type="button"
+                    onClick={() => togglePanel(node.id)}
+                    title={node.label}
+                    className={cn(
+                      'relative z-10 flex h-12 w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95',
+                      isCollapsed
+                        ? 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                        : 'bg-accent/15 text-accent shadow-[0_0_14px_color-mix(in_oklab,var(--accent)_35%,transparent)]'
+                    )}
+                  >
+                    {Icon && <Icon className="size-5 transition-transform duration-200" />}
+                    <span className={cn(
+                      'text-[8px] font-semibold uppercase leading-tight tracking-tight',
+                      isCollapsed ? 'text-muted-foreground' : 'text-accent'
+                    )}>
+                      {shortLabel}
+                    </span>
+                    {!isCollapsed && (
+                      <span className="absolute right-1.5 top-1.5 size-1.5 animate-in zoom-in rounded-full bg-accent" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Section divider above the portaled toolbar controls */}
+            <div className="my-2 h-px w-8 shrink-0 bg-foreground/10" aria-hidden="true" />
+
+            {/* Bottom slot — the page portals the global controls here */}
+            <div ref={railBottomSlotRef} className="flex shrink-0 flex-col items-center" />
           </div>
         </div>
 
@@ -994,8 +1027,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             waiting for the agent to expand the bookmark. Expanded panels
             stack vertically; collapsed ones take no visual space but stay
             mounted so e.g. the Product Lookup index is ready instantly.
-            Offset to the right of the unified 64px rail. */}
-        <div className="absolute left-[76px] top-4 z-30">
+            Offset to the right of the unified full-height rail (left-3 +
+            w-16 = 76px right edge; 12px breathing gap). */}
+        <div className="absolute left-[88px] top-4 z-30">
           {(() => {
             const gap = 16;
             let cursorY = 0;

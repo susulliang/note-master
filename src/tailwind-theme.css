@@ -945,15 +945,6 @@ body[data-ui-scale="small"] {
       0 0 28px color-mix(in oklab, #22d3ee 32%, transparent);
   }
 
-  /* Idle dimming (toolbar): almost no frost, no shadow */
-  .glass-dim {
-    background: color-mix(in oklab, var(--card) 10%, transparent);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    box-shadow: none;
-    border-color: color-mix(in oklab, var(--foreground) 5%, transparent);
-  }
-
   /* Expanded node (hovered quick-insert panel): much frostier, near-opaque
      so the in-flow expanded content reads clearly over the busy canvas */
   .glass-expanded {

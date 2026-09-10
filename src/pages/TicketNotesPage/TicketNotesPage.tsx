@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 // ---------------------------------------------------------------------------
 // Typewriter animation for auto-filled fields
@@ -112,7 +113,7 @@ import {
   Search,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import FloatingControls from '@/components/FloatingControls';
+import RailControls from '@/components/FloatingControls';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
@@ -1632,6 +1633,13 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     call.clear();
   }, [setFormData, setPositions, voice, call]);
 
+  // Portal target for the global controls at the bottom of the canvas's
+  // left rail pill. A callback ref (setState) keeps FlowchartCanvas's props
+  // referentially stable, so its memoization survives per-tick capture
+  // metric re-renders of this page — only the portaled RailControls subtree
+  // re-renders, exactly like the old standalone FloatingControls did.
+  const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
+
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
@@ -1639,67 +1647,6 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       <div className="flex h-full w-full">
         {/* Main canvas area */}
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <FloatingControls
-            theme={theme}
-            onCycleTheme={handleCycleTheme}
-            onReset={handleReset}
-            historyOpen={showHistory}
-            onToggleHistory={handleToggleHistory}
-            history={history}
-            onDeleteHistory={handleDeleteHistory}
-            onClearHistory={handleClearHistory}
-            uiScale={uiScale}
-            onToggleUiScale={handleToggleUiScale}
-            callSupported={call.isSupported}
-            callCapturing={call.isCapturing}
-            onToggleCall={handleToggleCall}
-            engine={{
-              isSupported: localWhisper.isSupported,
-              model: localWhisper.model,
-              status: localWhisper.status,
-              progress: localWhisper.progress,
-              dtype: localWhisper.dtype,
-              error: localWhisper.error,
-              lastInferenceMs: localWhisper.lastInferenceMs,
-              memStats: localWhisper.memStats,
-              onSwitchModel: handleSwitchWhisperModel,
-            }}
-            parser={{
-              enabled: llmParser.enabled,
-              model: llmParser.model,
-              models: llmParser.models,
-              status: llmParser.status,
-              progress: llmParser.progress,
-              error: llmParser.error,
-              isParsing: llmParser.isParsing,
-              isParaphrasing: llmParser.isParaphrasing,
-              lastParseMs: llmParser.lastParseMs,
-              device: llmParser.device,
-              dtype: llmParser.dtype,
-              genProgress: llmParser.genProgress,
-              memStats: llmParser.memStats,
-              failedAttempts: llmParser.failedAttempts,
-              window: llmParser.lastWindow,
-              lastReply: llmParser.lastReply,
-              lastStats: llmParser.lastStats,
-              onLoadDevice: handleLoadLlmDevice,
-              onToggleEnabled: handleToggleLlmEnabled,
-              onSwitchModel: handleSwitchLlmModel,
-              onLoad: handleLoadLlm,
-            }}
-            cloud={{
-              hasKey: cloudParser.hasKey,
-              error: cloudParser.error,
-              onSetApiKey: cloudParser.setApiKey,
-              isDefault: cloudParser.isDefault,
-            }}
-            transcript={call.transcript}
-            isTranscribing={call.isTranscribing}
-            gridboxVisibility={{
-              toggles: gridboxVisibilityToggles,
-              onToggle: handleToggleGridbox,
-            }}
-          />
           <TicketPanelsContext.Provider
             value={{
               openCase: async ({ caseNumber, directUrl, newTab }) => {
@@ -1849,10 +1796,81 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               activeView={workView}
               onViewChange={setWorkView}
               caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
+              railBottomSlotRef={setRailControlsSlot}
             />
           </TicketPanelsContext.Provider>
         </main>
       </div>
+
+      {/* Global controls — portaled into the bottom slot of the canvas's
+          left rail pill (one unified floating menu; no separate floating
+          toolbar). Rendered through a portal so capture-metric re-renders
+          of this page never invalidate FlowchartCanvas's memoization. */}
+      {railControlsSlot &&
+        createPortal(
+          <RailControls
+            theme={theme}
+            onCycleTheme={handleCycleTheme}
+            onReset={handleReset}
+            historyOpen={showHistory}
+            onToggleHistory={handleToggleHistory}
+            history={history}
+            onDeleteHistory={handleDeleteHistory}
+            onClearHistory={handleClearHistory}
+            uiScale={uiScale}
+            onToggleUiScale={handleToggleUiScale}
+            callSupported={call.isSupported}
+            callCapturing={call.isCapturing}
+            onToggleCall={handleToggleCall}
+            engine={{
+              isSupported: localWhisper.isSupported,
+              model: localWhisper.model,
+              status: localWhisper.status,
+              progress: localWhisper.progress,
+              dtype: localWhisper.dtype,
+              error: localWhisper.error,
+              lastInferenceMs: localWhisper.lastInferenceMs,
+              memStats: localWhisper.memStats,
+              onSwitchModel: handleSwitchWhisperModel,
+            }}
+            parser={{
+              enabled: llmParser.enabled,
+              model: llmParser.model,
+              models: llmParser.models,
+              status: llmParser.status,
+              progress: llmParser.progress,
+              error: llmParser.error,
+              isParsing: llmParser.isParsing,
+              isParaphrasing: llmParser.isParaphrasing,
+              lastParseMs: llmParser.lastParseMs,
+              device: llmParser.device,
+              dtype: llmParser.dtype,
+              genProgress: llmParser.genProgress,
+              memStats: llmParser.memStats,
+              failedAttempts: llmParser.failedAttempts,
+              window: llmParser.lastWindow,
+              lastReply: llmParser.lastReply,
+              lastStats: llmParser.lastStats,
+              onLoadDevice: handleLoadLlmDevice,
+              onToggleEnabled: handleToggleLlmEnabled,
+              onSwitchModel: handleSwitchLlmModel,
+              onLoad: handleLoadLlm,
+            }}
+            cloud={{
+              hasKey: cloudParser.hasKey,
+              error: cloudParser.error,
+              onSetApiKey: cloudParser.setApiKey,
+              isDefault: cloudParser.isDefault,
+            }}
+            transcript={call.transcript}
+            isTranscribing={call.isTranscribing}
+            gridboxVisibility={{
+              toggles: gridboxVisibilityToggles,
+              onToggle: handleToggleGridbox,
+            }}
+          />,
+          railControlsSlot
+        )}
 
       {/* NOTE: OutputModal reads TicketPanelsContext.openCase / applyCaseFields /
          extensionConnection to push notes to SF. In the 0.1.21 cycle we had it
