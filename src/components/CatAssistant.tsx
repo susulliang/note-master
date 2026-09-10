@@ -8,7 +8,7 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  * pops up thought bubbles (tips / advice / idle musings).
  *
  * Visual model:
- *  - The sprite is a 64px pixel-art cat at bottom-left by default, draggable
+ *  - The sprite is a 128px pixel-art cat at bottom-left by default, draggable
  *    anywhere on the viewport. Position is persisted to localStorage.
  *  - One static frame per state (resting / standby / side / thinking /
  *    alert — 128×128 alpha-transparent PNGs in /assets/cat/). No frame
@@ -24,7 +24,7 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  */
 
 const DEFAULT_POSITION = { x: 24, y: 24 };
-const SPRITE_SIZE = 64;
+const SPRITE_SIZE = 128;
 
 /** Sprite states and their single static frame. */
 type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert';
@@ -160,9 +160,8 @@ export function CatAssistant({
         role="img"
         aria-label="Cat assistant — drag to move"
         className={cn(
-          'pointer-events-auto relative flex h-16 w-16 cursor-grab items-center justify-center rounded-full',
-          dragging && 'cursor-grabbing',
-          'animate-cat-bob'
+          'pointer-events-auto relative flex h-32 w-32 cursor-grab items-center justify-center',
+          dragging && 'cursor-grabbing'
         )}
       >
         {showEmojiFallback ? (

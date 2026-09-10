@@ -548,19 +548,9 @@ body[data-ui-scale="small"] {
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Cat assistant — a gentle idle breathing bob so the sprite       */
-  /*  feels alive even when it has nothing to say.                    */
+  /*  Cat assistant — state-change pop so the pose swap reads as      */
+  /*  an intentional movement rather than an image flicker.           */
   /* ---------------------------------------------------------------- */
-  @keyframes cat-bob {
-    0%, 100% { transform: translateY(0); }
-    50%      { transform: translateY(-3px); }
-  }
-  .animate-cat-bob {
-    animation: cat-bob 2.6s ease-in-out infinite;
-  }
-
-  /* Cat state change: a quick squash-and-pop so the pose swap reads as
-     an intentional movement rather than an image flicker. */
   @keyframes cat-pop {
     0%   { transform: scale(0.86); opacity: 0.4; }
     60%  { transform: scale(1.06); opacity: 1; }
