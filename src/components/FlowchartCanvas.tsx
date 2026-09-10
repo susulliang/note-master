@@ -930,14 +930,19 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             • rounded-full on a tall narrow bar = half-circle caps top and
               bottom; a right-biased layered shadow "casts" the pill onto
               the canvas for the protruded look. */}
-        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 animate-in fade-in duration-500">
-          {/* Glass background layer — carries all surface styling */}
+        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.012]">
+          {/* Glass background layer — carries all surface styling.
+              Idle: subtle shadow only; hover (on the outer container, via
+              group-hover/rail): a normal amount of shadow. */}
           <div
             aria-hidden="true"
-            className="absolute inset-0 animate-in zoom-in-95 fade-in duration-500 rounded-full border border-foreground/10 bg-card/75 backdrop-blur-xl backdrop-saturate-150 transition-shadow duration-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.05),8px_0_24px_-6px_rgba(0,0,0,0.4),20px_0_56px_-12px_rgba(0,0,0,0.3)] group-hover/rail:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(255,255,255,0.06),10px_0_32px_-4px_rgba(0,0,0,0.5),24px_0_72px_-12px_rgba(0,0,0,0.4)]"
+            className="absolute inset-0 animate-in zoom-in-95 fade-in duration-500 rounded-full border border-foreground/10 bg-card/75 backdrop-blur-xl backdrop-saturate-150 transition-shadow duration-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),3px_0_10px_-3px_rgba(0,0,0,0.2)] group-hover/rail:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),6px_0_18px_-4px_rgba(0,0,0,0.38),14px_0_36px_-10px_rgba(0,0,0,0.28)]"
           />
-          {/* Content column */}
-          <div className="relative z-10 flex h-full flex-col items-center py-4">
+          {/* Content column — pt-2 (8px) so the first work-view pill's
+              vertical center aligns with the top half-circle cap's radial
+              center (cap radius = 32px; pill h-12 = 48px → center at
+              8 + 24 = 32px). pb-4 keeps the bottom controls as before. */}
+          <div className="relative z-10 flex h-full flex-col items-center pt-2 pb-4">
             {/* Work-view pills — sliding green highlight tracks the active view */}
             <div className="relative flex flex-col gap-1">
               <span

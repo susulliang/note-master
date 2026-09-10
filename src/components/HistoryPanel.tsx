@@ -79,7 +79,7 @@ export default function HistoryPanel({
         </div>
       ) : (
         <>
-          <ScrollArea className="flex-1">
+          <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-1.5 p-2">
               {history.map((entry) => {
                 const isExpanded = expandedNoteId === entry.id;
