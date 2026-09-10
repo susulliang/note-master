@@ -1834,7 +1834,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
               onViewChange={setWorkView}
-              caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} />}
+              caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
             />
           </TicketPanelsContext.Provider>
         </main>

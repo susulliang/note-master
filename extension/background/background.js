@@ -595,7 +595,7 @@ const INLINE_EXTRACT_MAP = {
  *  content-script listener isn't reachable. Returns
  *  { ok, reportName, totalRecords, cases[], error }. */
 // eslint-disable-next-line func-names
-const INLINE_OVER24_EXTRACT = function () {
+const INLINE_OVER24_EXTRACT = async function () {
   const REPORT_COLUMNS = {
     'case number': 'caseNumber',
     'case owner': 'caseOwner',
@@ -655,6 +655,41 @@ const INLINE_OVER24_EXTRACT = function () {
     ));
     if (cells.length === 0) cells = Array.from(row.children || []);
     return cells;
+  }
+
+  // Scroll the report grid to the bottom so virtualized rows load.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let scrollRounds = 0;
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    for (let round = 0; round < 60; round += 1) {
+      const scrollers = new Set();
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      for (const g of grids) {
+        let el = g;
+        for (let up = 0; up < 12 && el; up += 1) {
+          try {
+            const cs = getComputedStyle(el);
+            if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+              scrollers.add(el);
+            }
+          } catch { /* ignore */ }
+          el = el.parentElement || el.host || null;
+        }
+      }
+      scrollers.add(window);
+      let moved = false;
+      for (const s of scrollers) {
+        const isWin = s === window;
+        const prev = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
+        const max = isWin ? document.documentElement.scrollHeight : s.scrollHeight;
+        if (isWin) window.scrollTo(0, max); else s.scrollTop = max;
+        const after = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
+        if (Math.abs(after - prev) > 2) moved = true;
+      }
+      await sleep(120);
+      scrollRounds = round + 1;
+      if (!moved && round > 1) break;
+    }
   }
 
   if (typeof document !== 'undefined' && document.querySelectorAll) {
@@ -763,12 +798,14 @@ const INLINE_OVER24_EXTRACT = function () {
   }
 
   debug.sample = cases.slice(0, 5);
+  debug.scrollRounds = scrollRounds;
   return {
     ok: cases.length > 0,
     reportName,
     totalRecords: totalRecords || cases.length,
     cases,
     debug,
+    scrollRounds,
     error: cases.length === 0
       ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
       : '',
@@ -1383,17 +1420,19 @@ function buildMergedFields() {
   return out;
 }
 
-/** The 4 identity fields auto-pushed on every scrape (with dedupe). */
-const KEY_PUSH_FIELDS = ['contactNumber', 'customerName', 'deebotModel', 'serialNumber'];
+/** Identity fields auto-pushed on every scrape (with dedupe). Per the
+ *  agent's request, auto-push only carries the phone number + contact name;
+ *  device/model/serial must be pushed manually via the "Push info to Ticket
+ *  Notes" button so call notes stay lean during a live call. */
+const KEY_PUSH_FIELDS = ['contactNumber', 'customerName'];
 const KEY_PUSH_FALLBACKS = {
   contactNumber: ['phone'],
   customerName: ['accountName', 'contactName'],
-  deebotModel: [],
-  serialNumber: [],
 };
 
-/** Build the 4-field identity snapshot used for change detection + auto push.
- *  Falls back to aliases scrapers sometimes produce, always returns strings. */
+/** Build the identity snapshot (phone + contact name) used for change
+ *  detection + auto push. Falls back to aliases scrapers sometimes produce,
+ *  always returns strings. */
 function buildKeyFields(merged = buildMergedFields()) {
   const out = {};
   for (const k of KEY_PUSH_FIELDS) {
@@ -1431,8 +1470,8 @@ async function findTicketAppTab() {
  *  every content-script scrape event.
  *
  *  force=false (auto push on scrape):
- *    - sends only the 4 identity fields
- *    - skips entirely if the 4 fields haven't changed since last successful push
+ *    - sends only the phone + contact name fields
+ *    - skips entirely if those fields haven't changed since last successful push
  *    - payload.mode = 'auto' (app shows confirm popup)
  *
  *  force=true (popup "Push to open Ticket Notes" button):
@@ -1692,6 +1731,7 @@ async function importOver24Report() {
     totalRecords: state.over24.totalRecords,
     reportName: state.over24.reportName,
     via: r.via,
+    scrollRounds: r.scrollRounds ?? r.debug?.scrollRounds ?? null,
     pushed,
     sample: r.cases.slice(0, 10),
     debug: r.debug ?? null,
@@ -2161,6 +2201,15 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
       if (t === 'EXT_SCRAPE_SF')  {
         const r = await scrapeSalesforceTab();
         sendResponse(r); diagRecord('external:ok', { type: t, ok: Boolean(r?.ok), error: r?.error ?? null });
+        return;
+      }
+      if (t === 'EXT_SCRAPE_OVER24') {
+        // Case Trak board "Scrape OVER24" button → scrape the [OVER24] report
+        // tab and push every case into the board. Returns the same shape as
+        // the popup's POPUP_SCRAPE_OVER24 reply.
+        const r = await importOver24Report();
+        sendResponse(r);
+        diagRecord('external:ok', { type: t, ok: Boolean(r?.ok), cases: r?.count ?? 0, error: r?.error ?? null });
         return;
       }
       if (t === 'EXT_GET_STATE') {

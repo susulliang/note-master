@@ -103,6 +103,9 @@ export interface CcpExtensionBridge {
   scrapeAll: () => Promise<{ ok: boolean; merged?: ExtensionFieldMap; error?: string }>;
   /** Fetch the current extension state + merged fields snapshot. */
   getSnapshot: () => Promise<{ ok: boolean; merged?: ExtensionFieldMap; state?: unknown }>;
+  /** Trigger the extension's "[OVER24]" report scrape and push every case
+   *  into the Case Trak board. Returns the raw scrape result. */
+  scrapeOver24: () => Promise<any>;
   /** Ask the extension to open (or focus) a Salesforce Console tab for
    *  a given case number (global search scoped to Case records), OR to
    *  a direct Lightning view URL when provided.  `newTab=true` forces a
@@ -375,7 +378,7 @@ export function useCcpExtensionBridge({
   // Bump this EXPECTED whenever extension manifest version bumps so the
   // ticket app page can immediately flag "bridge content script loaded but
   // it's still the OLD cached version (user needs 🔄 reload extension)".
-  const EXPECTED_MANIFEST_VERSION = '0.1.56';
+  const EXPECTED_MANIFEST_VERSION = '0.1.57';
   const [manifestBridgePatterns, setManifestBridgePatterns] = useState<string[]>([...DEFAULT_BRIDGE_PATTERNS]);
   const [manifestExternalPatterns, setManifestExternalPatterns] = useState<string[]>([...DEFAULT_EXTERNAL_PATTERNS]);
   const [receivedBridgePatternsAt, setReceivedBridgePatternsAt] = useState<string | null>(null);
@@ -1257,6 +1260,20 @@ export function useCcpExtensionBridge({
     }
   }, [sendRequest]);
 
+  /** Trigger the extension's "[OVER24]" report scrape (same as the popup
+   *  "Import Over 24h Report Cases" button). The extension scrapes the
+   *  Salesforce report tab and pushes every case into the Case Trak board
+   *  via the bridge. Returns the raw scrape result so the UI can toast. */
+  const scrapeOver24 = useCallback(async (): Promise<any> => {
+    try {
+      const r = await sendRequest({ type: 'EXT_SCRAPE_OVER24' });
+      if (r?.ok) return r;
+      return { ok: false, error: r?.error || 'OVER24 scrape failed.' };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  }, [sendRequest]);
+
   const openCase = useCallback(async (opts: {
     caseNumber?: string;
     directUrl?: string;
@@ -1321,6 +1338,7 @@ export function useCcpExtensionBridge({
     dismissPendingPush,
     scrapeAll,
     getSnapshot,
+    scrapeOver24,
     openCase,
     applyCaseFields,
     connectionDiagnostics: {

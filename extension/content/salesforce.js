@@ -653,6 +653,54 @@
     'customer last reply time': 'customerLastReplyTime',
   };
 
+  /** Salesforce Lightning reports virtualize rows — only ~20 are in the DOM
+   *  until you scroll. Scroll every scrollable ancestor of the report grid
+   *  (and the grid itself) to the bottom repeatedly until the scroll height
+   *  stops growing, so all rows render before we scrape. Returns the number
+   *  of scroll rounds performed. */
+  async function scrollReportToBottom(maxRounds = 60, stepMs = 120) {
+    function findScrollers() {
+      const scrollers = new Set();
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      for (const g of grids) {
+        let el = g;
+        for (let up = 0; up < 12 && el; up += 1) {
+          try {
+            const cs = getComputedStyle(el);
+            const oy = cs.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+              scrollers.add(el);
+            }
+          } catch { /* ignore */ }
+          el = el.parentElement || el.host || null;
+        }
+      }
+      // Also include window as a last-resort scroller.
+      scrollers.add(window);
+      return Array.from(scrollers);
+    }
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let rounds = 0;
+    let stable = 0;
+    while (rounds < maxRounds && stable < 3) {
+      rounds += 1;
+      const scrollers = findScrollers();
+      let moved = false;
+      for (const s of scrollers) {
+        const isWin = s === window;
+        const prev = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
+        const max = isWin ? document.documentElement.scrollHeight : s.scrollHeight;
+        if (isWin) window.scrollTo(0, max);
+        else s.scrollTop = max;
+        const after = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
+        if (Math.abs(after - prev) > 2) moved = true;
+      }
+      await sleep(stepMs);
+      stable = moved ? 0 : stable + 1;
+    }
+    return rounds;
+  }
+
   function scrapeOver24Report() {
     function _clean(v) {
       return String(v == null ? '' : v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -861,11 +909,16 @@
       return true;
     }
     if (msg?.type === 'SCRAPE_OVER24_REPORT') {
-      try {
-        sendResponse({ ...scrapeOver24Report(), url: location.href, title: document.title });
-      } catch (e) {
-        sendResponse({ ok: false, cases: [], error: String(e?.message || e) });
-      }
+      (async () => {
+        try {
+          const rounds = await scrollReportToBottom();
+          console.log('[over24] scrolled report to bottom in', rounds, 'rounds');
+          const result = scrapeOver24Report();
+          sendResponse({ ...result, scrollRounds: rounds, url: location.href, title: document.title });
+        } catch (e) {
+          sendResponse({ ok: false, cases: [], error: String(e?.message || e) });
+        }
+      })();
       return true;
     }
     if (msg?.type === 'APPLY_CASE_FIELDS') {

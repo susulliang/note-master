@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type DragEvent, type KeyboardEvent } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, type DragEvent } from 'react';
 import {
   Plus,
   ExternalLink,
@@ -16,8 +16,10 @@ import type { ReportCaseRecord, ReportImportMeta } from '@/hooks/use-ccp-extensi
 import { TicketPanelsContext } from './FlowNode';
 import { useContext } from 'react';
 
-/** The five workflow columns, in left-to-right order as specified. */
-export const CASE_STATUS_COLUMNS = [
+/** Default workflow columns, in left-to-right order. Agents can rename,
+ *  add, or delete columns (see header controls); choices persist to
+ *  localStorage. */
+export const DEFAULT_CASE_COLUMNS = [
   { id: 'open', label: 'Open', accent: 'text-sky-300', dot: 'bg-sky-400' },
   { id: 'pending', label: 'Pending / Done', accent: 'text-amber-300', dot: 'bg-amber-400' },
   { id: 'escalated', label: 'Escalated', accent: 'text-rose-300', dot: 'bg-rose-400' },
@@ -25,7 +27,30 @@ export const CASE_STATUS_COLUMNS = [
   { id: 'closed', label: 'Closed', accent: 'text-emerald-300', dot: 'bg-emerald-400' },
 ] as const;
 
-export type CaseStatus = (typeof CASE_STATUS_COLUMNS)[number]['id'];
+/** A board column — `id` is stable (used as the case status), `label` is
+ *  user-editable. `accent`/`dot` are Tailwind classes picked from a small
+ *  palette so custom columns still look on-theme. */
+export interface BoardColumn {
+  id: string;
+  label: string;
+  accent: string;
+  dot: string;
+}
+
+/** Case status is now a free-form string because columns can be added. */
+export type CaseStatus = string;
+
+/** Rotating palette for newly-added columns. */
+const COLUMN_PALETTE = [
+  { accent: 'text-sky-300', dot: 'bg-sky-400' },
+  { accent: 'text-amber-300', dot: 'bg-amber-400' },
+  { accent: 'text-rose-300', dot: 'bg-rose-400' },
+  { accent: 'text-violet-300', dot: 'bg-violet-400' },
+  { accent: 'text-emerald-300', dot: 'bg-emerald-400' },
+  { accent: 'text-cyan-300', dot: 'bg-cyan-400' },
+  { accent: 'text-orange-300', dot: 'bg-orange-400' },
+  { accent: 'text-pink-300', dot: 'bg-pink-400' },
+];
 
 export interface CaseTrakItem {
   /** Stable dedupe key (digits only — leading zeros don't make a new case) */
@@ -98,6 +123,7 @@ function reportStatusColor(status: string): string {
 }
 
 const STORAGE_KEY = 'ecovacs_case_trak_v1';
+const COLUMNS_STORAGE_KEY = 'ecovacs_case_trak_columns_v1';
 /** Legacy 24h tracker key — we migrate its cases on first load. */
 const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
 
@@ -116,9 +142,20 @@ const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
  * card in tiny type; existing cards get their report fields refreshed
  * without touching the agent's chosen board status.
  */
-export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseReportImportBatch[] }) {
+export default function CaseTrakBoard({
+  reportImports,
+  scrapeOver24,
+  connected,
+}: {
+  reportImports?: CaseReportImportBatch[];
+  scrapeOver24?: () => Promise<any>;
+  connected?: boolean;
+}) {
   const [items, setItems] = useScopedState<CaseTrakItem[]>(STORAGE_KEY, []);
-  const [input, setInput] = useState('');
+  const [columns, setColumns] = useScopedState<BoardColumn[]>(COLUMNS_STORAGE_KEY, [...DEFAULT_CASE_COLUMNS] as BoardColumn[]);
+  const [editingColId, setEditingColId] = useState<string | null>(null);
+  const [colLabelDraft, setColLabelDraft] = useState('');
+  const [scraping, setScraping] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<CaseStatus | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
@@ -243,58 +280,6 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
     });
   }, [reportImports, setItems]);
 
-  const addCases = useCallback((raw: string) => {
-    const tokens = raw
-      .split(/[\s,;]+/)
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0 && /\d/.test(t));
-    if (tokens.length === 0) return;
-
-    setItems((prev) => {
-      const seen = new Set(prev.map((c) => c.id));
-      const now = new Date().toISOString();
-      const added: CaseTrakItem[] = [];
-      for (const token of tokens) {
-        const cnMatch = token.match(/\b(\d{7,})\b/);
-        const looksUrl = /^https?:\/\//i.test(token);
-        const caseNumber = cnMatch ? cnMatch[1] : token.replace(/\D/g, '');
-        if (!caseNumber || caseNumber.length < 7) continue;
-        const id = caseKey(caseNumber);
-        if (seen.has(id)) {
-          if (looksUrl && isValidLightningCaseUrl(token)) {
-            return prev.map((c) =>
-              c.id === id ? { ...c, directCaseUrl: token, updatedAt: now } : c
-            );
-          }
-          continue;
-        }
-        seen.add(id);
-        added.push({
-          id,
-          caseNumber,
-          customerName: null,
-          status: 'open',
-          directCaseUrl: looksUrl && isValidLightningCaseUrl(token) ? token : null,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-      if (added.length === 0) {
-        toast.info('All cases were already on the board');
-        return prev;
-      }
-      return [...prev, ...added];
-    });
-  }, [setItems]);
-
-  const handleInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      addCases(input);
-      setInput('');
-    }
-  };
-
   const moveCase = useCallback((id: string, status: CaseStatus) => {
     setItems((prev) =>
       prev.map((c) =>
@@ -385,10 +370,14 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
 
   const byStatus = useMemo(() => {
     const map = new Map<CaseStatus, CaseTrakItem[]>();
-    for (const col of CASE_STATUS_COLUMNS) map.set(col.id, []);
-    for (const c of items) (map.get(c.status) ?? map.get('open'))!.push(c);
+    const firstId = columns[0]?.id ?? 'open';
+    for (const col of columns) map.set(col.id, []);
+    for (const c of items) {
+      const bucket = map.has(c.status) ? c.status : firstId;
+      (map.get(bucket) ?? map.get(firstId))!.push(c);
+    }
     return map;
-  }, [items]);
+  }, [items, columns]);
 
   const totalCount = items.length;
 
@@ -397,7 +386,7 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
   const handleCopyStatus = useCallback(async () => {
     if (items.length === 0) return;
     const labelFor = (s: CaseStatus) =>
-      CASE_STATUS_COLUMNS.find((c) => c.id === s)?.label ?? s;
+      columns.find((c) => c.id === s)?.label ?? s;
     const text = items
       .map((c) => `${c.caseNumber} ${labelFor(c.status)}`)
       .join('\n');
@@ -407,16 +396,109 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
     } catch {
       toast.error('Failed to copy. Please select and copy manually.');
     }
-  }, [items]);
+  }, [items, columns]);
+
+  // --- Column management: rename / add / delete ---------------------------
+  const startRenameCol = (col: BoardColumn) => {
+    setEditingColId(col.id);
+    setColLabelDraft(col.label);
+  };
+  const commitRenameCol = () => {
+    if (editingColId == null) return;
+    const label = colLabelDraft.trim();
+    if (label) {
+      setColumns((prev) => prev.map((c) => (c.id === editingColId ? { ...c, label } : c)));
+    }
+    setEditingColId(null);
+    setColLabelDraft('');
+  };
+  const cancelRenameCol = () => {
+    setEditingColId(null);
+    setColLabelDraft('');
+  };
+  const addColumn = () => {
+    const idx = columns.length % COLUMN_PALETTE.length;
+    const palette = COLUMN_PALETTE[idx];
+    const id = `col_${Date.now().toString(36)}`;
+    setColumns((prev) => [...prev, { id, label: 'New Column', ...palette }]);
+    toast.info('Added a new column — click its name to rename.');
+  };
+  const deleteColumn = (colId: string) => {
+    setColumns((prev) => {
+      if (prev.length <= 1) {
+        toast.error('Keep at least one column.');
+        return prev;
+      }
+      const next = prev.filter((c) => c.id !== colId);
+      const fallback = next[0]?.id ?? 'open';
+      // Move orphaned cases into the first remaining column.
+      setItems((its) =>
+        its.map((c) => (c.status === colId ? { ...c, status: fallback, updatedAt: new Date().toISOString() } : c))
+      );
+      toast.info(`Column deleted — its cases moved to "${next[0]?.label}".`);
+      return next;
+    });
+    if (editingColId === colId) cancelRenameCol();
+  };
+
+  const handleScrapeOver24 = async () => {
+    if (!scrapeOver24) {
+      toast.error('Extension bridge not available. Reload the page or re-install the extension.');
+      return;
+    }
+    setScraping(true);
+    try {
+      const r = await scrapeOver24();
+      if (r?.ok) {
+        const n = Number(r.count ?? 0);
+        const total = r.totalRecords ? ` of ${r.totalRecords}` : '';
+        if (r.pushed?.ok) {
+          toast.success(`Imported ${n} case${n === 1 ? '' : 's'}${total} → board.`);
+        } else {
+          toast.warning(`Scraped ${n} case${n === 1 ? '' : 's'}${total}, but the board didn't receive them: ${r.pushed?.error || 'bridge not connected'}.`);
+        }
+      } else {
+        toast.error(r?.error || 'OVER24 scrape failed.');
+      }
+    } catch (e: any) {
+      toast.error(String(e?.message || e));
+    } finally {
+      setScraping(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-full min-w-0 flex-col gap-3 p-4">
-      {/* Header — no page title (the left-edge pill already says Case Trak).
-          Just a count badge + Copy status + Clear board actions. */}
+      {/* Header — case count + column add/remove controls + actions. */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
-          {totalCount} case{totalCount === 1 ? '' : 's'}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+            {totalCount} case{totalCount === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            onClick={addColumn}
+            className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+            title="Add a new column"
+          >
+            <Plus className="size-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (columns.length <= 1) {
+                toast.error('Keep at least one column.');
+                return;
+              }
+              const last = columns[columns.length - 1];
+              deleteColumn(last.id);
+            }}
+            className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            title="Delete the last column"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
         <div className="flex items-center gap-2">
           {totalCount > 0 && (
             <button
@@ -446,42 +528,29 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
         </div>
       </div>
 
-      {/* Paste / add area */}
-      <div className="shrink-0 rounded-lg border border-border/60 bg-card/40 p-2.5 backdrop-blur-sm">
-        <div className="flex gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleInputKeyDown}
-            rows={2}
-            placeholder="Paste case numbers or Lightning Case URLs, press Enter…"
-            spellCheck={false}
-            className="min-h-0 flex-1 resize-none rounded-md border border-border/50 bg-foreground/[0.04] px-2 py-1.5 font-mono text-xs text-foreground placeholder:font-sans placeholder:text-muted-foreground/60 focus:border-accent focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              addCases(input);
-              setInput('');
-            }}
-            disabled={!input.trim()}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Plus className="size-3.5" />
-            Add
-          </button>
-        </div>
-        <p className="mt-1 text-[10px] leading-snug text-muted-foreground/70">
-          Numbers can be separated by spaces, commas or new lines — duplicates are skipped.
-          Drag a card between columns to change its status.
+      {/* Scrape OVER24 action — replaces the old paste-cases box. */}
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-card/40 p-2.5 backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={() => void handleScrapeOver24()}
+          disabled={scraping || !scrapeOver24}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-b from-amber-500/30 to-amber-600/15 px-3 py-1.5 text-xs font-bold text-amber-200 ring-1 ring-inset ring-amber-500/40 transition-all hover:from-amber-500/40 hover:to-amber-600/20 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Scrape the [OVER24] Salesforce report and import every case into the board"
+        >
+          <span className={scraping ? 'animate-spin' : ''}>📥</span>
+          {scraping ? 'Scraping OVER24…' : 'Scrape OVER24 Report'}
+        </button>
+        <p className="text-[10px] leading-snug text-muted-foreground/70">
+          {connected ? 'Extension connected — scrapes the [OVER24] Salesforce tab and drops cases here.' : 'Extension not connected — reload the page after re-enabling the extension.'}
         </p>
       </div>
 
-      {/* Board — 5 responsive columns that fill the viewport width/height */}
+      {/* Board — responsive columns that fill the viewport width/height */}
       <div className="custom-scrollbar flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
-        {CASE_STATUS_COLUMNS.map((col) => {
+        {columns.map((col) => {
           const colItems = byStatus.get(col.id) ?? [];
           const isOver = dragOverCol === col.id;
+          const isEditing = editingColId === col.id;
           return (
             <div
               key={col.id}
@@ -495,15 +564,42 @@ export default function CaseTrakBoard({ reportImports }: { reportImports?: CaseR
                   : 'border-border/60 bg-card/20'
               )}
             >
-              {/* Column header */}
+              {/* Column header — click the label to rename. */}
               <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
-                <span className={cn('size-2 rounded-full', col.dot)} />
-                <span className={cn('text-[11px] font-extrabold uppercase tracking-wider', col.accent)}>
-                  {col.label}
-                </span>
-                <span className="ml-auto rounded-full bg-foreground/10 px-1.5 text-[10px] font-bold text-muted-foreground">
+                <span className={cn('size-2 shrink-0 rounded-full', col.dot)} />
+                {isEditing ? (
+                  <input
+                    autoFocus
+                    value={colLabelDraft}
+                    onChange={(e) => setColLabelDraft(e.target.value)}
+                    onBlur={commitRenameCol}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitRenameCol();
+                      if (e.key === 'Escape') cancelRenameCol();
+                    }}
+                    className={cn('min-w-0 flex-1 rounded border border-accent/50 bg-background/60 px-1 py-0.5 text-[11px] font-extrabold uppercase tracking-wider outline-none', col.accent)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startRenameCol(col)}
+                    className={cn('min-w-0 flex-1 truncate text-left text-[11px] font-extrabold uppercase tracking-wider transition-opacity hover:opacity-70', col.accent)}
+                    title="Click to rename"
+                  >
+                    {col.label}
+                  </button>
+                )}
+                <span className="ml-auto shrink-0 rounded-full bg-foreground/10 px-1.5 text-[10px] font-bold text-muted-foreground">
                   {colItems.length}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => deleteColumn(col.id)}
+                  className="shrink-0 rounded-full p-0.5 text-muted-foreground/50 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                  title="Delete this column"
+                >
+                  <X className="size-3" />
+                </button>
               </div>
 
               {/* Cards */}

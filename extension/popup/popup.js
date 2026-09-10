@@ -787,6 +787,7 @@ function renderOver24(r) {
     totalRecords: r.totalRecords ?? null,
     reportName: r.reportName ?? null,
     via: r.via ?? null,
+    scrollRounds: r.scrollRounds ?? null,
     pushed: r.pushed ?? null,
     debug: r.debug ?? null,
     sample: (Array.isArray(r.sample) && r.sample.length > 0) ? r.sample : (Array.isArray(r.cases) ? r.cases.slice(0, 10) : []),
