@@ -8,27 +8,52 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  * pops up thought bubbles (tips / advice / idle musings).
  *
  * Visual model:
- *  - The sprite is a 64px image at bottom-right by default, draggable
+ *  - The sprite is a 64px pixel-art cat at bottom-left by default, draggable
  *    anywhere on the viewport. Position is persisted to localStorage.
+ *  - Each state (resting / standby / side / thinking / alert) has 3 frames
+ *    (128×128 JPGs in /assets/cat/) cycled at ~450ms for a subtle idle
+ *    animation — ear twitches, blinks, tail flicks.
  *  - A thought bubble renders above the sprite when `currentThought` is set.
- *  - States: idle (gentle bob), listening (ear twitch + dot pulse while
- *    call is active), thinking (spin while an advice request is in flight).
  *
- * Asset:
- *  - `spriteSrc` defaults to '/assets/cat-sprite.png'. Drop the real asset
- *    there and it renders. Until then we fall back to an emoji cat so the
- *    component is visible and testable with zero setup.
+ * State mapping:
+ *  - thinking  → LLM advice request in flight
+ *  - alert     → live call capture running (ears perked, listening)
+ *  - side      → showing a thought bubble (glancing sideways at the agent)
+ *  - standby   → idle default (sitting, calm)
  */
 
 const DEFAULT_POSITION = { x: 24, y: 24 };
 const SPRITE_SIZE = 64;
+const FRAME_MS = 450;
+
+/** Sprite states and their animation frames (3 per state). */
+type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert';
+
+const CAT_FRAMES: Record<CatState, string[]> = {
+  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.jpg`),
+  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.jpg`),
+  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.jpg`),
+  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.jpg`),
+  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.jpg`),
+};
+
+/** Preload every frame once so state switches never flash. */
+function usePreloadFrames() {
+  useEffect(() => {
+    for (const frames of Object.values(CAT_FRAMES)) {
+      for (const src of frames) {
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }, []);
+}
 
 interface CatAssistantProps {
   currentThought: CatThought | null;
   isCapturing: boolean;
   isThinking: boolean;
   onDismiss: () => void;
-  spriteSrc?: string;
   className?: string;
 }
 
@@ -37,7 +62,6 @@ export function CatAssistant({
   isCapturing,
   isThinking,
   onDismiss,
-  spriteSrc = '/assets/cat-sprite.png',
   className,
 }: CatAssistantProps) {
   const [position, setPosition] = useScopedState(
@@ -47,8 +71,42 @@ export function CatAssistant({
   const [imgError, setImgError] = useState(false);
   const [dragging, setDragging] = useState(false);
 
+  // Current sprite state, derived from call / thought / LLM activity.
+  // After 90s of total inactivity the cat dozes off into "resting".
+  const [dozing, setDozing] = useState(false);
+  useEffect(() => {
+    if (isCapturing || currentThought || isThinking) {
+      setDozing(false);
+      return;
+    }
+    const id = window.setTimeout(() => setDozing(true), 90_000);
+    return () => window.clearTimeout(id);
+  }, [isCapturing, currentThought, isThinking]);
+
+  const state: CatState = isThinking
+    ? 'thinking'
+    : isCapturing
+      ? 'alert'
+      : currentThought
+        ? 'side'
+        : dozing
+          ? 'resting'
+          : 'standby';
+
+  // Frame cycling within the current state.
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setFrame((f) => (f + 1) % CAT_FRAMES[state].length);
+    }, FRAME_MS);
+    return () => window.clearInterval(id);
+  }, [state]);
+
+  usePreloadFrames();
+
+  const spriteSrc = CAT_FRAMES[state][frame];
+
   const dragOffset = useRef({ x: 0, y: 0 });
-  const movedRef = useRef(false);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -56,7 +114,6 @@ export function CatAssistant({
       if (e.button !== 0) return;
       e.preventDefault();
       setDragging(true);
-      movedRef.current = false;
       dragOffset.current = {
         x: e.clientX - position.x,
         y: e.clientY - position.y,
@@ -71,7 +128,6 @@ export function CatAssistant({
       if (!dragging) return;
       const x = e.clientX - dragOffset.current.x;
       const y = e.clientY - dragOffset.current.y;
-      movedRef.current = true;
       // Clamp so the sprite stays on screen
       const maxX = window.innerWidth - SPRITE_SIZE;
       const maxY = window.innerHeight - SPRITE_SIZE;
@@ -87,11 +143,8 @@ export function CatAssistant({
     setDragging(false);
   }, []);
 
-  // Reset img error if the source changes
-  useEffect(() => {
-    setImgError(false);
-  }, [spriteSrc]);
-
+  // Emoji fallback only if the frames are missing entirely. Never resets
+  // per frame — a cycling src must not retrigger a failed load every 450ms.
   const showEmojiFallback = imgError;
 
   return (
@@ -140,21 +193,18 @@ export function CatAssistant({
         ) : (
           <img
             src={spriteSrc}
-            alt="Cat assistant"
+            alt={`Cat assistant (${state})`}
             draggable={false}
             onError={() => setImgError(true)}
-            className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
+            style={{ imageRendering: 'pixelated' }}
+            className="h-full w-full rounded-full border border-border/50 object-cover drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
           />
         )}
 
-        {/* Listening indicator — pulsing dot while a call is live */}
+        {/* Listening indicator — pulsing dot while a call is live.
+            (thinking state is conveyed by the sprite frames themselves) */}
         {isCapturing && !isThinking && (
           <span className="absolute right-0 top-0 h-3 w-3 rounded-full bg-primary shadow-[0_0_8px_var(--primary)] animate-pulse" />
-        )}
-
-        {/* Thinking indicator — small spinner while fetching advice */}
-        {isThinking && (
-          <span className="absolute right-0 top-0 h-3 w-3 rounded-full border-2 border-accent border-t-transparent animate-spin" />
         )}
       </div>
     </div>
