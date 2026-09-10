@@ -21,7 +21,7 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: hsl(210 18% 8%);
+  --background: hsl(210 18% 6%);
   --foreground: hsl(210 17% 79%);
   --card: hsl(215 21% 11%);
   --card-foreground: hsl(210 17% 79%);
@@ -114,7 +114,7 @@
 /* Daylight — bright neutral white (morning / full-sun hours) */
 :root[data-theme="daylight"] {
   color-scheme: light;
-  --background: hsl(0 0% 98%);
+  --background: hsl(0 0% 93%);
   --foreground: hsl(220 9% 16%);
   --card: hsl(0 0% 100%);
   --card-foreground: hsl(220 9% 16%);
@@ -147,7 +147,7 @@
 /* Morning — warm cream (early hours) */
 :root[data-theme="morning"] {
   color-scheme: light;
-  --background: hsl(42 45% 94%);
+  --background: hsl(42 40% 89%);
   --foreground: hsl(30 12% 16%);
   --card: hsl(42 40% 98%);
   --card-foreground: hsl(30 12% 16%);
@@ -180,7 +180,7 @@
 /* Afternoon — soft overcast gray (late day, reduced glare) */
 :root[data-theme="afternoon"] {
   color-scheme: light;
-  --background: hsl(215 12% 86%);
+  --background: hsl(215 12% 81%);
   --foreground: hsl(215 12% 18%);
   --card: hsl(215 12% 92%);
   --card-foreground: hsl(215 12% 18%);
@@ -214,7 +214,7 @@
    Between Daylight (0% 98%) and Afternoon (12% 86%) on the HSL scale. */
 :root[data-theme="slate-light"] {
   color-scheme: light;
-  --background: hsl(210 14% 94%);
+  --background: hsl(210 14% 89%);
   --foreground: hsl(215 14% 18%);
   --card: hsl(210 12% 97%);
   --card-foreground: hsl(215 14% 18%);
@@ -247,7 +247,7 @@
 /* Neutral Grey — achromatic middle grey, no cool/warm cast. */
 :root[data-theme="neutral"] {
   color-scheme: light;
-  --background: hsl(0 0% 70%);
+  --background: hsl(0 0% 65%);
   --foreground: hsl(0 0% 12%);
   --card: hsl(0 0% 78%);
   --card-foreground: hsl(0 0% 12%);
@@ -283,7 +283,7 @@
    reads as foliage accent rather than washing the whole UI. */
 :root[data-theme="moss"] {
   color-scheme: light;
-  --background: hsl(120 8% 86%);
+  --background: hsl(120 8% 81%);
   --foreground: hsl(120 12% 14%);
   --card: hsl(120 8% 92%);
   --card-foreground: hsl(120 12% 14%);
@@ -321,7 +321,7 @@
 /* Evening — dim dark (dusk) */
 :root[data-theme="evening"] {
   color-scheme: dark;
-  --background: hsl(220 14% 15%);
+  --background: hsl(220 14% 12%);
   --foreground: hsl(215 12% 78%);
   --card: hsl(220 13% 19%);
   --card-foreground: hsl(215 12% 78%);
@@ -357,7 +357,7 @@
    Slightly lighter than Midnight so subtle typography still reads. */
 :root[data-theme="zinc-dark"] {
   color-scheme: dark;
-  --background: hsl(240 4% 12%);
+  --background: hsl(240 4% 9%);
   --foreground: hsl(60 2% 82%);
   --card: hsl(240 4% 16%);
   --card-foreground: hsl(60 2% 82%);
@@ -392,7 +392,7 @@
    lavender foreground so the purple CTA reads as the jewel of the UI. */
 :root[data-theme="amethyst"] {
   color-scheme: dark;
-  --background: hsl(270 22% 11%);
+  --background: hsl(270 22% 8%);
   --foreground: hsl(270 16% 90%);
   --card: hsl(270 20% 15%);
   --card-foreground: hsl(270 16% 90%);
@@ -809,10 +809,12 @@ body[data-ui-scale="small"] {
   /*  Accent/active variants only retune the CSS vars.                */
   /* ---------------------------------------------------------------- */
   .glass-panel {
-    --glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+    --glass-border: color-mix(in oklab, var(--foreground) 13%, transparent);
     --glass-glow: 0 0 0 transparent;
-    /* flat frosted surface — visibly frosty, no surface curvature */
-    background: color-mix(in oklab, var(--card) 78%, transparent);
+    /* Brightened, near-opaque frosted surface — the canvas is now darker so
+       the gridboxes read as bright, solid cards with strong contrast.
+       A 12% white lift keeps dark-theme cards from feeling muddy. */
+    background: color-mix(in oklab, var(--card) 88%, white 12%);
     backdrop-filter: blur(18px) saturate(1.35);
     -webkit-backdrop-filter: blur(18px) saturate(1.35);
     border: 1px solid var(--glass-border);

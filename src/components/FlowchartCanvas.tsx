@@ -933,10 +933,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.012]">
           {/* Glass background layer — carries all surface styling.
               Idle: subtle shadow only; hover (on the outer container, via
-              group-hover/rail): a normal amount of shadow. */}
+              group-hover/rail): a normal amount of shadow.
+              The border mirrors the gridboxes' glass-panel border but is
+              slightly thicker (1.5px) with multi-edge inset highlights that
+              refract light along the pill's curved top/bottom/left edges. */}
           <div
             aria-hidden="true"
-            className="absolute inset-0 animate-in zoom-in-95 fade-in duration-500 rounded-full border border-foreground/10 bg-card/75 backdrop-blur-xl backdrop-saturate-150 transition-shadow duration-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),3px_0_10px_-3px_rgba(0,0,0,0.2)] group-hover/rail:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),6px_0_18px_-4px_rgba(0,0,0,0.38),14px_0_36px_-10px_rgba(0,0,0,0.28)]"
+            className="absolute inset-0 animate-in zoom-in-95 fade-in duration-500 rounded-full border-[1.5px] border-foreground/15 bg-card/75 backdrop-blur-xl backdrop-saturate-150 transition-shadow duration-300 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.22),inset_0_-1.5px_0_rgba(255,255,255,0.07),inset_1.5px_0_0_rgba(255,255,255,0.12),3px_0_10px_-3px_rgba(0,0,0,0.2)] group-hover/rail:shadow-[inset_0_1.5px_0_rgba(255,255,255,0.26),inset_0_-1.5px_0_rgba(255,255,255,0.09),inset_1.5px_0_0_rgba(255,255,255,0.14),6px_0_18px_-4px_rgba(0,0,0,0.38),14px_0_36px_-10px_rgba(0,0,0,0.28)]"
           />
           {/* Content column — pt-2 (8px) so the first work-view pill's
               vertical center aligns with the top half-circle cap's radial
