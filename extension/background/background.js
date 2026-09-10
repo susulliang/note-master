@@ -1459,6 +1459,15 @@ const KEY_PUSH_FALLBACKS = {
   customerName: ['accountName', 'contactName'],
 };
 
+/** Auto-push only fires when the CCP phone panel is actually showing a phone
+ *  number. Strip spaces/dashes/parens and check for 7+ digits. */
+const PHONE_DIGIT_RE = /\d/g;
+function looksLikePhone(v) {
+  if (!v) return false;
+  const digits = String(v).match(PHONE_DIGIT_RE);
+  return !!digits && digits.length >= 7;
+}
+
 /** Build the identity snapshot (phone + contact name) used for change
  *  detection + auto push. Falls back to aliases scrapers sometimes produce,
  *  always returns strings. */
@@ -1525,9 +1534,17 @@ async function pushToTicketApp(force = false) {
     mode = 'manual';
     keyFields = buildKeyFields(fields);
   } else {
-    keyFields = buildKeyFields();
+    // Auto-push: ONLY use CCP data (never Salesforce page text), and only
+    // when the CCP phone panel is actually showing a phone number. This
+    // prevents random DOM elements from being pushed to the ticket app.
+    const ccpData = state.ccp?.data ?? {};
+    keyFields = buildKeyFields(ccpData);
     if (Object.keys(keyFields).length === 0) {
       return { ok: false, skipped: 'No identity fields scraped yet.' };
+    }
+    if (!looksLikePhone(keyFields.contactNumber)) {
+      diagRecord('push:skipped', { force, reason: 'no phone number in CCP data', contactNumber: keyFields.contactNumber ?? null });
+      return { ok: false, skipped: 'CCP phone panel not showing a phone number.' };
     }
     if (keyFieldsEqual(state.lastPushedKeyFields || {}, keyFields)) {
       return { ok: false, skipped: 'Key fields unchanged since last push.' };
@@ -1817,7 +1834,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           data: msg.data ?? {},
         };
         await saveState();
-        if (state.settings.autoPush) void pushToTicketApp(false);
+        // Note: auto-push only fires on CCP_SCRAPED. Salesforce scrapes must
+        // never auto-push — they can pick up random page DOM. The agent can
+        // push manually via the popup's "Push to ticket" button.
         sendResponse({ ok: true, stored: state.sf });
         diagRecord('content-msg:ok', { type: t, tabId: sender.tab.id, fields: Object.keys(msg.data ?? {}).length });
         return;

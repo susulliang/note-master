@@ -500,6 +500,21 @@ export default function CaseTrakBoard({
     if (editingColId === colId) cancelRenameCol();
   };
 
+  const resetColumns = () => {
+    if (!window.confirm('Reset all columns to the default team layout? Cases stay on the board but orphaned ones move to the first column.')) return;
+    const defaults = [...DEFAULT_CASE_COLUMNS];
+    const fallback = defaults[0]?.id ?? 'open';
+    setColumns(defaults);
+    setItems((its) => {
+      const validIds = new Set(defaults.map((c) => c.id));
+      return its.map((c) =>
+        validIds.has(c.status) ? c : { ...c, status: fallback, updatedAt: new Date().toISOString() }
+      );
+    });
+    cancelRenameCol();
+    toast.info('Columns reset to default.');
+  };
+
   const handleScrapeOver24 = async () => {
     if (!scrapeOver24) {
       toast.error('Extension bridge not available. Reload the page or re-install the extension.');
@@ -635,6 +650,14 @@ export default function CaseTrakBoard({
           title="Delete the last column"
         >
           <X className="size-3" />
+        </button>
+        <button
+          type="button"
+          onClick={resetColumns}
+          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 px-2 py-1 text-[10px] font-semibold text-muted-foreground transition-colors hover:border-accent/50 hover:text-accent"
+          title="Reset all columns to the default team layout"
+        >
+          ↺ Reset cols
         </button>
 
         <span className="mx-1 h-4 w-px bg-border/60" />

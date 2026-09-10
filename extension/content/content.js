@@ -204,10 +204,9 @@
   function scrapeStaticTextHeuristics(acc) {
     // Whole-document-text regex sweeps; anchored to label text when possible.
     const docText = document.body.innerText || '';
-    if (!acc.contactNumber) {
-      const m = docText.match(PHONE_RE);
-      if (m) acc.contactNumber = m[0].trim();
-    }
+    // Phone number must come from the CCP phone panel (or Connect Streams API
+    // / labelled inputs). Never sweep the whole document for a phone number —
+    // on a Salesforce tab that would grab any random number on the page.
     if (!acc.emailAddress) {
       const m = docText.match(EMAIL_RE);
       if (m) acc.emailAddress = m[0].trim();
