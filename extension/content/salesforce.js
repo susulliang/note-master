@@ -1415,6 +1415,245 @@
     };
   }
 
+  // =========================================================================
+  //  WAVE HOOK SCRAPER — read the report dataset captured by wave-hook.js
+  // =========================================================================
+  //
+  // wave-hook.js (MAIN world, document_start) records the XHR/fetch JSON of
+  // report data responses into a DOM node on demand. The Wave data-grid's
+  // custom viewport ignores scrollTop/synthetic wheel, so the ONLY reliable
+  // full-dataset source is the network payload itself.
+  async function waveHookScrape() {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Ask the MAIN-world hook for captured payloads.
+    let payloads = [];
+    try {
+      window.dispatchEvent(new CustomEvent('ecovacs-wave-pull'));
+      const t0 = Date.now();
+      while (Date.now() - t0 < 900) {
+        const el = document.getElementById('__ecovacs_wave_payload');
+        if (el && el.textContent) {
+          try { payloads = JSON.parse(el.textContent) || []; } catch { payloads = []; }
+          break;
+        }
+        await sleep(90);
+      }
+    } catch { /* ignore */ }
+    if (!Array.isArray(payloads) || payloads.length === 0) {
+      return { ok: false, engine: 'wave-hook', error: 'no captured payloads (report tab needs one reload after extension update)' };
+    }
+
+    const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ALIAS = {
+      casenumber: 'caseNumber',
+      caseowner: 'caseOwner',
+      contactaccountname: 'contactAccountName',
+      datetimeopened: 'dateTimeOpened',
+      caselastmodifieddate: 'lastModifiedDate',
+      status: 'status',
+      customerlastreplytime: 'customerLastReplyTime',
+      owner: 'caseOwner',
+      accountname: 'contactAccountName',
+      contactname: 'contactAccountName',
+      dateopened: 'dateTimeOpened',
+      opened: 'dateTimeOpened',
+      createddate: 'dateTimeOpened',
+      lastmodifieddate: 'lastModifiedDate',
+      lastmodified: 'lastModifiedDate',
+      lastreplytime: 'customerLastReplyTime',
+      customerlastreply: 'customerLastReplyTime',
+    };
+    const CASE_RE = /\b\d{6,10}\b/;
+    const cellStr = (c) => {
+      if (c == null) return '';
+      if (typeof c === 'object') {
+        for (const k of ['label', 'value', 'v', 'name', 'text', 'formattedValue', 'displayValue']) {
+          if (c[k] != null && typeof c[k] !== 'object') return String(c[k]);
+        }
+        return '';
+      }
+      return String(c);
+    };
+    const fromObjectRows = (arr) => {
+      const keys = new Set();
+      arr.slice(0, 10).forEach((o) => {
+        if (o && typeof o === 'object' && !Array.isArray(o)) Object.keys(o).forEach((k) => keys.add(k));
+      });
+      const colKey = {};
+      for (const k of keys) {
+        const f = ALIAS[normKey(k)];
+        if (f && !colKey[f]) colKey[f] = k;
+      }
+      if (!colKey.caseNumber) return null;
+      const rows = [];
+      for (const o of arr) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+        const rec = {};
+        for (const [f, k] of Object.entries(colKey)) {
+          const s = clean(cellStr(o[k]));
+          if (s) rec[f] = s;
+        }
+        if (!rec.caseNumber || !CASE_RE.test(rec.caseNumber)) continue;
+        try {
+          const idm = JSON.stringify(o).match(/500[A-Za-z0-9]{12,15}/);
+          if (idm) rec.caseUrl = 'https://' + location.hostname + '/lightning/r/' + idm[0] + '/view';
+        } catch { /* ignore */ }
+        rows.push(rec);
+      }
+      return rows.length ? rows : null;
+    };
+    const fromArrayRows = (arr) => {
+      // Positional: find the case-number column by hit frequency, then map
+      // neighbors using the report's column order (owner, account, opened,
+      // modified, status, last reply).
+      let maxLen = 0;
+      for (const r of arr.slice(0, 50)) { if (Array.isArray(r) && r.length > maxLen) maxLen = r.length; }
+      let caseIdx = -1;
+      let bestFrac = 0;
+      for (let i = 0; i < Math.min(maxLen, 24); i += 1) {
+        let hit = 0;
+        let n = 0;
+        for (const r of arr.slice(0, 60)) {
+          if (!Array.isArray(r)) continue;
+          n += 1;
+          if (CASE_RE.test(cellStr(r[i])) && /\d{7,8}/.test(cellStr(r[i]))) hit += 1;
+        }
+        const frac = n ? hit / n : 0;
+        if (frac > bestFrac) { bestFrac = frac; caseIdx = i; }
+      }
+      if (caseIdx < 0 || bestFrac < 0.5) return null;
+      const order = ['caseOwner', 'contactAccountName', 'dateTimeOpened', 'lastModifiedDate', 'status', 'customerLastReplyTime'];
+      const rows = [];
+      for (const r of arr) {
+        if (!Array.isArray(r)) continue;
+        const cn = clean(cellStr(r[caseIdx]));
+        if (!cn || !CASE_RE.test(cn)) continue;
+        const rec = { caseNumber: cn };
+        order.forEach((f, k) => {
+          const s = clean(cellStr(r[caseIdx + 1 + k]));
+          if (s) rec[f] = s;
+        });
+        try {
+          const idm = JSON.stringify(r).match(/500[A-Za-z0-9]{12,15}/);
+          if (idm) rec.caseUrl = 'https://' + location.hostname + '/lightning/r/' + idm[0] + '/view';
+        } catch { /* ignore */ }
+        rows.push(rec);
+      }
+      return rows.length ? rows : null;
+    };
+
+    let best = null;
+    const seen = new Set();
+    const finalize = (rows, method, url) => {
+      const out = [];
+      for (const rec of rows) {
+        const key = String(rec.caseNumber).replace(/\D/g, '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(rec);
+      }
+      if (!best || out.length > best.rows.length) best = { rows: out, method, url };
+    };
+
+    const walk = (node, parent) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        if (node.length >= 3) {
+          const isObj = node.every((x) => x && typeof x === 'object' && !Array.isArray(x));
+          const isArr = node.every((x) => Array.isArray(x));
+          if (isObj) {
+            const rows = fromObjectRows(node);
+            if (rows) finalize(rows, 'object-keys', '');
+          } else if (isArr) {
+            let rows = fromArrayRows(node);
+            let method = 'positional';
+            if (!rows && parent && typeof parent === 'object' && !Array.isArray(parent)) {
+              // Look for a sibling labels/columns array to map by header.
+              for (const v of Object.values(parent)) {
+                if (Array.isArray(v) && v.length >= 3 && v.every((x) => x != null && typeof x !== 'object')) {
+                  const idx = {};
+                  v.forEach((l, i) => { const f = ALIAS[normKey(String(l))]; if (f && !(f in idx)) idx[f] = i; });
+                  if (idx.caseNumber != null) {
+                    const rws = [];
+                    for (const r of node) {
+                      if (!Array.isArray(r)) continue;
+                      const rec = {};
+                      for (const [f, i] of Object.entries(idx)) {
+                        const s = clean(cellStr(r[i]));
+                        if (s) rec[f] = s;
+                      }
+                      if (rec.caseNumber && CASE_RE.test(rec.caseNumber)) rws.push(rec);
+                    }
+                    if (rws.length > (rows ? rows.length : 0)) { rows = rws; method = 'headers'; }
+                  }
+                  break;
+                }
+              }
+            }
+            if (rows) finalize(rows, method, '');
+          }
+        }
+        node.slice(0, 400).forEach((x) => walk(x, node));
+      } else {
+        for (const k of Object.keys(node)) {
+          try { walk(node[k], node); } catch { /* ignore */ }
+        }
+      }
+    };
+
+    for (const p of payloads) {
+      let j = null;
+      try { j = JSON.parse(p.text); } catch { continue; }
+      walk(j, null);
+    }
+
+    if (!best) {
+      return {
+        ok: false,
+        engine: 'wave-hook',
+        error: 'payloads captured but no case rows parsed',
+        debug: {
+          engine: 'wave-hook',
+          payloadCount: payloads.length,
+          urls: payloads.map((p) => p.url),
+          previews: payloads.map((p) => String(p.text).slice(0, 200)),
+        },
+      };
+    }
+
+    let total = 0;
+    for (const p of payloads) {
+      const m = String(p.text).match(/"total(?:Records|Size|Count|Rows)?"\s*:\s*(\d{2,6})/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > total && n < 100000) total = n;
+      }
+    }
+    if (!total) {
+      const g = document.querySelector('table.data-grid-full-table');
+      const rc = g ? parseInt(g.getAttribute('aria-rowcount') || '', 10) : 0;
+      if (rc > 0) total = rc - 1;
+    }
+    console.log('[over24][wave-hook] cases=', best.rows.length, '/ total=', total, 'method=', best.method);
+    return {
+      ok: true,
+      engine: 'wave-hook',
+      isReport: true,
+      reportName: '',
+      totalRecords: total || best.rows.length,
+      complete: total > 0 ? best.rows.length >= total : true,
+      cases: best.rows,
+      debug: {
+        engine: 'wave-hook',
+        payloadCount: payloads.length,
+        method: best.method,
+        total,
+        urls: payloads.map((p) => p.url),
+      },
+    };
+  }
+
   // -------------------------------------------------------------------------
   //  Messaging hooks
   // -------------------------------------------------------------------------
@@ -1430,14 +1669,21 @@
     if (msg?.type === 'SCRAPE_OVER24_REPORT') {
       (async () => {
         try {
-          // The report renders as a Wave/Analytics data-grid (often in this
-          // same-origin iframe). Try that engine first; fall back to the
-          // legacy lightning-datatable walker.
+          // Fastest + most complete: the network payload captured by the
+          // MAIN-world hook (wave-hook.js). Falls through when the report
+          // tab hasn't been reloaded since the hook installed.
+          const hook = await waveHookScrape();
+          if (hook && hook.ok && hook.cases && hook.cases.length > 0) {
+            sendResponse({ ...hook, url: location.href, title: document.title });
+            return;
+          }
+          // Next: the Wave data-grid DOM walker (scroll sweep).
           const wave = await scrapeWaveReport();
           if (wave && wave.ok) {
             sendResponse({ ...wave, url: location.href, title: document.title });
             return;
           }
+          // Last: the legacy lightning-datatable walker.
           const result = await scrapeOver24Report();
           sendResponse({ ...result, url: location.href, title: document.title });
         } catch (e) {

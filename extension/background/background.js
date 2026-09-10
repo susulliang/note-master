@@ -1248,6 +1248,254 @@ const INLINE_WAVE_EXTRACT = async function () {
   }
 };
 
+/**
+ * Self-contained reader for the [OVER24] report dataset captured by
+ * wave-hook.js (MAIN world). Serialized into EVERY frame via
+ * chrome.scripting.executeScript; frames without captured payloads return
+ * { ok:false, engine:'wave-hook' }. Must not reference service-worker scope.
+ */
+const INLINE_WAVE_HOOK_READ = async function () {
+  try {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let payloads = [];
+    try {
+      window.dispatchEvent(new CustomEvent('ecovacs-wave-pull'));
+      const t0 = Date.now();
+      while (Date.now() - t0 < 900) {
+        const el = document.getElementById('__ecovacs_wave_payload');
+        if (el && el.textContent) {
+          try { payloads = JSON.parse(el.textContent) || []; } catch (e) { payloads = []; }
+          break;
+        }
+        await sleep(90);
+      }
+    } catch (e) { /* ignore */ }
+    if (!Array.isArray(payloads) || payloads.length === 0) {
+      return { ok: false, engine: 'wave-hook', error: 'no captured payloads' };
+    }
+
+    const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ALIAS = {
+      casenumber: 'caseNumber',
+      caseowner: 'caseOwner',
+      contactaccountname: 'contactAccountName',
+      datetimeopened: 'dateTimeOpened',
+      caselastmodifieddate: 'lastModifiedDate',
+      status: 'status',
+      customerlastreplytime: 'customerLastReplyTime',
+      owner: 'caseOwner',
+      accountname: 'contactAccountName',
+      contactname: 'contactAccountName',
+      dateopened: 'dateTimeOpened',
+      opened: 'dateTimeOpened',
+      createddate: 'dateTimeOpened',
+      lastmodifieddate: 'lastModifiedDate',
+      lastmodified: 'lastModifiedDate',
+      lastreplytime: 'customerLastReplyTime',
+      customerlastreply: 'customerLastReplyTime',
+    };
+    const CASE_RE = /\b\d{6,10}\b/;
+    const cellStr = (c) => {
+      if (c == null) return '';
+      if (typeof c === 'object') {
+        for (const k of ['label', 'value', 'v', 'name', 'text', 'formattedValue', 'displayValue']) {
+          if (c[k] != null && typeof c[k] !== 'object') return String(c[k]);
+        }
+        return '';
+      }
+      return String(c);
+    };
+    const fromObjectRows = (arr) => {
+      const keys = new Set();
+      arr.slice(0, 10).forEach((o) => {
+        if (o && typeof o === 'object' && !Array.isArray(o)) Object.keys(o).forEach((k) => keys.add(k));
+      });
+      const colKey = {};
+      for (const k of keys) {
+        const f = ALIAS[normKey(k)];
+        if (f && !colKey[f]) colKey[f] = k;
+      }
+      if (!colKey.caseNumber) return null;
+      const rows = [];
+      for (const o of arr) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+        const rec = {};
+        for (const entry of Object.entries(colKey)) {
+          const s = clean(cellStr(o[entry[1]]));
+          if (s) rec[entry[0]] = s;
+        }
+        if (!rec.caseNumber || !CASE_RE.test(rec.caseNumber)) continue;
+        try {
+          const idm = JSON.stringify(o).match(/500[A-Za-z0-9]{12,15}/);
+          if (idm) rec.caseUrl = 'https://' + location.hostname + '/lightning/r/' + idm[0] + '/view';
+        } catch (e) { /* ignore */ }
+        rows.push(rec);
+      }
+      return rows.length ? rows : null;
+    };
+    const fromArrayRows = (arr) => {
+      let maxLen = 0;
+      for (const r of arr.slice(0, 50)) { if (Array.isArray(r) && r.length > maxLen) maxLen = r.length; }
+      let caseIdx = -1;
+      let bestFrac = 0;
+      for (let i = 0; i < Math.min(maxLen, 24); i += 1) {
+        let hit = 0;
+        let n = 0;
+        for (const r of arr.slice(0, 60)) {
+          if (!Array.isArray(r)) continue;
+          n += 1;
+          const s = cellStr(r[i]);
+          if (CASE_RE.test(s) && /\d{7,8}/.test(s)) hit += 1;
+        }
+        const frac = n ? hit / n : 0;
+        if (frac > bestFrac) { bestFrac = frac; caseIdx = i; }
+      }
+      if (caseIdx < 0 || bestFrac < 0.5) return null;
+      const order = ['caseOwner', 'contactAccountName', 'dateTimeOpened', 'lastModifiedDate', 'status', 'customerLastReplyTime'];
+      const rows = [];
+      for (const r of arr) {
+        if (!Array.isArray(r)) continue;
+        const cn = clean(cellStr(r[caseIdx]));
+        if (!cn || !CASE_RE.test(cn)) continue;
+        const rec = { caseNumber: cn };
+        order.forEach((f, k) => {
+          const s = clean(cellStr(r[caseIdx + 1 + k]));
+          if (s) rec[f] = s;
+        });
+        try {
+          const idm = JSON.stringify(r).match(/500[A-Za-z0-9]{12,15}/);
+          if (idm) rec.caseUrl = 'https://' + location.hostname + '/lightning/r/' + idm[0] + '/view';
+        } catch (e) { /* ignore */ }
+        rows.push(rec);
+      }
+      return rows.length ? rows : null;
+    };
+
+    let best = null;
+    const seen = new Set();
+    const finalize = (rows, method) => {
+      const out = [];
+      for (const rec of rows) {
+        const key = String(rec.caseNumber).replace(/\D/g, '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(rec);
+      }
+      if (!best || out.length > best.rows.length) best = { rows: out, method };
+    };
+    const walk = (node, parent) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        if (node.length >= 3) {
+          const isObj = node.every((x) => x && typeof x === 'object' && !Array.isArray(x));
+          const isArr = node.every((x) => Array.isArray(x));
+          if (isObj) {
+            const rows = fromObjectRows(node);
+            if (rows) finalize(rows, 'object-keys');
+          } else if (isArr) {
+            let rows = fromArrayRows(node);
+            let method = 'positional';
+            if (!rows && parent && typeof parent === 'object' && !Array.isArray(parent)) {
+              for (const v of Object.values(parent)) {
+                if (Array.isArray(v) && v.length >= 3 && v.every((x) => x != null && typeof x !== 'object')) {
+                  const idx = {};
+                  v.forEach((l, i) => { const f = ALIAS[normKey(String(l))]; if (f && !(f in idx)) idx[f] = i; });
+                  if (idx.caseNumber != null) {
+                    const rws = [];
+                    for (const r of node) {
+                      if (!Array.isArray(r)) continue;
+                      const rec = {};
+                      for (const entry of Object.entries(idx)) {
+                        const s = clean(cellStr(r[entry[1]]));
+                        if (s) rec[entry[0]] = s;
+                      }
+                      if (rec.caseNumber && CASE_RE.test(rec.caseNumber)) rws.push(rec);
+                    }
+                    if (rws.length > (rows ? rows.length : 0)) { rows = rws; method = 'headers'; }
+                  }
+                  break;
+                }
+              }
+            }
+            if (rows) finalize(rows, method);
+          }
+        }
+        node.slice(0, 400).forEach((x) => walk(x, node));
+      } else {
+        for (const k of Object.keys(node)) {
+          try { walk(node[k], node); } catch (e) { /* ignore */ }
+        }
+      }
+    };
+
+    for (const p of payloads) {
+      let j = null;
+      try { j = JSON.parse(p.text); } catch (e) { continue; }
+      walk(j, null);
+    }
+    if (!best) {
+      return {
+        ok: false,
+        engine: 'wave-hook',
+        error: 'payloads captured but no case rows parsed',
+        debug: {
+          engine: 'wave-hook',
+          payloadCount: payloads.length,
+          urls: payloads.map((p) => p.url),
+          previews: payloads.map((p) => String(p.text).slice(0, 200)),
+        },
+      };
+    }
+    let total = 0;
+    for (const p of payloads) {
+      const m = String(p.text).match(/"total(?:Records|Size|Count|Rows)?"\s*:\s*(\d{2,6})/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > total && n < 100000) total = n;
+      }
+    }
+    if (!total) {
+      const g = document.querySelector('table.data-grid-full-table');
+      const rc = g ? parseInt(g.getAttribute('aria-rowcount') || '', 10) : 0;
+      if (rc > 0) total = rc - 1;
+    }
+    return {
+      ok: true,
+      engine: 'wave-hook',
+      isReport: true,
+      reportName: '',
+      totalRecords: total || best.rows.length,
+      complete: total > 0 ? best.rows.length >= total : true,
+      cases: best.rows,
+      debug: {
+        engine: 'wave-hook',
+        payloadCount: payloads.length,
+        method: best.method,
+        total: total,
+        urls: payloads.map((p) => p.url),
+      },
+    };
+  } catch (e) {
+    return { ok: false, engine: 'wave-hook', error: String(e && e.message || e) };
+  }
+};
+
+/** Run INLINE_WAVE_HOOK_READ in every frame; keep the best report frame. */
+async function readWaveHookAllFrames(tabId) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: INLINE_WAVE_HOOK_READ,
+  });
+  let best = null;
+  for (const frame of Array.isArray(results) ? results : []) {
+    const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
+    if (!obj || !Array.isArray(obj.cases) || obj.cases.length === 0) continue;
+    if (!best || obj.cases.length > best.cases.length) best = { ...obj, via: 'wave-hook' };
+  }
+  return best;
+}
+
 async function sendToTab(tabId, payload) {
   // Field-count helper used for two "should we actually fall through?" checks:
   // a result with 0 non-empty fields is functionally "nothing found",
@@ -2048,13 +2296,28 @@ async function findOver24ReportTab() {
 /** Tiered [OVER24] report scrape of ONE tab. Returns
  *  { ok, cases[], reportName, totalRecords, complete, via?, error? }.
  *
- *  The report renders inside the same-origin `lightningReportApp` IFRAME as
- *  a virtualized Wave/Analytics data-grid. `chrome.tabs.sendMessage` only
- *  surfaces ONE frame's response (whichever answers first — often the top
- *  Console frame), so the primary tier injects into ALL frames and keeps the
- *  frame that actually hosts the report grid. */
+ *  Tier 0 reads the dataset captured by the MAIN-world network hook
+ *  (wave-hook.js) — complete data, no scrolling. The Wave data-grid's
+ *  virtual viewport ignores scrollTop/synthetic wheel events, so the DOM
+ *  scroll sweep (Tier 1+) only ever sees the first ~23 rendered rows and is
+ *  kept purely as a fallback. */
 async function scrapeOver24FromTab(tabId) {
   let firstError = null;
+  let best = null;
+  const consider = (res) => {
+    if (res && res.ok && Array.isArray(res.cases) && res.cases.length > 0) {
+      if (!best || res.cases.length > best.cases.length) best = res;
+    }
+  };
+  const complete = (res) => res && res.totalRecords > 0 && res.cases.length >= res.totalRecords;
+
+  // Tier 0: network-hook payload (fast, no scrolling).
+  try {
+    consider(await readWaveHookAllFrames(tabId));
+  } catch (err) {
+    if (!firstError) firstError = String(err?.message || err);
+  }
+  if (complete(best)) return best;
 
   /** Run a self-contained extractor in every frame; keep the best report
    *  frame (isReport flag first, then highest case count). */
@@ -2064,91 +2327,91 @@ async function scrapeOver24FromTab(tabId) {
       func,
       ...(world ? { world } : {}),
     });
-    let best = null;
+    let frameBest = null;
     let frameDebug = null;
     for (const frame of Array.isArray(results) ? results : []) {
       const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
       if (!obj) continue;
       const n = Array.isArray(obj.cases) ? obj.cases.length : 0;
       const score = (obj.isReport ? 100000 : 0) + n;
-      const bestScore = best ? ((best.isReport ? 100000 : 0) + (best.cases?.length || 0)) : -1;
-      if (score > bestScore) { best = obj; frameDebug = { frameId: frame.frameId, n }; }
+      const bestScore = frameBest ? ((frameBest.isReport ? 100000 : 0) + (frameBest.cases?.length || 0)) : -1;
+      if (score > bestScore) { frameBest = obj; frameDebug = { frameId: frame.frameId, n }; }
     }
-    if (best && Array.isArray(best.cases) && best.cases.length > 0) {
+    if (frameBest && Array.isArray(frameBest.cases) && frameBest.cases.length > 0) {
       return {
         ok: true,
-        cases: best.cases,
-        reportName: best.reportName || '',
-        totalRecords: best.totalRecords || best.cases.length,
-        complete: Boolean(best.debug?.complete ?? (best.cases.length >= (best.totalRecords || best.cases.length))),
+        cases: frameBest.cases,
+        reportName: frameBest.reportName || '',
+        totalRecords: frameBest.totalRecords || frameBest.cases.length,
+        complete: Boolean(frameBest.debug?.complete ?? (frameBest.cases.length >= (frameBest.totalRecords || frameBest.cases.length))),
         via,
-        debug: { ...(best.debug || {}), chosenFrame: frameDebug },
+        debug: { ...(frameBest.debug || {}), chosenFrame: frameDebug },
       };
     }
-    if (best && best.error && !firstError) firstError = String(best.error);
+    if (frameBest && frameBest.error && !firstError) firstError = String(frameBest.error);
     return null;
   }
 
-  // Tier 1: Wave/Analytics data-grid extractor in all frames (ISOLATED world
-  // so it shares the extension's content-script privileges; pure DOM only).
+  // Tier 1: Wave/Analytics data-grid DOM extractor in all frames.
   try {
-    const wave = await runAllFrames(INLINE_WAVE_EXTRACT, undefined, 'wave-all-frames');
-    if (wave) return wave;
+    consider(await runAllFrames(INLINE_WAVE_EXTRACT, undefined, 'wave-all-frames'));
   } catch (err) {
-    firstError = String(err?.message || err);
+    if (!firstError) firstError = String(err?.message || err);
   }
+  if (complete(best)) return best;
 
-  // Tier 2: manifest content-script listener (content script itself tries
-  // wave first, then the legacy lightning walker).
+  // Tier 2: manifest content-script listener (hook → wave → legacy inside).
   try {
     const r = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
     if (r && Array.isArray(r.cases) && r.cases.length > 0) {
-      return {
+      consider({
         ok: true,
         cases: r.cases,
         reportName: r.reportName || '',
         totalRecords: r.totalRecords || r.cases.length,
         complete: Boolean(r.debug?.complete ?? (r.cases.length >= (r.totalRecords || r.cases.length))),
-        via: r.engine === 'wave' ? 'listener-wave' : 'listener',
+        via: r.engine === 'wave-hook' ? 'listener-wave-hook' : r.engine === 'wave' ? 'listener-wave' : 'listener',
         debug: r.debug ?? null,
-      };
+      });
     }
     if (r && r.error && !firstError) firstError = String(r.error);
   } catch (err) {
     if (!firstError) firstError = String(err?.message || err);
   }
+  if (complete(best)) return best;
 
   // Tier 3: inject salesforce.js (tab predates the extension load), retry.
   try {
     await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: SF_INJECT_FILES });
     const retry = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
     if (retry && Array.isArray(retry.cases) && retry.cases.length > 0) {
-      return {
+      consider({
         ok: true,
         cases: retry.cases,
         reportName: retry.reportName || '',
         totalRecords: retry.totalRecords || retry.cases.length,
         complete: Boolean(retry.debug?.complete ?? (retry.cases.length >= (retry.totalRecords || retry.cases.length))),
-        via: retry.engine === 'wave' ? 'inject+listener-wave' : 'inject+listener',
+        via: retry.engine === 'wave-hook' ? 'inject+listener-wave-hook' : retry.engine === 'wave' ? 'inject+listener-wave' : 'inject+listener',
         debug: retry.debug ?? null,
-      };
+      });
     }
     if (!firstError && retry?.error) firstError = String(retry.error);
   } catch (err2) {
     if (!firstError) firstError = String(err2?.message || err2);
   }
+  if (complete(best)) return best;
 
   // Tier 4: legacy lightning-datatable inline extractor across all frames.
   try {
-    const legacy = await runAllFrames(
+    consider(await runAllFrames(
       INLINE_OVER24_EXTRACT,
       chrome.scripting.ExecutionWorld ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN',
       'legacy-all-frames'
-    );
-    if (legacy) return legacy;
+    ));
   } catch (err3) {
     if (!firstError) firstError = String(err3?.message || err3);
   }
+  if (best) return best;
   return { ok: false, cases: [], error: firstError || 'No report cases found. Open the [OVER24] report in a Salesforce tab, then retry.' };
 }
 
@@ -2211,15 +2474,41 @@ async function importOver24Report() {
   console.log('[over24] importOver24Report target tab=', tab.id, tab.url, tab.title);
   let r = await scrapeOver24FromTab(tab.id);
   console.log('[over24] scrape result via=', r?.via, 'cases=', r?.cases?.length ?? 0, 'complete=', r?.complete, 'error=', r?.error ?? null, 'debug=', JSON.stringify(r?.debug ?? null));
-  // If the first sweep was incomplete (captured fewer rows than the DOM's
-  // Total Records), wait a moment (let the report finish rendering) and run
-  // the whole sweep one more time before pushing anything to the board.
-  if (r.ok && r.complete === false && r.totalRecords > r.cases.length) {
-    console.warn('[over24] incomplete scrape', r.cases.length, '/', r.totalRecords, '— retrying after 1.5s');
-    await new Promise((res) => setTimeout(res, 1500));
-    const retry = await scrapeOver24FromTab(tab.id);
-    console.log('[over24] retry cases=', retry?.cases?.length ?? 0, 'complete=', retry?.complete, 'debug=', JSON.stringify(retry?.debug ?? null));
-    if (retry.ok && retry.cases.length > r.cases.length) r = retry;
+  // If the scrape is incomplete AND the network hook produced nothing, the
+  // report tab predates the wave-hook install (hook runs at document_start,
+  // so it only captures fetches made AFTER it loaded). Reload the report tab
+  // once — the hook then captures the full dataset when the report refetches
+  // — and poll it for up to ~30s. This is the reliable path for the Wave
+  // grid, whose viewport ignores synthetic scrolling entirely.
+  if (r.ok && r.complete === false && r.totalRecords > r.cases.length && r.via !== 'wave-hook') {
+    console.warn('[over24] incomplete scrape', r.cases.length, '/', r.totalRecords, '— reloading report tab for network hook');
+    diagRecord('over24:reload-for-hook', { tabId: tab.id, got: r.cases.length, total: r.totalRecords, via: r.via });
+    try { await chrome.tabs.reload(tab.id); } catch (e) {
+      console.warn('[over24] tab reload failed:', e?.message || e);
+    }
+    const expected = r.totalRecords || 0;
+    let hookBest = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30000) {
+      await new Promise((res) => setTimeout(res, 2500));
+      try {
+        const h = await readWaveHookAllFrames(tab.id);
+        if (h && h.ok && Array.isArray(h.cases) && h.cases.length > 0) {
+          if (!hookBest || h.cases.length > hookBest.cases.length) hookBest = h;
+          const target = Math.max(expected, hookBest.totalRecords || 0);
+          if (target > 0 && hookBest.cases.length >= target) break;
+        }
+      } catch (e) { /* page still loading */ }
+    }
+    console.log('[over24] post-reload hook cases=', hookBest?.cases?.length ?? 0, 'complete=', hookBest?.complete, 'debug=', JSON.stringify(hookBest?.debug ?? null));
+    if (hookBest && hookBest.cases.length > (r.cases?.length || 0)) {
+      r = hookBest;
+    } else {
+      // Hook still empty — one final full scrape attempt after the reload.
+      const retry = await scrapeOver24FromTab(tab.id);
+      console.log('[over24] retry cases=', retry?.cases?.length ?? 0, 'complete=', retry?.complete, 'debug=', JSON.stringify(retry?.debug ?? null));
+      if (retry.ok && retry.cases.length > (r.cases?.length || 0)) r = retry;
+    }
   }
   if (!r.ok || !r.cases || r.cases.length === 0) {
     diagRecord('over24:scrape:fail', { tabId: tab.id, url: tab.url, title: tab.title ?? null, error: r?.error ?? null, cases: r?.cases?.length ?? 0 });
