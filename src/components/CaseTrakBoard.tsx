@@ -5,7 +5,6 @@ import {
   Link as LinkIcon,
   Copy,
   Trash2,
-  Clock,
   User,
   X,
 } from 'lucide-react';
@@ -160,6 +159,10 @@ export default function CaseTrakBoard({
   const [dragOverCol, setDragOverCol] = useState<CaseStatus | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
   const [customerDraft, setCustomerDraft] = useState('');
+  // Hover tooltip state — bubble appears only after the pointer has stayed on
+  // a card for > 1s (matches the "hover for over 1 second" requirement).
+  const [hoveredCase, setHoveredCase] = useState<string | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelsCtx = useContext(TicketPanelsContext);
   const openCase = panelsCtx?.openCase;
   const hasMigratedRef = useRef(false);
@@ -467,6 +470,79 @@ export default function CaseTrakBoard({
     }
   };
 
+  // --- Distribute cases across columns ------------------------------------
+  // Rules:
+  //   - The FIRST column keeps every case whose `caseOwner` matches any
+  //     keyword in the first column's name (split on whitespace/slashes/commas).
+  //   - All other cases are shuffled and distributed equally (round-robin)
+  //     across the REMAINING columns.
+  //   - Cases already in the first column because of an owner match stay put.
+  const distributeCases = useCallback(() => {
+    if (columns.length < 2) {
+      toast.error('Need at least 2 columns to distribute.');
+      return;
+    }
+    const firstCol = columns[0];
+    const otherCols = columns.slice(1);
+    if (otherCols.length === 0) return;
+
+    // Parse the first column's name into lowercased keywords.
+    const keywords = firstCol.label
+      .toLowerCase()
+      .split(/[\s,/|;]+/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+
+    const now = new Date().toISOString();
+    setItems((prev) => {
+      // Determine which cases "belong" to the first column (owner match).
+      const firstColIds = new Set<string>();
+      if (keywords.length > 0) {
+        for (const c of prev) {
+          const owner = (c.caseOwner || '').toLowerCase();
+          if (owner && keywords.some((k) => owner.includes(k))) {
+            firstColIds.add(c.id);
+          }
+        }
+      }
+      // Shuffle the non-first-column cases.
+      const pool = prev
+        .filter((c) => !firstColIds.has(c.id))
+        .map((c) => ({ c, r: Math.random() }))
+        .sort((a, b) => a.r - b.r)
+        .map((x) => x.c);
+
+      // Round-robin assign across the other columns.
+      const next = prev.map((c) => {
+        if (firstColIds.has(c.id)) {
+          return c.status === firstCol.id ? c : { ...c, status: firstCol.id, updatedAt: now };
+        }
+        return c;
+      });
+      const byId = new Map(next.map((c) => [c.id, c]));
+      pool.forEach((c, i) => {
+        const target = otherCols[i % otherCols.length].id;
+        const cur = byId.get(c.id);
+        if (cur && cur.status !== target) byId.set(c.id, { ...cur, status: target, updatedAt: now });
+      });
+      return Array.from(byId.values());
+    });
+    toast.info(`Distributed ${items.length} case${items.length === 1 ? '' : 's'} — first column "${firstCol.label}" keeps owner-matched tickets.`);
+  }, [columns, items.length]);
+
+  // --- Hover-tooltip handlers ---------------------------------------------
+  const startHover = (id: string) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoveredCase(id), 1000);
+  };
+  const cancelHover = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoveredCase(null);
+  };
+
   return (
     <div className="flex h-full min-h-full min-w-0 flex-col gap-3 p-4">
       {/* Header — case count + column add/remove controls + actions. */}
@@ -500,6 +576,16 @@ export default function CaseTrakBoard({
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {totalCount > 0 && (
+            <button
+              type="button"
+              onClick={distributeCases}
+              className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground transition-colors hover:brightness-110"
+              title="Distribute all cases equally across columns (first column keeps tickets whose owner matches its name)"
+            >
+              ⚖ Distribute
+            </button>
+          )}
           {totalCount > 0 && (
             <button
               type="button"
@@ -619,8 +705,10 @@ export default function CaseTrakBoard({
                       draggable
                       onDragStart={(e) => onDragStart(e, c.id)}
                       onDragEnd={onDragEnd}
+                      onMouseEnter={() => startHover(c.id)}
+                      onMouseLeave={cancelHover}
                       className={cn(
-                        'group cursor-grab rounded-lg border border-border/50 bg-card/70 p-2.5 shadow-sm backdrop-blur-sm transition-all active:cursor-grabbing',
+                        'group relative cursor-grab rounded-lg border border-border/50 bg-card/70 p-2.5 shadow-sm backdrop-blur-sm transition-all active:cursor-grabbing',
                         'hover:border-foreground/20 hover:shadow-md',
                         isDragging && 'opacity-40 ring-2 ring-accent/50'
                       )}
@@ -724,13 +812,16 @@ export default function CaseTrakBoard({
                       </div>
 
                       {/* Report-scraped labels — tiny label/value rows in a
-                          two-column grid (only when any [OVER24] field exists) */}
-                      {(c.caseOwner || c.reportStatus || c.dateTimeOpened || c.lastModifiedDate || c.customerLastReplyTime) && (
+                          two-column grid (only when any [OVER24] field exists).
+                          Kept minimal: Status, Owner, Last reply. Full info
+                          (opened / modified / timestamps) lives in the 1s
+                          hover bubble. */}
+                      {(c.caseOwner || c.reportStatus || c.customerLastReplyTime) && (
                         <dl className="mt-1.5 grid grid-cols-[auto_1fr] items-baseline gap-x-1.5 gap-y-0.5 text-[9px] leading-tight">
                           {c.reportStatus && (
                             <>
                               <dt className="text-muted-foreground/60">Status</dt>
-                              <dd className={cn('truncate font-bold', reportStatusColor(c.reportStatus))} title={`Status: ${c.reportStatus}`}>
+                              <dd className={cn('truncate font-bold', reportStatusColor(c.reportStatus))}>
                                 {c.reportStatus}
                               </dd>
                             </>
@@ -738,46 +829,75 @@ export default function CaseTrakBoard({
                           {c.caseOwner && (
                             <>
                               <dt className="text-muted-foreground/60">Owner</dt>
-                              <dd className="truncate text-foreground/80" title={`Case Owner: ${c.caseOwner}`}>
-                                {c.caseOwner}
-                              </dd>
+                              <dd className="truncate text-foreground/80">{c.caseOwner}</dd>
                             </>
                           )}
                           {c.customerLastReplyTime && (
                             <>
                               <dt className="text-muted-foreground/60">Last reply</dt>
-                              <dd className="truncate text-amber-300/90" title={`Customer Last Reply Time: ${c.customerLastReplyTime}`}>
-                                {c.customerLastReplyTime}
-                              </dd>
-                            </>
-                          )}
-                          {c.dateTimeOpened && (
-                            <>
-                              <dt className="text-muted-foreground/60">Opened</dt>
-                              <dd className="truncate text-foreground/70" title={`Date/Time Opened: ${c.dateTimeOpened}`}>
-                                {c.dateTimeOpened}
-                              </dd>
-                            </>
-                          )}
-                          {c.lastModifiedDate && (
-                            <>
-                              <dt className="text-muted-foreground/60">Modified</dt>
-                              <dd className="truncate text-foreground/70" title={`Case Last Modified Date: ${c.lastModifiedDate}`}>
-                                {c.lastModifiedDate}
-                              </dd>
+                              <dd className="truncate text-amber-300/90">{c.customerLastReplyTime}</dd>
                             </>
                           )}
                         </dl>
                       )}
 
-                      {/* Timestamp */}
-                      <div className="mt-1.5 flex items-center gap-1 text-[9px] text-muted-foreground/60">
-                        <Clock className="size-2.5" />
-                        <span>
-                          {c.updatedAt !== c.createdAt ? 'Updated ' : 'Added '}
-                          {formatCardTime(c.updatedAt)}
-                        </span>
-                      </div>
+                      {/* Hover bubble — full case info, appears after 1s. */}
+                      {hoveredCase === c.id && (
+                        <div
+                          className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-border/70 bg-background/95 p-3 text-[11px] shadow-2xl backdrop-blur-md"
+                          onMouseEnter={() => startHover(c.id)}
+                          onMouseLeave={cancelHover}
+                        >
+                          <div className="mb-1.5 flex items-center justify-between border-b border-border/50 pb-1.5">
+                            <span className="font-mono font-bold text-foreground">{c.caseNumber}</span>
+                            {c.reportStatus && (
+                              <span className={cn('text-[10px] font-bold', reportStatusColor(c.reportStatus))}>
+                                {c.reportStatus}
+                              </span>
+                            )}
+                          </div>
+                          <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1">
+                            {c.customerName && (
+                              <>
+                                <dt className="text-muted-foreground/60">Customer</dt>
+                                <dd className="break-words text-foreground/90">{c.customerName}</dd>
+                              </>
+                            )}
+                            {c.caseOwner && (
+                              <>
+                                <dt className="text-muted-foreground/60">Owner</dt>
+                                <dd className="break-words text-foreground/90">{c.caseOwner}</dd>
+                              </>
+                            )}
+                            {c.dateTimeOpened && (
+                              <>
+                                <dt className="text-muted-foreground/60">Opened</dt>
+                                <dd className="break-words text-foreground/90">{c.dateTimeOpened}</dd>
+                              </>
+                            )}
+                            {c.lastModifiedDate && (
+                              <>
+                                <dt className="text-muted-foreground/60">Modified</dt>
+                                <dd className="break-words text-foreground/90">{c.lastModifiedDate}</dd>
+                              </>
+                            )}
+                            {c.customerLastReplyTime && (
+                              <>
+                                <dt className="text-muted-foreground/60">Last reply</dt>
+                                <dd className="break-words text-amber-300/90">{c.customerLastReplyTime}</dd>
+                              </>
+                            )}
+                            <dt className="text-muted-foreground/60">Added</dt>
+                            <dd className="break-words text-foreground/70">{formatCardTime(c.createdAt)}</dd>
+                            {c.updatedAt !== c.createdAt && (
+                              <>
+                                <dt className="text-muted-foreground/60">Updated</dt>
+                                <dd className="break-words text-foreground/70">{formatCardTime(c.updatedAt)}</dd>
+                              </>
+                            )}
+                          </dl>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
