@@ -657,44 +657,31 @@ const INLINE_OVER24_EXTRACT = async function () {
     return cells;
   }
 
-  // Scroll the report grid to the bottom so virtualized rows load.
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  let scrollRounds = 0;
-  if (typeof document !== 'undefined' && document.querySelectorAll) {
-    for (let round = 0; round < 60; round += 1) {
-      const scrollers = new Set();
-      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
-      for (const g of grids) {
-        let el = g;
-        for (let up = 0; up < 12 && el; up += 1) {
-          try {
-            const cs = getComputedStyle(el);
-            if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-              scrollers.add(el);
-            }
-          } catch { /* ignore */ }
-          el = el.parentElement || el.host || null;
-        }
+
+  function findGridScroller() {
+    if (typeof document === 'undefined') return null;
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const g of grids) {
+      let el = g;
+      for (let up = 0; up < 14 && el; up += 1) {
+        try {
+          const cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) return el;
+        } catch { /* ignore */ }
+        el = el.parentElement || el.host || null;
       }
-      scrollers.add(window);
-      let moved = false;
-      for (const s of scrollers) {
-        const isWin = s === window;
-        const prev = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
-        const max = isWin ? document.documentElement.scrollHeight : s.scrollHeight;
-        if (isWin) window.scrollTo(0, max); else s.scrollTop = max;
-        const after = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
-        if (Math.abs(after - prev) > 2) moved = true;
-      }
-      await sleep(120);
-      scrollRounds = round + 1;
-      if (!moved && round > 1) break;
     }
+    return null;
   }
 
-  if (typeof document !== 'undefined' && document.querySelectorAll) {
+  /** Extract currently-visible rows from the virtualized grid. Accumulates
+   *  into the outer `cases`/`seen`; returns newly added count. */
+  function extractVisibleRows() {
+    const before = cases.length;
+    if (typeof document === 'undefined') return 0;
     const grids = deepQueryAll('table, [role="grid"], [role="table"]');
-    debug.gridCount = grids.length;
+    if (debug.gridCount === 0) debug.gridCount = grids.length;
     for (const grid of grids) {
       let rows = [];
       try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
@@ -702,8 +689,7 @@ const INLINE_OVER24_EXTRACT = async function () {
       for (let ri = 0; ri < rows.length; ri += 1) {
         const headerCells = cellsOf(rows[ri]);
         const labels = headerCells.map((c) => _norm(c.textContent));
-        const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
-        if (headerHits < 3) continue;
+        if (labels.filter((l) => REPORT_COLUMNS[l]).length < 3) continue;
         const colMap = new Map();
         labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
         for (let rj = ri + 1; rj < rows.length; rj += 1) {
@@ -713,10 +699,7 @@ const INLINE_OVER24_EXTRACT = async function () {
           if (dlabels.filter((l) => REPORT_COLUMNS[l]).length >= 3) continue;
           const build = (offset) => {
             const rec = {};
-            colMap.forEach((field, i) => {
-              const cell = dcells[i + offset];
-              if (cell) rec[field] = _clean(cell.textContent);
-            });
+            colMap.forEach((field, i) => { const cell = dcells[i + offset]; if (cell) rec[field] = _clean(cell.textContent); });
             return rec;
           };
           let offset = 0;
@@ -730,17 +713,40 @@ const INLINE_OVER24_EXTRACT = async function () {
           if (cnEntry) {
             const cnCell = dcells[cnEntry[0] + offset];
             const a = cnCell && cnCell.querySelector ? cnCell.querySelector('a[href]') : null;
-            if (a) {
-              try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; }
-            }
+            if (a) { try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; } }
           }
           pushCase(rec, href);
         }
         break;
       }
     }
+    return cases.length - before;
+  }
+
+  // Incremental scroll-and-accumulate to defeat row virtualization.
+  const scroller = findGridScroller();
+  let scrollSteps = 0;
+  if (scroller) {
+    scroller.scrollTop = 0;
+    await sleep(150);
+    let lastScrollTop = -1;
+    let noNew = 0;
+    while (scrollSteps < 200) {
+      scrollSteps += 1;
+      const added = extractVisibleRows();
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      if (added === 0) noNew += 1; else noNew = 0;
+      if (atBottom && noNew >= 2) break;
+      scroller.scrollTop = Math.min(scroller.scrollHeight, scroller.scrollTop + Math.max(40, Math.floor(scroller.clientHeight * 0.85)));
+      await sleep(140);
+      if (scroller.scrollTop === lastScrollTop) break;
+      lastScrollTop = scroller.scrollTop;
+    }
+  } else {
+    extractVisibleRows();
   }
   debug.tierACases = cases.length;
+  debug.scrollSteps = scrollSteps;
 
   // ---- Tier B: innerText line sweep ----
   if (cases.length === 0) {
@@ -798,14 +804,14 @@ const INLINE_OVER24_EXTRACT = async function () {
   }
 
   debug.sample = cases.slice(0, 5);
-  debug.scrollRounds = scrollRounds;
+  debug.scrollSteps = scrollSteps;
   return {
     ok: cases.length > 0,
     reportName,
     totalRecords: totalRecords || cases.length,
     cases,
     debug,
-    scrollRounds,
+    scrollSteps,
     error: cases.length === 0
       ? 'No report rows found. Open the [OVER24] report (data grid visible) in a Salesforce tab, then retry.'
       : '',
@@ -1731,7 +1737,7 @@ async function importOver24Report() {
     totalRecords: state.over24.totalRecords,
     reportName: state.over24.reportName,
     via: r.via,
-    scrollRounds: r.scrollRounds ?? r.debug?.scrollRounds ?? null,
+    scrollRounds: r.scrollSteps ?? r.debug?.scrollSteps ?? r.scrollRounds ?? r.debug?.scrollRounds ?? null,
     pushed,
     sample: r.cases.slice(0, 10),
     debug: r.debug ?? null,

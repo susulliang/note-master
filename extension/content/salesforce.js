@@ -653,67 +653,28 @@
     'customer last reply time': 'customerLastReplyTime',
   };
 
-  /** Salesforce Lightning reports virtualize rows — only ~20 are in the DOM
-   *  until you scroll. Scroll every scrollable ancestor of the report grid
-   *  (and the grid itself) to the bottom repeatedly until the scroll height
-   *  stops growing, so all rows render before we scrape. Returns the number
-   *  of scroll rounds performed. */
-  async function scrollReportToBottom(maxRounds = 60, stepMs = 120) {
-    function findScrollers() {
-      const scrollers = new Set();
-      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
-      for (const g of grids) {
-        let el = g;
-        for (let up = 0; up < 12 && el; up += 1) {
-          try {
-            const cs = getComputedStyle(el);
-            const oy = cs.overflowY;
-            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-              scrollers.add(el);
-            }
-          } catch { /* ignore */ }
-          el = el.parentElement || el.host || null;
-        }
-      }
-      // Also include window as a last-resort scroller.
-      scrollers.add(window);
-      return Array.from(scrollers);
-    }
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    let rounds = 0;
-    let stable = 0;
-    while (rounds < maxRounds && stable < 3) {
-      rounds += 1;
-      const scrollers = findScrollers();
-      let moved = false;
-      for (const s of scrollers) {
-        const isWin = s === window;
-        const prev = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
-        const max = isWin ? document.documentElement.scrollHeight : s.scrollHeight;
-        if (isWin) window.scrollTo(0, max);
-        else s.scrollTop = max;
-        const after = isWin ? (window.scrollY || document.documentElement.scrollTop) : s.scrollTop;
-        if (Math.abs(after - prev) > 2) moved = true;
-      }
-      await sleep(stepMs);
-      stable = moved ? 0 : stable + 1;
-    }
-    return rounds;
-  }
-
-  function scrapeOver24Report() {
+  /** Salesforce Lightning reports use a VIRTUALIZED datatable: only ~20 rows
+   *  live in the DOM at any time (the visible viewport). Scrolling to the
+   *  bottom and scraping once therefore captures only the last ~20 rows.
+   *
+   *  fix: scroll the grid in small steps, extracting the currently-visible
+   *  rows at EACH position and accumulating them (deduped by case number).
+   *  We stop when scrollTop stops growing (bottom reached) and a couple of
+   *  consecutive passes add no new cases. */
+  async function scrapeOver24Report() {
     function _clean(v) {
       return String(v == null ? '' : v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     }
     function _norm(s) { return _clean(s).toLowerCase().replace(/[*:：]+$/, ''); }
     const cases = [];
     const seen = new Set();
-    const debug = { bodyLength: 0, gridCount: 0, grids: [], tierACases: 0, tierBCases: 0, tierCCases: 0, sample: [] };
+    const debug = { bodyLength: 0, gridCount: 0, grids: [], tierACases: 0, tierBCases: 0, tierCCases: 0, scrollSteps: 0, sample: [] };
     function pushCase(rec, href) {
       const cn = _clean(rec.caseNumber);
-      if (!/\d{5,}/.test(cn)) return; // drops summary / aggregate / header rows
+      if (!/\d{5,}/.test(cn)) return;
       const key = cn.replace(/\D/g, '');
       if (seen.has(key)) return;
+      seen.add(key);
       rec.caseNumber = cn;
       if (href && /^https?:/i.test(href)) rec.caseUrl = href;
       cases.push(rec);
@@ -721,11 +682,6 @@
 
     const bodyText = (document.body && (document.body.innerText || document.body.textContent)) || '';
     debug.bodyLength = bodyText.length;
-    console.log('[over24] scrapeOver24Report bodyText.length=', bodyText.length);
-    if (bodyText) {
-      const head = bodyText.slice(0, 1200);
-      console.log('[over24] bodyText head:\n' + head);
-    }
     let reportName = '';
     const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
     if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
@@ -733,7 +689,6 @@
     const tr = bodyText.match(/Total\s*Records\s*:?\s*(\d+)/i);
     if (tr) totalRecords = parseInt(tr[1], 10) || 0;
 
-    // ---- Tier A: DOM grid walk (shadow-piercing) --------------------------
     function deepQueryAll(sel) {
       const out = [];
       const walk = (root, depth) => {
@@ -741,7 +696,6 @@
         let found = [];
         try { found = Array.from(root.querySelectorAll(sel)); } catch { return; }
         out.push(...found);
-        // Lightning LWC grids often live inside open shadow roots.
         try {
           const all = root.querySelectorAll('*');
           for (const el of all) {
@@ -752,80 +706,134 @@
       walk(document, 0);
       return out;
     }
-
     function cellsOf(row) {
       let cells = Array.from(row.querySelectorAll(
         ':scope > td, :scope > th, :scope > [role="gridcell"], :scope > [role="columnheader"], :scope > [role="rowheader"]'
       ));
-      if (cells.length === 0) {
-        // custom div-based grids: direct element children act as cells
-        cells = Array.from(row.children || []);
-      }
+      if (cells.length === 0) cells = Array.from(row.children || []);
       return cells;
     }
 
-    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
-    debug.gridCount = grids.length;
-    for (const grid of grids) {
-      let rows = [];
-      try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
-      if (rows.length < 2) continue;
-      for (let ri = 0; ri < rows.length; ri += 1) {
-        const headerCells = cellsOf(rows[ri]);
-        const labels = headerCells.map((c) => _norm(c.textContent));
-        const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
-        if (debug.grids.length < 8) debug.grids.push({ rows: rows.length, headerHits, labels });
-        if (headerHits < 3) continue;
-        // column index → field map from THIS header row
-        const colMap = new Map();
-        labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
-        console.log('[over24] Tier A grid matched header:', [...colMap.entries()], 'rows=', rows.length);
-        for (let rj = ri + 1; rj < rows.length; rj += 1) {
-          const dcells = cellsOf(rows[rj]);
-          if (dcells.length < 3) continue;
-          const dlabels = dcells.map((c) => _norm(c.textContent));
-          // repeated (sticky) header rows are skipped, not parsed as data
-          if (dlabels.filter((l) => REPORT_COLUMNS[l]).length >= 3) continue;
-          // Alignment: data rows may carry one extra leading row-index cell
-          // that has no header of its own.
-          const build = (offset) => {
-            const rec = {};
-            colMap.forEach((field, i) => {
-              const cell = dcells[i + offset];
-              if (cell) rec[field] = _clean(cell.textContent);
-            });
-            return rec;
-          };
-          let offset = 0;
-          let rec = build(0);
-          if (!rec.caseNumber || !/\d{5,}/.test(rec.caseNumber)) {
-            const alt = build(1);
-            if (alt.caseNumber && /\d{5,}/.test(alt.caseNumber)) { rec = alt; offset = 1; }
+    /** Extract the rows currently rendered in the DOM (the visible viewport
+     *  of the virtualized table). Called once per scroll step; cases are
+     *  accumulated into the outer `cases`/`seen`. Returns how many NEW cases
+     *  were added this pass. */
+    function extractVisibleRows() {
+      const before = cases.length;
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      if (debug.gridCount === 0) debug.gridCount = grids.length;
+      for (const grid of grids) {
+        let rows = [];
+        try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+        if (rows.length < 2) continue;
+        for (let ri = 0; ri < rows.length; ri += 1) {
+          const headerCells = cellsOf(rows[ri]);
+          const labels = headerCells.map((c) => _norm(c.textContent));
+          const headerHits = labels.filter((l) => REPORT_COLUMNS[l]).length;
+          if (debug.grids.length < 8 && headerHits >= 3) {
+            debug.grids.push({ rows: rows.length, headerHits, labels });
           }
-          // Case hyperlink — first <a href> inside the case-number cell.
-          let href = '';
-          const cnEntry = [...colMap.entries()].find(([, f]) => f === 'caseNumber');
-          if (cnEntry) {
-            const cnCell = dcells[cnEntry[0] + offset];
-            const a = cnCell && cnCell.querySelector ? cnCell.querySelector('a[href]') : null;
-            if (a) {
-              try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; }
+          if (headerHits < 3) continue;
+          const colMap = new Map();
+          labels.forEach((l, i) => { const f = REPORT_COLUMNS[l]; if (f) colMap.set(i, f); });
+          for (let rj = ri + 1; rj < rows.length; rj += 1) {
+            const dcells = cellsOf(rows[rj]);
+            if (dcells.length < 3) continue;
+            const dlabels = dcells.map((c) => _norm(c.textContent));
+            if (dlabels.filter((l) => REPORT_COLUMNS[l]).length >= 3) continue;
+            const build = (offset) => {
+              const rec = {};
+              colMap.forEach((field, i) => {
+                const cell = dcells[i + offset];
+                if (cell) rec[field] = _clean(cell.textContent);
+              });
+              return rec;
+            };
+            let offset = 0;
+            let rec = build(0);
+            if (!rec.caseNumber || !/\d{5,}/.test(rec.caseNumber)) {
+              const alt = build(1);
+              if (alt.caseNumber && /\d{5,}/.test(alt.caseNumber)) { rec = alt; offset = 1; }
             }
+            let href = '';
+            const cnEntry = [...colMap.entries()].find(([, f]) => f === 'caseNumber');
+            if (cnEntry) {
+              const cnCell = dcells[cnEntry[0] + offset];
+              const a = cnCell && cnCell.querySelector ? cnCell.querySelector('a[href]') : null;
+              if (a) {
+                try { href = new URL(a.getAttribute('href'), location.href).href; } catch { href = ''; }
+              }
+            }
+            pushCase(rec, href);
           }
-          pushCase(rec, href);
+          break;
         }
-        break; // one grid is the report; stop after the first header match
       }
+      return cases.length - before;
+    }
+
+    // ---- Find the scrollable container of the report grid ------------------
+    function findGridScroller() {
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      for (const g of grids) {
+        let el = g;
+        for (let up = 0; up < 14 && el; up += 1) {
+          try {
+            const cs = getComputedStyle(el);
+            const oy = cs.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+              return el;
+            }
+          } catch { /* ignore */ }
+          el = el.parentElement || el.host || null;
+        }
+      }
+      return null;
+    }
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const scroller = findGridScroller();
+
+    if (scroller) {
+      // Reset to top first so we start from row 0.
+      scroller.scrollTop = 0;
+      await sleep(150);
+
+      let lastScrollTop = -1;
+      let noNewCount = 0;
+      let steps = 0;
+      // Loop until we hit the bottom (scrollTop stops increasing) and a couple
+      // of consecutive passes add no new cases (last viewport fully captured).
+      while (steps < 200) {
+        steps += 1;
+        const added = extractVisibleRows();
+        debug.scrollSteps = steps;
+        const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+        if (added === 0) noNewCount += 1; else noNewCount = 0;
+        if (atBottom && noNewCount >= 2) break;
+        // Advance by ~85% of a viewport so consecutive windows overlap and no
+        // row is missed at the boundary.
+        scroller.scrollTop = Math.min(
+          scroller.scrollHeight,
+          scroller.scrollTop + Math.max(40, Math.floor(scroller.clientHeight * 0.85))
+        );
+        await sleep(140);
+        if (scroller.scrollTop === lastScrollTop) break; // truly stuck
+        lastScrollTop = scroller.scrollTop;
+      }
+    } else {
+      // No scrollable grid — fall back to a single pass over whatever's there.
+      extractVisibleRows();
     }
     debug.tierACases = cases.length;
-    console.log('[over24] Tier A cases=', cases.length, 'grids=', debug.gridCount);
+    console.log('[over24] after incremental scroll cases=', cases.length, 'steps=', debug.scrollSteps);
 
-    // ---- Tier B: innerText line sweep (agent-pasted format) ---------------
+    // ---- Tier B: innerText line sweep (only if grid walk got nothing) ------
     if (cases.length === 0) {
       const ls = bodyText.split(/\r?\n/).map((s) => _clean(s)).filter(Boolean);
       for (let i = 0; i < ls.length - 7; i += 1) {
-        if (!/^\d{1,4}$/.test(ls[i])) continue;       // row index "1", "2", …
-        if (!/^\d{6,10}$/.test(ls[i + 1])) continue;  // case number
+        if (!/^\d{1,4}$/.test(ls[i])) continue;
+        if (!/^\d{6,10}$/.test(ls[i + 1])) continue;
         pushCase({
           caseNumber: ls[i + 1],
           caseOwner: ls[i + 2],
@@ -837,13 +845,9 @@
         }, '');
       }
       debug.tierBCases = cases.length;
-      console.log('[over24] Tier B cases=', cases.length);
     }
 
-    // ---- Tier C: anchor-based sweep (Lightning report renders each Case
-    //      number as an <a href=".../lightning/r/Case/500...">. Walk up to
-    //      the row and grab every sibling cell's text as a fallback when the
-    //      header-row mapping fails). --------------------------------------
+    // ---- Tier C: anchor-based sweep (fallback) ----------------------------
     if (cases.length === 0) {
       try {
         const anchors = deepQueryAll('a[href]');
@@ -853,7 +857,6 @@
           if (!/\d{5,}/.test(txt)) continue;
           const m = txt.match(cnRe);
           if (!m) continue;
-          // walk up to the nearest row-like ancestor
           let row = a;
           for (let up = 0; up < 8 && row && row.parentElement; up += 1) {
             const tag = (row.tagName || '').toLowerCase();
@@ -863,7 +866,6 @@
           if (!row) { pushCase({ caseNumber: m[1] }, a.href); continue; }
           const siblings = Array.from(row.children || []);
           const cells = siblings.map((c) => _clean(c.textContent || ''));
-          // Find the case number cell index; fields to its right in order.
           const cnIdx = cells.findIndex((c) => c && c.includes(m[1]));
           if (cnIdx === -1) { pushCase({ caseNumber: m[1] }, a.href); continue; }
           const rest = cells.slice(cnIdx + 1).filter(Boolean);
@@ -879,11 +881,10 @@
         }
       } catch (e) { console.warn('[over24] Tier C error:', e); }
       debug.tierCCases = cases.length;
-      console.log('[over24] Tier C cases=', cases.length);
     }
 
     debug.sample = cases.slice(0, 5);
-    console.log('[over24] total cases=', cases.length, 'sample=', JSON.stringify(debug.sample));
+    console.log('[over24] total cases=', cases.length, '/ totalRecords=', totalRecords, 'sample=', JSON.stringify(debug.sample));
     return {
       ok: cases.length > 0,
       reportName,
@@ -911,10 +912,8 @@
     if (msg?.type === 'SCRAPE_OVER24_REPORT') {
       (async () => {
         try {
-          const rounds = await scrollReportToBottom();
-          console.log('[over24] scrolled report to bottom in', rounds, 'rounds');
-          const result = scrapeOver24Report();
-          sendResponse({ ...result, scrollRounds: rounds, url: location.href, title: document.title });
+          const result = await scrapeOver24Report();
+          sendResponse({ ...result, url: location.href, title: document.title });
         } catch (e) {
           sendResponse({ ok: false, cases: [], error: String(e?.message || e) });
         }

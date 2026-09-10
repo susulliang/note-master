@@ -545,90 +545,88 @@ export default function CaseTrakBoard({
 
   return (
     <div className="flex h-full min-h-full min-w-0 flex-col gap-3 p-4">
-      {/* Header — case count + column add/remove controls + actions. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5">
-          <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
-            {totalCount} case{totalCount === 1 ? '' : 's'}
-          </span>
+      {/* Single-row toolbar — all controls above the columns. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+          {totalCount} case{totalCount === 1 ? '' : 's'}
+        </span>
+        <button
+          type="button"
+          onClick={addColumn}
+          className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+          title="Add a new column"
+        >
+          <Plus className="size-3" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (columns.length <= 1) {
+              toast.error('Keep at least one column.');
+              return;
+            }
+            const last = columns[columns.length - 1];
+            deleteColumn(last.id);
+          }}
+          className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          title="Delete the last column"
+        >
+          <X className="size-3" />
+        </button>
+
+        <span className="mx-1 h-4 w-px bg-border/60" />
+
+        {totalCount > 0 && (
           <button
             type="button"
-            onClick={addColumn}
-            className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-foreground transition-colors hover:border-accent/50 hover:text-accent"
-            title="Add a new column"
+            onClick={distributeCases}
+            className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground transition-colors hover:brightness-110"
+            title="Distribute all cases equally across columns (first column keeps tickets whose owner matches its name)"
           >
-            <Plus className="size-3" />
+            ⚖ Distribute
           </button>
+        )}
+        {totalCount > 0 && (
+          <button
+            type="button"
+            onClick={() => void handleCopyStatus()}
+            className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+            title="Copy every case number + its status, one per line"
+          >
+            <Copy className="size-3" />
+            Copy status
+          </button>
+        )}
+        {totalCount > 0 && (
           <button
             type="button"
             onClick={() => {
-              if (columns.length <= 1) {
-                toast.error('Keep at least one column.');
-                return;
+              if (window.confirm(`Clear all ${totalCount} cases from the board?`)) {
+                setItems([]);
               }
-              const last = columns[columns.length - 1];
-              deleteColumn(last.id);
             }}
-            className="inline-flex size-5 items-center justify-center rounded-full border border-border/60 bg-card/40 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            title="Delete the last column"
+            className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
-            <X className="size-3" />
+            <Trash2 className="size-3" />
+            Clear board
           </button>
-        </div>
-        <div className="flex items-center gap-2">
-          {totalCount > 0 && (
-            <button
-              type="button"
-              onClick={distributeCases}
-              className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground transition-colors hover:brightness-110"
-              title="Distribute all cases equally across columns (first column keeps tickets whose owner matches its name)"
-            >
-              ⚖ Distribute
-            </button>
-          )}
-          {totalCount > 0 && (
-            <button
-              type="button"
-              onClick={() => void handleCopyStatus()}
-              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:border-accent/50 hover:text-accent"
-              title="Copy every case number + its status, one per line (same format as the old 24h tracker)"
-            >
-              <Copy className="size-3" />
-              Copy status
-            </button>
-          )}
-          {totalCount > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                if (window.confirm(`Clear all ${totalCount} cases from the board?`)) {
-                  setItems([]);
-                }
-              }}
-              className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash2 className="size-3" />
-              Clear board
-            </button>
-          )}
-        </div>
-      </div>
+        )}
 
-      {/* Scrape OVER24 action — replaces the old paste-cases box. */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-card/40 p-2.5 backdrop-blur-sm">
+        <span className="mx-1 h-4 w-px bg-border/60" />
+
         <button
           type="button"
           onClick={() => void handleScrapeOver24()}
           disabled={scraping || !scrapeOver24}
-          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-b from-amber-500/30 to-amber-600/15 px-3 py-1.5 text-xs font-bold text-amber-200 ring-1 ring-inset ring-amber-500/40 transition-all hover:from-amber-500/40 hover:to-amber-600/20 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-b from-amber-500/30 to-amber-600/15 px-2.5 py-1 text-[11px] font-bold text-amber-200 ring-1 ring-inset ring-amber-500/40 transition-all hover:from-amber-500/40 hover:to-amber-600/20 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
           title="Scrape the [OVER24] Salesforce report and import every case into the board"
         >
           <span className={scraping ? 'animate-spin' : ''}>📥</span>
-          {scraping ? 'Scraping OVER24…' : 'Scrape OVER24 Report'}
+          {scraping ? 'Scraping OVER24…' : 'Scrape OVER24'}
         </button>
-        <p className="text-[10px] leading-snug text-muted-foreground/70">
-          {connected ? 'Extension connected — scrapes the [OVER24] Salesforce tab and drops cases here.' : 'Extension not connected — reload the page after re-enabling the extension.'}
-        </p>
+        <span className="ml-auto text-[10px] leading-snug text-muted-foreground/70">
+          {connected ? 'Extension connected' : 'Extension not connected — reload the page after re-enabling.'}
+        </span>
       </div>
 
       {/* Board — responsive columns that fill the viewport width/height */}
