@@ -841,6 +841,9 @@
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const targetMet = () => totalRecords > 0 && cases.length >= totalRecords;
     let steps = 0;
+    // Hard budget — the network hook is the primary full-data source; this
+    // legacy DOM sweep must never stall the import.
+    const deadline = Date.now() + 12000;
 
     // ===== Strategy 1: scroll-last-row-into-view (top → bottom) =============
     // This is the primary fix for virtualized Salesforce report grids.
@@ -855,7 +858,7 @@
       let stalls = 0;
       let lastKey = '';
       const startCount = cases.length;
-      for (let i = 0; i < 300 && !targetMet(); i += 1) {
+      for (let i = 0; i < 300 && !targetMet() && Date.now() < deadline; i += 1) {
         steps += 1;
         debug.strategy1.iterations = i + 1;
         const added = extractVisibleRows();
@@ -881,13 +884,13 @@
     console.log('[over24] strategy1 (last-row-into-view) cases=', cases.length, '/ total=', totalRecords);
 
     // ===== Strategy 2: classic scrollTop stepping on each scroller =========
-    if (!targetMet()) {
+    if (!targetMet() && Date.now() < deadline) {
       const scrollers = findAllScrollers();
       debug.scrollerCount = scrollers.length;
       debug.strategy2 = { scrollerCount: scrollers.length, added: 0 };
       const startCount = cases.length;
       for (const scroller of scrollers) {
-        if (targetMet()) break;
+        if (targetMet() || Date.now() >= deadline) break;
         const isWin = scroller === window;
         const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
         const setTop = (v) => {
@@ -902,7 +905,7 @@
         let noNew = 0;
         let topStall = 0;
         let lastTop = -1;
-        for (let local = 0; local < 250 && !targetMet(); local += 1) {
+        for (let local = 0; local < 250 && !targetMet() && Date.now() < deadline; local += 1) {
           steps += 1;
           const added = extractVisibleRows();
           debug.scrollSteps = steps;
@@ -929,12 +932,12 @@
     console.log('[over24] strategy2 (scrollTop) cases=', cases.length, '/ total=', totalRecords);
 
     // ===== Strategy 3: wheel-event sweep on the grid itself ================
-    if (!targetMet()) {
+    if (!targetMet() && Date.now() < deadline) {
       debug.strategy3 = { added: 0 };
       const startCount = cases.length;
       const grids = deepQueryAll('table, [role="grid"], [role="table"]');
       let noNew = 0;
-      for (let i = 0; i < 120 && !targetMet(); i += 1) {
+      for (let i = 0; i < 120 && !targetMet() && Date.now() < deadline; i += 1) {
         steps += 1;
         const added = extractVisibleRows();
         debug.scrollSteps = steps;
@@ -1264,7 +1267,9 @@
         docCh: document.scrollingElement ? document.scrollingElement.clientHeight : 0,
       };
       debug.tries = [];
-
+      // Hard time budget — this DOM sweep is a last-resort fallback; the
+      // network hook (wave-hook.js) is the primary full-data source.
+      const deadline = Date.now() + 15000;
       const wheelOn = (targets, delta) => {
         for (const t of targets) {
           if (!t) continue;
@@ -1279,7 +1284,7 @@
       // Sweep EVERY candidate to the end (not just the first one that
       // twitches). Each step drives BOTH scrollTop and a real wheel event —
       // Wave's custom viewport listens for wheel even when overflow:hidden.
-      for (let ci = 0; ci < candidates.length && !targetMet(); ci += 1) {
+      for (let ci = 0; ci < candidates.length && !targetMet() && Date.now() < deadline; ci += 1) {
         const cand = candidates[ci];
         const tr = { tag: cand.tag, steps: 0, moved: false, added: 0 };
         const startCount = recs.size;
@@ -1288,7 +1293,7 @@
         let stalls = 0;
         let lastMax = -1;
         let lastTop = null;
-        for (let i = 0; i < 300 && !targetMet(); i += 1) {
+        for (let i = 0; i < 300 && !targetMet() && Date.now() < deadline; i += 1) {
           tr.steps += 1;
           debug.scrollSteps += 1;
           extract();
@@ -1323,14 +1328,14 @@
       debug.scroller = (debug.tries.find((t) => t.added > 0) || {}).tag || 'none';
 
       // Wheel-only / window-scrollBy pass when nothing native worked.
-      if (!targetMet()) {
+      if (!targetMet() && Date.now() < deadline + 5000) {
         const tr = { tag: 'wheel-only', steps: 0, moved: false, added: 0 };
         const startCount = recs.size;
         window.scrollTo(0, 0);
         await sleep(300);
         let stalls = 0;
         let lastMax = -1;
-        for (let i = 0; i < 120 && !targetMet(); i += 1) {
+        for (let i = 0; i < 120 && !targetMet() && Date.now() < deadline + 5000; i += 1) {
           tr.steps += 1;
           debug.scrollSteps += 1;
           extract();
@@ -1353,7 +1358,7 @@
 
       // Last resort: keyboard paging (focusing a cell and paging moves the
       // virtual window even in fully custom viewports).
-      if (!targetMet()) {
+      if (!targetMet() && Date.now() < deadline + 9000) {
         debug.keyboard = true;
         const focusTarget = grid.querySelector('td[tabindex="0"], th[tabindex="0"], td[tabindex], th[tabindex]') || grid;
         try { focusTarget.focus({ preventScroll: true }); } catch { try { focusTarget.focus(); } catch { /* ignore */ } }
@@ -1374,7 +1379,7 @@
         extract();
         let stalls = 0;
         let lastMax = -1;
-        for (let i = 0; i < 200 && !targetMet(); i += 1) {
+        for (let i = 0; i < 200 && !targetMet() && Date.now() < deadline + 9000; i += 1) {
           debug.scrollSteps += 1;
           const added = extract();
           const idxs = renderedRowIndexes();
@@ -1427,20 +1432,35 @@
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // Ask the MAIN-world hook for captured payloads.
     let payloads = [];
+    let hookStats = null;
     try {
       window.dispatchEvent(new CustomEvent('ecovacs-wave-pull'));
       const t0 = Date.now();
       while (Date.now() - t0 < 900) {
         const el = document.getElementById('__ecovacs_wave_payload');
         if (el && el.textContent) {
-          try { payloads = JSON.parse(el.textContent) || []; } catch { payloads = []; }
+          try {
+            const raw = JSON.parse(el.textContent);
+            if (Array.isArray(raw)) payloads = raw; // legacy shape
+            else if (raw && Array.isArray(raw.payloads)) {
+              payloads = raw.payloads;
+              hookStats = raw.stats || null;
+            }
+          } catch { payloads = []; }
           break;
         }
         await sleep(90);
       }
     } catch { /* ignore */ }
     if (!Array.isArray(payloads) || payloads.length === 0) {
-      return { ok: false, engine: 'wave-hook', error: 'no captured payloads (report tab needs one reload after extension update)' };
+      return {
+        ok: false,
+        engine: 'wave-hook',
+        error: hookStats
+          ? `hook alive but stored 0 payloads (fetchSeen=${hookStats.fetchSeen}, xhrSeen=${hookStats.xhrSeen}) — report tab likely needs a reload to refetch`
+          : 'hook not responding (report tab needs one reload after extension update)',
+        debug: { engine: 'wave-hook', hookStats },
+      };
     }
 
     const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();

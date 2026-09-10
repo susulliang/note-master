@@ -765,6 +765,8 @@ const INLINE_OVER24_EXTRACT = async function () {
 
   const targetMet = () => totalRecords > 0 && cases.length >= totalRecords;
   let scrollSteps = 0;
+  // Hard budget — last-resort fallback tier; the network hook is primary.
+  const deadline = Date.now() + 12000;
 
   // Strategy 1: repeatedly scroll the last rendered row into view (works with
   // any virtualizer, including transform-based ones), top → bottom.
@@ -778,7 +780,7 @@ const INLINE_OVER24_EXTRACT = async function () {
     let stalls = 0;
     let lastKey = '';
     const startCount = cases.length;
-    for (let i = 0; i < 300 && !targetMet(); i += 1) {
+    for (let i = 0; i < 300 && !targetMet() && Date.now() < deadline; i += 1) {
       scrollSteps += 1;
       debug.strategy1.iterations = i + 1;
       const added = extractVisibleRows();
@@ -798,13 +800,13 @@ const INLINE_OVER24_EXTRACT = async function () {
   }
 
   // Strategy 2: classic scrollTop stepping, closest scroller first.
-  if (!targetMet()) {
+  if (!targetMet() && Date.now() < deadline) {
     const scrollers = findAllScrollers();
     debug.scrollerCount = scrollers.length;
     debug.strategy2 = { scrollerCount: scrollers.length, added: 0 };
     const startCount = cases.length;
     for (const scroller of scrollers) {
-      if (targetMet()) break;
+      if (targetMet() || Date.now() >= deadline) break;
       const isWin = scroller === window;
       const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
       const setTop = (v) => {
@@ -817,7 +819,7 @@ const INLINE_OVER24_EXTRACT = async function () {
       let noNew = 0;
       let topStall = 0;
       let lastTop = -1;
-      for (let local = 0; local < 250 && !targetMet(); local += 1) {
+      for (let local = 0; local < 250 && !targetMet() && Date.now() < deadline; local += 1) {
         scrollSteps += 1;
         const added = extractVisibleRows();
         const domTotal = readTotalFromDom();
@@ -839,12 +841,12 @@ const INLINE_OVER24_EXTRACT = async function () {
   }
 
   // Strategy 3: raw wheel events on the grid + window scroll.
-  if (!targetMet() && typeof document !== 'undefined') {
+  if (!targetMet() && typeof document !== 'undefined' && Date.now() < deadline) {
     debug.strategy3 = { added: 0 };
     const startCount = cases.length;
     const grids = deepQueryAll('table, [role="grid"], [role="table"]');
     let noNew = 0;
-    for (let i = 0; i < 120 && !targetMet(); i += 1) {
+    for (let i = 0; i < 120 && !targetMet() && Date.now() < deadline; i += 1) {
       scrollSteps += 1;
       const added = extractVisibleRows();
       const domTotal = readTotalFromDom();
@@ -1110,6 +1112,10 @@ const INLINE_WAVE_EXTRACT = async function () {
         docCh: document.scrollingElement ? document.scrollingElement.clientHeight : 0,
       };
       debug.tries = [];
+      // Hard time budget — the DOM sweep is only a last-resort fallback
+      // (the network hook is the primary path), so it must never stall the
+      // whole import for minutes.
+      const deadline = Date.now() + 15000;
       const wheelOn = (targets, delta) => {
         for (const t of targets) {
           if (!t) continue;
@@ -1121,7 +1127,7 @@ const INLINE_WAVE_EXTRACT = async function () {
         }
       };
 
-      for (let ci = 0; ci < candidates.length && !targetMet(); ci += 1) {
+      for (let ci = 0; ci < candidates.length && !targetMet() && Date.now() < deadline; ci += 1) {
         const cand = candidates[ci];
         const tr = { tag: cand.tag, steps: 0, moved: false, added: 0 };
         const startCount = recs.size;
@@ -1130,7 +1136,7 @@ const INLINE_WAVE_EXTRACT = async function () {
         let stalls = 0;
         let lastMax = -1;
         let lastTop = null;
-        for (let i = 0; i < 300 && !targetMet(); i += 1) {
+        for (let i = 0; i < 300 && !targetMet() && Date.now() < deadline; i += 1) {
           tr.steps += 1;
           debug.scrollSteps += 1;
           extract();
@@ -1161,14 +1167,14 @@ const INLINE_WAVE_EXTRACT = async function () {
       }
       debug.scroller = (debug.tries.find((t) => t.added > 0) || {}).tag || 'none';
 
-      if (!targetMet()) {
+      if (!targetMet() && Date.now() < deadline + 5000) {
         const tr = { tag: 'wheel-only', steps: 0, moved: false, added: 0 };
         const startCount = recs.size;
         window.scrollTo(0, 0);
         await sleep(300);
         let stalls = 0;
         let lastMax = -1;
-        for (let i = 0; i < 120 && !targetMet(); i += 1) {
+        for (let i = 0; i < 120 && !targetMet() && Date.now() < deadline + 5000; i += 1) {
           tr.steps += 1;
           debug.scrollSteps += 1;
           extract();
@@ -1189,7 +1195,7 @@ const INLINE_WAVE_EXTRACT = async function () {
         window.scrollTo(0, 0);
       }
 
-      if (!targetMet()) {
+      if (!targetMet() && Date.now() < deadline + 9000) {
         debug.keyboard = true;
         const focusTarget = grid.querySelector('td[tabindex="0"], th[tabindex="0"], td[tabindex], th[tabindex]') || grid;
         try { focusTarget.focus({ preventScroll: true }); } catch { try { focusTarget.focus(); } catch { /* ignore */ } }
@@ -1211,7 +1217,7 @@ const INLINE_WAVE_EXTRACT = async function () {
         extract();
         let stalls = 0;
         let lastMax = -1;
-        for (let i = 0; i < 200 && !targetMet(); i += 1) {
+        for (let i = 0; i < 200 && !targetMet() && Date.now() < deadline + 9000; i += 1) {
           debug.scrollSteps += 1;
           const added = extract();
           const idxs = renderedRowIndexes();
@@ -1258,20 +1264,35 @@ const INLINE_WAVE_HOOK_READ = async function () {
   try {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     let payloads = [];
+    let hookStats = null;
     try {
       window.dispatchEvent(new CustomEvent('ecovacs-wave-pull'));
       const t0 = Date.now();
       while (Date.now() - t0 < 900) {
         const el = document.getElementById('__ecovacs_wave_payload');
         if (el && el.textContent) {
-          try { payloads = JSON.parse(el.textContent) || []; } catch (e) { payloads = []; }
+          try {
+            const raw = JSON.parse(el.textContent);
+            if (Array.isArray(raw)) payloads = raw; // legacy shape
+            else if (raw && Array.isArray(raw.payloads)) {
+              payloads = raw.payloads;
+              hookStats = raw.stats || null;
+            }
+          } catch (e) { payloads = []; }
           break;
         }
         await sleep(90);
       }
     } catch (e) { /* ignore */ }
     if (!Array.isArray(payloads) || payloads.length === 0) {
-      return { ok: false, engine: 'wave-hook', error: 'no captured payloads' };
+      return {
+        ok: false,
+        engine: 'wave-hook',
+        error: hookStats
+          ? 'hook alive but stored 0 payloads (fetchSeen=' + hookStats.fetchSeen + ', xhrSeen=' + hookStats.xhrSeen + ')'
+          : 'hook not responding',
+        debug: { engine: 'wave-hook', hookStats: hookStats },
+      };
     }
 
     const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
@@ -1442,8 +1463,9 @@ const INLINE_WAVE_HOOK_READ = async function () {
         debug: {
           engine: 'wave-hook',
           payloadCount: payloads.length,
+          hookStats: hookStats,
           urls: payloads.map((p) => p.url),
-          previews: payloads.map((p) => String(p.text).slice(0, 200)),
+          previews: payloads.map((p) => String(p.text).slice(0, 500)),
         },
       };
     }
@@ -1474,6 +1496,7 @@ const INLINE_WAVE_HOOK_READ = async function () {
         method: best.method,
         total: total,
         urls: payloads.map((p) => p.url),
+        previews: payloads.slice(0, 3).map((p) => String(p.text).slice(0, 300)),
       },
     };
   } catch (e) {
@@ -1481,19 +1504,31 @@ const INLINE_WAVE_HOOK_READ = async function () {
   }
 };
 
-/** Run INLINE_WAVE_HOOK_READ in every frame; keep the best report frame. */
+/** Run INLINE_WAVE_HOOK_READ in every frame; keep the best report frame.
+ *  Returns the best result WITH cases, or — when nothing parsed — the
+ *  best failure snapshot (hookStats / urls / previews) for diagnostics. */
 async function readWaveHookAllFrames(tabId) {
   const results = await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     func: INLINE_WAVE_HOOK_READ,
   });
   let best = null;
+  let failBest = null;
   for (const frame of Array.isArray(results) ? results : []) {
     const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
-    if (!obj || !Array.isArray(obj.cases) || obj.cases.length === 0) continue;
-    if (!best || obj.cases.length > best.cases.length) best = { ...obj, via: 'wave-hook' };
+    if (!obj) continue;
+    if (Array.isArray(obj.cases) && obj.cases.length > 0) {
+      if (!best || obj.cases.length > best.cases.length) best = { ...obj, via: 'wave-hook' };
+    } else if (obj.engine === 'wave-hook') {
+      // Keep the most informative failure (one with hookStats > plain miss).
+      const score = (obj.debug?.hookStats ? 2 : 0) + (obj.debug?.payloadCount ? 1 : 0);
+      const failScore = failBest ? ((failBest.debug?.hookStats ? 2 : 0) + (failBest.debug?.payloadCount ? 1 : 0)) : -1;
+      if (score > failScore) failBest = obj;
+    }
   }
-  return best;
+  if (best) return best;
+  if (failBest) return { ok: false, engine: 'wave-hook', ...failBest, error: failBest.error || 'wave-hook: no cases parsed' };
+  return null;
 }
 
 async function sendToTab(tabId, payload) {
@@ -2472,45 +2507,61 @@ async function importOver24Report() {
     return { ok: false, error: 'No Salesforce tab found. Open the [OVER24] report in Salesforce first, then retry.' };
   }
   console.log('[over24] importOver24Report target tab=', tab.id, tab.url, tab.title);
-  let r = await scrapeOver24FromTab(tab.id);
-  console.log('[over24] scrape result via=', r?.via, 'cases=', r?.cases?.length ?? 0, 'complete=', r?.complete, 'error=', r?.error ?? null, 'debug=', JSON.stringify(r?.debug ?? null));
-  // If the scrape is incomplete AND the network hook produced nothing, the
-  // report tab predates the wave-hook install (hook runs at document_start,
-  // so it only captures fetches made AFTER it loaded). Reload the report tab
-  // once — the hook then captures the full dataset when the report refetches
-  // — and poll it for up to ~30s. This is the reliable path for the Wave
-  // grid, whose viewport ignores synthetic scrolling entirely.
-  if (r.ok && r.complete === false && r.totalRecords > r.cases.length && r.via !== 'wave-hook') {
-    console.warn('[over24] incomplete scrape', r.cases.length, '/', r.totalRecords, '— reloading report tab for network hook');
-    diagRecord('over24:reload-for-hook', { tabId: tab.id, got: r.cases.length, total: r.totalRecords, via: r.via });
+
+  // ---- Phase 1: quick network-hook read (~2s). Complete data when it hits;
+  //      no scrolling involved (the Wave viewport ignores synthetic scroll). -
+  let r = null;
+  try {
+    r = await readWaveHookAllFrames(tab.id);
+    console.log('[over24] hook read cases=', r?.cases?.length ?? 0, 'complete=', r?.complete, 'debug=', JSON.stringify(r?.debug ?? null));
+  } catch (err) {
+    console.warn('[over24] hook read failed:', String(err?.message || err));
+  }
+
+  // ---- Phase 2: hook empty/incomplete → reload the report tab so the hook
+  //      (installed at document_start) captures the report's refetch, then
+  //      poll it. The tab predating the hook install is the common case on
+  //      first use after an extension update. ------------------------------
+  if (!(r && r.ok && r.complete !== false)) {
+    console.warn('[over24] hook incomplete — reloading report tab for capture');
+    diagRecord('over24:reload-for-hook', { tabId: tab.id, got: r?.cases?.length ?? 0, via: r?.via ?? null });
     try { await chrome.tabs.reload(tab.id); } catch (e) {
       console.warn('[over24] tab reload failed:', e?.message || e);
     }
-    const expected = r.totalRecords || 0;
-    let hookBest = null;
     const t0 = Date.now();
+    let hookBest = (r && r.ok) ? r : null;
     while (Date.now() - t0 < 30000) {
       await new Promise((res) => setTimeout(res, 2500));
       try {
         const h = await readWaveHookAllFrames(tab.id);
         if (h && h.ok && Array.isArray(h.cases) && h.cases.length > 0) {
-          if (!hookBest || h.cases.length > hookBest.cases.length) hookBest = h;
-          const target = Math.max(expected, hookBest.totalRecords || 0);
-          if (target > 0 && hookBest.cases.length >= target) break;
+          if (!hookBest || h.cases.length > (hookBest.cases?.length || 0)) hookBest = h;
+          if (hookBest.complete !== false) break;
         }
       } catch (e) { /* page still loading */ }
     }
-    console.log('[over24] post-reload hook cases=', hookBest?.cases?.length ?? 0, 'complete=', hookBest?.complete, 'debug=', JSON.stringify(hookBest?.debug ?? null));
-    if (hookBest && hookBest.cases.length > (r.cases?.length || 0)) {
+    if (hookBest && hookBest.ok) {
+      console.log('[over24] post-reload hook cases=', hookBest.cases.length, 'complete=', hookBest.complete, 'debug=', JSON.stringify(hookBest.debug ?? null));
       r = hookBest;
-    } else {
-      // Hook still empty — one final full scrape attempt after the reload.
-      const retry = await scrapeOver24FromTab(tab.id);
-      console.log('[over24] retry cases=', retry?.cases?.length ?? 0, 'complete=', retry?.complete, 'debug=', JSON.stringify(retry?.debug ?? null));
-      if (retry.ok && retry.cases.length > (r.cases?.length || 0)) r = retry;
     }
   }
-  if (!r.ok || !r.cases || r.cases.length === 0) {
+
+  // ---- Phase 3: last resort — DOM scrape tiers (hook found nothing
+  //      parseable). Bounded by internal deadlines (~15-25s each tier). ----
+  const hookFailDebug = (r && !r.ok && r.engine === 'wave-hook') ? (r.debug ?? null) : null;
+  if (!(r && r.ok && r.complete !== false)) {
+    const dom = await scrapeOver24FromTab(tab.id);
+    console.log('[over24] DOM scrape via=', dom?.via, 'cases=', dom?.cases?.length ?? 0, 'complete=', dom?.complete, 'error=', dom?.error ?? null);
+    if (dom && dom.ok && (!r || !r.ok || dom.cases.length > (r.cases?.length || 0))) {
+      // Keep the network-hook failure diagnostics alongside the DOM result
+      // so the popup can show WHY the hook path missed.
+      if (hookFailDebug && dom.debug) dom.debug.hookFail = hookFailDebug;
+      else if (hookFailDebug) dom.debug = { ...(dom.debug || {}), hookFail: hookFailDebug };
+      r = dom;
+    }
+  }
+
+  if (!r || !r.ok || !r.cases || r.cases.length === 0) {
     diagRecord('over24:scrape:fail', { tabId: tab.id, url: tab.url, title: tab.title ?? null, error: r?.error ?? null, cases: r?.cases?.length ?? 0 });
     return { ok: false, error: r?.error || 'No report cases found on the Salesforce tab. Make sure the [OVER24] report grid is visible, then retry.', debug: r?.debug ?? null, sample: [] };
   }

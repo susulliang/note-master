@@ -739,8 +739,11 @@ async function onClickPush() {
  *  reply shape: { ok, count, totalRecords, reportName, via, pushed,
  *  sample[], debug{} }. */
 async function onClickOver24() {
-  const r = await withLoading(btnOver24, () => sendWithTimeout({ type: 'POPUP_SCRAPE_OVER24' }, 25000));
+  // 100s budget: the flow may scrape → auto-reload the report tab → poll the
+  // network hook (~30s) → retry DOM tiers before replying.
+  const r = await withLoading(btnOver24, () => sendWithTimeout({ type: 'POPUP_SCRAPE_OVER24' }, 100000));
   lastOver24Result = r;
+  persistOver24Result(r);
   if (r === SEND_TIMED_OUT) {
     renderOver24({ ok: false, error: 'Service worker did not reply — reload the extension, then retry.' });
     toast('Service worker did not reply — reload the extension at edge://extensions / chrome://extensions, then retry.', 'err');
@@ -758,6 +761,27 @@ async function onClickOver24() {
     return;
   }
   toast(explainError(r, 'OVER24 report import failed — is the [OVER24] report open in a Salesforce tab?'), 'err');
+}
+
+/** Persist the last OVER24 scrape result so reopening the popup still shows
+ *  it (the popup document is destroyed on close; lastOver24Result is not). */
+function persistOver24Result(r) {
+  try {
+    if (r && r !== SEND_TIMED_OUT) {
+      chrome.storage.local.set({ __ecovacs_over24_last: r }, () => { /* fire-and-forget */ });
+    }
+  } catch { /* ignore */ }
+}
+
+async function restoreOver24Result() {
+  try {
+    const got = await chrome.storage.local.get({ __ecovacs_over24_last: null });
+    const r = got && got.__ecovacs_over24_last;
+    if (r && typeof r === 'object') {
+      lastOver24Result = r;
+      renderOver24(r);
+    }
+  } catch { /* ignore */ }
 }
 
 /** Render the last OVER24 scrape result into the preview panel so the user
@@ -862,6 +886,10 @@ window.addEventListener('error', (e) => {
 async function bootstrap() {
   try {
     paintHeaderNow();
+    // Restore the last OVER24 scrape result (persisted in chrome.storage) so
+    // the JSON preview panel shows data instead of the placeholder after the
+    // popup is reopened.
+    void restoreOver24Result();
     // Cheap synchronous pre-pop of the diag panel so "Loading…" never
     // remains when boot completes, even if the following storage.get fuses
     // never fire.
