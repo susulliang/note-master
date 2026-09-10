@@ -429,7 +429,7 @@ export default function CaseTrakBoard({
       htmlParts.push('');
       plainParts.push('');
     }
-    const html = htmlParts.join('\n');
+    const html = htmlParts.join('<br>');
     const plain = plainParts.join('\n').trim();
 
     try {
@@ -589,7 +589,7 @@ export default function CaseTrakBoard({
   // --- Hover-tooltip handlers ---------------------------------------------
   const startHover = (id: string) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = setTimeout(() => setHoveredCase(id), 1000);
+    hoverTimerRef.current = setTimeout(() => setHoveredCase(id), 500);
   };
   const cancelHover = () => {
     if (hoverTimerRef.current) {
@@ -600,6 +600,13 @@ export default function CaseTrakBoard({
   };
 
   return (
+    <>
+      <style>{`
+        @keyframes ct-bubble-in {
+          from { opacity: 0; transform: translate(-50%, -4px) scale(0.97); }
+          to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+      `}</style>
     <div className="flex h-full min-h-full min-w-0 flex-col gap-3 p-4">
       {/* Single-row toolbar — all controls above the columns. */}
       <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -765,7 +772,8 @@ export default function CaseTrakBoard({
                       className={cn(
                         'group relative cursor-grab rounded-lg border border-border/50 bg-card/70 p-2.5 shadow-sm backdrop-blur-sm transition-all active:cursor-grabbing',
                         'hover:border-foreground/20 hover:shadow-md',
-                        isDragging && 'opacity-40 ring-2 ring-accent/50'
+                        isDragging && 'opacity-40 ring-2 ring-accent/50',
+                        hoveredCase === c.id && 'z-40'
                       )}
                     >
                       {/* Case number */}
@@ -899,7 +907,8 @@ export default function CaseTrakBoard({
                       {/* Hover bubble — full case info, appears after 1s. */}
                       {hoveredCase === c.id && (
                         <div
-                          className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-border/70 bg-background/95 p-3 text-[11px] shadow-2xl backdrop-blur-md"
+                          className="pointer-events-none absolute left-1/2 top-full z-[100] mt-2 w-64 rounded-lg border border-border/70 bg-background/95 p-3 text-[11px] shadow-2xl backdrop-blur-md"
+                          style={{ animation: 'ct-bubble-in 0.18s ease-out both' }}
                           onMouseEnter={() => startHover(c.id)}
                           onMouseLeave={cancelHover}
                         >
@@ -962,5 +971,6 @@ export default function CaseTrakBoard({
         })}
       </div>
     </div>
+    </>
   );
 }
