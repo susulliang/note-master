@@ -1028,6 +1028,319 @@
     };
   }
 
+  // =========================================================================
+  //  WAVE / ANALYTICS REPORT GRID SCRAPER
+  // =========================================================================
+  //
+  //  The [OVER24] report runs inside a same-origin iframe
+  //  (lightningReportApp) and renders Salesforce's Wave/Analytics data grid:
+  //
+  //    div.data-grid
+  //      div.data-grid-table-ctr (fixed corner | fixed header | fixed col)
+  //      div.data-grid-table-ctr[data-testid=data-grid-full-table-ctr]
+  //        table.data-grid-full-table[role=grid][aria-rowcount=N+1]
+  //          tbody > tr.data-grid-table-row (VIRTUALIZED — only the rows in
+  //                 the scroll window are mounted; a final
+  //                 tr.data-grid-table-row-spacer carries the remaining h)
+  //
+  //  Every data cell carries a clean `aria-label="Field Name: value"`,
+  //  and the Case Number cell holds <a data-object-api-name="Case"
+  //  href="/lightning/r/500…/view">. Total records come from the
+  //  "Total Records" metrics widget and aria-rowcount.
+  const WAVE_FIELD_MAP = {
+    'Case Number': 'caseNumber',
+    'Case Owner': 'caseOwner',
+    'Contact Account Name': 'contactAccountName',
+    'Date/Time Opened': 'dateTimeOpened',
+    'Case Last Modified Date': 'lastModifiedDate',
+    'Status': 'status',
+    'Customer Last Reply Time': 'customerLastReplyTime',
+  };
+
+  function waveClean(v) {
+    return String(v == null ? '' : v).replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function findWaveGrid() {
+    const grids = document.querySelectorAll('table[role="grid"]');
+    for (const g of grids) {
+      if (g.classList.contains('data-grid-full-table')) return g;
+    }
+    for (const g of grids) {
+      if (g.classList.contains('data-grid-table')) return g;
+    }
+    return null;
+  }
+
+  function readWaveTotal(grid) {
+    // 1) aria-rowcount on the full table includes the header row.
+    const rc = parseInt(grid.getAttribute('aria-rowcount') || '', 10);
+    if (rc > 0) return rc - 1;
+    // 2) "Total Records" metrics widget.
+    const titles = document.querySelectorAll('.metricsElement.metricsTitle');
+    for (const t of titles) {
+      if (waveClean(t.textContent).toLowerCase() === 'total records') {
+        const wrap = t.closest('li') || t.parentElement;
+        const v = wrap && wrap.querySelector('.metricsElement.metricsValue');
+        const n = parseInt(waveClean(v ? v.textContent : '').replace(/[,\s]/g, ''), 10);
+        if (n > 0) return n;
+      }
+    }
+    // 3) Accessible announcement span.
+    const ann = document.querySelector('.metricsAnnouncement');
+    const m = ann && waveClean(ann.textContent).match(/Total Records\s*:?\s*([\d,]+)/i);
+    if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+    return 0;
+  }
+
+  async function scrapeWaveReport() {
+    const grid = findWaveGrid();
+    if (!grid) return null;
+
+    const debug = {
+      engine: 'wave',
+      frameUrl: location.href,
+      rowCountAttr: parseInt(grid.getAttribute('aria-rowcount') || '', 10) || 0,
+      scroller: null,
+      scrollSteps: 0,
+      renderedWindows: 0,
+    };
+    const total = readWaveTotal(grid);
+    debug.totalRecords = total;
+
+    const recs = new Map(); // data-row-index (0-based data row) -> rec
+    const seenCase = new Set();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    function renderedRowIndexes() {
+      const set = new Set();
+      grid.querySelectorAll('tbody > tr').forEach((tr) => {
+        if (tr.className.indexOf('spacer') !== -1) return;
+        tr.querySelectorAll('td[data-row-index], th[data-row-index]').forEach((c) => {
+          const ri = parseInt(c.getAttribute('data-row-index') || '', 10);
+          if (!Number.isNaN(ri)) {
+            // 0 = header row; data rows carry data-fixed-row="false"
+            if (c.getAttribute('data-fixed-row') === 'false') set.add(ri);
+          }
+        });
+      });
+      return set;
+    }
+
+    function extract() {
+      let added = 0;
+      const trs = grid.querySelectorAll('tbody > tr');
+      for (const tr of trs) {
+        if (tr.className.indexOf('spacer') !== -1) continue;
+        const cells = tr.querySelectorAll('td[role="gridcell"]');
+        if (!cells.length) continue;
+        let rowIndex = NaN;
+        const rec = {};
+        for (const td of cells) {
+          const ri = parseInt(td.getAttribute('data-row-index') || '', 10);
+          if (!Number.isNaN(ri)) rowIndex = ri;
+          const al = td.getAttribute('aria-label') || '';
+          // Exact "Field: value" form. The link cell uses a different
+          // "Field, value, Press Enter…" sentence and is skipped here.
+          const ci = al.indexOf(': ');
+          if (ci <= 0) continue;
+          const field = WAVE_FIELD_MAP[al.slice(0, ci)];
+          if (!field || rec[field]) continue;
+          rec[field] = waveClean(al.slice(ci + 2));
+          if (field === 'caseNumber') {
+            const a = td.querySelector('a[data-object-api-name="Case"], a[href*="/lightning/r/"]');
+            if (a) {
+              try { rec.caseUrl = new URL(a.getAttribute('href'), location.href).href; } catch { /* ignore */ }
+            }
+          }
+        }
+        const cn = waveClean(rec.caseNumber);
+        if (!cn || !/\d{5,}/.test(cn)) continue;
+        const key = cn.replace(/\D/g, '');
+        if (seenCase.has(key)) continue;
+        seenCase.add(key);
+        rec.caseNumber = cn;
+        recs.set(Number.isNaN(rowIndex) ? recs.size : rowIndex, rec);
+        added += 1;
+      }
+      return added;
+    }
+
+    // ---- Find the element that actually scrolls the virtual grid ----------
+    // Candidates: every ancestor of the grid with a real overflow scrollbar,
+    // the frame's documentElement/window, and elements whose class hints at
+    // a viewport. A candidate only counts when nudging it CHANGES the set of
+    // rendered data rows — this is verified, not guessed.
+    function candidateScrollers() {
+      const out = [];
+      const seen = new Set();
+      const push = (el, tag) => {
+        if (!el || seen.has(el)) return;
+        seen.add(el);
+        out.push({ el, tag });
+      };
+      let el = grid;
+      for (let up = 0; up < 24 && el; up += 1) {
+        try {
+          const cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight - el.clientHeight > 8) {
+            push(el, `ancestor(${up})`);
+          }
+        } catch { /* ignore */ }
+        el = el.parentElement;
+      }
+      document.querySelectorAll('.wave-table [class*="scroll" i], [class*="data-grid"][class*="scroll" i]').forEach((n) => {
+        try {
+          const cs = getComputedStyle(n);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && n.scrollHeight - n.clientHeight > 8) {
+            push(n, 'class-hint');
+          }
+        } catch { /* ignore */ }
+      });
+      // Frame document scroller last.
+      const de = document.scrollingElement || document.documentElement;
+      if (de && de.scrollHeight - de.clientHeight > 8) push(de, 'documentElement');
+      return out;
+    }
+
+    function nudge(cand, delta) {
+      const { el } = cand;
+      const isDoc = el === document.scrollingElement || el === document.documentElement || el === document.body;
+      if (isDoc) {
+        const cur = window.scrollY || document.documentElement.scrollTop || 0;
+        window.scrollTo(0, Math.min(el.scrollHeight, cur + delta));
+      } else {
+        el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + delta);
+        try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ }
+      }
+    }
+    function topOf(cand) {
+      const { el } = cand;
+      const isDoc = el === document.scrollingElement || el === document.documentElement || el === document.body;
+      return isDoc ? (window.scrollY || document.documentElement.scrollTop || 0) : el.scrollTop;
+    }
+    function resetTop(cand) {
+      const { el } = cand;
+      if (el === document.scrollingElement || el === document.documentElement || el === document.body) window.scrollTo(0, 0);
+      else el.scrollTop = 0;
+    }
+
+    extract();
+    const targetMet = () => (total > 0 ? recs.size >= total : false);
+    debug.renderedWindows = 1;
+
+    if (!targetMet()) {
+      const candidates = candidateScrollers();
+      debug.candidateCount = candidates.length;
+      let winner = null;
+      for (const cand of candidates) {
+        resetTop(cand);
+        await sleep(250);
+        const before = renderedRowIndexes();
+        nudge(cand, 320);
+        await sleep(260);
+        const after = renderedRowIndexes();
+        let changed = false;
+        if (after.size !== before.size) changed = true;
+        if (!changed) for (const ri of after) if (!before.has(ri)) { changed = true; break; }
+        if (changed) { winner = cand; debug.scroller = cand.tag; break; }
+      }
+
+      if (winner) {
+        // Top → bottom sweep on the verified scroller. Half-viewport steps
+        // (the grid mounts a large overscan window, so overlaps are safe).
+        resetTop(winner);
+        await sleep(300);
+        let stalls = 0;
+        let lastTop = -1;
+        for (let i = 0; i < 400 && !targetMet(); i += 1) {
+          debug.scrollSteps += 1;
+          const added = extract();
+          debug.renderedWindows += 1;
+          const el = winner.el;
+          const isDoc = el === document.scrollingElement || el === document.documentElement || el === document.body;
+          const top = topOf(winner);
+          const viewH = isDoc ? window.innerHeight : el.clientHeight;
+          const max = el.scrollHeight;
+          const atBottom = top + viewH >= max - 3;
+          if (added === 0) stalls += 1; else stalls = 0;
+          if (atBottom && stalls >= 4) break;
+          nudge(winner, Math.max(120, Math.floor((viewH || 400) * 0.5)));
+          await sleep(230);
+          const nowTop = topOf(winner);
+          if (nowTop === lastTop) stalls += 1;
+          lastTop = nowTop;
+          if (stalls >= 8) break;
+        }
+        // One final extract after the last window settles.
+        await sleep(150);
+        extract();
+        resetTop(winner);
+      } else {
+        // Fallback: keyboard paging. Wave grids react to PageDown/ArrowDown
+        // (moving the cell cursor scrolls the virtual window) even when no
+        // native overflow scroller is detectable.
+        debug.scroller = 'KEYBOARD';
+        const focusTarget = grid.querySelector('td[tabindex="0"], th[tabindex="0"], td[tabindex], th[tabindex]') || grid;
+        try { focusTarget.focus({ preventScroll: true }); } catch { try { focusTarget.focus(); } catch { /* ignore */ } }
+        const press = (key) => {
+          for (const type of ['keydown', 'keyup']) {
+            try {
+              focusTarget.dispatchEvent(new KeyboardEvent(type, {
+                key, code: key === 'PageDown' ? 'PageDown' : key === 'Home' ? 'Home' : 'ArrowDown',
+                keyCode: key === 'PageDown' ? 34 : key === 'Home' ? 36 : 40,
+                which: key === 'PageDown' ? 34 : key === 'Home' ? 36 : 40,
+                bubbles: true, cancelable: true,
+              }));
+            } catch { /* ignore */ }
+          }
+        };
+        press('Home');
+        await sleep(300);
+        extract();
+        let stalls = 0;
+        let lastMax = -1;
+        for (let i = 0; i < 200 && !targetMet(); i += 1) {
+          debug.scrollSteps += 1;
+          const added = extract();
+          const idxs = renderedRowIndexes();
+          const curMax = idxs.size ? Math.max(...idxs) : -1;
+          if (added === 0 && curMax === lastMax) stalls += 1; else stalls = 0;
+          lastMax = curMax;
+          if (stalls >= 6) break;
+          press('PageDown');
+          await sleep(180);
+          if (curMax === lastMax) {
+            for (let k = 0; k < 12; k += 1) press('ArrowDown');
+            await sleep(120);
+          }
+        }
+        await sleep(150);
+        extract();
+      }
+    }
+
+    const cases = [...recs.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, rec]) => rec);
+    debug.tierACases = cases.length;
+    debug.complete = total > 0 ? cases.length >= total : cases.length > 0;
+    console.log('[over24][wave] cases=', cases.length, '/ total=', total, 'steps=', debug.scrollSteps, 'scroller=', debug.scroller, 'complete=', debug.complete);
+
+    let reportName = '';
+    try { reportName = grid.getAttribute('aria-label') || ''; } catch { /* ignore */ }
+    return {
+      ok: cases.length > 0,
+      engine: 'wave',
+      isReport: cases.length > 0,
+      reportName,
+      totalRecords: total || cases.length,
+      cases,
+      debug,
+      error: cases.length === 0 ? 'Wave report grid found but no rows rendered.' : '',
+    };
+  }
+
   // -------------------------------------------------------------------------
   //  Messaging hooks
   // -------------------------------------------------------------------------
@@ -1043,6 +1356,14 @@
     if (msg?.type === 'SCRAPE_OVER24_REPORT') {
       (async () => {
         try {
+          // The report renders as a Wave/Analytics data-grid (often in this
+          // same-origin iframe). Try that engine first; fall back to the
+          // legacy lightning-datatable walker.
+          const wave = await scrapeWaveReport();
+          if (wave && wave.ok) {
+            sendResponse({ ...wave, url: location.href, title: document.title });
+            return;
+          }
           const result = await scrapeOver24Report();
           sendResponse({ ...result, url: location.href, title: document.title });
         } catch (e) {

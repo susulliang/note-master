@@ -935,6 +935,247 @@ const INLINE_OVER24_EXTRACT = async function () {
   };
 };
 
+/**
+ * Self-contained extractor for the Wave/Analytics report data-grid used by
+ * the [OVER24] report (runs inside the same-origin lightningReportApp
+ * iframe). Serialized into EVERY frame via chrome.scripting.executeScript —
+ * frames without the grid simply return { ok:false, engine:'wave-absent' }.
+ * Must not reference anything from the service-worker scope.
+ */
+const INLINE_WAVE_EXTRACT = async function () {
+  try {
+    const FIELD_MAP = {
+      'Case Number': 'caseNumber',
+      'Case Owner': 'caseOwner',
+      'Contact Account Name': 'contactAccountName',
+      'Date/Time Opened': 'dateTimeOpened',
+      'Case Last Modified Date': 'lastModifiedDate',
+      'Status': 'status',
+      'Customer Last Reply Time': 'customerLastReplyTime',
+    };
+    const clean = (v) => String(v == null ? '' : v).replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+
+    const grids = document.querySelectorAll('table[role="grid"]');
+    let grid = null;
+    for (const g of grids) {
+      if (g.classList && g.classList.contains('data-grid-full-table')) { grid = g; break; }
+    }
+    if (!grid) {
+      for (const g of grids) {
+        if (g.classList && g.classList.contains('data-grid-table')) { grid = g; break; }
+      }
+    }
+    if (!grid) return { ok: false, engine: 'wave-absent' };
+
+    let total = parseInt(grid.getAttribute('aria-rowcount') || '', 10) || 0;
+    if (total > 0) total -= 1; // aria-rowcount includes the header row
+    if (!total) {
+      const titles = document.querySelectorAll('.metricsElement.metricsTitle');
+      for (const t of titles) {
+        if (clean(t.textContent).toLowerCase() === 'total records') {
+          const wrap = t.closest('li') || t.parentElement;
+          const v = wrap && wrap.querySelector('.metricsElement.metricsValue');
+          const n = parseInt(clean(v ? v.textContent : '').replace(/[,\s]/g, ''), 10);
+          if (n > 0) { total = n; break; }
+        }
+      }
+    }
+    const debug = { engine: 'wave', frameUrl: location.href, totalRecords: total, scroller: null, scrollSteps: 0 };
+
+    const recs = new Map();
+    const seenCase = new Set();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const renderedRowIndexes = () => {
+      const set = new Set();
+      grid.querySelectorAll('tbody > tr').forEach((tr) => {
+        if (String(tr.className).indexOf('spacer') !== -1) return;
+        tr.querySelectorAll('td[data-row-index], th[data-row-index]').forEach((c) => {
+          if (c.getAttribute('data-fixed-row') === 'false') {
+            const ri = parseInt(c.getAttribute('data-row-index') || '', 10);
+            if (!Number.isNaN(ri)) set.add(ri);
+          }
+        });
+      });
+      return set;
+    };
+
+    const extract = () => {
+      let added = 0;
+      grid.querySelectorAll('tbody > tr').forEach((tr) => {
+        if (String(tr.className).indexOf('spacer') !== -1) return;
+        const cells = tr.querySelectorAll('td[role="gridcell"]');
+        if (!cells.length) return;
+        let rowIndex = NaN;
+        const rec = {};
+        cells.forEach((td) => {
+          const ri = parseInt(td.getAttribute('data-row-index') || '', 10);
+          if (!Number.isNaN(ri)) rowIndex = ri;
+          const al = td.getAttribute('aria-label') || '';
+          const ci = al.indexOf(': ');
+          if (ci <= 0) return;
+          const field = FIELD_MAP[al.slice(0, ci)];
+          if (!field || rec[field]) return;
+          rec[field] = clean(al.slice(ci + 2));
+          if (field === 'caseNumber') {
+            const a = td.querySelector('a[data-object-api-name="Case"], a[href*="/lightning/r/"]');
+            if (a) {
+              try { rec.caseUrl = new URL(a.getAttribute('href'), location.href).href; } catch { /* ignore */ }
+            }
+          }
+        });
+        const cn = clean(rec.caseNumber);
+        if (!cn || !/\d{5,}/.test(cn)) return;
+        const key = cn.replace(/\D/g, '');
+        if (seenCase.has(key)) return;
+        seenCase.add(key);
+        rec.caseNumber = cn;
+        recs.set(Number.isNaN(rowIndex) ? recs.size : rowIndex, rec);
+        added += 1;
+      });
+      return added;
+    };
+
+    const isDocEl = (el) => el === document.scrollingElement || el === document.documentElement || el === document.body;
+    const candidateScrollers = () => {
+      const out = [];
+      const seen = new Set();
+      const push = (el, tag) => { if (el && !seen.has(el)) { seen.add(el); out.push({ el, tag }); } };
+      let el = grid;
+      for (let up = 0; up < 24 && el; up += 1) {
+        try {
+          const cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight - el.clientHeight > 8) {
+            push(el, `ancestor(${up})`);
+          }
+        } catch { /* ignore */ }
+        el = el.parentElement;
+      }
+      document.querySelectorAll('.wave-table [class*="scroll" i], [class*="data-grid"][class*="scroll" i]').forEach((n) => {
+        try {
+          const cs = getComputedStyle(n);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && n.scrollHeight - n.clientHeight > 8) push(n, 'class-hint');
+        } catch { /* ignore */ }
+      });
+      const de = document.scrollingElement || document.documentElement;
+      if (de && de.scrollHeight - de.clientHeight > 8) push(de, 'documentElement');
+      return out;
+    };
+    const nudge = (cand, delta) => {
+      const { el } = cand;
+      if (isDocEl(el)) {
+        const cur = window.scrollY || document.documentElement.scrollTop || 0;
+        window.scrollTo(0, Math.min(el.scrollHeight, cur + delta));
+      } else {
+        el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + delta);
+        try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ }
+      }
+    };
+    const topOf = (cand) => isDocEl(cand.el) ? (window.scrollY || document.documentElement.scrollTop || 0) : cand.el.scrollTop;
+    const resetTop = (cand) => { if (isDocEl(cand.el)) window.scrollTo(0, 0); else cand.el.scrollTop = 0; };
+
+    extract();
+    const targetMet = () => (total > 0 ? recs.size >= total : false);
+
+    if (!targetMet()) {
+      const candidates = candidateScrollers();
+      debug.candidateCount = candidates.length;
+      let winner = null;
+      for (const cand of candidates) {
+        resetTop(cand);
+        await sleep(250);
+        const before = renderedRowIndexes();
+        nudge(cand, 320);
+        await sleep(260);
+        const after = renderedRowIndexes();
+        let changed = after.size !== before.size;
+        if (!changed) for (const ri of after) if (!before.has(ri)) { changed = true; break; }
+        if (changed) { winner = cand; debug.scroller = cand.tag; break; }
+      }
+      if (winner) {
+        resetTop(winner);
+        await sleep(300);
+        let stalls = 0;
+        let lastTop = -1;
+        for (let i = 0; i < 400 && !targetMet(); i += 1) {
+          debug.scrollSteps += 1;
+          const added = extract();
+          const el = winner.el;
+          const top = topOf(winner);
+          const viewH = isDocEl(el) ? window.innerHeight : el.clientHeight;
+          const atBottom = top + viewH >= el.scrollHeight - 3;
+          if (added === 0) stalls += 1; else stalls = 0;
+          if (atBottom && stalls >= 4) break;
+          nudge(winner, Math.max(120, Math.floor((viewH || 400) * 0.5)));
+          await sleep(230);
+          const nowTop = topOf(winner);
+          if (nowTop === lastTop) stalls += 1;
+          lastTop = nowTop;
+          if (stalls >= 8) break;
+        }
+        await sleep(150);
+        extract();
+        resetTop(winner);
+      } else {
+        // Keyboard paging fallback (custom-scroll viewports).
+        debug.scroller = 'KEYBOARD';
+        const focusTarget = grid.querySelector('td[tabindex="0"], th[tabindex="0"], td[tabindex], th[tabindex]') || grid;
+        try { focusTarget.focus({ preventScroll: true }); } catch { try { focusTarget.focus(); } catch { /* ignore */ } }
+        const press = (key) => {
+          for (const type of ['keydown', 'keyup']) {
+            try {
+              focusTarget.dispatchEvent(new KeyboardEvent(type, {
+                key,
+                code: key === 'PageDown' ? 'PageDown' : key === 'Home' ? 'Home' : 'ArrowDown',
+                keyCode: key === 'PageDown' ? 34 : key === 'Home' ? 36 : 40,
+                which: key === 'PageDown' ? 34 : key === 'Home' ? 36 : 40,
+                bubbles: true, cancelable: true,
+              }));
+            } catch { /* ignore */ }
+          }
+        };
+        press('Home');
+        await sleep(300);
+        extract();
+        let stalls = 0;
+        let lastMax = -1;
+        for (let i = 0; i < 200 && !targetMet(); i += 1) {
+          debug.scrollSteps += 1;
+          const added = extract();
+          const idxs = renderedRowIndexes();
+          const curMax = idxs.size ? Math.max(...idxs) : -1;
+          if (added === 0 && curMax === lastMax) stalls += 1; else stalls = 0;
+          lastMax = curMax;
+          if (stalls >= 6) break;
+          press('PageDown');
+          await sleep(180);
+          if (curMax === lastMax) {
+            for (let k = 0; k < 12; k += 1) press('ArrowDown');
+            await sleep(120);
+          }
+        }
+        await sleep(150);
+        extract();
+      }
+    }
+
+    const cases = [...recs.entries()].sort((a, b) => a[0] - b[0]).map(([, rec]) => rec);
+    debug.tierACases = cases.length;
+    debug.complete = total > 0 ? cases.length >= total : cases.length > 0;
+    return {
+      ok: cases.length > 0,
+      engine: 'wave',
+      isReport: cases.length > 0,
+      reportName: grid.getAttribute('aria-label') || '',
+      totalRecords: total || cases.length,
+      cases,
+      debug,
+    };
+  } catch (e) {
+    return { ok: false, engine: 'wave', error: String(e && e.message || e) };
+  }
+};
+
 async function sendToTab(tabId, payload) {
   // Field-count helper used for two "should we actually fall through?" checks:
   // a result with 0 non-empty fields is functionally "nothing found",
@@ -1733,10 +1974,60 @@ async function findOver24ReportTab() {
 }
 
 /** Tiered [OVER24] report scrape of ONE tab. Returns
- *  { ok, cases[], reportName, totalRecords, via?, error? }. */
+ *  { ok, cases[], reportName, totalRecords, complete, via?, error? }.
+ *
+ *  The report renders inside the same-origin `lightningReportApp` IFRAME as
+ *  a virtualized Wave/Analytics data-grid. `chrome.tabs.sendMessage` only
+ *  surfaces ONE frame's response (whichever answers first — often the top
+ *  Console frame), so the primary tier injects into ALL frames and keeps the
+ *  frame that actually hosts the report grid. */
 async function scrapeOver24FromTab(tabId) {
   let firstError = null;
-  // Tier 1: manifest content-script listener.
+
+  /** Run a self-contained extractor in every frame; keep the best report
+   *  frame (isReport flag first, then highest case count). */
+  async function runAllFrames(func, world, via) {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func,
+      ...(world ? { world } : {}),
+    });
+    let best = null;
+    let frameDebug = null;
+    for (const frame of Array.isArray(results) ? results : []) {
+      const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
+      if (!obj) continue;
+      const n = Array.isArray(obj.cases) ? obj.cases.length : 0;
+      const score = (obj.isReport ? 100000 : 0) + n;
+      const bestScore = best ? ((best.isReport ? 100000 : 0) + (best.cases?.length || 0)) : -1;
+      if (score > bestScore) { best = obj; frameDebug = { frameId: frame.frameId, n }; }
+    }
+    if (best && Array.isArray(best.cases) && best.cases.length > 0) {
+      return {
+        ok: true,
+        cases: best.cases,
+        reportName: best.reportName || '',
+        totalRecords: best.totalRecords || best.cases.length,
+        complete: Boolean(best.debug?.complete ?? (best.cases.length >= (best.totalRecords || best.cases.length))),
+        via,
+        debug: { ...(best.debug || {}), chosenFrame: frameDebug },
+      };
+    }
+    if (best && best.error && !firstError) firstError = String(best.error);
+    return null;
+  }
+
+  // Tier 1: Wave/Analytics data-grid extractor in all frames (ISOLATED world
+  // so it shares the extension's content-script privileges; pure DOM only).
+  try {
+    const wave = await runAllFrames(INLINE_WAVE_EXTRACT, undefined, 'wave-all-frames');
+    if (wave) return wave;
+  } catch (err) {
+    firstError = String(err?.message || err);
+  }
+
+  // Tier 2: manifest content-script listener (content script itself tries
+  // wave first, then the legacy lightning walker).
   try {
     const r = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
     if (r && Array.isArray(r.cases) && r.cases.length > 0) {
@@ -1746,15 +2037,16 @@ async function scrapeOver24FromTab(tabId) {
         reportName: r.reportName || '',
         totalRecords: r.totalRecords || r.cases.length,
         complete: Boolean(r.debug?.complete ?? (r.cases.length >= (r.totalRecords || r.cases.length))),
-        via: 'listener',
+        via: r.engine === 'wave' ? 'listener-wave' : 'listener',
         debug: r.debug ?? null,
       };
     }
-    firstError = (r && r.error) ? String(r.error) : 'Report content script found no cases.';
+    if (r && r.error && !firstError) firstError = String(r.error);
   } catch (err) {
-    firstError = String(err?.message || err);
+    if (!firstError) firstError = String(err?.message || err);
   }
-  // Tier 2: inject salesforce.js (tab predates the extension load), retry.
+
+  // Tier 3: inject salesforce.js (tab predates the extension load), retry.
   try {
     await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: SF_INJECT_FILES });
     const retry = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
@@ -1765,7 +2057,7 @@ async function scrapeOver24FromTab(tabId) {
         reportName: retry.reportName || '',
         totalRecords: retry.totalRecords || retry.cases.length,
         complete: Boolean(retry.debug?.complete ?? (retry.cases.length >= (retry.totalRecords || retry.cases.length))),
-        via: 'inject+listener',
+        via: retry.engine === 'wave' ? 'inject+listener-wave' : 'inject+listener',
         debug: retry.debug ?? null,
       };
     }
@@ -1773,32 +2065,15 @@ async function scrapeOver24FromTab(tabId) {
   } catch (err2) {
     if (!firstError) firstError = String(err2?.message || err2);
   }
-  // Tier 3: inline executeScript across every frame — keep the frame with
-  // the most cases (the report can live in a sub-frame of the Console).
+
+  // Tier 4: legacy lightning-datatable inline extractor across all frames.
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: INLINE_OVER24_EXTRACT,
-      world: chrome.scripting.ExecutionWorld ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN',
-    });
-    let best = null;
-    for (const frame of Array.isArray(results) ? results : []) {
-      const obj = (frame && typeof frame.result === 'object' && frame.result) ? frame.result : null;
-      if (!obj) continue;
-      if (!best || ((obj.cases?.length) || 0) > ((best.cases?.length) || 0)) best = obj;
-    }
-    if (best && Array.isArray(best.cases) && best.cases.length > 0) {
-      return {
-        ok: true,
-        cases: best.cases,
-        reportName: best.reportName || '',
-        totalRecords: best.totalRecords || best.cases.length,
-        complete: Boolean(best.debug?.complete ?? (best.cases.length >= (best.totalRecords || best.cases.length))),
-        via: 'inline-executeScript',
-        debug: best.debug ?? null,
-      };
-    }
-    if (!firstError && best?.error) firstError = String(best.error);
+    const legacy = await runAllFrames(
+      INLINE_OVER24_EXTRACT,
+      chrome.scripting.ExecutionWorld ? chrome.scripting.ExecutionWorld.MAIN : 'MAIN',
+      'legacy-all-frames'
+    );
+    if (legacy) return legacy;
   } catch (err3) {
     if (!firstError) firstError = String(err3?.message || err3);
   }

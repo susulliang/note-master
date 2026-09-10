@@ -529,7 +529,7 @@ export default function CaseTrakBoard({
         const incomplete = r.complete === false && r.totalRecords > n;
         if (r.pushed?.ok) {
           if (incomplete) {
-            toast.warning(`Imported ${n} case${n === 1 ? '' : 's'}${total} — scrape incomplete. Scroll the report to its bottom, then retry.`);
+            toast.warning(`Imported ${n} case${n === 1 ? '' : 's'}${total} — scrape incomplete. Open the [OVER24] report tab, let it finish loading, then retry.`);
           } else {
             toast.success(`Imported ${n} case${n === 1 ? '' : 's'}${total} → board.`);
           }
