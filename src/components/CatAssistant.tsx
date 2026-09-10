@@ -10,9 +10,10 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  * Visual model:
  *  - The sprite is a 64px pixel-art cat at bottom-left by default, draggable
  *    anywhere on the viewport. Position is persisted to localStorage.
- *  - Each state (resting / standby / side / thinking / alert) has 3 frames
- *    (128×128 alpha-transparent PNGs in /assets/cat/) cycled at ~450ms for
- *    a subtle idle animation — ear twitches, blinks, tail flicks.
+ *  - One static frame per state (resting / standby / side / thinking /
+ *    alert — 128×128 alpha-transparent PNGs in /assets/cat/). No frame
+ *    cycling within a state; the state change itself is the animation
+ *    (the sprite pops when it swaps pose).
  *  - A thought bubble renders above the sprite when `currentThought` is set.
  *
  * State mapping:
@@ -24,30 +25,17 @@ import { useScopedState } from '@/hooks/use-scoped-state';
 
 const DEFAULT_POSITION = { x: 24, y: 24 };
 const SPRITE_SIZE = 64;
-const FRAME_MS = 450;
 
-/** Sprite states and their animation frames (3 per state). */
+/** Sprite states and their single static frame. */
 type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert';
 
-const CAT_FRAMES: Record<CatState, string[]> = {
-  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.png`),
-  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.png`),
-  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.png`),
-  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.png`),
-  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.png`),
+const CAT_FRAMES: Record<CatState, string> = {
+  resting: '/assets/cat/resting-1.png',
+  standby: '/assets/cat/standby-1.png',
+  side: '/assets/cat/side-1.png',
+  thinking: '/assets/cat/thinking-1.png',
+  alert: '/assets/cat/alert-1.png',
 };
-
-/** Preload every frame once so state switches never flash. */
-function usePreloadFrames() {
-  useEffect(() => {
-    for (const frames of Object.values(CAT_FRAMES)) {
-      for (const src of frames) {
-        const img = new Image();
-        img.src = src;
-      }
-    }
-  }, []);
-}
 
 interface CatAssistantProps {
   currentThought: CatThought | null;
@@ -93,18 +81,9 @@ export function CatAssistant({
           ? 'resting'
           : 'standby';
 
-  // Frame cycling within the current state.
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setFrame((f) => (f + 1) % CAT_FRAMES[state].length);
-    }, FRAME_MS);
-    return () => window.clearInterval(id);
-  }, [state]);
-
-  usePreloadFrames();
-
-  const spriteSrc = CAT_FRAMES[state][frame];
+  // `key={state}` remounts the img on every state change so the pop
+  // animation replays — that swap is the sprite's only animation.
+  const spriteSrc = CAT_FRAMES[state];
 
   const dragOffset = useRef({ x: 0, y: 0 });
 
@@ -192,12 +171,13 @@ export function CatAssistant({
           </span>
         ) : (
           <img
+            key={state}
             src={spriteSrc}
             alt={`Cat assistant (${state})`}
             draggable={false}
             onError={() => setImgError(true)}
             style={{ imageRendering: 'pixelated' }}
-            className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
+            className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)] animate-cat-pop"
           />
         )}
 
