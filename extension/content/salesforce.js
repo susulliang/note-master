@@ -686,8 +686,18 @@
     const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
     if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
     let totalRecords = 0;
-    const tr = bodyText.match(/Total\s*Records\s*:?\s*(\d+)/i);
-    if (tr) totalRecords = parseInt(tr[1], 10) || 0;
+    function readTotalFromDom() {
+      const t = (document.body && (document.body.innerText || document.body.textContent)) || '';
+      let m = t.match(/Total\s*Records\s*:?\s*(\d[\d,]*)/i);
+      if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+      m = t.match(/\b(?:of|out\s*of|total)\s*:?\s*(\d[\d,]{1,})\s*(?:records|results|rows|items|cases)\b/i);
+      if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+      // "1-61 of 61" style pagination labels
+      m = t.match(/\b\d[\d,]*\s*(?:-|–|—|to)\s*\d[\d,]*\s+of\s+(\d[\d,]{1,})/i);
+      if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+      return 0;
+    }
+    totalRecords = readTotalFromDom();
 
     function deepQueryAll(sel) {
       const out = [];
@@ -773,87 +783,181 @@
     }
 
     // ---- Find ALL scrollable containers near the report grid ---------------
-    // Salesforce's lightning-datatable virtualizes rows; only ~20 live in the
-    // DOM. The correct scroll container must be advanced so new rows render.
-    // We collect every candidate (piercing shadow roots) and try each.
     function findAllScrollers() {
       const out = [];
       const seen = new Set();
       const grids = deepQueryAll('table, [role="grid"], [role="table"]');
       for (const g of grids) {
         let el = g;
-        for (let up = 0; up < 16 && el; up += 1) {
+        for (let up = 0; up < 20 && el; up += 1) {
           try {
             const cs = getComputedStyle(el);
             const oy = cs.overflowY;
             if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-              if (!seen.has(el)) { seen.add(el); out.push(el); }
+              if (!seen.has(el)) { seen.add(el); out.push({ el, depth: up }); }
             }
           } catch { /* ignore */ }
           el = el.parentElement || el.host || null;
         }
       }
-      // Always include window as a last-resort scroller.
-      if (!seen.has(window)) out.push(window);
-      return out;
+      // Closest scrollers (smallest ancestor distance) first; window last.
+      out.sort((a, b) => a.depth - b.depth);
+      const list = out.map((x) => x.el);
+      if (!seen.has(window)) list.push(window);
+      return list;
     }
     function fireScroll(el) {
       try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ }
     }
+    /** The last currently-rendered DATA row (a row whose cells contain a
+     *  5+ digit case number). Repeatedly scrolling it into view forces
+     *  virtualized lists to render the next window of rows — regardless of
+     *  which ancestor actually scrolls (works for transform-based VCs too). */
+    function findLastDataRow() {
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      let best = null;
+      for (const grid of grids) {
+        let rows = [];
+        try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+        for (let i = rows.length - 1; i >= 0; i -= 1) {
+          const r = rows[i];
+          if (/\d{5,}/.test(r.textContent || '')) { best = r; break; }
+        }
+      }
+      return best;
+    }
+    function findFirstDataRow() {
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+      for (const grid of grids) {
+        let rows = [];
+        try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+        for (const r of rows) {
+          if (/\d{5,}/.test(r.textContent || '')) return r;
+        }
+      }
+      return null;
+    }
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const scrollers = findAllScrollers();
-    debug.scrollerCount = scrollers.length;
-
-    // For each candidate scroller, run an incremental scroll-and-extract
-    // sweep. Cases accumulate across all sweepers (deduped by case number).
+    const targetMet = () => totalRecords > 0 && cases.length >= totalRecords;
     let steps = 0;
-    for (const scroller of scrollers) {
-      const isWin = scroller === window;
-      const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
-      const getMax = () => isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
-      const setTop = (v) => {
-        if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
-        fireScroll(scroller);
-      };
-      const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
 
-      // Reset to top.
-      setTop(0);
-      await sleep(200);
+    // ===== Strategy 1: scroll-last-row-into-view (top → bottom) =============
+    // This is the primary fix for virtualized Salesforce report grids.
+    debug.strategy1 = { iterations: 0, added: 0 };
+    {
+      // Start at the top so rows are captured in top-to-bottom order.
+      const first = findFirstDataRow();
+      if (first) {
+        try { first.scrollIntoView({ block: 'start', behavior: 'instant' }); } catch { /* ignore */ }
+        await sleep(300);
+      }
+      let stalls = 0;
+      let lastKey = '';
+      const startCount = cases.length;
+      for (let i = 0; i < 300 && !targetMet(); i += 1) {
+        steps += 1;
+        debug.strategy1.iterations = i + 1;
+        const added = extractVisibleRows();
+        debug.scrollSteps = steps;
+        const domTotal = readTotalFromDom();
+        if (domTotal > 0) totalRecords = domTotal;
+        const lastRow = findLastDataRow();
+        const key = lastRow ? (lastRow.textContent.match(/\d{5,}/)?.[0] || '') : '';
+        const stuck = !lastRow || (key !== '' && key === lastKey && added === 0);
+        if (stuck) stalls += 1; else stalls = 0;
+        lastKey = key;
+        if (stalls >= 5) break;
+        if (!lastRow) break;
+        // Nudge with every technique the virtualizer might listen to.
+        try { lastRow.scrollIntoView({ block: 'end', behavior: 'instant' }); } catch { /* ignore */ }
+        try {
+          lastRow.dispatchEvent(new WheelEvent('wheel', { deltaY: 320, bubbles: true, cancelable: true }));
+        } catch { /* ignore */ }
+        await sleep(260);
+      }
+      debug.strategy1.added = cases.length - startCount;
+    }
+    console.log('[over24] strategy1 (last-row-into-view) cases=', cases.length, '/ total=', totalRecords);
 
+    // ===== Strategy 2: classic scrollTop stepping on each scroller =========
+    if (!targetMet()) {
+      const scrollers = findAllScrollers();
+      debug.scrollerCount = scrollers.length;
+      debug.strategy2 = { scrollerCount: scrollers.length, added: 0 };
+      const startCount = cases.length;
+      for (const scroller of scrollers) {
+        if (targetMet()) break;
+        const isWin = scroller === window;
+        const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
+        const setTop = (v) => {
+          if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
+          fireScroll(scroller);
+        };
+        const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
+
+        setTop(0);
+        await sleep(250);
+
+        let noNew = 0;
+        let topStall = 0;
+        let lastTop = -1;
+        for (let local = 0; local < 250 && !targetMet(); local += 1) {
+          steps += 1;
+          const added = extractVisibleRows();
+          debug.scrollSteps = steps;
+          const domTotal = readTotalFromDom();
+          if (domTotal > 0) totalRecords = domTotal;
+
+          const top = getTop();
+          const max = isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+          const view = getViewH();
+          const atBottom = top + view >= max - 2;
+          if (added === 0) noNew += 1; else noNew = 0;
+          // Small 45%-viewport steps with heavy overlap — no row skipped.
+          setTop(Math.min(max, top + Math.max(60, Math.floor(view * 0.45))));
+          await sleep(240);
+          const nowTop = getTop();
+          if (nowTop === lastTop) topStall += 1; else topStall = 0;
+          lastTop = nowTop;
+          // Stop only when truly at the bottom with no new data, or hard-stuck.
+          if ((atBottom && noNew >= 4) || topStall >= 6) break;
+        }
+      }
+      debug.strategy2.added = cases.length - startCount;
+    }
+    console.log('[over24] strategy2 (scrollTop) cases=', cases.length, '/ total=', totalRecords);
+
+    // ===== Strategy 3: wheel-event sweep on the grid itself ================
+    if (!targetMet()) {
+      debug.strategy3 = { added: 0 };
+      const startCount = cases.length;
+      const grids = deepQueryAll('table, [role="grid"], [role="table"]');
       let noNew = 0;
-      let localSteps = 0;
-      let lastTop = -1;
-      // Sweep up to 400 steps per scroller; stop only when bottomed out AND
-      // several consecutive passes yield no new cases.
-      while (localSteps < 400) {
-        localSteps += 1;
+      for (let i = 0; i < 120 && !targetMet(); i += 1) {
         steps += 1;
         const added = extractVisibleRows();
         debug.scrollSteps = steps;
-        const top = getTop();
-        const max = getMax();
-        const view = getViewH();
-        const atBottom = top + view >= max - 2;
+        const domTotal = readTotalFromDom();
+        if (domTotal > 0) totalRecords = domTotal;
         if (added === 0) noNew += 1; else noNew = 0;
-        if (atBottom && noNew >= 3) break;
-        // Advance by ~80% of a viewport; overlap windows so no row is missed.
-        setTop(Math.min(max, top + Math.max(50, Math.floor(view * 0.8))));
-        await sleep(220);
-        const nowTop = getTop();
-        if (nowTop === lastTop && atBottom) break; // truly stuck at bottom
-        lastTop = nowTop;
+        for (const g of grids) {
+          try {
+            g.dispatchEvent(new WheelEvent('wheel', { deltaY: 400, bubbles: true, cancelable: true }));
+          } catch { /* ignore */ }
+        }
+        // Also scroll window — some report layouts scroll the whole page.
+        window.scrollBy(0, 400);
+        await sleep(240);
+        if (noNew >= 8) break;
       }
-      // If we've already captured the expected total (or there's no total
-      // to compare against and we have a healthy count), stop trying other
-      // scrollers — the right virtualizer was found. Otherwise move on so
-      // every candidate gets a chance to reveal more rows.
-      if (totalRecords > 0 && cases.length >= totalRecords) break;
+      debug.strategy3.added = cases.length - startCount;
     }
 
+    debug.totalRecords = totalRecords;
+    debug.complete = targetMet();
     debug.tierACases = cases.length;
-    console.log('[over24] after incremental scroll cases=', cases.length, 'steps=', steps, 'scrollers=', scrollers.length);
+    console.log('[over24] sweep complete cases=', cases.length, '/ totalRecords=', totalRecords, 'steps=', steps, 'complete=', debug.complete);
 
     // ---- Tier B: innerText line sweep (only if grid walk got nothing) ------
     if (cases.length === 0) {

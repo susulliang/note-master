@@ -773,7 +773,8 @@ function renderOver24(r) {
   const via = r.via ? ` · via ${r.via}` : '';
   const reportName = r.reportName ? ` · ${r.reportName}` : '';
   const pushedOk = r.pushed?.ok ? 'push OK' : (r.pushed ? `push failed: ${r.pushed.error || 'bridge not connected'}` : '');
-  const status = ok ? `OK — ${count} case${count === 1 ? '' : 's'}${via}${reportName}` : `FAILED — ${r.error || 'unknown error'}`;
+  const totalSuffix = r.totalRecords && Number(r.totalRecords) !== count ? ` of ${r.totalRecords}${r.complete === false ? ' (INCOMPLETE)' : ''}` : '';
+  const status = ok ? `OK — ${count} case${count === 1 ? '' : 's'}${totalSuffix}${via}${reportName}` : `FAILED — ${r.error || 'unknown error'}`;
   elOver24Meta.textContent = `${status}${pushedOk ? ' · ' + pushedOk : ''}`;
   elOver24Meta.classList.toggle('ok', ok);
   elOver24Meta.classList.toggle('err', !ok);
@@ -787,6 +788,7 @@ function renderOver24(r) {
     totalRecords: r.totalRecords ?? null,
     reportName: r.reportName ?? null,
     via: r.via ?? null,
+    complete: r.complete ?? null,
     scrollRounds: r.scrollRounds ?? null,
     pushed: r.pushed ?? null,
     debug: r.debug ?? null,

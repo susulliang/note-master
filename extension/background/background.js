@@ -628,8 +628,17 @@ const INLINE_OVER24_EXTRACT = async function () {
   const rn = bodyText.match(/\[(OVER\s*24[^\]]*)\]/i);
   if (rn) reportName = `[${_clean(rn[1]).toUpperCase().replace(/\s+/g, ' ')}]`;
   let totalRecords = 0;
-  const tr = bodyText.match(/Total\s*Records\s*:?\s*(\d+)/i);
-  if (tr) totalRecords = parseInt(tr[1], 10) || 0;
+  function readTotalFromDom() {
+    const t = (typeof document !== 'undefined' && document.body && (document.body.innerText || document.body.textContent)) || '';
+    let m = t.match(/Total\s*Records\s*:?\s*(\d[\d,]*)/i);
+    if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+    m = t.match(/\b(?:of|out\s*of|total)\s*:?\s*(\d[\d,]{1,})\s*(?:records|results|rows|items|cases)\b/i);
+    if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+    m = t.match(/\b\d[\d,]*\s*(?:-|–|—|to)\s*\d[\d,]*\s+of\s+(\d[\d,]{1,})/i);
+    if (m) return parseInt(m[1].replace(/[,\s]/g, ''), 10) || 0;
+    return 0;
+  }
+  totalRecords = readTotalFromDom();
 
   // ---- Tier A: DOM grid walk (shadow-piercing) ----
   function deepQueryAll(sel) {
@@ -707,9 +716,7 @@ const INLINE_OVER24_EXTRACT = async function () {
     return cases.length - before;
   }
 
-  // Incremental scroll-and-accumulate to defeat row virtualization. We try
-  // EVERY scrollable container near the grid (piercing shadow roots) because
-  // the first one may not be the real virtualizer.
+  // Incremental scroll-and-accumulate to defeat row virtualization.
   function findAllScrollers() {
     if (typeof document === 'undefined') return [window];
     const out = [];
@@ -717,57 +724,144 @@ const INLINE_OVER24_EXTRACT = async function () {
     const grids = deepQueryAll('table, [role="grid"], [role="table"]');
     for (const g of grids) {
       let el = g;
-      for (let up = 0; up < 16 && el; up += 1) {
+      for (let up = 0; up < 20 && el; up += 1) {
         try {
           const cs = getComputedStyle(el);
           if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-            if (!seen.has(el)) { seen.add(el); out.push(el); }
+            if (!seen.has(el)) { seen.add(el); out.push({ el, depth: up }); }
           }
         } catch { /* ignore */ }
         el = el.parentElement || el.host || null;
       }
     }
-    if (!seen.has(window)) out.push(window);
-    return out;
+    out.sort((a, b) => a.depth - b.depth);
+    const list = out.map((x) => x.el);
+    if (!seen.has(window)) list.push(window);
+    return list;
   }
   function fireScroll(el) { try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch { /* ignore */ } }
+  function findLastDataRow() {
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const grid of grids) {
+      let rows = [];
+      try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        if (/\d{5,}/.test(rows[i].textContent || '')) return rows[i];
+      }
+    }
+    return null;
+  }
+  function findFirstDataRow() {
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
+    for (const grid of grids) {
+      let rows = [];
+      try { rows = Array.from(grid.querySelectorAll('tr, [role="row"]')); } catch { continue; }
+      for (const r of rows) {
+        if (/\d{5,}/.test(r.textContent || '')) return r;
+      }
+    }
+    return null;
+  }
 
-  const scrollers = findAllScrollers();
-  debug.scrollerCount = scrollers.length;
+  const targetMet = () => totalRecords > 0 && cases.length >= totalRecords;
   let scrollSteps = 0;
-  for (const scroller of scrollers) {
-    const isWin = scroller === window;
-    const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
-    const getMax = () => isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
-    const setTop = (v) => {
-      if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
-      fireScroll(scroller);
-    };
-    const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
 
-    setTop(0);
-    await sleep(200);
+  // Strategy 1: repeatedly scroll the last rendered row into view (works with
+  // any virtualizer, including transform-based ones), top → bottom.
+  debug.strategy1 = { iterations: 0, added: 0 };
+  {
+    const first = findFirstDataRow();
+    if (first) {
+      try { first.scrollIntoView({ block: 'start', behavior: 'instant' }); } catch { /* ignore */ }
+      await sleep(300);
+    }
+    let stalls = 0;
+    let lastKey = '';
+    const startCount = cases.length;
+    for (let i = 0; i < 300 && !targetMet(); i += 1) {
+      scrollSteps += 1;
+      debug.strategy1.iterations = i + 1;
+      const added = extractVisibleRows();
+      const domTotal = readTotalFromDom();
+      if (domTotal > 0) totalRecords = domTotal;
+      const lastRow = findLastDataRow();
+      const key = lastRow ? (lastRow.textContent.match(/\d{5,}/)?.[0] || '') : '';
+      const stuck = !lastRow || (key !== '' && key === lastKey && added === 0);
+      if (stuck) stalls += 1; else stalls = 0;
+      lastKey = key;
+      if (stalls >= 5 || !lastRow) break;
+      try { lastRow.scrollIntoView({ block: 'end', behavior: 'instant' }); } catch { /* ignore */ }
+      try { lastRow.dispatchEvent(new WheelEvent('wheel', { deltaY: 320, bubbles: true, cancelable: true })); } catch { /* ignore */ }
+      await sleep(260);
+    }
+    debug.strategy1.added = cases.length - startCount;
+  }
+
+  // Strategy 2: classic scrollTop stepping, closest scroller first.
+  if (!targetMet()) {
+    const scrollers = findAllScrollers();
+    debug.scrollerCount = scrollers.length;
+    debug.strategy2 = { scrollerCount: scrollers.length, added: 0 };
+    const startCount = cases.length;
+    for (const scroller of scrollers) {
+      if (targetMet()) break;
+      const isWin = scroller === window;
+      const getTop = () => isWin ? (window.scrollY || document.documentElement.scrollTop) : scroller.scrollTop;
+      const setTop = (v) => {
+        if (isWin) window.scrollTo(0, v); else scroller.scrollTop = v;
+        fireScroll(scroller);
+      };
+      const getViewH = () => isWin ? window.innerHeight : scroller.clientHeight;
+      setTop(0);
+      await sleep(250);
+      let noNew = 0;
+      let topStall = 0;
+      let lastTop = -1;
+      for (let local = 0; local < 250 && !targetMet(); local += 1) {
+        scrollSteps += 1;
+        const added = extractVisibleRows();
+        const domTotal = readTotalFromDom();
+        if (domTotal > 0) totalRecords = domTotal;
+        const top = getTop();
+        const max = isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+        const view = getViewH();
+        const atBottom = top + view >= max - 2;
+        if (added === 0) noNew += 1; else noNew = 0;
+        setTop(Math.min(max, top + Math.max(60, Math.floor(view * 0.45))));
+        await sleep(240);
+        const nowTop = getTop();
+        if (nowTop === lastTop) topStall += 1; else topStall = 0;
+        lastTop = nowTop;
+        if ((atBottom && noNew >= 4) || topStall >= 6) break;
+      }
+    }
+    debug.strategy2.added = cases.length - startCount;
+  }
+
+  // Strategy 3: raw wheel events on the grid + window scroll.
+  if (!targetMet() && typeof document !== 'undefined') {
+    debug.strategy3 = { added: 0 };
+    const startCount = cases.length;
+    const grids = deepQueryAll('table, [role="grid"], [role="table"]');
     let noNew = 0;
-    let localSteps = 0;
-    let lastTop = -1;
-    while (localSteps < 400) {
-      localSteps += 1;
+    for (let i = 0; i < 120 && !targetMet(); i += 1) {
       scrollSteps += 1;
       const added = extractVisibleRows();
-      const top = getTop();
-      const max = getMax();
-      const view = getViewH();
-      const atBottom = top + view >= max - 2;
+      const domTotal = readTotalFromDom();
+      if (domTotal > 0) totalRecords = domTotal;
       if (added === 0) noNew += 1; else noNew = 0;
-      if (atBottom && noNew >= 3) break;
-      setTop(Math.min(max, top + Math.max(50, Math.floor(view * 0.8))));
-      await sleep(220);
-      const nowTop = getTop();
-      if (nowTop === lastTop && atBottom) break;
-      lastTop = nowTop;
+      for (const g of grids) {
+        try { g.dispatchEvent(new WheelEvent('wheel', { deltaY: 400, bubbles: true, cancelable: true })); } catch { /* ignore */ }
+      }
+      window.scrollBy(0, 400);
+      await sleep(240);
+      if (noNew >= 8) break;
     }
-    if (totalRecords > 0 && cases.length >= totalRecords) break;
+    debug.strategy3.added = cases.length - startCount;
   }
+
+  debug.totalRecords = totalRecords;
+  debug.complete = targetMet();
   debug.tierACases = cases.length;
   debug.scrollSteps = scrollSteps;
 
@@ -1646,7 +1740,15 @@ async function scrapeOver24FromTab(tabId) {
   try {
     const r = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
     if (r && Array.isArray(r.cases) && r.cases.length > 0) {
-      return { ok: true, cases: r.cases, reportName: r.reportName || '', totalRecords: r.totalRecords || r.cases.length, via: 'listener' };
+      return {
+        ok: true,
+        cases: r.cases,
+        reportName: r.reportName || '',
+        totalRecords: r.totalRecords || r.cases.length,
+        complete: Boolean(r.debug?.complete ?? (r.cases.length >= (r.totalRecords || r.cases.length))),
+        via: 'listener',
+        debug: r.debug ?? null,
+      };
     }
     firstError = (r && r.error) ? String(r.error) : 'Report content script found no cases.';
   } catch (err) {
@@ -1657,7 +1759,15 @@ async function scrapeOver24FromTab(tabId) {
     await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: SF_INJECT_FILES });
     const retry = await chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_OVER24_REPORT' });
     if (retry && Array.isArray(retry.cases) && retry.cases.length > 0) {
-      return { ok: true, cases: retry.cases, reportName: retry.reportName || '', totalRecords: retry.totalRecords || retry.cases.length, via: 'inject+listener' };
+      return {
+        ok: true,
+        cases: retry.cases,
+        reportName: retry.reportName || '',
+        totalRecords: retry.totalRecords || retry.cases.length,
+        complete: Boolean(retry.debug?.complete ?? (retry.cases.length >= (retry.totalRecords || retry.cases.length))),
+        via: 'inject+listener',
+        debug: retry.debug ?? null,
+      };
     }
     if (!firstError && retry?.error) firstError = String(retry.error);
   } catch (err2) {
@@ -1678,7 +1788,15 @@ async function scrapeOver24FromTab(tabId) {
       if (!best || ((obj.cases?.length) || 0) > ((best.cases?.length) || 0)) best = obj;
     }
     if (best && Array.isArray(best.cases) && best.cases.length > 0) {
-      return { ok: true, cases: best.cases, reportName: best.reportName || '', totalRecords: best.totalRecords || best.cases.length, via: 'inline-executeScript' };
+      return {
+        ok: true,
+        cases: best.cases,
+        reportName: best.reportName || '',
+        totalRecords: best.totalRecords || best.cases.length,
+        complete: Boolean(best.debug?.complete ?? (best.cases.length >= (best.totalRecords || best.cases.length))),
+        via: 'inline-executeScript',
+        debug: best.debug ?? null,
+      };
     }
     if (!firstError && best?.error) firstError = String(best.error);
   } catch (err3) {
@@ -1744,8 +1862,18 @@ async function importOver24Report() {
     return { ok: false, error: 'No Salesforce tab found. Open the [OVER24] report in Salesforce first, then retry.' };
   }
   console.log('[over24] importOver24Report target tab=', tab.id, tab.url, tab.title);
-  const r = await scrapeOver24FromTab(tab.id);
-  console.log('[over24] scrape result via=', r?.via, 'cases=', r?.cases?.length ?? 0, 'error=', r?.error ?? null, 'debug=', JSON.stringify(r?.debug ?? null));
+  let r = await scrapeOver24FromTab(tab.id);
+  console.log('[over24] scrape result via=', r?.via, 'cases=', r?.cases?.length ?? 0, 'complete=', r?.complete, 'error=', r?.error ?? null, 'debug=', JSON.stringify(r?.debug ?? null));
+  // If the first sweep was incomplete (captured fewer rows than the DOM's
+  // Total Records), wait a moment (let the report finish rendering) and run
+  // the whole sweep one more time before pushing anything to the board.
+  if (r.ok && r.complete === false && r.totalRecords > r.cases.length) {
+    console.warn('[over24] incomplete scrape', r.cases.length, '/', r.totalRecords, '— retrying after 1.5s');
+    await new Promise((res) => setTimeout(res, 1500));
+    const retry = await scrapeOver24FromTab(tab.id);
+    console.log('[over24] retry cases=', retry?.cases?.length ?? 0, 'complete=', retry?.complete, 'debug=', JSON.stringify(retry?.debug ?? null));
+    if (retry.ok && retry.cases.length > r.cases.length) r = retry;
+  }
   if (!r.ok || !r.cases || r.cases.length === 0) {
     diagRecord('over24:scrape:fail', { tabId: tab.id, url: tab.url, title: tab.title ?? null, error: r?.error ?? null, cases: r?.cases?.length ?? 0 });
     return { ok: false, error: r?.error || 'No report cases found on the Salesforce tab. Make sure the [OVER24] report grid is visible, then retry.', debug: r?.debug ?? null, sample: [] };
@@ -1775,9 +1903,10 @@ async function importOver24Report() {
     ok: true,
     count: r.cases.length,
     totalRecords: state.over24.totalRecords,
+    complete: Boolean(r.complete ?? (r.cases.length >= state.over24.totalRecords)),
     reportName: state.over24.reportName,
     via: r.via,
-    scrollRounds: r.scrollSteps ?? r.debug?.scrollSteps ?? r.scrollRounds ?? r.debug?.scrollRounds ?? null,
+    scrollRounds: r.debug?.scrollSteps ?? r.scrollSteps ?? r.debug?.scrollRounds ?? null,
     pushed,
     sample: r.cases.slice(0, 10),
     debug: r.debug ?? null,

@@ -526,8 +526,13 @@ export default function CaseTrakBoard({
       if (r?.ok) {
         const n = Number(r.count ?? 0);
         const total = r.totalRecords ? ` of ${r.totalRecords}` : '';
+        const incomplete = r.complete === false && r.totalRecords > n;
         if (r.pushed?.ok) {
-          toast.success(`Imported ${n} case${n === 1 ? '' : 's'}${total} → board.`);
+          if (incomplete) {
+            toast.warning(`Imported ${n} case${n === 1 ? '' : 's'}${total} — scrape incomplete. Scroll the report to its bottom, then retry.`);
+          } else {
+            toast.success(`Imported ${n} case${n === 1 ? '' : 's'}${total} → board.`);
+          }
         } else {
           toast.warning(`Scraped ${n} case${n === 1 ? '' : 's'}${total}, but the board didn't receive them: ${r.pushed?.error || 'bridge not connected'}.`);
         }
