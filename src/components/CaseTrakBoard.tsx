@@ -121,6 +121,16 @@ function reportStatusColor(status: string): string {
   return 'text-foreground/80';
 }
 
+/** Escape a string for safe inclusion in a text/html clipboard payload. */
+function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const STORAGE_KEY = 'ecovacs_case_trak_v1';
 const COLUMNS_STORAGE_KEY = 'ecovacs_case_trak_columns_v1';
 /** Legacy 24h tracker key — we migrate its cases on first load. */
@@ -388,18 +398,53 @@ export default function CaseTrakBoard({
    *  flat-text format the old Over-24h Tracker produced for the report. */
   const handleCopyStatus = useCallback(async () => {
     if (items.length === 0) return;
-    const labelFor = (s: CaseStatus) =>
-      columns.find((c) => c.id === s)?.label ?? s;
-    const text = items
-      .map((c) => `${c.caseNumber} ${labelFor(c.status)}`)
-      .join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(`Copied ${items.length} case statuses to clipboard`);
-    } catch {
-      toast.error('Failed to copy. Please select and copy manually.');
+
+    // Build rich-text output grouped by column (in column order).
+    //   <b>Column Name</b>
+    //   CASE_NUMBER [Owner Name]
+    //   ...
+    const htmlParts: string[] = [];
+    const plainParts: string[] = [];
+    for (const col of columns) {
+      const colItems = byStatus.get(col.id) ?? [];
+      if (colItems.length === 0) continue;
+      htmlParts.push(`<b>${escapeHtml(col.label)}</b>`);
+      plainParts.push(`${col.label}:`);
+      for (const c of colItems) {
+        const owner = c.caseOwner ? ` [${c.caseOwner}]` : '';
+        htmlParts.push(`${escapeHtml(c.caseNumber)}${escapeHtml(owner)}`);
+        plainParts.push(`${c.caseNumber}${owner}`);
+      }
+      htmlParts.push('');
+      plainParts.push('');
     }
-  }, [items, columns]);
+    const html = htmlParts.join('\n');
+    const plain = plainParts.join('\n').trim();
+
+    try {
+      // Prefer rich-text copy (ClipboardItem with text/html) so pasting into
+      // email/docs keeps the bold column headers. Fall back to plain text.
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([plain], { type: 'text/plain' }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plain);
+      }
+      toast.success(`Copied ${items.length} case${items.length === 1 ? '' : 's'} (grouped by column)`);
+    } catch {
+      // Last-resort fallback: copy the HTML source as text.
+      try {
+        await navigator.clipboard.writeText(plain);
+        toast.success(`Copied ${items.length} case${items.length === 1 ? '' : 's'}`);
+      } catch {
+        toast.error('Failed to copy. Please select and copy manually.');
+      }
+    }
+  }, [items, columns, byStatus]);
 
   // --- Column management: rename / add / delete ---------------------------
   const startRenameCol = (col: BoardColumn) => {
