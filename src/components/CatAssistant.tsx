@@ -8,34 +8,45 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  * pops up thought bubbles (tips / advice / idle musings).
  *
  * Visual model:
- *  - The sprite is a 128px pixel-art cat at bottom-left by default, draggable
+ *  - The sprite is a 128px pixel-art cat at top-left by default, draggable
  *    anywhere on the viewport. Position is persisted to localStorage.
- *  - One static frame per state (resting / standby / side / thinking /
- *    alert — 128×128 alpha-transparent PNGs in /assets/cat/). No frame
- *    cycling within a state; the state change itself is the animation
- *    (the sprite pops when it swaps pose).
+ *  - Six states (resting / standby / side / thinking / alert / dragged),
+ *    each with 3 variant frames (128×128 alpha-transparent PNGs in
+ *    /assets/cat/). One variant is picked at random on every state change,
+ *    so the same cat appears in a slightly different moment of that pose.
+ *    No frame cycling within a state; the state change itself (pop
+ *    animation) is the only movement.
  *  - A thought bubble renders above the sprite when `currentThought` is set.
+ *  - After 20s of inactivity the cat dozes into "resting"; a click wakes it.
  *
- * State mapping:
+ * State mapping (priority order):
+ *  - dragged   → pointer is down and the cat is being moved
  *  - thinking  → LLM advice request in flight
  *  - alert     → live call capture running (ears perked, listening)
  *  - side      → showing a thought bubble (glancing sideways at the agent)
+ *  - resting   → dozed off after 20s idle
  *  - standby   → idle default (sitting, calm)
  */
 
 const DEFAULT_POSITION = { x: 24, y: 24 };
 const SPRITE_SIZE = 128;
 
-/** Sprite states and their single static frame. */
-type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert';
+/** Sprite states. Each has 3 variant frames (128×128 alpha-transparent PNGs
+ *  in /assets/cat/); one is picked at random on every state change so the cat
+ *  looks like the same animal in a slightly different moment of that pose. */
+type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert' | 'dragged';
 
-const CAT_FRAMES: Record<CatState, string> = {
-  resting: '/assets/cat/resting-1.png',
-  standby: '/assets/cat/standby-1.png',
-  side: '/assets/cat/side-1.png',
-  thinking: '/assets/cat/thinking-1.png',
-  alert: '/assets/cat/alert-1.png',
+const CAT_FRAMES: Record<CatState, string[]> = {
+  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.png`),
+  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.png`),
+  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.png`),
+  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.png`),
+  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.png`),
+  dragged: [1, 2, 3].map((n) => `/assets/cat/dragged-${n}.png`),
 };
+
+/** How long the cat waits before dozing off into "resting" (ms). */
+const RESTING_DELAY_MS = 20_000;
 
 interface CatAssistantProps {
   currentThought: CatThought | null;
@@ -60,30 +71,50 @@ export function CatAssistant({
   const [dragging, setDragging] = useState(false);
 
   // Current sprite state, derived from call / thought / LLM activity.
-  // After 90s of total inactivity the cat dozes off into "resting".
+  // After RESTING_DELAY_MS of total inactivity the cat dozes off into
+  // "resting"; clicking the cat wakes it back up.
   const [dozing, setDozing] = useState(false);
   useEffect(() => {
-    if (isCapturing || currentThought || isThinking) {
+    if (isCapturing || currentThought || isThinking || dragging) {
       setDozing(false);
       return;
     }
-    const id = window.setTimeout(() => setDozing(true), 90_000);
+    const id = window.setTimeout(() => setDozing(true), RESTING_DELAY_MS);
     return () => window.clearTimeout(id);
-  }, [isCapturing, currentThought, isThinking]);
+  }, [isCapturing, currentThought, isThinking, dragging]);
 
-  const state: CatState = isThinking
-    ? 'thinking'
-    : isCapturing
-      ? 'alert'
-      : currentThought
-        ? 'side'
-        : dozing
-          ? 'resting'
-          : 'standby';
+  // State priority: dragged (being moved) > thinking (LLM working) >
+  // alert (live call) > side (thought bubble showing) > resting (dozed
+  // off) > standby (idle default).
+  const state: CatState = dragging
+    ? 'dragged'
+    : isThinking
+      ? 'thinking'
+      : isCapturing
+        ? 'alert'
+        : currentThought
+          ? 'side'
+          : dozing
+            ? 'resting'
+            : 'standby';
+
+  // Pick a random variant frame for the new state. The effect keys on
+  // `state` so it only re-rolls when the state actually changes, not on
+  // every render — the cat keeps the same pose while it stays put.
+  const [frameIndex, setFrameIndex] = useState(0);
+  useEffect(() => {
+    setFrameIndex(Math.floor(Math.random() * CAT_FRAMES[state].length));
+  }, [state]);
 
   // `key={state}` remounts the img on every state change so the pop
   // animation replays — that swap is the sprite's only animation.
-  const spriteSrc = CAT_FRAMES[state];
+  const spriteSrc = CAT_FRAMES[state][frameIndex];
+
+  // Wake the cat from resting when clicked (only matters when dozing;
+  // other states already reset the timer).
+  const wakeUp = useCallback(() => {
+    if (dozing) setDozing(false);
+  }, [dozing]);
 
   const dragOffset = useRef({ x: 0, y: 0 });
 
@@ -157,8 +188,9 @@ export function CatAssistant({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onClick={wakeUp}
         role="img"
-        aria-label="Cat assistant — drag to move"
+        aria-label="Cat assistant — drag to move, click to wake"
         className={cn(
           'pointer-events-auto relative flex h-32 w-32 cursor-grab items-center justify-center',
           dragging && 'cursor-grabbing'
