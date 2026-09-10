@@ -11,8 +11,8 @@ import { useScopedState } from '@/hooks/use-scoped-state';
  *  - The sprite is a 64px pixel-art cat at bottom-left by default, draggable
  *    anywhere on the viewport. Position is persisted to localStorage.
  *  - Each state (resting / standby / side / thinking / alert) has 3 frames
- *    (128×128 JPGs in /assets/cat/) cycled at ~450ms for a subtle idle
- *    animation — ear twitches, blinks, tail flicks.
+ *    (128×128 alpha-transparent PNGs in /assets/cat/) cycled at ~450ms for
+ *    a subtle idle animation — ear twitches, blinks, tail flicks.
  *  - A thought bubble renders above the sprite when `currentThought` is set.
  *
  * State mapping:
@@ -30,11 +30,11 @@ const FRAME_MS = 450;
 type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert';
 
 const CAT_FRAMES: Record<CatState, string[]> = {
-  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.jpg`),
-  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.jpg`),
-  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.jpg`),
-  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.jpg`),
-  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.jpg`),
+  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.png`),
+  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.png`),
+  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.png`),
+  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.png`),
+  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.png`),
 };
 
 /** Preload every frame once so state switches never flash. */
@@ -197,7 +197,7 @@ export function CatAssistant({
             draggable={false}
             onError={() => setImgError(true)}
             style={{ imageRendering: 'pixelated' }}
-            className="h-full w-full rounded-full border border-border/50 object-cover drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
+            className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
           />
         )}
 
