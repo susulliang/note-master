@@ -1183,18 +1183,23 @@
       for (let up = 0; up < 24 && el; up += 1) {
         try {
           const cs = getComputedStyle(el);
-          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight - el.clientHeight > 8) {
+          const scrollable = el.scrollHeight - el.clientHeight > 8;
+          // overflow:hidden elements are still scrollable programmatically
+          // (scrollTop works) — Wave viewports use exactly this pattern.
+          if (scrollable && (cs.overflowY === 'auto' || cs.overflowY === 'scroll')) {
             push(el, `ancestor(${up})`);
+          } else if (scrollable && cs.overflowY === 'hidden') {
+            push(el, `ancestor-hidden(${up})`);
           }
         } catch { /* ignore */ }
         el = el.parentElement;
       }
-      document.querySelectorAll('.wave-table [class*="scroll" i], [class*="data-grid"][class*="scroll" i]').forEach((n) => {
+      document.querySelectorAll('.wave-table [class*="scroll" i], [class*="data-grid"][class*="scroll" i], .wave-table, .table-with-search-wrapper').forEach((n) => {
         try {
           const cs = getComputedStyle(n);
-          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && n.scrollHeight - n.clientHeight > 8) {
-            push(n, 'class-hint');
-          }
+          if (n.scrollHeight - n.clientHeight <= 8) return;
+          if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') push(n, 'class-hint');
+          else if (cs.overflowY === 'hidden') push(n, 'class-hint-hidden');
         } catch { /* ignore */ }
       });
       // Frame document scroller last.
@@ -1232,55 +1237,124 @@
     if (!targetMet()) {
       const candidates = candidateScrollers();
       debug.candidateCount = candidates.length;
-      let winner = null;
-      for (const cand of candidates) {
-        resetTop(cand);
-        await sleep(250);
-        const before = renderedRowIndexes();
-        nudge(cand, 320);
-        await sleep(260);
-        const after = renderedRowIndexes();
-        let changed = false;
-        if (after.size !== before.size) changed = true;
-        if (!changed) for (const ri of after) if (!before.has(ri)) { changed = true; break; }
-        if (changed) { winner = cand; debug.scroller = cand.tag; break; }
-      }
+      // Ancestor-chain metrics — tells us exactly which element is the
+      // viewport when the automatic sweep needs tuning.
+      debug.chain = (() => {
+        const out = [];
+        let el = grid;
+        for (let i = 0; i < 16 && el; i += 1) {
+          try {
+            const cs = getComputedStyle(el);
+            out.push({
+              i,
+              tag: (el.tagName || '').toLowerCase(),
+              cls: String(el.className || '').replace(/\s+/g, ' ').slice(0, 70),
+              oy: cs.overflowY,
+              sh: el.scrollHeight,
+              ch: el.clientHeight,
+            });
+          } catch { /* ignore */ }
+          el = el.parentElement;
+        }
+        return out;
+      })();
+      debug.win = {
+        innerHeight: window.innerHeight,
+        docSh: document.scrollingElement ? document.scrollingElement.scrollHeight : 0,
+        docCh: document.scrollingElement ? document.scrollingElement.clientHeight : 0,
+      };
+      debug.tries = [];
 
-      if (winner) {
-        // Top → bottom sweep on the verified scroller. Half-viewport steps
-        // (the grid mounts a large overscan window, so overlaps are safe).
-        resetTop(winner);
+      const wheelOn = (targets, delta) => {
+        for (const t of targets) {
+          if (!t) continue;
+          try {
+            t.dispatchEvent(new WheelEvent('wheel', {
+              deltaX: 0, deltaY: delta, deltaMode: 0, bubbles: true, cancelable: true,
+            }));
+          } catch { /* ignore */ }
+        }
+      };
+
+      // Sweep EVERY candidate to the end (not just the first one that
+      // twitches). Each step drives BOTH scrollTop and a real wheel event —
+      // Wave's custom viewport listens for wheel even when overflow:hidden.
+      for (let ci = 0; ci < candidates.length && !targetMet(); ci += 1) {
+        const cand = candidates[ci];
+        const tr = { tag: cand.tag, steps: 0, moved: false, added: 0 };
+        const startCount = recs.size;
+        resetTop(cand);
+        await sleep(350);
+        let stalls = 0;
+        let lastMax = -1;
+        let lastTop = null;
+        for (let i = 0; i < 300 && !targetMet(); i += 1) {
+          tr.steps += 1;
+          debug.scrollSteps += 1;
+          extract();
+          const idxs = renderedRowIndexes();
+          const curMax = idxs.size ? Math.max(...idxs) : -1;
+          const el = cand.el;
+          const isDoc = el === document.scrollingElement || el === document.documentElement || el === document.body;
+          const top = topOf(cand);
+          const viewH = isDoc ? window.innerHeight : el.clientHeight;
+          const atBottom = top + viewH >= el.scrollHeight - 3;
+          const delta = Math.max(140, Math.floor((viewH || 420) * 0.45));
+          nudge(cand, delta);
+          wheelOn([el, grid], delta);
+          if (isDoc) window.scrollBy(0, delta);
+          await sleep(320);
+          const nowTop = topOf(cand);
+          const progressed = curMax !== lastMax || (lastTop !== null && nowTop !== lastTop);
+          if (progressed) { tr.moved = true; stalls = 0; } else stalls += 1;
+          lastMax = curMax;
+          lastTop = nowTop;
+          // Stop this candidate when pinned at the bottom with no movement,
+          // or six fully-stalled steps; then move on to the next candidate.
+          if ((atBottom && stalls >= 3) || stalls >= 6) break;
+        }
+        await sleep(200);
+        extract();
+        tr.added = recs.size - startCount;
+        tr.got = recs.size;
+        debug.tries.push(tr);
+        resetTop(cand);
+      }
+      debug.scroller = (debug.tries.find((t) => t.added > 0) || {}).tag || 'none';
+
+      // Wheel-only / window-scrollBy pass when nothing native worked.
+      if (!targetMet()) {
+        const tr = { tag: 'wheel-only', steps: 0, moved: false, added: 0 };
+        const startCount = recs.size;
+        window.scrollTo(0, 0);
         await sleep(300);
         let stalls = 0;
-        let lastTop = -1;
-        for (let i = 0; i < 400 && !targetMet(); i += 1) {
+        let lastMax = -1;
+        for (let i = 0; i < 120 && !targetMet(); i += 1) {
+          tr.steps += 1;
           debug.scrollSteps += 1;
-          const added = extract();
-          debug.renderedWindows += 1;
-          const el = winner.el;
-          const isDoc = el === document.scrollingElement || el === document.documentElement || el === document.body;
-          const top = topOf(winner);
-          const viewH = isDoc ? window.innerHeight : el.clientHeight;
-          const max = el.scrollHeight;
-          const atBottom = top + viewH >= max - 3;
-          if (added === 0) stalls += 1; else stalls = 0;
-          if (atBottom && stalls >= 4) break;
-          nudge(winner, Math.max(120, Math.floor((viewH || 400) * 0.5)));
-          await sleep(230);
-          const nowTop = topOf(winner);
-          if (nowTop === lastTop) stalls += 1;
-          lastTop = nowTop;
-          if (stalls >= 8) break;
+          extract();
+          const idxs = renderedRowIndexes();
+          const curMax = idxs.size ? Math.max(...idxs) : -1;
+          wheelOn([grid, document.scrollingElement, document.documentElement, document.body], 300);
+          window.scrollBy(0, 300);
+          await sleep(300);
+          if (curMax !== lastMax) { tr.moved = true; stalls = 0; } else stalls += 1;
+          lastMax = curMax;
+          if (stalls >= 6) break;
         }
-        // One final extract after the last window settles.
         await sleep(150);
         extract();
-        resetTop(winner);
-      } else {
-        // Fallback: keyboard paging. Wave grids react to PageDown/ArrowDown
-        // (moving the cell cursor scrolls the virtual window) even when no
-        // native overflow scroller is detectable.
-        debug.scroller = 'KEYBOARD';
+        tr.added = recs.size - startCount;
+        tr.got = recs.size;
+        debug.tries.push(tr);
+        window.scrollTo(0, 0);
+      }
+
+      // Last resort: keyboard paging (focusing a cell and paging moves the
+      // virtual window even in fully custom viewports).
+      if (!targetMet()) {
+        debug.keyboard = true;
         const focusTarget = grid.querySelector('td[tabindex="0"], th[tabindex="0"], td[tabindex], th[tabindex]') || grid;
         try { focusTarget.focus({ preventScroll: true }); } catch { try { focusTarget.focus(); } catch { /* ignore */ } }
         const press = (key) => {
