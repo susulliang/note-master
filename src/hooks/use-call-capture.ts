@@ -8,6 +8,11 @@ import {
   type Speaker,
   type TranscriptEntry,
 } from '@/lib/field-extraction';
+import {
+  classifyWhisperGarbage,
+  familyEligible,
+  familyKey,
+} from '@/lib/transcript-noise';
 import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
 import type { CallTranscriber } from './use-local-transcriber';
 
@@ -85,6 +90,10 @@ const PARAPHRASE_DEBOUNCE_MS = 6_000;
 
 /** How long finalize() waits for the final segments to transcribe (ms) */
 const FINALIZE_DRAIN_MS = 6_000;
+
+/** Same normalized ≥4-word line from the same speaker this many times =
+ *  a Whisper hallucination family → the whole family is dropped. */
+const FAMILY_REPEAT_THRESHOLD = 3;
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
@@ -207,6 +216,10 @@ export function useCallCapture(
   const [queued, setQueued] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Whisper hallucination turns detected and dropped so far (loops,
+   *  artifact tags, lone filler words, repeated families) — shown as a
+   *  "N noise filtered" counter in the caption panel. */
+  const [garbageFiltered, setGarbageFiltered] = useState(0);
   /** Live input level per speaker — proves each channel is actually arriving */
   const [customerLevel, setCustomerLevel] = useState(0);
   const [agentLevel, setAgentLevel] = useState(0);
@@ -230,6 +243,10 @@ export function useCallCapture(
    *  blobs are tagged 'recording' instead of 'customer', mic is skipped). */
   const recordingDebugRef = useRef(false);
   const entriesRef = useRef<TranscriptEntry[]>([]);
+  /** Cross-turn duplicate family counter: normalized `speaker::text` key →
+   *  occurrences seen this session. 3+ identical ≥4-word turns = Whisper
+   *  hallucination family → dropped wholesale (retroactively). */
+  const familyCountsRef = useRef(new Map<string, number>());
   /** Fields already given a provisional REGEX fill, with the value pushed.
    *  Accumulating fields (issue clauses, TBS steps, the issue type derived
    *  from them) KEEP GROWING as the call goes on — their pushed value is
@@ -785,9 +802,44 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
         const text = (await transcriberRef.current.transcribe(pcm)).trim();
         if (!text) return;
         // Whisper emits bracketed pseudo-tags ([BLANK_AUDIO], [INAUDIBLE],
-        // …) for non-speech audio — they carry no ticket information and
-        // only confuse both parsers, so the turn is never recorded.
+        // [Musique]…) for non-speech audio — they carry no ticket
+        // information and only confuse both parsers, so the turn is never
+        // recorded.
         if (isAsrArtifact(text)) return;
+
+        // GARBAGE GATE — hallucination turns never reach the transcript,
+        // the regex extractor or the LLM prompt:
+        //  - artifact-only / punctuation-only turns, lone filler words
+        //    ("de", "à")
+        //  - repetition loops: one phrase repeated back-to-back many times
+        //    (Whisper's classic response to music / echo / silence)
+        const garbage = classifyWhisperGarbage(text);
+        if (garbage) {
+          setGarbageFiltered((n) => n + 1);
+          return;
+        }
+
+        // Cross-turn duplicate family: the SAME normalized ≥4-word line
+        // from the same speaker arriving as separate turns is the other
+        // hallucination shape — music/echo segments emit one phrase per
+        // segment ("Je vous invite à vous faire une autre vidéo." ×6).
+        // From the threshold occurrence on, the WHOLE family (including
+        // the earlier copies already on screen) is dropped.
+        if (familyEligible(text)) {
+          const key = familyKey(speaker, text);
+          const seen = (familyCountsRef.current.get(key) ?? 0) + 1;
+          familyCountsRef.current.set(key, seen);
+          if (seen >= FAMILY_REPEAT_THRESHOLD) {
+            const before = entriesRef.current.length;
+            entriesRef.current = entriesRef.current.filter(
+              (e) => familyKey(e.speaker, e.text) !== key
+            );
+            const removed = before - entriesRef.current.length;
+            if (removed > 0) setTranscript(entriesRef.current);
+            setGarbageFiltered((n) => n + removed + 1);
+            return;
+          }
+        }
 
         setError(null);
         entriesRef.current = [...entriesRef.current, { speaker, text }];
@@ -1195,6 +1247,8 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
 
   const clear = useCallback(() => {
     entriesRef.current = [];
+    familyCountsRef.current = new Map();
+    setGarbageFiltered(0);
     regexFilledRef.current = new Map();
     llmConfirmedRef.current = new Set();
     llmSuggestionsRef.current = new Map();
@@ -1272,6 +1326,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     queued,
     isTranscribing,
     error,
+    /** Whisper hallucination turns filtered this session (loops, artifact
+     *  tags, filler words, duplicate families) — display counter */
+    garbageFiltered,
     customerLevel,
     agentLevel,
     hasMic,

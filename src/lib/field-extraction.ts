@@ -265,7 +265,7 @@ function normalizeModelKeyZeroAsO(raw: string): string {
  * speech ("it makes a noise while charging") and must survive.
  */
 const ASR_ARTIFACT_TAG =
-  /\[\s*(?:inaudible|blank[_ ]?audio|silence|noise|music(?:\s+playing)?|applause|laughter|crosstalk|unintelligible|no speech|pause)\s*\]/gi;
+  /\[\s*(?:inaudible|blank[_ ]?audio|silence|noise|music(?:\s+playing)?|musique|applause|laughter|crosstalk|unintelligible|no speech|pause|ouh|euh|son|bruit)\s*\]/gi;
 
 /** Remove ASR artifact tags from a transcript turn */
 export function stripAsrArtifacts(text: string): string {

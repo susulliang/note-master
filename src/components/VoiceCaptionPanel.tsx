@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bug, Loader2, Mic, Sparkles } from 'lucide-react';
+import { Bug, Loader2, Mic, Sparkles, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -41,6 +41,10 @@ export interface CallPanelState {
   /** Live input level of the agent's microphone */
   agentLevel: number;
   hasMic: boolean;
+  /** Whisper hallucination turns (repetition loops, [Musique]-style
+   *  artifact tags, lone filler words, duplicate families) filtered out
+   *  this session — shown as a counter next to the segment count. */
+  garbageFiltered: number;
   /** True while DEBUG RECORDING mode captures ONE source (tab audio of a
    *  recorded agent+customer conversation) instead of tab + mic */
   isRecordingDebug: boolean;
@@ -420,6 +424,20 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
             </span>
           )}
 
+          {/* Whisper noise counter — hallucination turns (repetition loops,
+              [Musique] artifact tags, lone filler words, duplicate
+              families) that were detected and stripped before reaching
+              the transcript or the AI parse. */}
+          {activeSource === 'call' && call.garbageFiltered > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70"
+              title="Whisper hallucination lines detected and filtered out: repetition loops (one phrase repeated many times), artifact tags like [Musique], punctuation-only turns, lone filler words, and the same line arriving over and over as separate turns. They never reach the transcript or the AI parse."
+            >
+              <VolumeX className="size-3" />
+              {call.garbageFiltered} noise
+            </span>
+          )}
+
           {/* Cloud / remote AI parse — the on-demand extraction triggers.
               Primary: "Parse" = full recall. Secondary: "Concise Parse" =
               2–4 primary issues + 2–4 primary fixes (drops tangents).
@@ -581,6 +599,14 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                   const sent = inWindow && lastSentMax !== null && i <= lastSentMax;
                   const beforeWindow =
                     llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
+                  // Consecutive same-speaker lines render as ONE group: the
+                  // chip shows on the first line only, continuation lines
+                  // keep an invisible chip so the text column stays aligned.
+                  // Long same-speaker runs (garbage-filtered calls, the
+                  // single-channel RECORDING debug mode) read like a chat
+                  // log instead of a wall of repeated chips.
+                  const groupStart =
+                    i === 0 || call.transcript[i - 1].speaker !== entry.speaker;
                   return (
                     <p
                       key={i}
@@ -609,6 +635,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                       <span
                         className={cn(
                           'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
+                          !groupStart && 'invisible',
                           entry.speaker === 'agent'
                             ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
                             : entry.speaker === 'recording'
@@ -616,11 +643,13 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                               : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                         )}
                         title={
-                          entry.speaker === 'agent'
-                            ? 'Your microphone'
-                            : entry.speaker === 'recording'
-                              ? 'Single-channel recording — agent and customer mixed; the AI parse attributes each statement'
-                              : 'CCP tab audio'
+                          groupStart
+                            ? entry.speaker === 'agent'
+                              ? 'Your microphone'
+                              : entry.speaker === 'recording'
+                                ? 'Single-channel recording — agent and customer mixed; the AI parse attributes each statement'
+                                : 'CCP tab audio'
+                            : undefined
                         }
                       >
                         {entry.speaker === 'agent'

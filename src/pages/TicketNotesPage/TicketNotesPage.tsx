@@ -1716,6 +1716,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                     customerLevel: call.customerLevel,
                     agentLevel: call.agentLevel,
                     hasMic: call.hasMic,
+                    garbageFiltered: call.garbageFiltered,
                     isRecordingDebug: call.isRecordingDebug,
                     onToggle: handleToggleCall,
                     onToggleRecordingDebug: handleToggleRecordingDebug,
