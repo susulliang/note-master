@@ -3,10 +3,11 @@
  *
  * Loads a quantized Whisper model (Xenova/whisper-{base,tiny}[.en]) through
  * transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
- * on-device. The `.fr` models are the multilingual exports running the
- * TRANSLATE task, so French (or any detected language) audio comes back
- * as English text — fields and notes stay in English on French calls.
- * Keeping this in a worker matters twice over:
+ * on-device. The `.fr` models are the multilingual exports: speech is
+ * transcribed in its ORIGINAL language (French calls show French text in
+ * the caption panel). English happens one step later — the LLM parse
+ * prompts translate the extracted values, so fields and notes stay in
+ * English on French calls. Keeping this in a worker matters twice over:
  *
  *   1. WASM inference is CPU-heavy — running it off the main thread keeps
  *      the flowchart editor at 60 fps while segments transcribe.
@@ -165,17 +166,23 @@ async function handleTranscribe(id: number, audio: Float32Array): Promise<void> 
     // Segments are ≤ 30 s, so the single-pass path applies — no chunking
     // options needed; the pipeline zero-pads to Whisper's 30 s window.
     //
-    // French models (.fr = multilingual base/tiny) run Whisper's built-in
-    // TRANSLATE task: the spoken language is auto-detected and the text
-    // comes back in ENGLISH, so the English field-extraction patterns,
-    // the English LLM prompts and the English ticket note work unchanged
-    // on French calls. The language is deliberately NOT forced — mixed
-    // calls (agent in English on the mic, customer in French on the CCP
-    // tab) both come out English. English-only `.en` models must NOT
-    // receive task/language options (multilingual-only kwargs).
+    // French models (.fr = multilingual base/tiny) run the default
+    // TRANSCRIBE task with language='french', so the transcript comes
+    // back in the ORIGINAL language — the caption panel shows French
+    // text on French calls. Translation to English happens one step
+    // later, at the LLM parse (llm-parser.ts / cloud-parser.ts prompts
+    // tell the model to write every extracted value in English), so the
+    // fields and the ticket note stay in English. NOTE: transformers.js
+    // v3 has NOT implemented Whisper's auto language detection — an
+    // unspecified language silently defaults to ENGLISH (models.js
+    // _retrieve_init_tokens), which is why french is forced here.
+    // On a mixed call (English agent mic + French customer) Whisper is
+    // audio-driven and still transcribes English speech readably under
+    // the French token; the parse handles either language. English-only
+    // `.en` models must NOT receive task/language options (they throw).
     const output = (await current.pipe(
       audio,
-      current.model.endsWith('.fr') ? { task: 'translate' } : {}
+      current.model.endsWith('.fr') ? { language: 'french', task: 'transcribe' } : {}
     )) as { text?: string } | Array<{ text?: string }>;
     const text = (Array.isArray(output) ? (output[0]?.text ?? '') : (output.text ?? '')).trim();
 

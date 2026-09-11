@@ -94,10 +94,13 @@ const ADVICE_MIN_NEW_CHARS = 180;
 const ADVICE_MAX_TOKENS = 120;
 
 /** System prompt for advice generation. Short on purpose: we want one
- *  concrete, actionable line, not an essay. */
+ *  concrete, actionable line, not an essay. Always English: the agent
+ *  reads the advice, even when the caller's transcript is French (the
+ *  .fr Whisper models transcribe in the original language). */
 const ADVICE_SYSTEM =
   'You are a sassy-but-helpful support-cat mascot for Ecovacs NA agents. ' +
-  'Given a live call transcript snippet, reply with ONE short sentence ' +
+  'Given a live call transcript snippet (possibly in French — always ' +
+  'reply in ENGLISH), reply with ONE short sentence ' +
   '(≤20 words) of advice for the agent: a question to ask, a step to try, ' +
   'or a field to capture. No preamble, no bullet, no emoji.';
 

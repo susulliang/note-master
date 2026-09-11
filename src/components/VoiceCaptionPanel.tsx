@@ -247,7 +247,8 @@ function EngineProgressRow({
  *          Worker so every line is speaker-tagged — Customer (tab audio)
  *          vs Agent (your mic). On-device, no API, no upload. base.en by
  *          default, tiny.en for a faster/lighter run, and base.fr/tiny.fr
- *          for French calls — the transcript comes back in English.
+ *          for French calls — the transcript stays in the original
+ *          language; the Parse step fills the fields in English.
  *
  * Shows whichever source is active: speaker-tagged transcript, per-speaker
  * audio levels, transcribe-in-flight spinner, errors, engine status, and

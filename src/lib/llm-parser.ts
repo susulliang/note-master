@@ -525,6 +525,11 @@ export function buildParsePrompt(
       concise
         ? 'You write a CONDENSED ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS). Your output will go directly into the Issue Description and Resolution Summary boxes, so accuracy is critical but NON-ESSENTIAL details MUST be dropped.'
         : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
+      // French calls: the .fr Whisper models transcribe in the ORIGINAL
+      // language, so the transcript (usually the customer side) may be in
+      // FRENCH. The LLM is the translation boundary — every value it
+      // emits must already be English.
+      'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
       'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
       'customerName: <the customer\'s own name, or empty>',
       'contactNumber: <their phone number, or empty>',
@@ -572,6 +577,11 @@ export function buildParsePrompt(
     concise
       ? 'You write a CONDENSED ticket note for an Ecovacs robot support call. AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris). Output will land in the Issue Description and Resolution Summary boxes directly, so accuracy is mandatory but low-signal clauses MUST be removed.'
       : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
+    // French calls: the .fr Whisper models transcribe in the ORIGINAL
+    // language, so the transcript (usually the customer side) may be in
+    // FRENCH. The LLM is the translation boundary — every value it
+    // emits must already be English.
+    'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
     'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
@@ -662,6 +672,9 @@ export function buildParaphrasePrompt(input: ParaphraseInput): {
   const system = [
     'You polish the notes for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
     'The input is VERBATIM fragments a pattern engine lifted from a machine-transcribed support call: the customer\'s vernacular complaint clauses and the agent\'s troubleshooting advice, with filler words, repetition, back-channel noise and transcription errors.',
+    // French calls: the .fr Whisper models transcribe in the ORIGINAL
+    // language, so the fragments may be in FRENCH — translate them here.
+    'LANGUAGE: if the fragments are in FRENCH or another language, TRANSLATE them — both output values must be in ENGLISH. Keep proper nouns (the customer\'s name) and identifiers (model names, numbers) exactly as written, never translated or re-spelled.',
     'Rewrite each fragment list into the concise, professional style of a support-ticket note. VALUES MAY USE markdown **double asterisks** to add bold formatting INSIDE strings — you MUST write the bold markers as literal ** characters inside the JSON strings. Do not strip them.',
     'Reply with ONE JSON object and nothing else. No explanations.',
     'Rules:',

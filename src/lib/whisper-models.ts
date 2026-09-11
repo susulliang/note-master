@@ -8,18 +8,20 @@
  *
  *   base.en — default; higher accuracy, ~70 MB one-time download
  *   tiny.en — lighter and faster fallback, ~30 MB one-time download
- *   base.fr — French-capable, translates speech to English, ~75 MB
- *   tiny.fr — French-capable translate-to-English, fastest, ~35 MB
+ *   base.fr — French calls; transcript in the original language, ~75 MB
+ *   tiny.fr — French calls; lightest original-language transcript, ~35 MB
  *
  * The ".fr" models are the MULTILINGUAL base/tiny exports (same Xenova
  * q8 lineage as the .en ones — there is no dedicated .fr export). They
- * run Whisper's built-in TRANSLATE task (see transcribe.worker.ts): the
- * spoken language is auto-detected and the transcript comes back in
- * ENGLISH, so the English field-extraction patterns, the English LLM
- * prompts and the English ticket note all work unchanged on French
- * calls. Auto-detection (rather than forcing language='french') also
- * keeps mixed calls working — an English-speaking agent on the mic and
- * a French-speaking customer on the CCP tab both come out English.
+ * run Whisper's default TRANSCRIBE task with language='french' (see
+ * transcribe.worker.ts): the transcript stays in the ORIGINAL language,
+ * so the caption panel shows French text on French calls. English is
+ * produced one step later — the LLM parse prompts (llm-parser.ts /
+ * cloud-parser.ts) instruct the model to write every extracted value
+ * in English, so the fields and the ticket note stay in English on
+ * French calls. On a mixed call (English-speaking agent on the mic,
+ * French-speaking customer on the CCP tab) Whisper is audio-driven and
+ * still transcribes English speech readably under the French token.
  *
  * Repos are the Xenova exports (not the newer `onnx-community` ones): their
  * `q8` files are the classic DynamicQuantizeLinear exports that transformers.js
@@ -52,18 +54,20 @@ export const WHISPER_MODEL_META: Record<
   'tiny.en': { label: 'tiny.en', note: 'Fastest + lightest · ~30 MB one-time download' },
   'base.fr': {
     label: 'base.fr',
-    note: 'French calls · auto-detects language, transcript translated to English · ~75 MB one-time download',
+    note: 'French calls · transcript in the original language, parse fills fields in English · ~75 MB one-time download',
   },
   'tiny.fr': {
     label: 'tiny.fr',
-    note: 'French calls · fastest translate-to-English · ~35 MB one-time download',
+    note: 'French calls · fastest original-language transcript, parse fills English fields · ~35 MB one-time download',
   },
 };
 
 export const WHISPER_MODELS = Object.keys(LOCAL_WHISPER_MODELS) as WhisperModelName[];
 
-/** True when the model transcribes non-English speech into English text */
-export function isTranslateModel(model: WhisperModelName): boolean {
+/** True for the multilingual (.fr) models — they transcribe French calls in
+ *  the ORIGINAL language; English field values come from the LLM parse
+ *  step, not from Whisper. */
+export function isMultilingualModel(model: WhisperModelName): boolean {
   return model.endsWith('.fr');
 }
 

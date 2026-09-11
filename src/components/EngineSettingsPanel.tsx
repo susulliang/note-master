@@ -12,7 +12,7 @@ import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
   WHISPER_RAM_ESTIMATE_MB,
-  isTranslateModel,
+  isMultilingualModel,
   type WhisperDtype,
   type WhisperModelName,
 } from '@/lib/whisper-models';
@@ -369,12 +369,12 @@ export default function EngineSettingsPanel({
               <span className="inline-flex overflow-hidden rounded-full border border-border/40">
                 {WHISPER_MODELS.map((name, index) => (
                   <Fragment key={name}>
-                    {/* Divider between the English (.en) and French (.fr)
-                        model groups — the .fr models translate speech to
-                        English, so agents can spot the boundary at a
-                        glance while mid-call. */}
-                    {isTranslateModel(name) &&
-                      (index === 0 || !isTranslateModel(WHISPER_MODELS[index - 1])) && (
+                    {/* Divider between the English-only (.en) and
+                        multilingual (.fr) model groups — the .fr models
+                        transcribe in the original language, so agents can
+                        spot the boundary at a glance while mid-call. */}
+                    {isMultilingualModel(name) &&
+                      (index === 0 || !isMultilingualModel(WHISPER_MODELS[index - 1])) && (
                         <span aria-hidden="true" className="my-0.5 w-px self-stretch bg-border/60" />
                       )}
                     <button
@@ -394,12 +394,12 @@ export default function EngineSettingsPanel({
                   </Fragment>
                 ))}
               </span>
-              {isTranslateModel(engine.model) && (
+              {isMultilingualModel(engine.model) && (
                 <span
                   className="text-[10px] text-muted-foreground"
-                  title="French (or any detected) speech is transcribed directly into English — fields and the ticket note stay in English"
+                  title="French speech is transcribed in its ORIGINAL language in the transcript panel — the Parse step (local LLM or cloud) extracts and translates the fields, so the ticket note stays in English"
                 >
-                  → EN
+                  FR
                 </span>
               )}
               {engine.status === 'loading' && (
