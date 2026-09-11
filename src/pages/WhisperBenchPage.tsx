@@ -180,8 +180,18 @@ export default function WhisperBenchPage() {
   // (P3). Validated on jfk.wav: whisper is audio-driven, so English speech
   // under the French token exercises the full option path of a French call.
   const langParam = search?.get('lang') ?? 'en';
-  const tjsModel = langParam === 'fr' ? TJS_MODEL_FR : TJS_MODEL_EN;
-  const tjsLabel = langParam === 'fr' ? 'tjs-base.fr-q8' : 'tjs-base.en-q8';
+  // ?repo=org/name overrides the tjs model repo — same drop-in path a
+  // LoRA-merged French export takes in the app (runtime adapters don't
+  // exist in this stack, merged ONNX is the only browser-compatible LoRA
+  // artifact; see whisper-models.ts). Bench any candidate export here
+  // before pointing the app's override at it.
+  const repoParam = search?.get('repo');
+  const tjsModel = repoParam ?? (langParam === 'fr' ? TJS_MODEL_FR : TJS_MODEL_EN);
+  const tjsLabel = repoParam
+    ? `tjs-${repoParam.replace('Xenova/whisper-', '').replace('onnx-community/', '')}-q8`
+    : langParam === 'fr'
+      ? 'tjs-base.fr-q8'
+      : 'tjs-base.en-q8';
   // ORT's wasm arena grows with every asr() call and the sandbox memcg
   // kills the renderer after a couple of calls (production has no such
   // limit) — the runner drives tjs with runs=1 per fresh context instead.

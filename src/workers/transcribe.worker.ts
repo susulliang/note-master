@@ -18,14 +18,15 @@
  * happens once per model per browser profile.
  *
  * Protocol (see src/lib/whisper-models.ts for the message types):
- *   load       { model, dtype? }  → load-start / progress+ / ready | load-error
- *   transcribe { id, audio }       → result { id, text, ms } | transcribe-error
+ *   load       { model, dtype?, repo? }  → load-start / progress+ / ready | load-error
+ *   transcribe { id, audio }             → result { id, text, ms } | transcribe-error
  */
 
 import { pipeline, env } from '@huggingface/transformers';
 import type { AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 import {
   LOCAL_WHISPER_MODELS,
+  repoFromEnv,
   DTYPE_CHAIN,
   type WhisperModelName,
   type WhisperDtype,
@@ -43,9 +44,10 @@ interface ProgressInfo {
   progress?: number;
 }
 
-/** The currently loaded pipeline + which dtype actually worked */
+/** The currently loaded pipeline + which repo/dtype actually worked */
 let current: {
   model: WhisperModelName;
+  repo: string;
   pipe: AutomaticSpeechRecognitionPipeline;
   dtype: WhisperDtype;
 } | null = null;
@@ -90,12 +92,35 @@ function postMemStats(force = false): void {
 }
 
 /**
+ * Resolve which HF repo `model` loads from. Priority: the load message's
+ * repo (main-thread localStorage override — workers cannot read storage
+ * themselves) → build-time env (LoRA-merged French export baked into a
+ * deploy) → the registry default. A LoRA fine-tune must arrive MERGED and
+ * ONNX-exported in the Xenova layout — runtime adapters don't exist in
+ * this stack (see whisper-models.ts) — so for it this resolves to the
+ * merged model's repo and nothing else changes.
+ */
+function resolveRepo(model: WhisperModelName, repoOverride?: string): string {
+  if (repoOverride && repoOverride.includes('/')) return repoOverride;
+  return repoFromEnv(model) ?? LOCAL_WHISPER_MODELS[model];
+}
+
+/**
  * Load `model`, trying precisions from `preferred` (then the rest of the
  * chain, most quantized first). Resolves once a session is ready; posts
  * `ready` with the dtype that worked or `load-error` if all fail.
  */
-async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Promise<void> {
-  if (current?.model === model) {
+async function loadModel(
+  model: WhisperModelName,
+  preferred?: WhisperDtype,
+  repoOverride?: string
+): Promise<void> {
+  const repo = resolveRepo(model, repoOverride);
+
+  // Same model AND same repo → already resident. The repo check matters
+  // when an override (e.g. a candidate LoRA-merged export) changes while
+  // the model name stays 'base.fr' — that must reload, not no-op.
+  if (current?.model === model && current.repo === repo) {
     post({ type: 'ready', model, dtype: current.dtype });
     return;
   }
@@ -121,7 +146,7 @@ async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Pro
     };
 
     try {
-      const pipe = await pipeline('automatic-speech-recognition', LOCAL_WHISPER_MODELS[model], {
+      const pipe = await pipeline('automatic-speech-recognition', repo, {
         device: 'wasm',
         dtype,
         progress_callback: onProgress as (data: ProgressInfo) => void,
@@ -136,7 +161,7 @@ async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Pro
           /* best effort */
         }
       }
-      current = { model, pipe, dtype };
+      current = { model, repo, pipe, dtype };
       post({ type: 'ready', model, dtype });
       postMemStats(true); // fresh model resident — heap just grew
       return;
@@ -203,7 +228,7 @@ scope.addEventListener('message', (event) => {
   if (data.type === 'load') {
     // Chain loads so switching models rapidly is well-defined; `loading`
     // tracks the latest request (the model the user last asked for).
-    const run = loadChain.then(() => loadModel(data.model, data.dtype));
+    const run = loadChain.then(() => loadModel(data.model, data.dtype, data.repo));
     loadChain = run.catch(() => undefined);
     loading = run.catch(() => undefined);
     return;

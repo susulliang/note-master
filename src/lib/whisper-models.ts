@@ -32,6 +32,11 @@
  *
  * Model files are fetched from the Hugging Face Hub and cached by the
  * browser (Cache API), so only the first capture of each model downloads.
+ *
+ * LoRA / fine-tuned French models — see resolveRepo() below. Runtime LoRA
+ * adapters are NOT loadable in this stack (neither transformers.js nor
+ * onnxruntime-web ships an adapter API); a merged LoRA export is a drop-in
+ * repo override.
  */
 
 /** Hugging Face repo per selectable model */
@@ -45,6 +50,84 @@ export const LOCAL_WHISPER_MODELS = {
 export type WhisperModelName = keyof typeof LOCAL_WHISPER_MODELS;
 
 export const DEFAULT_WHISPER_MODEL: WhisperModelName = 'base.en';
+
+// ---------------------------------------------------------------------------
+//  Repo resolution — how a LoRA fine-tune plugs into French transcription
+// ---------------------------------------------------------------------------
+//
+// transformers.js and onnxruntime-web CANNOT load PEFT/LoRA adapters at
+// runtime — there is no adapter API in the JS bindings (adapter hot-swap
+// only exists in the native ORT-GenAI / llama.cpp stacks). The
+// browser-compatible way to ship a French fine-tune — LoRA or full — is:
+//
+//   1. Fine-tune on French speech (PEFT LoRA, r=16-32 on attention/mlp
+//      projections is the usual recipe for Whisper).
+//   2. MERGE the adapter back: model.merge_and_unload() — after this the
+//      checkpoint is a plain Whisper model, no adapter runtime needed.
+//   3. Export to ONNX in the Xenova layout (encoder_model.onnx +
+//      decoder_model_merged.onnx + their _quantized q8 variants; optimum-cli
+//      export --model <merged> --task automatic-speech-recognition, then
+//      quantize) and push the folder to a Hugging Face repo. No French
+//      fine-tune currently ships ONNX exports, so this export step is ours.
+//   4. Point base.fr (or tiny.fr) at that repo — see the two overrides
+//      below. Everything else (dtype chain, French language option,
+//      caching, RAM tracking) is unchanged: a merged model is a drop-in.
+//
+// Overrides, in priority order:
+//   a. localStorage 'nm-whisper-repo-override' — JSON map like
+//      {"base.fr":"org/whisper-base-fr-lora"}. Dev/ops escape hatch for
+//      validating a candidate export before baking it into a build
+//      (resolved on the MAIN thread — workers cannot read localStorage —
+//      and forwarded to the worker in the load message).
+//   b. Build-time env: VITE_WHISPER_BASE_FR_REPO / VITE_WHISPER_TINY_FR_REPO
+//      (inlined by Vite, so they work inside the worker directly).
+//   c. The default Xenova repos in LOCAL_WHISPER_MODELS.
+
+const envRepoOverrides: Partial<Record<WhisperModelName, string>> = {
+  'base.fr': import.meta.env.VITE_WHISPER_BASE_FR_REPO,
+  'tiny.fr': import.meta.env.VITE_WHISPER_TINY_FR_REPO,
+};
+
+/**
+ * Repo for `model` from build-time env (works in the worker too — Vite
+ * inlines import.meta.env at compile time). Returns undefined when unset
+ * or malformed; callers fall back to the registry default.
+ */
+export function repoFromEnv(model: WhisperModelName): string | undefined {
+  const repo = envRepoOverrides[model];
+  return typeof repo === 'string' && repo.includes('/') ? repo : undefined;
+}
+
+const REPO_OVERRIDE_KEY = 'nm-whisper-repo-override';
+
+/**
+ * Runtime repo override for `model` from localStorage — main thread only.
+ * Lets a merged LoRA export be validated/swapped without a rebuild.
+ */
+export function readRepoOverride(model: WhisperModelName): string | undefined {
+  try {
+    const raw = localStorage.getItem(REPO_OVERRIDE_KEY);
+    if (!raw) return undefined;
+    const map = JSON.parse(raw) as Record<string, unknown>;
+    const repo = map?.[model];
+    if (typeof repo === 'string' && repo.includes('/')) return repo;
+  } catch {
+    /* private mode / malformed JSON — fall back to defaults */
+  }
+  return undefined;
+}
+
+/** Set/clear (repo='') a runtime override. Console escape hatch for ops. */
+export function writeRepoOverride(model: WhisperModelName, repo: string): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(REPO_OVERRIDE_KEY) ?? '{}') as Record<string, string>;
+    if (repo) map[model] = repo;
+    else delete map[model];
+    localStorage.setItem(REPO_OVERRIDE_KEY, JSON.stringify(map));
+  } catch {
+    /* private mode / unavailable */
+  }
+}
 
 export const WHISPER_MODEL_META: Record<
   WhisperModelName,
@@ -105,6 +188,12 @@ export interface WhisperLoadMessage {
   model: WhisperModelName;
   /** Preferred dtype (from localStorage); worker still falls back down the chain */
   dtype?: WhisperDtype;
+  /**
+   * Main-thread-resolved repo override (localStorage 'nm-whisper-repo-override'
+   * — workers cannot read it themselves). Takes priority over env and default;
+   * absent means "no runtime override, use env/registry".
+   */
+  repo?: string;
 }
 
 export interface WhisperTranscribeMessage {

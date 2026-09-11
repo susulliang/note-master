@@ -45,6 +45,9 @@ const cppModel = arg('model', 'base.en');
 const cppThreads = Number(arg('threads', '1'));
 const lang = arg('lang', 'en');
 const contextsArg = arg('contexts', '');
+// Override the tjs model repo (e.g. a candidate LoRA-merged French ONNX
+// export) — mirrors the app's repo-override drop-in path.
+const repoOverride = arg('repo', '');
 
 const BENCH_URL = `http://localhost:${port}/whisper-bench`;
 const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || '';
@@ -223,7 +226,8 @@ try {
         const page = await context.newPage();
         await attach(page);
         const url = `${BENCH_URL}?engine=${phase.engine}&runs=${phase.runs}&lang=${lang}`
-          + (phase.engine === 'cpp' ? `&model=${cppModel}&threads=${cppThreads}` : '');
+          + (phase.engine === 'cpp' ? `&model=${cppModel}&threads=${cppThreads}` : '')
+          + (repoOverride ? `&repo=${encodeURIComponent(repoOverride)}` : '');
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         if (c === 0) console.log('Waiting for __BENCH_DONE__ (model downloads ~130 MB) …');
         await page.waitForFunction(() => window.__BENCH_DONE__ === true, null, { timeout });
@@ -264,6 +268,7 @@ try {
     audio: { source: 'jfk.wav (Xenova/transformers.js-docs)', sampleRate: 16000, seconds: 8 },
     runs: 3,
     lang,
+    repo: repoOverride || null,
     cppModel,
     cppThreads,
     engines: enginesMerged,

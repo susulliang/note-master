@@ -4,6 +4,7 @@ import {
   writeModelPref,
   readDtypePref,
   writeDtypePref,
+  readRepoOverride,
   type WhisperMemStats,
   type WhisperModelName,
   type WhisperDtype,
@@ -181,7 +182,15 @@ export function useLocalTranscriber() {
 
       const promise = new Promise<void>((resolve, reject) => {
         pendingLoadsRef.current.push({ model: requested, resolve, reject });
-        worker.postMessage({ type: 'load', model: requested, dtype: readDtypePref(requested) });
+        // Repo override (LoRA-merged export validation, ops swap) resolves
+        // HERE: workers cannot read localStorage, so the main thread looks
+        // it up and forwards it. Env/default fallbacks live in the worker.
+        worker.postMessage({
+          type: 'load',
+          model: requested,
+          dtype: readDtypePref(requested),
+          repo: readRepoOverride(requested),
+        });
       });
       // Fire-and-forget callers must not surface unhandled rejections.
       promise.catch(() => undefined);
