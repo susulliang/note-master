@@ -427,6 +427,27 @@
   --scrollbar-thumb-hover: hsl(270 18% 48%);
 }
 
+/* ---- Field background tint (theme-aware) ----
+   Gridbox cards were brightened, so inputs need a touch of contrast.
+   - Light themes: only slightly darker than the card (just enough to
+     read as a field); keeps dark text legible.
+   - Dark themes: noticeably darker than the card for strong contrast. */
+:root[data-theme="daylight"],
+:root[data-theme="morning"],
+:root[data-theme="afternoon"],
+:root[data-theme="slate-light"],
+:root[data-theme="neutral"],
+:root[data-theme="moss"] {
+  --field-bg: color-mix(in oklab, var(--card) 90%, black 10%);
+}
+
+:root,
+:root[data-theme="evening"],
+:root[data-theme="zinc-dark"],
+:root[data-theme="amethyst"] {
+  --field-bg: color-mix(in oklab, var(--card) 64%, black 36%);
+}
+
 /* ------------------------------------------------------------------ */
 /*  UI scale ("old people mode") — zoom the whole app 1.25x.           */
 /*  Percent heights on html/body keep the full-viewport app layout     */
@@ -957,11 +978,11 @@ body[data-ui-scale="small"] {
 
   /* Recessed glass for text fields */
   .glass-field {
-    /* Field sits IN the brightened glass-panel card, so it must contrast
-       with it. Mixing 25% foreground into the card auto-inverts: on light
-       themes the field darkens, on dark themes it lightens — reliable
-       contrast in every theme without per-theme overrides. */
-    background: color-mix(in oklab, var(--card) 75%, var(--foreground) 25%);
+    /* Field sits IN the brightened glass-panel card. --field-bg is
+       theme-aware: light themes darken the card only a little (10%),
+       dark themes darken it more (36%) for strong contrast. Text stays
+       --foreground so readability is preserved on both. */
+    background: var(--field-bg);
     backdrop-filter: blur(10px) saturate(1.35);
     -webkit-backdrop-filter: blur(10px) saturate(1.35);
     border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
