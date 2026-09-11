@@ -7,6 +7,7 @@ import type { ExtractedField } from '@/hooks/use-voice-transcription';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
+import type { CallTldrState } from '@/hooks/use-call-tldr';
 import type { WhisperModelName } from '@/lib/whisper-models';
 import {
   buildPromptWindow,
@@ -153,6 +154,9 @@ interface VoiceCaptionPanelProps {
   parser?: ParserPanelState;
   /** On-demand DeepSeek cloud parse (the Parse button in the header) */
   cloud?: CloudPanelState;
+  /** Live EN/ZH whole-call TLDR (FR calls; use-call-tldr). Absent when
+   *  no cloud key — the card simply does not render. */
+  tldr?: CallTldrState;
 }
 
 /** Bar thresholds for the audio level meters */
@@ -264,7 +268,7 @@ function EngineProgressRow({
  * audio levels, transcribe-in-flight spinner, errors, engine status, and
  * extracted field chips.
  */
-export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: VoiceCaptionPanelProps) {
+export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tldr }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The SLIDING window the NEXT parse will send — computed LIVE from the
@@ -708,6 +712,58 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                 )}
               {llmWindowFirst !== null && llmWindowFirst > 0 && (
                 <span className="opacity-70">grey/dimmed = slid out (values live on in the form)</span>
+              )}
+            </div>
+          )}
+
+        {/* Live whole-call TLDR (FR calls) — EN + ZH 1–3-sentence summary
+            from the cloud LLM, regenerated 10s/30s/60s/90s… into the call.
+            Hidden entirely until the first refresh has something to show. */}
+        {activeSource === 'call' &&
+          tldr &&
+          (tldr.en || tldr.zh || tldr.isGenerating) && (
+            <div className="mt-1.5 rounded-lg border border-border/60 bg-card/50 px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="size-3 shrink-0 text-accent" />
+                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                  TLDR
+                </span>
+                {tldr.isGenerating ? (
+                  <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
+                ) : (
+                  tldr.updatedAtSec !== null && (
+                    <span
+                      className="text-[9px] text-muted-foreground/70"
+                      title="Regenerated automatically at 10s, 30s, 60s, 90s… into the call"
+                    >
+                      {tldr.updatedAtSec}s
+                    </span>
+                  )
+                )}
+              </div>
+              {tldr.en || tldr.zh ? (
+                <div className="mt-1 space-y-1">
+                  {tldr.en && (
+                    <p className="text-[12px] leading-snug text-foreground">
+                      <span className="mr-1.5 inline-block rounded bg-accent/10 px-1 py-px text-[8px] font-semibold uppercase tracking-wide text-accent">
+                        EN
+                      </span>
+                      {tldr.en}
+                    </p>
+                  )}
+                  {tldr.zh && (
+                    <p className="text-[12px] leading-snug text-foreground">
+                      <span className="mr-1.5 inline-block rounded bg-primary/10 px-1 py-px text-[8px] font-semibold uppercase tracking-wide text-primary">
+                        中文
+                      </span>
+                      {tldr.zh}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/60">
+                  Summarizing the conversation…
+                </p>
               )}
             </div>
           )}

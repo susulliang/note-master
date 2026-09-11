@@ -19,7 +19,9 @@ export type CatFormData = Record<string, string | string[]>;
  *  - tip:       form-state nudges (empty required fields, call ended with
  *               missing info). Push-led, not polled.
  *  - advice:    LLM-generated call advice derived from the live transcript.
- *               Rate-limited so the agent isn't spammed.
+ *               PAUSED for now (ENABLE_LIVE_ADVICE=false): the live
+ *               cloud-generation slot during calls belongs to the EN/ZH
+ *               TLDR panel under the transcript (use-call-tldr.ts).
  *  - greeting:  one-liners when a call starts / ends.
  *
  * Design goals:
@@ -92,6 +94,12 @@ const ADVICE_MIN_INTERVAL_MS = 30_000;
 const ADVICE_MIN_NEW_CHARS = 180;
 /** Max tokens for an advice reply — keep it snappy. */
 const ADVICE_MAX_TOKENS = 120;
+
+/** PAUSED — the live-transcript advice loop is OFF. The TLDR panel
+ *  (use-call-tldr.ts) now owns the live cloud-generation slot during
+ *  calls, and the advice thoughts added noise on garbled French ASR.
+ *  Flip back to true to bring the advice loop back. */
+const ENABLE_LIVE_ADVICE = false;
 
 /** System prompt for advice generation. Short on purpose: we want one
  *  concrete, actionable line, not an essay. Always English: the agent
@@ -173,7 +181,9 @@ export function useCatAssistant({
   // -----------------------------------------------------------------
   useEffect(() => {
     if (isCapturing && !wasCapturingRef.current) {
-      pushThought('greeting', 'Live! I\'ll keep an ear out. 🎧', 6000);
+      // Advice loop is paused — the cat no longer "keeps an ear out", it
+      // just stands by (the TLDR panel handles the live summarizing).
+      pushThought('greeting', 'Live call! I\'m on standby. 🎧', 6000);
     } else if (!isCapturing && wasCapturingRef.current) {
       pushThought('greeting', 'Call over. Let\'s wrap this note up.', 7000);
       // Nudge about any still-empty required fields after the call ends.
@@ -187,11 +197,11 @@ export function useCatAssistant({
   }, [isCapturing, formData, pushThought]);
 
   // -----------------------------------------------------------------
-  //  LLM advice during live transcription.
+  //  LLM advice during live transcription.  PAUSED (ENABLE_LIVE_ADVICE).
   //  Debounced on transcript length growth; one in-flight request max.
   // -----------------------------------------------------------------
   useEffect(() => {
-    if (!isCapturing || !cloudGenerate || !cloudEnabled) return;
+    if (!ENABLE_LIVE_ADVICE || !isCapturing || !cloudGenerate || !cloudEnabled) return;
 
     const totalChars = transcript.reduce((n, e) => n + e.text.length, 0);
     const newChars = totalChars - lastAdviceCharsRef.current;
