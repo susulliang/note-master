@@ -156,6 +156,13 @@ interface SegmentBlobs {
  * agent) and transcribed sequentially, producing an interleaved,
  * speaker-tagged transcript.
  *
+ * DEBUG RECORDING MODE (toggleRecordingDebug): captures ONE source only —
+ * the tab audio — and never opens the mic. For feeding a RECORDED
+ * conversation (agent + customer on a single track, e.g. a test call
+ * playing in another tab) through the whole pipeline: every segment is
+ * tagged 'recording', the transcript shows a RECORDING badge, and the LLM
+ * parse prompt asks the model to attribute each statement itself.
+ *
  * Parsing is LLM-first: whenever the transcription queue goes idle, the
  * on-device LLM (src/lib/llm-parser.ts) re-reads the WHOLE conversation —
  * agent and customer speech together — and its full-context understanding
@@ -205,6 +212,8 @@ export function useCallCapture(
   const [agentLevel, setAgentLevel] = useState(0);
   /** True when the agent's mic is being recorded alongside the tab audio */
   const [hasMic, setHasMic] = useState(false);
+  /** True while DEBUG RECORDING mode is capturing (single source, no mic) */
+  const [isRecordingDebug, setIsRecordingDebug] = useState(false);
 
   const displayStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -217,6 +226,9 @@ export function useCallCapture(
   const rafRef = useRef<number | null>(null);
 
   const shouldCaptureRef = useRef(false);
+  /** True while the current capture runs in DEBUG RECORDING mode (the tab
+   *  blobs are tagged 'recording' instead of 'customer', mic is skipped). */
+  const recordingDebugRef = useRef(false);
   const entriesRef = useRef<TranscriptEntry[]>([]);
   /** Fields already given a provisional REGEX fill, with the value pushed.
    *  Accumulating fields (issue clauses, TBS steps, the issue type derived
@@ -913,17 +925,22 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
   // -----------------------------------------------------------------
   //  Lifecycle
   // -----------------------------------------------------------------
-  const start = useCallback(async () => {
+  const start = useCallback(async (recordingDebug = false) => {
     if (!isSupported) return;
 
     setError(null);
     shouldCaptureRef.current = true;
+    recordingDebugRef.current = recordingDebug;
+    setIsRecordingDebug(recordingDebug);
     seqRef.current = 0;
     nextFlushSeqRef.current = 1;
     pendingRef.current.clear();
 
     // 1. Capture the CCP tab — video: true is required for tab audio,
-    //    and the user must tick "Also share tab audio" in the share dialog
+    //    and the user must tick "Also share tab audio" in the share dialog.
+    //    In DEBUG RECORDING mode this is the ONLY source: the user shares
+    //    the tab PLAYING the recorded conversation (agent + customer on
+    //    one track) and the mic is never opened.
     let display: MediaStream;
     try {
       display = await navigator.mediaDevices.getDisplayMedia({
@@ -933,35 +950,47 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     } catch (err) {
       setError(readableCaptureError(err));
       shouldCaptureRef.current = false;
+      recordingDebugRef.current = false;
+      setIsRecordingDebug(false);
       return;
     }
 
     if (display.getAudioTracks().length === 0) {
       display.getTracks().forEach((t) => t.stop());
       setError(
-        'No tab audio in that share — click "Capture call" again, choose the CCP tab, and tick "Also share tab audio".'
+        recordingDebug
+          ? 'No tab audio in that share — pick the tab PLAYING the recorded conversation and tick "Also share tab audio".'
+          : 'No tab audio in that share — click "Capture call" again, choose the CCP tab, and tick "Also share tab audio".'
       );
       shouldCaptureRef.current = false;
+      recordingDebugRef.current = false;
+      setIsRecordingDebug(false);
       return;
     }
     displayStreamRef.current = display;
 
-    // 2. Also open the agent's mic. It is recorded as a SEPARATE stream so
-    //    Whisper can be told who is speaking (mic = agent, tab = customer)
-    //    instead of getting an inseparable mix of both voices.
+    // 2. Also open the agent's mic — SKIPPED in DEBUG RECORDING mode (the
+    //    recording already contains both parties). It is recorded as a
+    //    SEPARATE stream so Whisper can be told who is speaking
+    //    (mic = agent, tab = customer) instead of getting an inseparable
+    //    mix of both voices.
     let mic: MediaStream | null = null;
-    try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      micStreamRef.current = mic;
-      setHasMic(true);
-    } catch {
-      // Headset/mic unavailable — continue with the customer side only
+    if (!recordingDebug) {
+      try {
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        micStreamRef.current = mic;
+        setHasMic(true);
+      } catch {
+        // Headset/mic unavailable — continue with the customer side only
+        setHasMic(false);
+      }
+    } else {
       setHasMic(false);
     }
 
@@ -998,7 +1027,13 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
 
     const tabAudioStream = new MediaStream([display.getAudioTracks()[0]]);
     const tabRecorder = new MediaRecorder(tabAudioStream, recorderOptions);
-    tabRecorder.ondataavailable = (event) => handleSegmentData('customer', event);
+    // DEBUG RECORDING mode tags the single-source blobs 'recording' (mixed
+    // agent + customer audio); normal mode tags them 'customer'. The tag is
+    // bound in the CLOSURE per session — the final dataavailable fires after
+    // stop() has already reset the mutable ref, so it must not be read at
+    // event time.
+    const tabSpeaker: Speaker = recordingDebug ? 'recording' : 'customer';
+    tabRecorder.ondataavailable = (event) => handleSegmentData(tabSpeaker, event);
     // The tab recorder owns the restart cadence; the mic recorder rides along.
     tabRecorder.onstop = () => {
       if (shouldCaptureRef.current) {
@@ -1026,7 +1061,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
 
   const stop = useCallback(() => {
     shouldCaptureRef.current = false;
+    recordingDebugRef.current = false;
     setIsCapturing(false);
+    setIsRecordingDebug(false);
     setHasMic(false);
 
     if (segmentTimerRef.current !== null) {
@@ -1075,6 +1112,29 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     } else {
       void start();
     }
+  }, [start, stop]);
+
+  /**
+   * Debug recording mode toggle. Starts capture from ONE source only (the
+   * shared tab's audio — a RECORDED agent+customer conversation playing in
+   * it) instead of tab + mic. Clicking again stops it; clicking while a
+   * normal capture is running switches that capture into debug mode (the
+   * old session's final partial segment is allowed to flush first).
+   */
+  const toggleRecordingDebug = useCallback(async () => {
+    if (recordingDebugRef.current) {
+      stop();
+      return;
+    }
+    if (shouldCaptureRef.current) {
+      stop();
+      // stop() only ASKS the recorders to stop — their final dataavailable
+      // + onstop events land as tasks afterwards and flush the last partial
+      // window. Give them a beat before the new session resets the seq
+      // counters, or that tail segment is dropped.
+      await sleep(RESTART_DELAY_MS + 50);
+    }
+    await start(true);
   }, [start, stop]);
 
   /**
@@ -1185,6 +1245,11 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     isSupported,
     isCapturing,
     toggle,
+    /** Debug: capture ONE source (tab audio of a recorded conversation)
+     *  instead of tab + mic; segments are tagged 'recording'. */
+    toggleRecordingDebug,
+    /** True while the debug single-source recording capture is running */
+    isRecordingDebug,
     stop,
     clear,
     finalize,

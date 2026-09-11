@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic, Sparkles } from 'lucide-react';
+import { Bug, Loader2, Mic, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -28,7 +28,8 @@ export interface MicPanelState {
 
 export interface CallPanelState {
   isCapturing: boolean;
-  /** Speaker-tagged transcript: Agent = mic, Customer = tab audio */
+  /** Speaker-tagged transcript: Agent = mic, Customer = tab audio,
+   *  Recording = debug single-source capture (mixed both parties) */
   transcript: TranscriptEntry[];
   suggestions: ExtractedField[];
   segmentsSent: number;
@@ -40,7 +41,12 @@ export interface CallPanelState {
   /** Live input level of the agent's microphone */
   agentLevel: number;
   hasMic: boolean;
+  /** True while DEBUG RECORDING mode captures ONE source (tab audio of a
+   *  recorded agent+customer conversation) instead of tab + mic */
+  isRecordingDebug: boolean;
   onToggle: () => void;
+  /** Start/stop the debug single-source recording capture */
+  onToggleRecordingDebug: () => void;
   onClear: () => void;
 }
 
@@ -333,9 +339,11 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
       ? `Loading Whisper ${engine.model} on this machine — one-time download, cached afterwards…`
       : engine.status === 'error'
         ? 'Whisper model failed to load — try switching models or reload the page.'
-        : call.hasMic
-          ? 'Capturing both speakers — Customer from the CCP tab, Agent from your mic. First captions arrive after ~15s.'
-          : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.';
+        : call.isRecordingDebug
+          ? 'Recording debug — share the tab PLAYING the recorded conversation (with audio). Both voices arrive mixed on one channel, transcribed as RECORDING lines; the AI parse attributes each statement itself.'
+          : call.hasMic
+            ? 'Capturing both speakers — Customer from the CCP tab, Agent from your mic. First captions arrive after ~15s.'
+            : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.'
 
   // Hidden when idle with nothing captured and no error to show
   // — EXCEPT when mounted inside the canvas (default): the box always
@@ -362,11 +370,47 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
           )}
           <p className="flex-1 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {activeSource === 'call'
-              ? 'Live captions — Agent + Customer'
+              ? call.isRecordingDebug
+                ? 'Live captions — recording debug'
+                : 'Live captions — Agent + Customer'
               : activeSource === 'mic'
                 ? 'Live captions — mic'
                 : 'Captured transcript'}
           </p>
+
+          {/* RECORDING badge — debug mode: ONE source (a recorded
+              agent+customer conversation), no mic capture. */}
+          {call.isRecordingDebug && (
+            <span
+              className="flex shrink-0 items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-500 dark:text-red-400"
+              title="Debug recording mode — capturing ONE audio source (the tab playing the recorded conversation). Both voices arrive mixed on a single channel; the transcript is tagged RECORDING and the AI parse attributes each statement itself."
+            >
+              <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
+              RECORDING
+            </span>
+          )}
+
+          {/* Debug recording toggle — capture a single source (a recording
+              of a full agent+customer conversation) instead of tab + mic. */}
+          <button
+            type="button"
+            onClick={call.onToggleRecordingDebug}
+            aria-pressed={call.isRecordingDebug}
+            aria-label="Toggle debug recording capture — single audio source, no mic"
+            title={
+              call.isRecordingDebug
+                ? 'Debug recording mode is ON — one audio source (recorded conversation), no mic. Click to stop.'
+                : 'Debug: capture ONE audio source instead of tab + mic. Play a recorded agent/customer conversation in a tab, click this, and share that tab (with audio). Segments are tagged RECORDING; the AI parse attributes each statement itself.'
+            }
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+              call.isRecordingDebug
+                ? 'bg-red-500/20 text-red-500 dark:text-red-400'
+                : 'text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground'
+            )}
+          >
+            <Bug className="size-3.5" />
+          </button>
 
           {/* Segments sent + in-flight spinner (call mode) */}
           {activeSource === 'call' && (
@@ -455,19 +499,34 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
         )}
 
         {/* Per-speaker audio level meters — proves each channel is live.
-            Engine controls/resources live in the toolbar's settings panel. */}
+            Engine controls/resources live in the toolbar's settings panel.
+            Debug recording mode: ONE meter (the single shared source). */}
         {isActive && activeSource === 'call' && (
           <div className="mt-1.5 flex flex-wrap items-center gap-3">
-            <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
-            {call.hasMic ? (
-              <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+            {call.isRecordingDebug ? (
+              <>
+                <SpeakerMeter label="Recording" level={call.customerLevel} tone="red" />
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="Debug recording mode — the mic is NOT captured; the recorded conversation (agent + customer mixed) arrives on the single shared tab's audio."
+                >
+                  single source — mic not captured
+                </span>
+              </>
             ) : (
-              <span
-                className="text-[10px] text-muted-foreground/70"
-                title="No microphone was shared — only the customer side is transcribed"
-              >
-                mic unavailable — customer only
-              </span>
+              <>
+                <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
+                {call.hasMic ? (
+                  <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+                ) : (
+                  <span
+                    className="text-[10px] text-muted-foreground/70"
+                    title="No microphone was shared — only the customer side is transcribed"
+                  >
+                    mic unavailable — customer only
+                  </span>
+                )}
+              </>
             )}
             {call.hasMic && !bothQuiet && (
               <span
@@ -552,15 +611,23 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                           'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
                           entry.speaker === 'agent'
                             ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                            : entry.speaker === 'recording'
+                              ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                              : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                         )}
                         title={
                           entry.speaker === 'agent'
                             ? 'Your microphone'
-                            : 'CCP tab audio'
+                            : entry.speaker === 'recording'
+                              ? 'Single-channel recording — agent and customer mixed; the AI parse attributes each statement'
+                              : 'CCP tab audio'
                         }
                       >
-                        {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                        {entry.speaker === 'agent'
+                          ? 'Agent'
+                          : entry.speaker === 'recording'
+                            ? 'Recording'
+                            : 'Customer'}
                       </span>
                       <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
                         {entry.text}

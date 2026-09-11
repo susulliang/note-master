@@ -1446,6 +1446,20 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
     call.toggle();
   }, [call, localWhisper, llmParser]);
 
+  /** Debug recording capture — ONE source (a tab playing a recorded
+   *  agent+customer conversation) instead of tab + mic. Same model warm-up
+   *  as a normal capture so the debug run isn't download-bound either. */
+  const handleToggleRecordingDebug = useCallback(() => {
+    if (voice.isListening) voice.stop();
+    if (localWhisper.isSupported && localWhisper.status !== 'ready') {
+      void localWhisper.load();
+    }
+    if (llmParser.enabled && !llmParser.isReady) {
+      void llmParser.load();
+    }
+    void call.toggleRecordingDebug();
+  }, [call, localWhisper, llmParser, voice]);
+
   const handleSwitchWhisperModel = useCallback(
     (model: Parameters<typeof localWhisper.switchModel>[0]) => {
       localWhisper.switchModel(model);
@@ -1702,7 +1716,9 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                     customerLevel: call.customerLevel,
                     agentLevel: call.agentLevel,
                     hasMic: call.hasMic,
+                    isRecordingDebug: call.isRecordingDebug,
                     onToggle: handleToggleCall,
+                    onToggleRecordingDebug: handleToggleRecordingDebug,
                     onClear: handleClearCall,
                   }}
                   engine={{

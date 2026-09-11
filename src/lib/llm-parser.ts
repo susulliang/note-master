@@ -336,7 +336,10 @@ export function buildPromptWindow(
     if (isNoiseTurn(e.text)) continue;
     const clean = stripAsrArtifacts(e.text);
     if (clean.length === 0) continue;
-    kept.push({ index: i, line: `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${clean}` });
+    kept.push({
+      index: i,
+      line: `${e.speaker === 'agent' ? 'AGENT' : e.speaker === 'recording' ? 'RECORDING' : 'CUSTOMER'}: ${clean}`,
+    });
   }
 
   let lines = kept;
@@ -509,6 +512,13 @@ export function buildParsePrompt(
     ])
   );
   const concise = mode === 'concise';
+  // Debug recording mode: transcript lines tagged RECORDING come from ONE
+  // mixed channel holding BOTH parties — the model must attribute each
+  // statement itself from content before extracting.
+  const hasRecording = entries.some((e) => e.speaker === 'recording');
+  const recordingRule = hasRecording
+    ? 'RECORDING LINES: lines tagged "RECORDING:" are single-channel recording audio containing BOTH the agent and the customer mixed together. Attribute each statement to the correct party yourself based on its content (who speaks like the support rep, who like the caller) before extracting — issue points come from the customer, resolution steps from the agent.'
+    : null;
   const issueDescRule = concise
     ? 'issueDescription: <ONLY the 2–4 MOST IMPORTANT customer complaint clauses, short phrases joined with "; ". EXCLUDE diagnostic tangents, side-topic small-talk, ruled-out possibilities, pure filler, and any minor detail not needed to understand what happened. RICH TEXT RULE: wrap the top 1–2 worst / most-confirmed clauses in **double asterisks** bold. Accuracy is non-negotiable — every clause you keep must be directly stated in the transcript; never invent or paraphrase beyond what the call supports.>'
     : 'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the MOST IMPORTANT customer complaint points (root-cause symptoms, safety concerns, high-severity failures, expensive part damage, strongly-worded customer requests) in **double asterisks** so they render as bold. Markdown only, no other formatting. At least the key clause gets bolded — if the list has several points, highlight the top 2–4 that capture "what went wrong" without overmarking.';
@@ -530,6 +540,7 @@ export function buildParsePrompt(
       // FRENCH. The LLM is the translation boundary — every value it
       // emits must already be English.
       'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
+      recordingRule,
       'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
       'customerName: <the customer\'s own name, or empty>',
       'contactNumber: <their phone number, or empty>',
@@ -582,6 +593,7 @@ export function buildParsePrompt(
     // FRENCH. The LLM is the translation boundary — every value it
     // emits must already be English.
     'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
+    recordingRule,
     'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',

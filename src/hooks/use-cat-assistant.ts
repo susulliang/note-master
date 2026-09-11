@@ -205,9 +205,13 @@ export function useCatAssistant({
     setIsThinking(true);
 
     // Take the last ~600 chars of transcript for context (most recent speech).
+    // 'recording' entries (debug single-channel capture) render as "Recording:".
     const window = transcript.slice(-8);
     const user = window
-      .map((e) => `${e.speaker === 'agent' ? 'Agent' : 'Customer'}: ${e.text}`)
+      .map(
+        (e) =>
+          `${e.speaker === 'agent' ? 'Agent' : e.speaker === 'recording' ? 'Recording' : 'Customer'}: ${e.text}`
+      )
       .join('\n');
 
     void cloudGenerate(ADVICE_SYSTEM, user, ADVICE_MAX_TOKENS).then(({ text, timedOut }) => {

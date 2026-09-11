@@ -27,8 +27,13 @@ import { DEEBOT_MODELS, ISSUE_TYPES } from '@/data/ticket';
 //  Transcript types
 // ---------------------------------------------------------------------------
 
-/** Who said something: the agent (mic) or the customer (CCP tab audio) */
-export type Speaker = 'agent' | 'customer';
+/**
+ * Who said something: the agent (mic), the customer (CCP tab audio), or a
+ * mixed single-channel RECORDING (debug mode: a tab playing a recorded
+ * conversation of BOTH parties — attribution is impossible, so the entry
+ * is tagged 'recording' and the parsers treat the text as either voice).
+ */
+export type Speaker = 'agent' | 'customer' | 'recording';
 
 /** One transcribed utterance, tagged with who said it. */
 export interface TranscriptEntry {
@@ -813,12 +818,16 @@ export const ACCUMULATING_FIELD_IDS: ReadonlySet<string> = new Set(
 export function extractFields(entries: TranscriptEntry[]): ExtractedField[] {
   if (entries.length === 0) return [];
 
+  // 'recording' entries (debug mode, mixed single-channel audio) join BOTH
+  // pools: attribution is impossible, and the provisional regex fill is
+  // allowed to catch a match from either voice — the LLM parse, which reads
+  // the speaker-agnostic RECORDING lines with full context, overrides them.
   const customerText = entries
-    .filter((e) => e.speaker === 'customer')
+    .filter((e) => e.speaker !== 'agent')
     .map((e) => e.text)
     .join(' ');
   const agentText = entries
-    .filter((e) => e.speaker === 'agent')
+    .filter((e) => e.speaker !== 'customer')
     .map((e) => e.text)
     .join(' ');
 
