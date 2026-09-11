@@ -4,10 +4,22 @@
  * Whisper runs fully in the browser via transformers.js v3 (ONNX Runtime Web,
  * WASM backend): call audio never leaves the machine, there is no API key
  * and no per-minute cost. The trade-off is a one-time model download and
- * CPU inference, so both models are English-only quantized exports:
+ * CPU inference, so all models are quantized Xenova exports:
  *
  *   base.en — default; higher accuracy, ~70 MB one-time download
  *   tiny.en — lighter and faster fallback, ~30 MB one-time download
+ *   base.fr — French-capable, translates speech to English, ~75 MB
+ *   tiny.fr — French-capable translate-to-English, fastest, ~35 MB
+ *
+ * The ".fr" models are the MULTILINGUAL base/tiny exports (same Xenova
+ * q8 lineage as the .en ones — there is no dedicated .fr export). They
+ * run Whisper's built-in TRANSLATE task (see transcribe.worker.ts): the
+ * spoken language is auto-detected and the transcript comes back in
+ * ENGLISH, so the English field-extraction patterns, the English LLM
+ * prompts and the English ticket note all work unchanged on French
+ * calls. Auto-detection (rather than forcing language='french') also
+ * keeps mixed calls working — an English-speaking agent on the mic and
+ * a French-speaking customer on the CCP tab both come out English.
  *
  * Repos are the Xenova exports (not the newer `onnx-community` ones): their
  * `q8` files are the classic DynamicQuantizeLinear exports that transformers.js
@@ -24,6 +36,8 @@
 export const LOCAL_WHISPER_MODELS = {
   'base.en': 'Xenova/whisper-base.en',
   'tiny.en': 'Xenova/whisper-tiny.en',
+  'base.fr': 'Xenova/whisper-base',
+  'tiny.fr': 'Xenova/whisper-tiny',
 } as const;
 
 export type WhisperModelName = keyof typeof LOCAL_WHISPER_MODELS;
@@ -36,9 +50,22 @@ export const WHISPER_MODEL_META: Record<
 > = {
   'base.en': { label: 'base.en', note: 'Higher accuracy · ~70 MB one-time download' },
   'tiny.en': { label: 'tiny.en', note: 'Fastest + lightest · ~30 MB one-time download' },
+  'base.fr': {
+    label: 'base.fr',
+    note: 'French calls · auto-detects language, transcript translated to English · ~75 MB one-time download',
+  },
+  'tiny.fr': {
+    label: 'tiny.fr',
+    note: 'French calls · fastest translate-to-English · ~35 MB one-time download',
+  },
 };
 
 export const WHISPER_MODELS = Object.keys(LOCAL_WHISPER_MODELS) as WhisperModelName[];
+
+/** True when the model transcribes non-English speech into English text */
+export function isTranslateModel(model: WhisperModelName): boolean {
+  return model.endsWith('.fr');
+}
 
 /**
  * Approximate resident-memory footprint per model + precision (MB) — the
@@ -48,6 +75,9 @@ export const WHISPER_MODELS = Object.keys(LOCAL_WHISPER_MODELS) as WhisperModelN
 export const WHISPER_RAM_ESTIMATE_MB: Record<WhisperModelName, Record<WhisperDtype, number>> = {
   'base.en': { q8: 150, fp32: 480 },
   'tiny.en': { q8: 60, fp32: 200 },
+  // Multilingual twins share the .en param counts (74M / 39M)
+  'base.fr': { q8: 150, fp32: 480 },
+  'tiny.fr': { q8: 60, fp32: 200 },
 };
 
 /**

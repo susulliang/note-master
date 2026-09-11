@@ -1319,7 +1319,10 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
   // ---------------------------------------------------------------------
   //  Local Whisper engine — on-device transcription of the CCP call.
   //  Fully local (transformers.js WASM in a worker): no API key, no
-  //  upload, no per-minute cost. base.en by default, tiny.en available.
+  //  upload, no per-minute cost. base.en by default, tiny.en available,
+  //  plus base.fr / tiny.fr for French calls — those run Whisper's
+  //  translate task, so the transcript comes back in English and the
+  //  fields / ticket note stay in English.
   // ---------------------------------------------------------------------
   const localWhisper = useLocalTranscriber();
 

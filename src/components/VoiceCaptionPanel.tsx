@@ -246,7 +246,8 @@ function EngineProgressRow({
  *          each transcribed separately by a local Whisper model in a Web
  *          Worker so every line is speaker-tagged — Customer (tab audio)
  *          vs Agent (your mic). On-device, no API, no upload. base.en by
- *          default, tiny.en for a faster/lighter run.
+ *          default, tiny.en for a faster/lighter run, and base.fr/tiny.fr
+ *          for French calls — the transcript comes back in English.
  *
  * Shows whichever source is active: speaker-tagged transcript, per-speaker
  * audio levels, transcribe-in-flight spinner, errors, engine status, and

@@ -34,8 +34,10 @@ interface PendingTranscribe {
  * Owns the transcribe worker: it is created lazily on the first `load()`
  * call (no worker spin-up for agents who never touch call capture), keeps
  * one pipeline resident, and supports switching between base.en (default,
- * higher accuracy) and tiny.en (faster, lighter). Downloads are one-time
- * per model — the browser caches the weights.
+ * higher accuracy), tiny.en (faster, lighter), and the French-capable
+ * base.fr / tiny.fr models, which run Whisper's translate task so French
+ * calls still produce an English transcript, fields and note. Downloads
+ * are one-time per model — the browser caches the weights.
  *
  * Model and working-dtype preferences survive reloads via localStorage.
  */

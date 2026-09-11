@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import {
   WHISPER_MODELS,
   WHISPER_MODEL_META,
   WHISPER_RAM_ESTIMATE_MB,
+  isTranslateModel,
   type WhisperDtype,
   type WhisperModelName,
 } from '@/lib/whisper-models';
@@ -366,24 +367,41 @@ export default function EngineSettingsPanel({
                 Local
               </span>
               <span className="inline-flex overflow-hidden rounded-full border border-border/40">
-                {WHISPER_MODELS.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => engine.onSwitchModel(name)}
-                    disabled={engine.status === 'loading' && engine.model === name}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
-                      engine.model === name
-                        ? 'bg-foreground/10 text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                    title={WHISPER_MODEL_META[name].note}
-                  >
-                    {WHISPER_MODEL_META[name].label}
-                  </button>
+                {WHISPER_MODELS.map((name, index) => (
+                  <Fragment key={name}>
+                    {/* Divider between the English (.en) and French (.fr)
+                        model groups — the .fr models translate speech to
+                        English, so agents can spot the boundary at a
+                        glance while mid-call. */}
+                    {isTranslateModel(name) &&
+                      (index === 0 || !isTranslateModel(WHISPER_MODELS[index - 1])) && (
+                        <span aria-hidden="true" className="my-0.5 w-px self-stretch bg-border/60" />
+                      )}
+                    <button
+                      type="button"
+                      onClick={() => engine.onSwitchModel(name)}
+                      disabled={engine.status === 'loading' && engine.model === name}
+                      className={cn(
+                        'px-2 py-0.5 text-[10px] font-medium leading-none transition-colors',
+                        engine.model === name
+                          ? 'bg-foreground/10 text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                      title={WHISPER_MODEL_META[name].note}
+                    >
+                      {WHISPER_MODEL_META[name].label}
+                    </button>
+                  </Fragment>
                 ))}
               </span>
+              {isTranslateModel(engine.model) && (
+                <span
+                  className="text-[10px] text-muted-foreground"
+                  title="French (or any detected) speech is transcribed directly into English — fields and the ticket note stay in English"
+                >
+                  → EN
+                </span>
+              )}
               {engine.status === 'loading' && (
                 <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Loader2 className="size-2.5 animate-spin" />

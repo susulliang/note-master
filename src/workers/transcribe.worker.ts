@@ -1,9 +1,12 @@
 /**
  * Local Whisper transcription worker.
  *
- * Loads a quantized English Whisper model (Xenova/whisper-{base,tiny}.en)
- * through transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
- * on-device. Keeping this in a worker matters twice over:
+ * Loads a quantized Whisper model (Xenova/whisper-{base,tiny}[.en]) through
+ * transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
+ * on-device. The `.fr` models are the multilingual exports running the
+ * TRANSLATE task, so French (or any detected language) audio comes back
+ * as English text — fields and notes stay in English on French calls.
+ * Keeping this in a worker matters twice over:
  *
  *   1. WASM inference is CPU-heavy — running it off the main thread keeps
  *      the flowchart editor at 60 fps while segments transcribe.
@@ -49,7 +52,7 @@ let current: {
 /** In-flight load, so transcribe requests can await a model swap */
 let loading: Promise<void> | null = null;
 
-/** Serialize loads: a rapid base.en ⇄ tiny.en toggle must not interleave */
+/** Serialize loads: a rapid model toggle (e.g. base.en ⇄ base.fr) must not interleave */
 let loadChain: Promise<void> = Promise.resolve();
 
 // Window-typed `self` can't express worker-scope postMessage; narrow it.
@@ -161,7 +164,19 @@ async function handleTranscribe(id: number, audio: Float32Array): Promise<void> 
 
     // Segments are ≤ 30 s, so the single-pass path applies — no chunking
     // options needed; the pipeline zero-pads to Whisper's 30 s window.
-    const output = (await current.pipe(audio)) as { text?: string } | Array<{ text?: string }>;
+    //
+    // French models (.fr = multilingual base/tiny) run Whisper's built-in
+    // TRANSLATE task: the spoken language is auto-detected and the text
+    // comes back in ENGLISH, so the English field-extraction patterns,
+    // the English LLM prompts and the English ticket note work unchanged
+    // on French calls. The language is deliberately NOT forced — mixed
+    // calls (agent in English on the mic, customer in French on the CCP
+    // tab) both come out English. English-only `.en` models must NOT
+    // receive task/language options (multilingual-only kwargs).
+    const output = (await current.pipe(
+      audio,
+      current.model.endsWith('.fr') ? { task: 'translate' } : {}
+    )) as { text?: string } | Array<{ text?: string }>;
     const text = (Array.isArray(output) ? (output[0]?.text ?? '') : (output.text ?? '')).trim();
 
     post({ type: 'result', id, text, ms: Math.round(performance.now() - started) });
