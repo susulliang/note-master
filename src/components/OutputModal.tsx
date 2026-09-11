@@ -13,7 +13,6 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { TicketPanelsContext } from './FlowNode';
 import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
-import { cn } from '@/lib/utils';
 
 interface OutputModalProps {
   open: boolean;
@@ -108,6 +107,9 @@ export default function OutputModal({
   const [editableText, setEditableText] = useState(noteText);
   const [pushing, setPushing] = useState(false);
   const [pushReport, setPushReport] = useState<PushReport | null>(null);
+  /** Raw-source textarea collapsed by default — most calls only need the
+   *  rendered preview; the Show Source toggle in the action row expands it. */
+  const [sourceOpen, setSourceOpen] = useState(false);
   const panelsCtx = useContext(TicketPanelsContext);
 
   // Defensive fallback: OutputModal was accidentally rendered outside
@@ -723,7 +725,7 @@ export default function OutputModal({
           </DialogTitle>
           <DialogDescription className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Pencil className="size-3.5" />
-            Preview the bold highlights above, then edit the raw note below. Copy writes both rich and plain text.
+            Preview the bold highlights above — use Show Source to edit the raw note. Copy writes both rich and plain text.
           </DialogDescription>
         </DialogHeader>
 
@@ -790,22 +792,26 @@ export default function OutputModal({
           </div>
         </div>
 
-        {/* (C2) Bottom: editable SOURCE textarea — raw **…** markdown visible,
-         *  so the agent can manually adjust bold emphasis, copy the raw
-         *  string, or paste it back into a ticket system that supports md. */}
-        <div className="rounded-xl border border-border/70 bg-card/70 backdrop-blur-sm">
-          <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
-            <Code2 className="size-3.5 text-accent" />
-            <span className="font-semibold tracking-wide text-accent">SOURCE</span>
-            <span className="ml-auto opacity-70">Edit here — **bold** drives the preview above</span>
+        {/* (C2) Bottom: editable SOURCE textarea — HIDDEN BY DEFAULT (most
+         *  calls only need the preview); the Show Source toggle in the
+         *  action row expands it. Raw **…** markdown visible, so the agent
+         *  can manually adjust bold emphasis, copy the raw string, or paste
+         *  it back into a ticket system that supports md. */}
+        {sourceOpen && (
+          <div className="rounded-xl border border-border/70 bg-card/70 backdrop-blur-sm">
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
+              <Code2 className="size-3.5 text-accent" />
+              <span className="font-semibold tracking-wide text-accent">SOURCE</span>
+              <span className="ml-auto opacity-70">Edit here — **bold** drives the preview above</span>
+            </div>
+            <textarea
+              value={editableText}
+              onChange={(e) => setEditableText(e.target.value)}
+              spellCheck={false}
+              className="glass-field max-h-[30vh] min-h-[150px] w-full resize-none whitespace-pre-wrap break-words rounded-b-xl bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:bg-card/80"
+            />
           </div>
-          <textarea
-            value={editableText}
-            onChange={(e) => setEditableText(e.target.value)}
-            spellCheck={false}
-            className="glass-field max-h-[30vh] min-h-[150px] w-full resize-none whitespace-pre-wrap break-words rounded-b-xl bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:bg-card/80"
-          />
-        </div>
+        )}
 
         {/* (C3) Last push report — persistent per-target breakdown of the
          *  most recent "Push to Salesforce Case" run: the chatter Post
@@ -855,15 +861,27 @@ export default function OutputModal({
           </div>
         )}
 
+        {/* Action row: Source toggle + Push to Salesforce + Diagnostics all
+         *  on ONE line (left), copy/close controls on the right. */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSourceOpen((v) => !v)}
+              aria-expanded={sourceOpen}
+              className="gap-1.5"
+              title="Toggle the editable raw note source (markdown **bold** markup). Hidden by default — the preview above is what gets copied."
+            >
+              <Code2 className="size-3.5 text-accent" />
+              {sourceOpen ? 'Hide Source' : 'Show Source'}
+            </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={() => void handlePushToSalesforce()}
               aria-disabled={pushing}
-              className={cn('ml-2 gap-1.5', applyCaseFields ? 'text-foreground' : 'text-foreground')}
+              className="gap-1.5"
               title={
                 applyCaseFields
                   ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit."
@@ -947,6 +965,9 @@ export default function OutputModal({
             </Button>
           </div>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
+        </p>
       </DialogContent>
     </Dialog>
   );
