@@ -12,7 +12,8 @@
     "precommit": "npm run lint",
     "prepare": "node scripts/setup-git-hooks.mjs",
     "ext:bump": "node scripts/bump-version.mjs",
-    "bump": "node scripts/bump-version.mjs"
+    "bump": "node scripts/bump-version.mjs",
+    "bench:whisper": "node scripts/bench-whisper.mjs"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",
@@ -82,6 +83,7 @@
   "devDependencies": {
     "@lark-apaas/coding-preset-vite-react": "^1.0.13",
     "@lark-apaas/coding-presets-react": "^0.1.0",
+    "@timur00kh/whisper.wasm": "^0.1.1",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -89,6 +91,7 @@
     "eslint": "^9",
     "mammoth": "^1.12.2",
     "pdf-parse": "^2.4.5",
+    "playwright": "^1.63.0",
     "typescript": "~5.9",
     "vite": "^8",
     "xlsx": "^0.18.5"

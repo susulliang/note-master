@@ -67,3 +67,7 @@ pnpm-lock.yaml
 __pycache__/
 *.pyc
 *.pyo
+
+# Whisper bench model mirror cache
+.bench-cache/
+*/.bench-cache/
