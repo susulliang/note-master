@@ -61,7 +61,9 @@ export function useCloudParser() {
 
   /**
    * One cloud extraction. Never rejects: failures land in `error` state
-   * and resolve to [] so the caller's apply path is a no-op.
+   * and resolve to an empty outcome so the caller's apply path is a no-op.
+   * The reply's bilingual whole-call TLDR rides along — the ZH half is
+   * appended to the ticket note's Additional information section.
    */
   const parse = useCallback(
     async (
@@ -69,8 +71,9 @@ export function useCloudParser() {
       prior?: PriorLlmValues,
       /** 'full' = every clause (default); 'concise' = 2–4 primary issues + 2–4 main fix steps */
       mode: 'full' | 'concise' = 'full'
-    ): Promise<ExtractedField[]> => {
-      if (runningRef.current) return [];
+    ): Promise<{ fields: ExtractedField[]; tldr: { en: string; zh: string } }> => {
+      const EMPTY = { fields: [] as ExtractedField[], tldr: { en: '', zh: '' } };
+      if (runningRef.current) return EMPTY;
       runningRef.current = true;
       setIsParsing(true);
       setError(null);
@@ -89,10 +92,10 @@ export function useCloudParser() {
         );
         if (error) {
           setError(error);
-          return [];
+          return EMPTY;
         }
         if (result) setLastResult(result);
-        return result?.fields ?? [];
+        return { fields: result?.fields ?? [], tldr: result?.tldr ?? EMPTY.tldr };
       } finally {
         runningRef.current = false;
         setIsParsing(false);

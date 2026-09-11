@@ -471,7 +471,17 @@ export function buildParsePrompt(
    * steps that the customer immediately ruled out, etc. Used by the
    * "Concise Parse" secondary button in the caption panel header.
    */
-  mode: 'full' | 'concise' = 'full'
+  mode: 'full' | 'concise' = 'full',
+  /**
+   * Also ask for a BILINGUAL TLDR of the whole conversation, returned
+   * alongside the fields: two extra reply lines "EN: …" / "ZH: …" (simple
+   * format) or "tldrEn"/"tldrZh" JSON keys (json format). Parsed by
+   * extractTldr(); validateLlmFields() drops the extra keys and
+   * extractLineFields() skips the EN:/ZH: lines, so field extraction is
+   * unaffected. Used by the cloud Parse/Concise buttons — the ZH half
+   * later lands in the note's Additional information section.
+   */
+  includeTldr = false
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -542,6 +552,12 @@ export function buildParsePrompt(
       'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
       recordingRule,
       'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
+      ...(includeTldr
+        ? [
+            'EN: <1-3 sentences in plain English summarizing the ENTIRE conversation — the customer\'s issue, key facts captured, and the current status / next steps.>',
+            'ZH: <用1-3句简体中文总结整通对话：客户的问题、已获取的关键信息以及当前进展与下一步。>',
+          ]
+        : []),
       'customerName: <the customer\'s own name, or empty>',
       'contactNumber: <their phone number, or empty>',
       'emailAddress: <their email, or empty>',
@@ -562,7 +578,11 @@ export function buildParsePrompt(
         ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
         : null,
       ...(strict
-        ? ['CRITICAL: only the twelve lines, as short as possible, nothing else.']
+        ? [
+            includeTldr
+              ? 'CRITICAL: only the twelve field lines plus the EN and ZH summary lines, as short as possible, nothing else.'
+              : 'CRITICAL: only the twelve lines, as short as possible, nothing else.',
+          ]
         : []),
     ].filter(Boolean).join('\n');
     const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
@@ -580,7 +600,10 @@ export function buildParsePrompt(
       userLines.push('', 'resolutionSummary currently:', prior.resolutionSummary);
       if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary fix / outcome steps only.)');
     }
-    userLines.push('', `Reply with the twelve lines now, one per field.${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`);
+    userLines.push(
+      '',
+      `Reply with the twelve lines now, one per field.${includeTldr ? ' Then finish with the EN: and ZH: whole-call summary lines.' : ''}${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`
+    );
     return { system, user: userLines.join('\n') };
   }
 
@@ -607,6 +630,12 @@ export function buildParsePrompt(
       ? '7. resolutionSummary (CONCISE MODE): ONLY the 2–4 AGENT actions that MATTERED — confirmed fix steps, accepted next actions, confirmed part orders / returns / replacement decisions, or the final failed-outcome step if the call ended without a resolution. EXCLUDE every purely diagnostic question ("checked power state?") that went nowhere, every suggestion the customer declined, all small-talk. Keep the output 2–4 short phrases joined with " -> ". RICH TEXT RULE: wrap the SINGLE confirmed effective step / final success sentence in **…** markdown bold inside the JSON string. 100% accurate to transcript; never invent step wording.'
       : '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
     '8. customerNameAddressCount: a whole NUMBER (as a string) — how many times the AGENT said the CUSTOMER\'S NAME out loud during the call. Count FUZZILY: pronunciation variants / ASR misspellings of the same name still each count as one address (e.g. "Sarah", "Sara", "Saruh" are all the same name). Only count the AGENT, never the customer saying their own name. "0" if the agent never used the name.',
+    ...(includeTldr
+      ? [
+          '9. tldrEn: 1-3 plain-English sentences summarizing the ENTIRE conversation — the customer\'s issue, key facts captured, and the current status / next steps.',
+          '10. tldrZh: 1-3句简体中文总结整通对话：客户的问题、已获取的关键信息以及当前进展与下一步。',
+        ]
+      : []),
     // Identity fields already known from SF / CCP — echo verbatim, never mask
     priorIdentity
       ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
@@ -887,6 +916,33 @@ export function extractLineFields(raw: string): Record<string, unknown> | null {
     out[fieldId] = value;
   }
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Pull the bilingual whole-call TLDR out of a parse reply — the two extra
+ * lines the prompt asks for when buildParsePrompt is called with
+ * includeTldr. Tolerates both reply shapes the models emit:
+ *  - simple format: "EN: …" / "ZH: …" lines (leading bullets tolerated)
+ *  - json format:   "tldrEn" / "tldrZh" string keys (incl. fenced JSON)
+ * Returns '' halves when absent — callers keep the previous value on
+ * partial replies instead of blanking the panel.
+ */
+export function extractTldr(raw: string): { en: string; zh: string } {
+  const stripQuotes = (s: string) =>
+    s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).trim() : s;
+  let en = '';
+  let zh = '';
+  if (raw) {
+    const json = extractJsonLoose(raw);
+    if (json && typeof json === 'object') {
+      const j = json as Record<string, unknown>;
+      if (typeof j.tldrEn === 'string') en = j.tldrEn.trim();
+      if (typeof j.tldrZh === 'string') zh = j.tldrZh.trim();
+    }
+    if (!en) en = raw.match(/^\s*[-*•"']*\s*EN\s*:\s*(.+)$/m)?.[1]?.trim() ?? '';
+    if (!zh) zh = raw.match(/^\s*[-*•"']*\s*ZH\s*:\s*(.+)$/m)?.[1]?.trim() ?? '';
+  }
+  return { en: stripQuotes(en), zh: stripQuotes(zh) };
 }
 
 // ---------------------------------------------------------------------------

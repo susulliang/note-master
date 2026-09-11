@@ -54,12 +54,15 @@ export interface CallCaptureCloudParser {
    * mode:
    *  - 'full'    → every customer / agent clause (original parse button)
    *  - 'concise' → 2–4 primary issues + 2–4 primary fix steps, drop tangents
+   *
+   * The reply also carries a bilingual whole-call TLDR; the ZH half is
+   * remembered (lastParseTldr) for the note's Additional information.
    */
   parse: (
     entries: TranscriptEntry[],
     prior?: PriorLlmValues,
     mode?: 'full' | 'concise'
-  ) => Promise<ExtractedField[]>;
+  ) => Promise<{ fields: ExtractedField[]; tldr: { en: string; zh: string } }>;
 }
 
 /** Seconds of audio per transcription request — small enough for snappy
@@ -270,6 +273,12 @@ export function useCallCapture(
    *  FULL Parse on their behalf before generating the note."
    *  mode: 'full' (default) | 'concise' depending on which button ran last. */
   const lastCloudParseSuccessRef = useRef<{ at: number; mode: 'full' | 'concise' } | null>(null);
+  /** Bilingual whole-call TLDR from the last successful cloud parse (the
+   *  prompt asks for it on every Parse / Concise click). The ZH half is
+   *  appended to the note's Additional information at note generation;
+   *  a reply missing one half keeps the previous half instead of
+   *  blanking it. */
+  const parseTldrRef = useRef<{ en: string; zh: string } | null>(null);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   /** Sequential transcription chain — keeps transcript ordering stable */
@@ -693,7 +702,17 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     cloudRunningRef.current = true;
     setIsCloudParsing(true);
     try {
-      const fields = await cloud.parse(entriesRef.current, buildPriorValues(), mode);
+      const { fields, tldr } = await cloud.parse(entriesRef.current, buildPriorValues(), mode);
+      // Remember the bilingual TLDR even when the reply carried no fields —
+      // a whole-call summary is still note-worthy. Partial tolerance: keep
+      // the previous half when the model omitted one of the two.
+      if (tldr.en || tldr.zh) {
+        const prev = parseTldrRef.current;
+        parseTldrRef.current = {
+          en: tldr.en || prev?.en || '',
+          zh: tldr.zh || prev?.zh || '',
+        };
+      }
       if (fields.length === 0) return;
       const applied: ExtractedField[] = [];
       for (const field of fields) {
@@ -1254,6 +1273,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     llmSuggestionsRef.current = new Map();
     lastLlmRunRef.current = 0;
     lastCloudParseSuccessRef.current = null;
+    parseTldrRef.current = null;
     paraphrasePendingRef.current = {};
     paraphrasedFromRef.current = {};
     paraphraseRunningRef.current = false;
@@ -1322,6 +1342,10 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     /** Last successful mode and wall-clock timestamp — for the caption panel
      *  status line to show "Full parse · 2.1s" vs "Concise parse · 2.0s". */
     lastCloudParse: () => lastCloudParseSuccessRef.current,
+    /** Bilingual whole-call TLDR from the last successful Parse / Concise
+     *  (null before the first one, wiped by clear()). The note generator
+     *  appends the ZH half to the Additional information section. */
+    lastParseTldr: () => parseTldrRef.current,
     segmentsSent,
     queued,
     isTranscribing,

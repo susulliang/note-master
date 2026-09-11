@@ -1090,11 +1090,18 @@ export default function TicketNotesPage() {
     ]
   );
 
-  const buildNoteText = useCallback((data: Record<string, string | string[]>): string => {
+  const buildNoteText = useCallback(
+    (data: Record<string, string | string[]>, tldrZh?: string): string => {
     const getStr = (key: string) => {
       const v = data[key];
       return typeof v === 'string' ? v : '';
     };
+
+    // Chinese whole-call TLDR from the last Parse / Concise click rides
+    // along with the Additional information section (agent-typed notes
+    // first, the bilingual summary the LLM returned last).
+    const additional = getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A';
+    const tldrLine = tldrZh ? `\nChinese Summary: ${tldrZh}` : '';
 
     return `**Notes**
 
@@ -1109,7 +1116,7 @@ Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
 
-Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'}`;
+Additional information (if needed): ${additional}${tldrLine}`;
   }, []);
 
   /** Always-fresh mirror of the form data — the hang-up flow generates the
@@ -1628,7 +1635,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
       // Step 2 & 3: build the note from what is NOW on the form and open
       // the modal. ALWAYS runs regardless of capture errors above — this
       // is the actual "one click shows the note" guarantee.
-      const text = buildNoteText(formDataRef.current);
+      const text = buildNoteText(formDataRef.current, callNow.lastParseTldr()?.zh);
       setNoteText(text);
       setShowOutput(true);
     } finally {
@@ -1790,7 +1797,7 @@ Additional information (if needed): ${getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A'
                   issueTypeId={NODE_IDS.ISSUE_TYPE}
                   detailedIssueId={NODE_IDS.DETAILED_ISSUE}
                   purchaseInfoId={NODE_IDS.PURCHASE_INFO}
-                  getFinalNote={() => buildNoteText(formData)}
+                  getFinalNote={() => buildNoteText(formData, call.lastParseTldr()?.zh)}
                   cloudGenerate={sopCloudGenerateEnabled ? sopCloudGenerate : undefined}
                   llmGenerate={llmParser.enabled ? llmParser.generate : null}
                   llmStatus={llmParser.status}
