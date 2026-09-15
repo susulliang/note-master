@@ -4,6 +4,7 @@ import {
   writeModelPref,
   readDtypePref,
   writeDtypePref,
+  readRepoOverride,
   type WhisperMemStats,
   type WhisperModelName,
   type WhisperDtype,
@@ -34,8 +35,11 @@ interface PendingTranscribe {
  * Owns the transcribe worker: it is created lazily on the first `load()`
  * call (no worker spin-up for agents who never touch call capture), keeps
  * one pipeline resident, and supports switching between base.en (default,
- * higher accuracy) and tiny.en (faster, lighter). Downloads are one-time
- * per model — the browser caches the weights.
+ * higher accuracy), tiny.en (faster, lighter), and the French-capable
+ * base.fr / tiny.fr multilingual models, which transcribe French calls
+ * in the original language — the LLM parse step translates the fields
+ * to English. Downloads are one-time per model — the browser caches
+ * the weights.
  *
  * Model and working-dtype preferences survive reloads via localStorage.
  */
@@ -178,7 +182,15 @@ export function useLocalTranscriber() {
 
       const promise = new Promise<void>((resolve, reject) => {
         pendingLoadsRef.current.push({ model: requested, resolve, reject });
-        worker.postMessage({ type: 'load', model: requested, dtype: readDtypePref(requested) });
+        // Repo override (LoRA-merged export validation, ops swap) resolves
+        // HERE: workers cannot read localStorage, so the main thread looks
+        // it up and forwards it. Env/default fallbacks live in the worker.
+        worker.postMessage({
+          type: 'load',
+          model: requested,
+          dtype: readDtypePref(requested),
+          repo: readRepoOverride(requested),
+        });
       });
       // Fire-and-forget callers must not surface unhandled rejections.
       promise.catch(() => undefined);

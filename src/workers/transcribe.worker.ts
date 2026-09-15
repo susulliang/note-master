@@ -1,9 +1,13 @@
 /**
  * Local Whisper transcription worker.
  *
- * Loads a quantized English Whisper model (Xenova/whisper-{base,tiny}.en)
- * through transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
- * on-device. Keeping this in a worker matters twice over:
+ * Loads a quantized Whisper model (Xenova/whisper-{base,tiny}[.en]) through
+ * transformers.js v3 and transcribes 16 kHz mono PCM segments entirely
+ * on-device. The `.fr` models are the multilingual exports: speech is
+ * transcribed in its ORIGINAL language (French calls show French text in
+ * the caption panel). English happens one step later — the LLM parse
+ * prompts translate the extracted values, so fields and notes stay in
+ * English on French calls. Keeping this in a worker matters twice over:
  *
  *   1. WASM inference is CPU-heavy — running it off the main thread keeps
  *      the flowchart editor at 60 fps while segments transcribe.
@@ -14,14 +18,15 @@
  * happens once per model per browser profile.
  *
  * Protocol (see src/lib/whisper-models.ts for the message types):
- *   load       { model, dtype? }  → load-start / progress+ / ready | load-error
- *   transcribe { id, audio }       → result { id, text, ms } | transcribe-error
+ *   load       { model, dtype?, repo? }  → load-start / progress+ / ready | load-error
+ *   transcribe { id, audio }             → result { id, text, ms } | transcribe-error
  */
 
 import { pipeline, env } from '@huggingface/transformers';
 import type { AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 import {
   LOCAL_WHISPER_MODELS,
+  repoFromEnv,
   DTYPE_CHAIN,
   type WhisperModelName,
   type WhisperDtype,
@@ -39,9 +44,10 @@ interface ProgressInfo {
   progress?: number;
 }
 
-/** The currently loaded pipeline + which dtype actually worked */
+/** The currently loaded pipeline + which repo/dtype actually worked */
 let current: {
   model: WhisperModelName;
+  repo: string;
   pipe: AutomaticSpeechRecognitionPipeline;
   dtype: WhisperDtype;
 } | null = null;
@@ -49,7 +55,7 @@ let current: {
 /** In-flight load, so transcribe requests can await a model swap */
 let loading: Promise<void> | null = null;
 
-/** Serialize loads: a rapid base.en ⇄ tiny.en toggle must not interleave */
+/** Serialize loads: a rapid model toggle (e.g. base.en ⇄ base.fr) must not interleave */
 let loadChain: Promise<void> = Promise.resolve();
 
 // Window-typed `self` can't express worker-scope postMessage; narrow it.
@@ -86,12 +92,35 @@ function postMemStats(force = false): void {
 }
 
 /**
+ * Resolve which HF repo `model` loads from. Priority: the load message's
+ * repo (main-thread localStorage override — workers cannot read storage
+ * themselves) → build-time env (LoRA-merged French export baked into a
+ * deploy) → the registry default. A LoRA fine-tune must arrive MERGED and
+ * ONNX-exported in the Xenova layout — runtime adapters don't exist in
+ * this stack (see whisper-models.ts) — so for it this resolves to the
+ * merged model's repo and nothing else changes.
+ */
+function resolveRepo(model: WhisperModelName, repoOverride?: string): string {
+  if (repoOverride && repoOverride.includes('/')) return repoOverride;
+  return repoFromEnv(model) ?? LOCAL_WHISPER_MODELS[model];
+}
+
+/**
  * Load `model`, trying precisions from `preferred` (then the rest of the
  * chain, most quantized first). Resolves once a session is ready; posts
  * `ready` with the dtype that worked or `load-error` if all fail.
  */
-async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Promise<void> {
-  if (current?.model === model) {
+async function loadModel(
+  model: WhisperModelName,
+  preferred?: WhisperDtype,
+  repoOverride?: string
+): Promise<void> {
+  const repo = resolveRepo(model, repoOverride);
+
+  // Same model AND same repo → already resident. The repo check matters
+  // when an override (e.g. a candidate LoRA-merged export) changes while
+  // the model name stays 'base.fr' — that must reload, not no-op.
+  if (current?.model === model && current.repo === repo) {
     post({ type: 'ready', model, dtype: current.dtype });
     return;
   }
@@ -117,7 +146,7 @@ async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Pro
     };
 
     try {
-      const pipe = await pipeline('automatic-speech-recognition', LOCAL_WHISPER_MODELS[model], {
+      const pipe = await pipeline('automatic-speech-recognition', repo, {
         device: 'wasm',
         dtype,
         progress_callback: onProgress as (data: ProgressInfo) => void,
@@ -132,7 +161,7 @@ async function loadModel(model: WhisperModelName, preferred?: WhisperDtype): Pro
           /* best effort */
         }
       }
-      current = { model, pipe, dtype };
+      current = { model, repo, pipe, dtype };
       post({ type: 'ready', model, dtype });
       postMemStats(true); // fresh model resident — heap just grew
       return;
@@ -161,7 +190,25 @@ async function handleTranscribe(id: number, audio: Float32Array): Promise<void> 
 
     // Segments are ≤ 30 s, so the single-pass path applies — no chunking
     // options needed; the pipeline zero-pads to Whisper's 30 s window.
-    const output = (await current.pipe(audio)) as { text?: string } | Array<{ text?: string }>;
+    //
+    // French models (.fr = multilingual base/tiny) run the default
+    // TRANSCRIBE task with language='french', so the transcript comes
+    // back in the ORIGINAL language — the caption panel shows French
+    // text on French calls. Translation to English happens one step
+    // later, at the LLM parse (llm-parser.ts / cloud-parser.ts prompts
+    // tell the model to write every extracted value in English), so the
+    // fields and the ticket note stay in English. NOTE: transformers.js
+    // v3 has NOT implemented Whisper's auto language detection — an
+    // unspecified language silently defaults to ENGLISH (models.js
+    // _retrieve_init_tokens), which is why french is forced here.
+    // On a mixed call (English agent mic + French customer) Whisper is
+    // audio-driven and still transcribes English speech readably under
+    // the French token; the parse handles either language. English-only
+    // `.en` models must NOT receive task/language options (they throw).
+    const output = (await current.pipe(
+      audio,
+      current.model.endsWith('.fr') ? { language: 'french', task: 'transcribe' } : {}
+    )) as { text?: string } | Array<{ text?: string }>;
     const text = (Array.isArray(output) ? (output[0]?.text ?? '') : (output.text ?? '')).trim();
 
     post({ type: 'result', id, text, ms: Math.round(performance.now() - started) });
@@ -181,7 +228,7 @@ scope.addEventListener('message', (event) => {
   if (data.type === 'load') {
     // Chain loads so switching models rapidly is well-defined; `loading`
     // tracks the latest request (the model the user last asked for).
-    const run = loadChain.then(() => loadModel(data.model, data.dtype));
+    const run = loadChain.then(() => loadModel(data.model, data.dtype, data.repo));
     loadChain = run.catch(() => undefined);
     loading = run.catch(() => undefined);
     return;

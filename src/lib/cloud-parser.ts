@@ -27,6 +27,7 @@ import {
   buildParsePrompt,
   extractJsonLoose,
   extractLineFields,
+  extractTldr,
   validateLlmFields,
   type PriorLlmValues,
 } from '@/lib/llm-parser';
@@ -100,6 +101,12 @@ export type DeepseekProgressStage = 'connecting' | 'streaming' | 'finalizing';
 export interface CloudParseResult {
   /** Validated fields (possibly []) — validation is shared with the local parser */
   fields: ExtractedField[];
+  /**
+   * Bilingual whole-call TLDR the prompt also asks for ('' halves when the
+   * model omitted them). The ZH half is appended to the ticket note's
+   * Additional information section at note generation.
+   */
+  tldr: { en: string; zh: string };
   /** Raw model reply (debug display) */
   raw: string;
   /** prompt chars actually sent (window + system) */
@@ -302,7 +309,8 @@ export async function parseWithDeepseek(
     /* strict= */ false,
     /* format= */ 'simple',
     /* maxChars= */ CLOUD_MAX_CHARS,
-    mode
+    mode,
+    /* includeTldr= */ true
   );
   const started = performance.now();
   onProgress?.(0, 'connecting');
@@ -395,6 +403,7 @@ export async function parseWithDeepseek(
   return {
     result: {
       fields,
+      tldr: extractTldr(raw),
       raw: raw.slice(0, 4000),
       promptChars: system.length + user.length,
       ms: Math.round(performance.now() - started),

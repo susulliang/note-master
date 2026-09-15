@@ -336,7 +336,10 @@ export function buildPromptWindow(
     if (isNoiseTurn(e.text)) continue;
     const clean = stripAsrArtifacts(e.text);
     if (clean.length === 0) continue;
-    kept.push({ index: i, line: `${e.speaker === 'agent' ? 'AGENT' : 'CUSTOMER'}: ${clean}` });
+    kept.push({
+      index: i,
+      line: `${e.speaker === 'agent' ? 'AGENT' : e.speaker === 'recording' ? 'RECORDING' : 'CUSTOMER'}: ${clean}`,
+    });
   }
 
   let lines = kept;
@@ -468,7 +471,17 @@ export function buildParsePrompt(
    * steps that the customer immediately ruled out, etc. Used by the
    * "Concise Parse" secondary button in the caption panel header.
    */
-  mode: 'full' | 'concise' = 'full'
+  mode: 'full' | 'concise' = 'full',
+  /**
+   * Also ask for a BILINGUAL TLDR of the whole conversation, returned
+   * alongside the fields: two extra reply lines "EN: …" / "ZH: …" (simple
+   * format) or "tldrEn"/"tldrZh" JSON keys (json format). Parsed by
+   * extractTldr(); validateLlmFields() drops the extra keys and
+   * extractLineFields() skips the EN:/ZH: lines, so field extraction is
+   * unaffected. Used by the cloud Parse/Concise buttons — the ZH half
+   * later lands in the note's Additional information section.
+   */
+  includeTldr = false
 ): { system: string; user: string } {
   const wanted = missingFieldIds.filter((id): id is LlmFieldId =>
     (LLM_FIELD_IDS as readonly string[]).includes(id)
@@ -509,6 +522,13 @@ export function buildParsePrompt(
     ])
   );
   const concise = mode === 'concise';
+  // Debug recording mode: transcript lines tagged RECORDING come from ONE
+  // mixed channel holding BOTH parties — the model must attribute each
+  // statement itself from content before extracting.
+  const hasRecording = entries.some((e) => e.speaker === 'recording');
+  const recordingRule = hasRecording
+    ? 'RECORDING LINES: lines tagged "RECORDING:" are single-channel recording audio containing BOTH the agent and the customer mixed together. Attribute each statement to the correct party yourself based on its content (who speaks like the support rep, who like the caller) before extracting — issue points come from the customer, resolution steps from the agent.'
+    : null;
   const issueDescRule = concise
     ? 'issueDescription: <ONLY the 2–4 MOST IMPORTANT customer complaint clauses, short phrases joined with "; ". EXCLUDE diagnostic tangents, side-topic small-talk, ruled-out possibilities, pure filler, and any minor detail not needed to understand what happened. RICH TEXT RULE: wrap the top 1–2 worst / most-confirmed clauses in **double asterisks** bold. Accuracy is non-negotiable — every clause you keep must be directly stated in the transcript; never invent or paraphrase beyond what the call supports.>'
     : 'issueDescription: <EVERY distinct customer point, short clauses joined with "; ", or empty>. RICH TEXT RULE FOR THIS LINE: wrap the MOST IMPORTANT customer complaint points (root-cause symptoms, safety concerns, high-severity failures, expensive part damage, strongly-worded customer requests) in **double asterisks** so they render as bold. Markdown only, no other formatting. At least the key clause gets bolded — if the list has several points, highlight the top 2–4 that capture "what went wrong" without overmarking.';
@@ -525,7 +545,19 @@ export function buildParsePrompt(
       concise
         ? 'You write a CONDENSED ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS). Your output will go directly into the Issue Description and Resolution Summary boxes, so accuracy is critical but NON-ESSENTIAL details MUST be dropped.'
         : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS).',
+      // French calls: the .fr Whisper models transcribe in the ORIGINAL
+      // language, so the transcript (usually the customer side) may be in
+      // FRENCH. The LLM is the translation boundary — every value it
+      // emits must already be English.
+      'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
+      recordingRule,
       'Reply with ONE LINE PER FIELD, exactly this shape (no JSON, no braces, no quotes, no explanations):',
+      ...(includeTldr
+        ? [
+            'EN: <1-3 sentences in plain English summarizing the ENTIRE conversation — the customer\'s issue, key facts captured, and the current status / next steps.>',
+            'ZH: <用1-3句简体中文总结整通对话：客户的问题、已获取的关键信息以及当前进展与下一步。>',
+          ]
+        : []),
       'customerName: <the customer\'s own name, or empty>',
       'contactNumber: <their phone number, or empty>',
       'emailAddress: <their email, or empty>',
@@ -546,7 +578,11 @@ export function buildParsePrompt(
         ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
         : null,
       ...(strict
-        ? ['CRITICAL: only the twelve lines, as short as possible, nothing else.']
+        ? [
+            includeTldr
+              ? 'CRITICAL: only the twelve field lines plus the EN and ZH summary lines, as short as possible, nothing else.'
+              : 'CRITICAL: only the twelve lines, as short as possible, nothing else.',
+          ]
         : []),
     ].filter(Boolean).join('\n');
     const userLines = ['Support call transcript:', renderTranscript(entries, maxChars)];
@@ -564,7 +600,10 @@ export function buildParsePrompt(
       userLines.push('', 'resolutionSummary currently:', prior.resolutionSummary);
       if (concise) userLines.push('(Concise mode: you may REPLACE the above draft with the 2–4 primary fix / outcome steps only.)');
     }
-    userLines.push('', `Reply with the twelve lines now, one per field.${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`);
+    userLines.push(
+      '',
+      `Reply with the twelve lines now, one per field.${includeTldr ? ' Then finish with the EN: and ZH: whole-call summary lines.' : ''}${concise ? ' Remember — 2–4 issue clauses, 2–4 resolution steps max.' : ''}`
+    );
     return { system, user: userLines.join('\n') };
   }
 
@@ -572,6 +611,12 @@ export function buildParsePrompt(
     concise
       ? 'You write a CONDENSED ticket note for an Ecovacs robot support call. AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris). Output will land in the Issue Description and Resolution Summary boxes directly, so accuracy is mandatory but low-signal clauses MUST be removed.'
       : 'You write the ticket note for an Ecovacs robot support call (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool robots). AGENT is the support rep, CUSTOMER is the caller. The transcript is machine-garbled — read for INTENT, not literally ("Acovox" = ECOVACS, "free of the breeze" = free of debris).',
+    // French calls: the .fr Whisper models transcribe in the ORIGINAL
+    // language, so the transcript (usually the customer side) may be in
+    // FRENCH. The LLM is the translation boundary — every value it
+    // emits must already be English.
+    'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
+    recordingRule,
     'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
     '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
@@ -585,6 +630,12 @@ export function buildParsePrompt(
       ? '7. resolutionSummary (CONCISE MODE): ONLY the 2–4 AGENT actions that MATTERED — confirmed fix steps, accepted next actions, confirmed part orders / returns / replacement decisions, or the final failed-outcome step if the call ended without a resolution. EXCLUDE every purely diagnostic question ("checked power state?") that went nowhere, every suggestion the customer declined, all small-talk. Keep the output 2–4 short phrases joined with " -> ". RICH TEXT RULE: wrap the SINGLE confirmed effective step / final success sentence in **…** markdown bold inside the JSON string. 100% accurate to transcript; never invent step wording.'
       : '7. resolutionSummary: EVERY step, recommendation and question the agent made, in order — advice as short imperative phrases (3-10 words), questions as terse past-tense checks ("checked power state?", "wifi changed recently?"), joined with " -> ", ASR garble fixed. REPLACES the previous extraction: keep the given steps plus new ones. RICH TEXT RULE for this field value ONLY: wrap the EFFECTIVE / CONFIRMED fix steps and the final success confirmation in **…** bold inside the JSON string. Purely diagnostic checks stay un-bolded. Highlight at least the final success sentence if one is stated.',
     '8. customerNameAddressCount: a whole NUMBER (as a string) — how many times the AGENT said the CUSTOMER\'S NAME out loud during the call. Count FUZZILY: pronunciation variants / ASR misspellings of the same name still each count as one address (e.g. "Sarah", "Sara", "Saruh" are all the same name). Only count the AGENT, never the customer saying their own name. "0" if the agent never used the name.',
+    ...(includeTldr
+      ? [
+          '9. tldrEn: 1-3 plain-English sentences summarizing the ENTIRE conversation — the customer\'s issue, key facts captured, and the current status / next steps.',
+          '10. tldrZh: 1-3句简体中文总结整通对话：客户的问题、已获取的关键信息以及当前进展与下一步。',
+        ]
+      : []),
     // Identity fields already known from SF / CCP — echo verbatim, never mask
     priorIdentity
       ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
@@ -662,6 +713,9 @@ export function buildParaphrasePrompt(input: ParaphraseInput): {
   const system = [
     'You polish the notes for Ecovacs robot support calls (DEEBOT vacuums, GOAT lawn mowers, WINBOT window cleaners, ULTRAMARINE pool cleaners).',
     'The input is VERBATIM fragments a pattern engine lifted from a machine-transcribed support call: the customer\'s vernacular complaint clauses and the agent\'s troubleshooting advice, with filler words, repetition, back-channel noise and transcription errors.',
+    // French calls: the .fr Whisper models transcribe in the ORIGINAL
+    // language, so the fragments may be in FRENCH — translate them here.
+    'LANGUAGE: if the fragments are in FRENCH or another language, TRANSLATE them — both output values must be in ENGLISH. Keep proper nouns (the customer\'s name) and identifiers (model names, numbers) exactly as written, never translated or re-spelled.',
     'Rewrite each fragment list into the concise, professional style of a support-ticket note. VALUES MAY USE markdown **double asterisks** to add bold formatting INSIDE strings — you MUST write the bold markers as literal ** characters inside the JSON strings. Do not strip them.',
     'Reply with ONE JSON object and nothing else. No explanations.',
     'Rules:',
@@ -862,6 +916,33 @@ export function extractLineFields(raw: string): Record<string, unknown> | null {
     out[fieldId] = value;
   }
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Pull the bilingual whole-call TLDR out of a parse reply — the two extra
+ * lines the prompt asks for when buildParsePrompt is called with
+ * includeTldr. Tolerates both reply shapes the models emit:
+ *  - simple format: "EN: …" / "ZH: …" lines (leading bullets tolerated)
+ *  - json format:   "tldrEn" / "tldrZh" string keys (incl. fenced JSON)
+ * Returns '' halves when absent — callers keep the previous value on
+ * partial replies instead of blanking the panel.
+ */
+export function extractTldr(raw: string): { en: string; zh: string } {
+  const stripQuotes = (s: string) =>
+    s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).trim() : s;
+  let en = '';
+  let zh = '';
+  if (raw) {
+    const json = extractJsonLoose(raw);
+    if (json && typeof json === 'object') {
+      const j = json as Record<string, unknown>;
+      if (typeof j.tldrEn === 'string') en = j.tldrEn.trim();
+      if (typeof j.tldrZh === 'string') zh = j.tldrZh.trim();
+    }
+    if (!en) en = raw.match(/^\s*[-*•"']*\s*EN\s*:\s*(.+)$/m)?.[1]?.trim() ?? '';
+    if (!zh) zh = raw.match(/^\s*[-*•"']*\s*ZH\s*:\s*(.+)$/m)?.[1]?.trim() ?? '';
+  }
+  return { en: stripQuotes(en), zh: stripQuotes(zh) };
 }
 
 // ---------------------------------------------------------------------------

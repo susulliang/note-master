@@ -37,7 +37,16 @@ function sopFolderPlugin(): Plugin {
       // synthetic root that misses the /workspace/SOP folder.
       const sopRoot = path.join(process.cwd(), 'SOP');
       server.middlewares.use((req, _res, next) => {
-        const rawUrl = (req.url ?? '').split('?')[0]!;
+        const reqUrl = req.url ?? '';
+        // Vite module requests (e.g. `import sopRaw from '../../SOP/SOP.md?raw'`
+        // in SopPanel.tsx) must reach Vite's transform pipeline — serving them
+        // here would return raw markdown and kill the module graph with a
+        // MIME error. Only runtime fetches (no ?import/&raw query) are ours.
+        if (reqUrl.includes('?import') || reqUrl.includes('?raw')) {
+          next();
+          return;
+        }
+        const rawUrl = reqUrl.split('?')[0]!;
         let rel: string | null = null;
         const basePrefixed = basePrefix + SOP_URL_SEGMENT;
         if (rawUrl.startsWith(basePrefixed + '/') || rawUrl === basePrefixed) {
@@ -236,6 +245,38 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       react(),
       sopFolderPlugin(),
+      // whisper.cpp WASM (P0 spike) is a pthread build: SharedArrayBuffer
+      // requires crossOriginIsolated, so cross-origin-isolate ONLY the
+      // dev-only bench document (COEP: credentialless keeps Google Fonts
+      // working instead of require-corp, which would block them).
+      {
+        name: 'whisper-bench-coi',
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            const url = req.url ?? '';
+            if (url.split('?')[0] === '/whisper-bench' && !url.includes('engine=tjs')) {
+              // Cross-origin-isolate only the phases that run whisper.cpp
+              // (?engine=cpp|all). The transformers.js baseline must run
+              // non-COI (like production) — ORT swaps to its threaded wasm
+              // binary whenever SharedArrayBuffer exists and that path OOMs
+              // the 4 GB container memcg.
+              res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+              res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+            } else {
+              // Chromium blocks worker scripts fetched from a COI'd document
+              // with ERR_BLOCKED_BY_RESPONSE unless the worker script
+              // response itself carries COEP (the emscripten pthread worker
+              // is the module's own URL, same-origin, served by vite). These
+              // headers are inert on plain asset responses — they only take
+              // effect when the response becomes a worker script — so they
+              // don't affect the non-COI transformers.js phase.
+              res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+              res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+            }
+            next();
+          });
+        },
+      },
       mdRawStaticImportResolverPlugin(),
       {
         name: 'ecovacs-capabilities-stub',
@@ -314,6 +355,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: Number(env.CLIENT_DEV_PORT) || 8001,
       host: '0.0.0.0',
+      // The repo holds 8k+ product FAQ markdown files and the dev launcher
+      // streams logs/ — watching them exhausts inotify (ENOSPC crash) and
+      // none of them participate in HMR (the ?raw virtual modules cache
+      // contents; SOP is served by middleware). Keep the watcher on src/.
+      watch: {
+        ignored: ['**/products/**', '**/logs/**', '**/dist/**'],
+      },
     },
     preview: {
       port: Number(env.CLIENT_DEV_PORT) || 8001,

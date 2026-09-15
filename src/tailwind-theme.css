@@ -21,7 +21,7 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: hsl(210 18% 8%);
+  --background: hsl(210 18% 6%);
   --foreground: hsl(210 17% 79%);
   --card: hsl(215 21% 11%);
   --card-foreground: hsl(210 17% 79%);
@@ -32,7 +32,7 @@
   --secondary: hsl(212 92% 62%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(215 21% 11%);
-  --muted-foreground: hsl(212 9% 55%);
+  --muted-foreground: hsl(212 9% 63%);
   --accent: hsl(212 92% 62%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 83% 53%);
@@ -43,7 +43,7 @@
   --success-foreground: hsl(115 77% 97%);
   --warning: hsl(26 90% 49%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(215 12% 27%);
+  --border: hsl(215 12% 32%);
   --input: hsl(215 21% 11%);
   --ring: hsl(137 55% 36%);
   --chart-1: hsl(137 55% 36%);
@@ -102,8 +102,8 @@
 
   /* Scrollbar - dark theme */
   --scrollbar-track: hsl(215 21% 11%);
-  --scrollbar-thumb: hsl(215 12% 27%);
-  --scrollbar-thumb-hover: hsl(215 10% 38%);
+  --scrollbar-thumb: hsl(215 12% 32%);
+  --scrollbar-thumb-hover: hsl(215 10% 44%);
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,7 +114,7 @@
 /* Daylight — bright neutral white (morning / full-sun hours) */
 :root[data-theme="daylight"] {
   color-scheme: light;
-  --background: hsl(0 0% 98%);
+  --background: hsl(0 0% 93%);
   --foreground: hsl(220 9% 16%);
   --card: hsl(0 0% 100%);
   --card-foreground: hsl(220 9% 16%);
@@ -125,7 +125,7 @@
   --secondary: hsl(212 92% 48%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(220 14% 96%);
-  --muted-foreground: hsl(220 9% 46%);
+  --muted-foreground: hsl(220 9% 40%);
   --accent: hsl(212 92% 48%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 83% 53%);
@@ -136,7 +136,7 @@
   --success-foreground: hsl(115 77% 97%);
   --warning: hsl(26 90% 49%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(220 13% 91%);
+  --border: hsl(220 13% 86%);
   --input: hsl(220 14% 96%);
   --ring: hsl(137 55% 32%);
   --scrollbar-track: hsl(220 14% 96%);
@@ -147,7 +147,7 @@
 /* Morning — warm cream (early hours) */
 :root[data-theme="morning"] {
   color-scheme: light;
-  --background: hsl(42 45% 94%);
+  --background: hsl(42 40% 89%);
   --foreground: hsl(30 12% 16%);
   --card: hsl(42 40% 98%);
   --card-foreground: hsl(30 12% 16%);
@@ -158,7 +158,7 @@
   --secondary: hsl(212 80% 44%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(42 30% 90%);
-  --muted-foreground: hsl(30 8% 40%);
+  --muted-foreground: hsl(30 8% 34%);
   --accent: hsl(212 80% 44%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 75% 46%);
@@ -180,7 +180,7 @@
 /* Afternoon — soft overcast gray (late day, reduced glare) */
 :root[data-theme="afternoon"] {
   color-scheme: light;
-  --background: hsl(215 12% 86%);
+  --background: hsl(215 12% 81%);
   --foreground: hsl(215 12% 18%);
   --card: hsl(215 12% 92%);
   --card-foreground: hsl(215 12% 18%);
@@ -191,7 +191,7 @@
   --secondary: hsl(212 80% 44%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(215 10% 80%);
-  --muted-foreground: hsl(215 9% 38%);
+  --muted-foreground: hsl(215 9% 33%);
   --accent: hsl(212 80% 44%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 75% 46%);
@@ -214,7 +214,7 @@
    Between Daylight (0% 98%) and Afternoon (12% 86%) on the HSL scale. */
 :root[data-theme="slate-light"] {
   color-scheme: light;
-  --background: hsl(210 14% 94%);
+  --background: hsl(210 14% 89%);
   --foreground: hsl(215 14% 18%);
   --card: hsl(210 12% 97%);
   --card-foreground: hsl(215 14% 18%);
@@ -225,7 +225,7 @@
   --secondary: hsl(212 85% 46%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(210 10% 90%);
-  --muted-foreground: hsl(215 10% 42%);
+  --muted-foreground: hsl(215 10% 37%);
   --accent: hsl(212 85% 46%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 78% 48%);
@@ -236,7 +236,7 @@
   --success-foreground: hsl(115 77% 97%);
   --warning: hsl(26 86% 46%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(210 11% 85%);
+  --border: hsl(210 11% 80%);
   --input: hsl(210 10% 90%);
   --ring: hsl(137 52% 31%);
   --scrollbar-track: hsl(210 10% 90%);
@@ -247,7 +247,7 @@
 /* Neutral Grey — achromatic middle grey, no cool/warm cast. */
 :root[data-theme="neutral"] {
   color-scheme: light;
-  --background: hsl(0 0% 70%);
+  --background: hsl(0 0% 65%);
   --foreground: hsl(0 0% 12%);
   --card: hsl(0 0% 78%);
   --card-foreground: hsl(0 0% 12%);
@@ -258,7 +258,7 @@
   --secondary: hsl(212 85% 42%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(0 0% 63%);
-  --muted-foreground: hsl(0 0% 28%);
+  --muted-foreground: hsl(0 0% 22%);
   --accent: hsl(212 85% 42%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 78% 44%);
@@ -283,7 +283,7 @@
    reads as foliage accent rather than washing the whole UI. */
 :root[data-theme="moss"] {
   color-scheme: light;
-  --background: hsl(120 8% 86%);
+  --background: hsl(120 8% 81%);
   --foreground: hsl(120 12% 14%);
   --card: hsl(120 8% 92%);
   --card-foreground: hsl(120 12% 14%);
@@ -294,7 +294,7 @@
   --secondary: hsl(120 25% 65%);        /* #8FBC8F */
   --secondary-foreground: hsl(120 30% 14%);
   --muted: hsl(120 8% 78%);
-  --muted-foreground: hsl(120 10% 32%);
+  --muted-foreground: hsl(120 10% 27%);
   --accent: hsl(122 44% 40%);           /* darker moss for focus/links */
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(199 80% 42%);
@@ -321,7 +321,7 @@
 /* Evening — dim dark (dusk) */
 :root[data-theme="evening"] {
   color-scheme: dark;
-  --background: hsl(220 14% 15%);
+  --background: hsl(220 14% 12%);
   --foreground: hsl(215 12% 78%);
   --card: hsl(220 13% 19%);
   --card-foreground: hsl(215 12% 78%);
@@ -332,7 +332,7 @@
   --secondary: hsl(212 85% 60%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(220 13% 19%);
-  --muted-foreground: hsl(215 9% 62%);
+  --muted-foreground: hsl(215 9% 68%);
   --accent: hsl(212 85% 60%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 75% 58%);
@@ -343,12 +343,12 @@
   --success-foreground: hsl(115 77% 97%);
   --warning: hsl(26 85% 52%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(215 10% 30%);
+  --border: hsl(215 10% 34%);
   --input: hsl(220 13% 19%);
   --ring: hsl(137 50% 40%);
   --scrollbar-track: hsl(220 13% 19%);
-  --scrollbar-thumb: hsl(215 10% 32%);
-  --scrollbar-thumb-hover: hsl(215 10% 42%);
+  --scrollbar-thumb: hsl(215 10% 34%);
+  --scrollbar-thumb-hover: hsl(215 10% 44%);
 }
 
 /* Midnight = :root defaults above (deepest dark) */
@@ -357,7 +357,7 @@
    Slightly lighter than Midnight so subtle typography still reads. */
 :root[data-theme="zinc-dark"] {
   color-scheme: dark;
-  --background: hsl(240 4% 12%);
+  --background: hsl(240 4% 9%);
   --foreground: hsl(60 2% 82%);
   --card: hsl(240 4% 16%);
   --card-foreground: hsl(60 2% 82%);
@@ -368,7 +368,7 @@
   --secondary: hsl(212 82% 62%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(240 4% 18%);
-  --muted-foreground: hsl(60 3% 64%);
+  --muted-foreground: hsl(60 3% 70%);
   --accent: hsl(212 82% 62%);
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(221 76% 60%);
@@ -379,12 +379,12 @@
   --success-foreground: hsl(115 77% 97%);
   --warning: hsl(26 86% 54%);
   --warning-foreground: hsl(33 100% 96%);
-  --border: hsl(240 4% 26%);
+  --border: hsl(240 4% 31%);
   --input: hsl(240 4% 18%);
   --ring: hsl(137 48% 42%);
   --scrollbar-track: hsl(240 4% 18%);
-  --scrollbar-thumb: hsl(240 4% 30%);
-  --scrollbar-thumb-hover: hsl(240 4% 40%);
+  --scrollbar-thumb: hsl(240 4% 31%);
+  --scrollbar-thumb-hover: hsl(240 4% 42%);
 }
 
 /* Amethyst — deep purple-tinted dark theme built around #9966CC (primary
@@ -392,7 +392,7 @@
    lavender foreground so the purple CTA reads as the jewel of the UI. */
 :root[data-theme="amethyst"] {
   color-scheme: dark;
-  --background: hsl(270 22% 11%);
+  --background: hsl(270 22% 8%);
   --foreground: hsl(270 16% 90%);
   --card: hsl(270 20% 15%);
   --card-foreground: hsl(270 16% 90%);
@@ -403,7 +403,7 @@
   --secondary: hsl(308 40% 55%);        /* #8E4585 lifted */
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(270 18% 18%);
-  --muted-foreground: hsl(270 12% 72%);
+  --muted-foreground: hsl(270 12% 78%);
   --accent: hsl(308 38% 48%);           /* #8E4585 */
   --accent-foreground: hsl(0 0% 100%);
   --info: hsl(270 75% 66%);
@@ -425,6 +425,27 @@
   --scrollbar-track: hsl(270 18% 17%);
   --scrollbar-thumb: hsl(270 18% 36%);
   --scrollbar-thumb-hover: hsl(270 18% 48%);
+}
+
+/* ---- Field background tint (theme-aware) ----
+   Gridbox cards were brightened, so inputs need a touch of contrast.
+   - Light themes: only slightly darker than the card (just enough to
+     read as a field); keeps dark text legible.
+   - Dark themes: noticeably darker than the card for strong contrast. */
+:root[data-theme="daylight"],
+:root[data-theme="morning"],
+:root[data-theme="afternoon"],
+:root[data-theme="slate-light"],
+:root[data-theme="neutral"],
+:root[data-theme="moss"] {
+  --field-bg: color-mix(in oklab, var(--card) 90%, black 10%);
+}
+
+:root,
+:root[data-theme="evening"],
+:root[data-theme="zinc-dark"],
+:root[data-theme="amethyst"] {
+  --field-bg: color-mix(in oklab, var(--card) 64%, black 36%);
 }
 
 /* ------------------------------------------------------------------ */
@@ -545,6 +566,19 @@ body[data-ui-scale="small"] {
   @keyframes mini-bar-run {
     0% { transform: translateX(-110%); }
     100% { transform: translateX(340%); }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Cat assistant — state-change pop so the pose swap reads as      */
+  /*  an intentional movement rather than an image flicker.           */
+  /* ---------------------------------------------------------------- */
+  @keyframes cat-pop {
+    0%   { transform: scale(0.86); opacity: 0.4; }
+    60%  { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+  .animate-cat-pop {
+    animation: cat-pop 260ms ease-out;
   }
 
   .mini-bar-run {
@@ -796,10 +830,12 @@ body[data-ui-scale="small"] {
   /*  Accent/active variants only retune the CSS vars.                */
   /* ---------------------------------------------------------------- */
   .glass-panel {
-    --glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+    --glass-border: color-mix(in oklab, var(--foreground) 13%, transparent);
     --glass-glow: 0 0 0 transparent;
-    /* flat frosted surface — visibly frosty, no surface curvature */
-    background: color-mix(in oklab, var(--card) 78%, transparent);
+    /* Brightened, near-opaque frosted surface — the canvas is now darker so
+       the gridboxes read as bright, solid cards with strong contrast.
+       A 12% white lift keeps dark-theme cards from feeling muddy. */
+    background: color-mix(in oklab, var(--card) 88%, white 12%);
     backdrop-filter: blur(18px) saturate(1.35);
     -webkit-backdrop-filter: blur(18px) saturate(1.35);
     border: 1px solid var(--glass-border);
@@ -932,15 +968,6 @@ body[data-ui-scale="small"] {
       0 0 28px color-mix(in oklab, #22d3ee 32%, transparent);
   }
 
-  /* Idle dimming (toolbar): almost no frost, no shadow */
-  .glass-dim {
-    background: color-mix(in oklab, var(--card) 10%, transparent);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    box-shadow: none;
-    border-color: color-mix(in oklab, var(--foreground) 5%, transparent);
-  }
-
   /* Expanded node (hovered quick-insert panel): much frostier, near-opaque
      so the in-flow expanded content reads clearly over the busy canvas */
   .glass-expanded {
@@ -951,10 +978,14 @@ body[data-ui-scale="small"] {
 
   /* Recessed glass for text fields */
   .glass-field {
-    background: color-mix(in oklab, var(--foreground) 5%, transparent);
+    /* Field sits IN the brightened glass-panel card. --field-bg is
+       theme-aware: light themes darken the card only a little (10%),
+       dark themes darken it more (36%) for strong contrast. Text stays
+       --foreground so readability is preserved on both. */
+    background: var(--field-bg);
     backdrop-filter: blur(10px) saturate(1.35);
     -webkit-backdrop-filter: blur(10px) saturate(1.35);
-    border: 1px solid color-mix(in oklab, var(--foreground) 11%, transparent);
+    border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
     box-shadow:
       inset 0 1px 3px rgba(0, 0, 0, 0.16),
       inset 0 -1px 0 rgba(255, 255, 255, 0.07),

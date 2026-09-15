@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic, Sparkles } from 'lucide-react';
+import { Bug, Loader2, Mic, Sparkles, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FIELD_PATTERNS } from '@/hooks/use-voice-transcription';
@@ -7,6 +7,7 @@ import type { ExtractedField } from '@/hooks/use-voice-transcription';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
 import type { LlmParserStatus, LlmParseStats } from '@/hooks/use-llm-parser';
+import type { CallTldrState } from '@/hooks/use-call-tldr';
 import type { WhisperModelName } from '@/lib/whisper-models';
 import {
   buildPromptWindow,
@@ -28,7 +29,8 @@ export interface MicPanelState {
 
 export interface CallPanelState {
   isCapturing: boolean;
-  /** Speaker-tagged transcript: Agent = mic, Customer = tab audio */
+  /** Speaker-tagged transcript: Agent = mic, Customer = tab audio,
+   *  Recording = debug single-source capture (mixed both parties) */
   transcript: TranscriptEntry[];
   suggestions: ExtractedField[];
   segmentsSent: number;
@@ -40,7 +42,16 @@ export interface CallPanelState {
   /** Live input level of the agent's microphone */
   agentLevel: number;
   hasMic: boolean;
+  /** Whisper hallucination turns (repetition loops, [Musique]-style
+   *  artifact tags, lone filler words, duplicate families) filtered out
+   *  this session — shown as a counter next to the segment count. */
+  garbageFiltered: number;
+  /** True while DEBUG RECORDING mode captures ONE source (tab audio of a
+   *  recorded agent+customer conversation) instead of tab + mic */
+  isRecordingDebug: boolean;
   onToggle: () => void;
+  /** Start/stop the debug single-source recording capture */
+  onToggleRecordingDebug: () => void;
   onClear: () => void;
 }
 
@@ -143,6 +154,9 @@ interface VoiceCaptionPanelProps {
   parser?: ParserPanelState;
   /** On-demand DeepSeek cloud parse (the Parse button in the header) */
   cloud?: CloudPanelState;
+  /** Live EN/ZH whole-call TLDR (FR calls; use-call-tldr). Absent when
+   *  no cloud key — the card simply does not render. */
+  tldr?: CallTldrState;
 }
 
 /** Bar thresholds for the audio level meters */
@@ -246,13 +260,15 @@ function EngineProgressRow({
  *          each transcribed separately by a local Whisper model in a Web
  *          Worker so every line is speaker-tagged — Customer (tab audio)
  *          vs Agent (your mic). On-device, no API, no upload. base.en by
- *          default, tiny.en for a faster/lighter run.
+ *          default, tiny.en for a faster/lighter run, and base.fr/tiny.fr
+ *          for French calls — the transcript stays in the original
+ *          language; the Parse step fills the fields in English.
  *
  * Shows whichever source is active: speaker-tagged transcript, per-speaker
  * audio levels, transcribe-in-flight spinner, errors, engine status, and
  * extracted field chips.
  */
-export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: VoiceCaptionPanelProps) {
+export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tldr }: VoiceCaptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The SLIDING window the NEXT parse will send — computed LIVE from the
@@ -331,9 +347,11 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
       ? `Loading Whisper ${engine.model} on this machine — one-time download, cached afterwards…`
       : engine.status === 'error'
         ? 'Whisper model failed to load — try switching models or reload the page.'
-        : call.hasMic
-          ? 'Capturing both speakers — Customer from the CCP tab, Agent from your mic. First captions arrive after ~15s.'
-          : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.';
+        : call.isRecordingDebug
+          ? 'Recording debug — share the tab PLAYING the recorded conversation (with audio). Both voices arrive mixed on one channel, transcribed as RECORDING lines; the AI parse attributes each statement itself.'
+          : call.hasMic
+            ? 'Capturing both speakers — Customer from the CCP tab, Agent from your mic. First captions arrive after ~15s.'
+            : 'Capturing the customer from the CCP tab — no mic was shared, so your own replies are not transcribed. Restart and allow the mic to capture both speakers.'
 
   // Hidden when idle with nothing captured and no error to show
   // — EXCEPT when mounted inside the canvas (default): the box always
@@ -360,17 +378,67 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
           )}
           <p className="flex-1 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {activeSource === 'call'
-              ? 'Live captions — Agent + Customer'
+              ? call.isRecordingDebug
+                ? 'Live captions — recording debug'
+                : 'Live captions — Agent + Customer'
               : activeSource === 'mic'
                 ? 'Live captions — mic'
                 : 'Captured transcript'}
           </p>
+
+          {/* RECORDING badge — debug mode: ONE source (a recorded
+              agent+customer conversation), no mic capture. */}
+          {call.isRecordingDebug && (
+            <span
+              className="flex shrink-0 items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-500 dark:text-red-400"
+              title="Debug recording mode — capturing ONE audio source (the tab playing the recorded conversation). Both voices arrive mixed on a single channel; the transcript is tagged RECORDING and the AI parse attributes each statement itself."
+            >
+              <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
+              RECORDING
+            </span>
+          )}
+
+          {/* Debug recording toggle — capture a single source (a recording
+              of a full agent+customer conversation) instead of tab + mic. */}
+          <button
+            type="button"
+            onClick={call.onToggleRecordingDebug}
+            aria-pressed={call.isRecordingDebug}
+            aria-label="Toggle debug recording capture — single audio source, no mic"
+            title={
+              call.isRecordingDebug
+                ? 'Debug recording mode is ON — one audio source (recorded conversation), no mic. Click to stop.'
+                : 'Debug: capture ONE audio source instead of tab + mic. Play a recorded agent/customer conversation in a tab, click this, and share that tab (with audio). Segments are tagged RECORDING; the AI parse attributes each statement itself.'
+            }
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+              call.isRecordingDebug
+                ? 'bg-red-500/20 text-red-500 dark:text-red-400'
+                : 'text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground'
+            )}
+          >
+            <Bug className="size-3.5" />
+          </button>
 
           {/* Segments sent + in-flight spinner (call mode) */}
           {activeSource === 'call' && (
             <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
               {call.isTranscribing && <Loader2 className="size-3 animate-spin" />}
               {call.queued > 0 ? `${call.queued} queued` : `${call.segmentsSent} seg`}
+            </span>
+          )}
+
+          {/* Whisper noise counter — hallucination turns (repetition loops,
+              [Musique] artifact tags, lone filler words, duplicate
+              families) that were detected and stripped before reaching
+              the transcript or the AI parse. */}
+          {activeSource === 'call' && call.garbageFiltered > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70"
+              title="Whisper hallucination lines detected and filtered out: repetition loops (one phrase repeated many times), artifact tags like [Musique], punctuation-only turns, lone filler words, and the same line arriving over and over as separate turns. They never reach the transcript or the AI parse."
+            >
+              <VolumeX className="size-3" />
+              {call.garbageFiltered} noise
             </span>
           )}
 
@@ -453,19 +521,34 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
         )}
 
         {/* Per-speaker audio level meters — proves each channel is live.
-            Engine controls/resources live in the toolbar's settings panel. */}
+            Engine controls/resources live in the toolbar's settings panel.
+            Debug recording mode: ONE meter (the single shared source). */}
         {isActive && activeSource === 'call' && (
           <div className="mt-1.5 flex flex-wrap items-center gap-3">
-            <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
-            {call.hasMic ? (
-              <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+            {call.isRecordingDebug ? (
+              <>
+                <SpeakerMeter label="Recording" level={call.customerLevel} tone="red" />
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="Debug recording mode — the mic is NOT captured; the recorded conversation (agent + customer mixed) arrives on the single shared tab's audio."
+                >
+                  single source — mic not captured
+                </span>
+              </>
             ) : (
-              <span
-                className="text-[10px] text-muted-foreground/70"
-                title="No microphone was shared — only the customer side is transcribed"
-              >
-                mic unavailable — customer only
-              </span>
+              <>
+                <SpeakerMeter label="Customer" level={call.customerLevel} tone="amber" />
+                {call.hasMic ? (
+                  <SpeakerMeter label="Agent" level={call.agentLevel} tone="blue" />
+                ) : (
+                  <span
+                    className="text-[10px] text-muted-foreground/70"
+                    title="No microphone was shared — only the customer side is transcribed"
+                  >
+                    mic unavailable — customer only
+                  </span>
+                )}
+              </>
             )}
             {call.hasMic && !bothQuiet && (
               <span
@@ -520,6 +603,14 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                   const sent = inWindow && lastSentMax !== null && i <= lastSentMax;
                   const beforeWindow =
                     llmWindowFirst !== null && i < llmWindowFirst && !inWindow;
+                  // Consecutive same-speaker lines render as ONE group: the
+                  // chip shows on the first line only, continuation lines
+                  // keep an invisible chip so the text column stays aligned.
+                  // Long same-speaker runs (garbage-filtered calls, the
+                  // single-channel RECORDING debug mode) read like a chat
+                  // log instead of a wall of repeated chips.
+                  const groupStart =
+                    i === 0 || call.transcript[i - 1].speaker !== entry.speaker;
                   return (
                     <p
                       key={i}
@@ -548,17 +639,28 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                       <span
                         className={cn(
                           'mt-[3px] shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide',
+                          !groupStart && 'invisible',
                           entry.speaker === 'agent'
                             ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                            : entry.speaker === 'recording'
+                              ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                              : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                         )}
                         title={
-                          entry.speaker === 'agent'
-                            ? 'Your microphone'
-                            : 'CCP tab audio'
+                          groupStart
+                            ? entry.speaker === 'agent'
+                              ? 'Your microphone'
+                              : entry.speaker === 'recording'
+                                ? 'Single-channel recording — agent and customer mixed; the AI parse attributes each statement'
+                                : 'CCP tab audio'
+                            : undefined
                         }
                       >
-                        {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                        {entry.speaker === 'agent'
+                          ? 'Agent'
+                          : entry.speaker === 'recording'
+                            ? 'Recording'
+                            : 'Customer'}
                       </span>
                       <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
                         {entry.text}
@@ -610,6 +712,58 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud }: 
                 )}
               {llmWindowFirst !== null && llmWindowFirst > 0 && (
                 <span className="opacity-70">grey/dimmed = slid out (values live on in the form)</span>
+              )}
+            </div>
+          )}
+
+        {/* Live whole-call TLDR (FR calls) — EN + ZH 1–3-sentence summary
+            from the cloud LLM, regenerated 10s/30s/60s/90s… into the call.
+            Hidden entirely until the first refresh has something to show. */}
+        {activeSource === 'call' &&
+          tldr &&
+          (tldr.en || tldr.zh || tldr.isGenerating) && (
+            <div className="mt-1.5 rounded-lg border border-border/60 bg-card/50 px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="size-3 shrink-0 text-accent" />
+                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                  TLDR
+                </span>
+                {tldr.isGenerating ? (
+                  <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
+                ) : (
+                  tldr.updatedAtSec !== null && (
+                    <span
+                      className="text-[9px] text-muted-foreground/70"
+                      title="Regenerated automatically at 10s, 30s, 60s, 90s… into the call"
+                    >
+                      {tldr.updatedAtSec}s
+                    </span>
+                  )
+                )}
+              </div>
+              {tldr.en || tldr.zh ? (
+                <div className="mt-1 space-y-1">
+                  {tldr.en && (
+                    <p className="text-[12px] leading-snug text-foreground">
+                      <span className="mr-1.5 inline-block rounded bg-accent/10 px-1 py-px text-[8px] font-semibold uppercase tracking-wide text-accent">
+                        EN
+                      </span>
+                      {tldr.en}
+                    </p>
+                  )}
+                  {tldr.zh && (
+                    <p className="text-[12px] leading-snug text-foreground">
+                      <span className="mr-1.5 inline-block rounded bg-primary/10 px-1 py-px text-[8px] font-semibold uppercase tracking-wide text-primary">
+                        中文
+                      </span>
+                      {tldr.zh}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/60">
+                  Summarizing the conversation…
+                </p>
               )}
             </div>
           )}
