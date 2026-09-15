@@ -2150,12 +2150,29 @@ const KEY_PUSH_FALLBACKS = {
 };
 
 /** Auto-push only fires when the CCP phone panel is actually showing a phone
- *  number. Strip spaces/dashes/parens and check for 7+ digits. */
+ *  number. Strip non-digits and require 7–15 digits (a NA number is 10, or
+ *  11 with the country-code 1). Anything >15 digits is almost certainly a
+ *  phone number with call-duration/timer digits appended — reject it so the
+ *  timer can't trigger a spurious re-push. */
 const PHONE_DIGIT_RE = /\d/g;
 function looksLikePhone(v) {
   if (!v) return false;
   const digits = String(v).match(PHONE_DIGIT_RE);
-  return !!digits && digits.length >= 7;
+  if (!digits) return false;
+  return digits.length >= 7 && digits.length <= 15;
+}
+
+/** Normalize a phone number to a stable canonical form for dedupe:
+ *  digits only, keep up to 11 (strip leading 1 if present, leaving 10).
+ *  This makes "1 234 567 8901" and "+1 (234) 567-8901" compare equal, and
+ *  clips any trailing timer digits that slipped past the content-script
+ *  extractor before they can defeat keyFieldsEqual. */
+function normalizePhone(v) {
+  if (!v) return '';
+  let digits = String(v).replace(/\D/g, '');
+  if (digits.length > 11) digits = digits.slice(0, 11);
+  if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
+  return digits;
 }
 
 /** Build the identity snapshot (phone + contact name) used for change
@@ -2173,7 +2190,12 @@ function buildKeyFields(merged = buildMergedFields()) {
     }
     if (!v) continue;
     const asStr = Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v);
-    if (asStr.trim() !== '') out[k] = asStr;
+    if (asStr.trim() !== '') {
+      // Normalize phone to digits for stable dedupe — a timer digit that
+      // slipped in would otherwise make keyFieldsEqual return false every
+      // minute.
+      out[k] = k === 'contactNumber' ? normalizePhone(asStr) : asStr;
+    }
   }
   return out;
 }

@@ -49,7 +49,12 @@
     { field: 'caseNumber',      re: /(case\s*(id|number|#)|ticket\s*(id|number|#)|incident\s*id|interaction\s*id|contact\s*id)/i },
   ];
 
-  const PHONE_RE = /(?:\+?\d[\d\s\-().]{7,}\d)|(?:\(\d{3}\)\s*\d{3}[\- ]?\d{4})/;
+  // Strict phone regex — matches a single NA phone number (10 digits,
+  // optional +1 / 1 prefix, common separators) and stops cleanly at the end
+  // via (?!\d). The OLD regex used an unbounded greedy `{7,}` character class
+  // that absorbed the call-duration digits rendered next to the number in the
+  // CCP, so contactNumber changed every minute and auto-push kept firing.
+  const PHONE_RE = /\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}(?!\d)/;
   const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   const SF_ID_RE = /\b[0-9A-Za-z]{15,18}\b/;
   // Serial numbers virtually always mix letters AND digits (e.g. "X2OMNI21",
@@ -58,6 +63,30 @@
   // must be 10+ chars to avoid matching phone-ish / id-ish noise.
   const SERIAL_RE = /\b(?=[A-Za-z0-9\-]*[0-9])(?=[A-Za-z0-9\-]*[A-Za-z])[A-Za-z][A-Za-z0-9\-]{5,}\b|\b[0-9]{10,}\b/;
   const CASE_TAG_RE = /\b(?:case|ticket|incident)\s*#?\s*([A-Za-z0-9\-]{6,})\b/i;
+
+  /** Extract a clean phone number from free text. Returns a normalized
+   *  string (digits only, +1 prefix kept) or '' when no valid phone is
+   *  found. Strict: only accepts exactly 10 digits, or 11 digits starting
+   *  with 1 — anything longer (e.g. a phone number followed by call-duration
+   *  digits) is truncated at the phone boundary so the timer can never leak
+   *  into contactNumber and defeat auto-push dedupe. */
+  function extractPhone(text) {
+    if (!text) return '';
+    // Remove everything that isn't a digit or phone separator, then scan.
+    const cleanText = String(text);
+    const m = cleanText.match(PHONE_RE);
+    if (!m) return '';
+    const raw = m[0];
+    const digits = raw.replace(/\D/g, '');
+    let d = digits;
+    // 11 digits starting with 1 → strip the leading 1 for the canonical
+    // 10-digit form but keep +1 prefix for display.
+    if (d.length === 11 && d[0] === '1') d = d.slice(1);
+    if (d.length !== 10) return ''; // reject anything that absorbed extra digits
+    const plus = raw.trim().startsWith('+') ? '+1 ' : '';
+    return `${plus}(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  }
+
 
   // -------------------------------------------------------------------------
   //  Scrapers
@@ -194,8 +223,11 @@
       if (st) acc.ccpStatus = st[1];
     }
     if (!acc.contactNumber) {
-      const m = docText.match(PHONE_RE);
-      if (m) acc.contactNumber = m[0].trim();
+      // Use the strict extractor so the CCP call timer (e.g. "00:01:23"
+      // rendered next to the number) can never leak digits into the phone
+      // field and defeat auto-push's change-detection.
+      const pn = extractPhone(docText);
+      if (pn) acc.contactNumber = pn;
     }
     return acc;
   }
