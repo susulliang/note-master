@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RotateCcw, History, Settings, Type, Mic, MicOff, Boxes } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Mic, MicOff, Boxes, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -23,6 +23,7 @@ import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
+import type { KeywordAlert } from '@/hooks/use-cat-assistant';
 
 interface RailControlsProps {
   theme: ThemeId;
@@ -52,6 +53,12 @@ interface RailControlsProps {
     toggles: Array<{ id: string; label: string; visible: boolean }>;
     onToggle: (id: string, nextVisible: boolean) => void;
   };
+  /** Live-transcript keyword → alert dictionary (cat pops an amber bubble
+   *  when any keyword is heard). Editable from this rail's alert menu. */
+  keywordAlerts?: KeywordAlert[];
+  onAddKeywordAlert?: () => void;
+  onUpdateKeywordAlert?: (id: string, patch: Partial<Pick<KeywordAlert, 'keyword' | 'alert'>>) => void;
+  onRemoveKeywordAlert?: (id: string) => void;
 }
 
 /** Round icon button shared by every rail control — springy hover/active. */
@@ -88,11 +95,16 @@ export default function RailControls({
   transcript,
   isTranscribing,
   gridboxVisibility,
+  keywordAlerts,
+  onAddKeywordAlert,
+  onUpdateKeywordAlert,
+  onRemoveKeywordAlert,
 }: RailControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
   const [engineOpen, setEngineOpen] = useState(false);
   const [boxesOpen, setBoxesOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   return (
     <>
@@ -102,6 +114,31 @@ export default function RailControls({
       )}
 
       <div className="flex flex-col items-center gap-1 animate-in fade-in duration-700">
+        {/* Keyword alerts — the amber ⚠ button opens the editable
+            word→reminder dictionary. Sits at the TOP of the rail so the
+            agent can reach it while a call is live. */}
+        {keywordAlerts && onAddKeywordAlert && onUpdateKeywordAlert && onRemoveKeywordAlert && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              setAlertsOpen((v) => !v);
+              if (engineOpen) setEngineOpen(false);
+              if (boxesOpen) setBoxesOpen(false);
+            }}
+            className={cn(RAIL_BTN, alertsOpen && 'bg-amber-500/15 text-amber-400')}
+            aria-label="Keyword alerts"
+            title="Keyword alerts — words the cat watches for during calls (editable)"
+          >
+            <AlertTriangle className="size-[18px]" />
+            {keywordAlerts.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-black">
+                {keywordAlerts.length > 9 ? '9+' : keywordAlerts.length}
+              </span>
+            )}
+          </Button>
+        )}
+
         <Button
           variant="ghost"
           size="icon"
@@ -355,6 +392,98 @@ export default function RailControls({
           </div>
         </>
       )}
+      {/* Keyword alerts panel — editable word → reminder dictionary.
+          Each row edits the keyword (what the cat listens for) and the
+          alert text (what the amber bubble says). */}
+      {alertsOpen &&
+        keywordAlerts &&
+        onAddKeywordAlert &&
+        onUpdateKeywordAlert &&
+        onRemoveKeywordAlert && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setAlertsOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed bottom-6 left-[88px] z-50 max-h-[calc(100vh-2rem)] w-80 animate-in fade-in slide-in-from-left-2 duration-200">
+              <div className="glass-panel max-h-[80vh] overflow-y-auto rounded-2xl p-3 text-[11px] shadow-2xl">
+                <div className="mb-1.5 flex items-center justify-between px-0.5">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground">
+                      <AlertTriangle className="size-3.5 text-amber-400" />
+                      Keyword alerts
+                    </div>
+                    <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+                      The cat pops an amber reminder whenever it hears a
+                      keyword during a live call. Case-insensitive.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground"
+                    onClick={() => setAlertsOpen(false)}
+                    aria-label="Close keyword alerts"
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="mt-2 flex flex-col gap-1.5 rounded-xl border border-foreground/10 bg-foreground/[0.03] p-1.5">
+                  {keywordAlerts.length === 0 && (
+                    <p className="px-1.5 py-2 text-[10px] text-muted-foreground/70">
+                      No keywords yet — add one below.
+                    </p>
+                  )}
+                  {keywordAlerts.map((a) => (
+                    <div
+                      key={a.id}
+                      className="group flex flex-col gap-1 rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-1.5 py-1.5"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          value={a.keyword}
+                          onChange={(e) =>
+                            onUpdateKeywordAlert(a.id, { keyword: e.target.value })
+                          }
+                          placeholder="keyword (e.g. factory reset)"
+                          className="min-w-0 flex-1 rounded-md border border-foreground/10 bg-background/60 px-1.5 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => onRemoveKeywordAlert(a.id)}
+                          aria-label={`Remove keyword ${a.keyword || 'alert'}`}
+                          title="Remove"
+                          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition hover:bg-destructive/15 hover:text-destructive"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <textarea
+                        value={a.alert}
+                        onChange={(e) =>
+                          onUpdateKeywordAlert(a.id, { alert: e.target.value })
+                        }
+                        placeholder="Reminder the cat shows (e.g. Please remind user that settings and maps will be erased.)"
+                        rows={2}
+                        className="min-w-0 resize-y rounded-md border border-foreground/10 bg-background/60 px-1.5 py-1 text-[11px] leading-snug text-foreground placeholder:text-muted-foreground/50 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onAddKeywordAlert}
+                  className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] font-medium text-amber-300 transition hover:bg-amber-500/20"
+                >
+                  + Add keyword alert
+                </button>
+              </div>
+            </div>
+          </>
+        )}
     </>
   );
 }

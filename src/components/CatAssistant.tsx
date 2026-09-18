@@ -165,7 +165,14 @@ export function CatAssistant({
       {/* Thought bubble — anchored above the sprite */}
       {currentThought && (
         <div className="pointer-events-auto absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2">
-          <div className="glass-panel relative rounded-2xl border border-border/70 px-3.5 py-2.5 text-sm leading-snug text-foreground shadow-lg">
+          <div
+            className={cn(
+              'glass-panel relative rounded-2xl border px-3.5 py-2.5 text-sm leading-snug shadow-lg',
+              currentThought.kind === 'alert'
+                ? 'border-amber-500/80 bg-amber-500/10 text-amber-50 shadow-[0_0_18px_rgba(245,158,11,0.55)] animate-cat-alert-glow'
+                : 'border-border/70 text-foreground'
+            )}
+          >
             {/* Close button */}
             <button
               type="button"
@@ -177,7 +184,14 @@ export function CatAssistant({
             </button>
             <p className="pr-4">{currentThought.text}</p>
             {/* Bubble tail */}
-            <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-border/70 bg-card/90 backdrop-blur-md" />
+            <span
+              className={cn(
+                'absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r backdrop-blur-md',
+                currentThought.kind === 'alert'
+                  ? 'border-amber-500/80 bg-amber-500/10'
+                  : 'border-border/70 bg-card/90'
+              )}
+            />
           </div>
         </div>
       )}

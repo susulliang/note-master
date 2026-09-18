@@ -124,7 +124,7 @@ import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
 import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import CatAssistant from '@/components/CatAssistant';
-import { useCatAssistant } from '@/hooks/use-cat-assistant';
+import { useCatAssistant, type KeywordAlert } from '@/hooks/use-cat-assistant';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { useCallCapture } from '@/hooks/use-call-capture';
@@ -697,6 +697,33 @@ export default function TicketNotesPage() {
   const [hiddenNodeIds, setHiddenNodeIds] = useScopedState<string[]>(
     'ecovacs_ticket_hidden_nodes',
     []
+  );
+  /**
+   * Live-transcript keyword alerts — the cat pops an amber thought bubble
+   * whenever it hears one of these keywords during a call. Editable from
+   * the toolbar's ⚠ menu. Persisted to localStorage.
+   */
+  const [keywordAlerts, setKeywordAlerts] = useScopedState<KeywordAlert[]>(
+    'ecovacs_ticket_keyword_alerts',
+    [
+      {
+        id: 'kw-factory-reset',
+        keyword: 'factory reset',
+        alert: 'Please remind user that settings and maps will be erased.',
+      },
+      {
+        id: 'kw-supervisor',
+        keyword: 'Superviser',
+        alert:
+          'Please kindly and politely inform user that our supervisor is not available and we are able to take any questions and notes.',
+      },
+      {
+        id: 'kw-amazon',
+        keyword: 'Amazon',
+        alert:
+          'Please verify with user if their purchase is still within the 30-day return window from Amazon',
+      },
+    ]
   );
   const hiddenNodesSet = useMemo(
     () => new Set(hiddenNodeIds),
@@ -1394,6 +1421,32 @@ Additional information (if needed): ${additional}${tldrLine}`;
   });
 
   // -------------------------------------------------------------------------
+  //  Keyword alert dictionary handlers (toolbar ⚠ menu).
+  // -------------------------------------------------------------------------
+  const handleAddKeywordAlert = useCallback(() => {
+    setKeywordAlerts((prev) => [
+      ...prev,
+      { id: `kw-${Date.now()}`, keyword: '', alert: '' },
+    ]);
+  }, [setKeywordAlerts]);
+
+  const handleUpdateKeywordAlert = useCallback(
+    (id: string, patch: Partial<Pick<KeywordAlert, 'keyword' | 'alert'>>) => {
+      setKeywordAlerts((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+      );
+    },
+    [setKeywordAlerts]
+  );
+
+  const handleRemoveKeywordAlert = useCallback(
+    (id: string) => {
+      setKeywordAlerts((prev) => prev.filter((a) => a.id !== id));
+    },
+    [setKeywordAlerts]
+  );
+
+  // -------------------------------------------------------------------------
   //  Cat assistant — the Clippy-style workspace sprite. Pops up tips,
   //  ambient thoughts and greetings (live-transcript advice is paused).
   // -------------------------------------------------------------------------
@@ -1403,6 +1456,7 @@ Additional information (if needed): ${additional}${tldrLine}`;
     formData,
     cloudGenerate: sopCloudGenerateEnabled ? sopCloudGenerate : undefined,
     cloudEnabled: sopCloudGenerateEnabled,
+    keywordAlerts,
   });
 
   // -------------------------------------------------------------------------
@@ -1910,6 +1964,10 @@ Additional information (if needed): ${additional}${tldrLine}`;
               toggles: gridboxVisibilityToggles,
               onToggle: handleToggleGridbox,
             }}
+            keywordAlerts={keywordAlerts}
+            onAddKeywordAlert={handleAddKeywordAlert}
+            onUpdateKeywordAlert={handleUpdateKeywordAlert}
+            onRemoveKeywordAlert={handleRemoveKeywordAlert}
           />,
           railControlsSlot
         )}

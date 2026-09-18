@@ -32,7 +32,16 @@ export type CatFormData = Record<string, string | string[]>;
  *    already got advice on a near-identical window).
  */
 
-export type CatThoughtKind = 'ambient' | 'tip' | 'advice' | 'greeting';
+export type CatThoughtKind = 'ambient' | 'tip' | 'advice' | 'greeting' | 'alert';
+
+/** A live-transcript keyword alert. When the keyword (case-insensitive)
+ *  appears in any new transcript line, the cat pops an amber thought bubble
+ *  showing `alert`. Editable by the agent from the toolbar's alert menu. */
+export interface KeywordAlert {
+  id: string;
+  keyword: string;
+  alert: string;
+}
 
 export interface CatThought {
   id: number;
@@ -57,6 +66,9 @@ export interface CatAssistantProps {
   ) => Promise<{ text: string; ms: number; timedOut: boolean }>;
   /** Whether cloudGenerate is available (has API key). */
   cloudEnabled?: boolean;
+  /** Agent-editable keyword → alert dictionary. Every new transcript line is
+   *  scanned for these keywords; a match pops an amber thought bubble. */
+  keywordAlerts?: KeywordAlert[];
 }
 
 /** Field ids the cat should nudge about when empty. Keys match NODE_IDS. */
@@ -94,6 +106,13 @@ const ADVICE_MIN_INTERVAL_MS = 30_000;
 const ADVICE_MIN_NEW_CHARS = 180;
 /** Max tokens for an advice reply — keep it snappy. */
 const ADVICE_MAX_TOKENS = 120;
+
+/** How long an amber keyword-alert bubble stays up (ms). */
+const ALERT_TTL_MS = 12_000;
+/** Min gap between two firings of the SAME keyword (ms) — prevents the cat
+ *  from spamming the same reminder every 8s segment while the word is
+ *  repeated. */
+const ALERT_KEYWORD_COOLDOWN_MS = 30_000;
 
 /** PAUSED — the live-transcript advice loop is OFF. The TLDR panel
  *  (use-call-tldr.ts) now owns the live cloud-generation slot during
@@ -133,6 +152,7 @@ export function useCatAssistant({
   formData,
   cloudGenerate,
   cloudEnabled,
+  keywordAlerts,
 }: CatAssistantProps) {
   const [thoughts, setThoughts] = useState<CatThought[]>([]);
   /** True while an LLM advice request is in flight (drives the spinner). */
@@ -146,6 +166,11 @@ export function useCatAssistant({
   const wasCapturingRef = useRef(isCapturing);
   const ambientTimerRef = useRef<number | null>(null);
   const transcriptLenRef = useRef(0);
+  /** Number of transcript entries already scanned for keyword alerts —
+   *  only NEW lines are inspected so we never re-alert on old speech. */
+  const scannedEntriesRef = useRef(0);
+  /** keyword id → Date.now() of last firing (per-keyword cooldown). */
+  const lastAlertAtRef = useRef<Map<string, number>>(new Map());
 
   const pushThought = useCallback((kind: CatThoughtKind, text: string, ttl = THOUGHT_TTL_MS) => {
     const thought: CatThought = {
@@ -266,11 +291,46 @@ export function useCatAssistant({
     };
   }, [isCapturing, scheduleAmbient]);
 
+  // -----------------------------------------------------------------
+  //  Live-transcript keyword alerts.
+  //  Every time the transcript grows, scan ONLY the newly added lines
+  //  for the agent's keyword dictionary. A match pushes an amber
+  //  "alert" thought. Per-keyword cooldown stops the same reminder from
+  //  firing every 8s segment.
+  // -----------------------------------------------------------------
+  useEffect(() => {
+    if (!isCapturing) return;
+    const alerts = keywordAlerts ?? [];
+    if (alerts.length === 0) return;
+    if (transcript.length <= scannedEntriesRef.current) return;
+
+    const now = Date.now();
+    // Scan only entries appended since the last pass.
+    const fresh = transcript.slice(scannedEntriesRef.current);
+    scannedEntriesRef.current = transcript.length;
+
+    for (const entry of fresh) {
+      const line = entry.text.toLowerCase();
+      for (const rule of alerts) {
+        const kw = rule.keyword.trim().toLowerCase();
+        if (!kw) continue;
+        if (!line.includes(kw)) continue;
+        const last = lastAlertAtRef.current.get(rule.id) ?? 0;
+        if (now - last < ALERT_KEYWORD_COOLDOWN_MS) continue;
+        lastAlertAtRef.current.set(rule.id, now);
+        pushThought('alert', rule.alert, ALERT_TTL_MS);
+        break; // one alert per line max — avoid stacking multiple bubbles
+      }
+    }
+  }, [transcript, keywordAlerts, isCapturing, pushThought]);
+
   // Reset the "chars since last advice" baseline on transcript clear.
   useEffect(() => {
     if (transcript.length === 0) {
       transcriptLenRef.current = 0;
       lastAdviceCharsRef.current = 0;
+      scannedEntriesRef.current = 0;
+      lastAlertAtRef.current.clear();
     }
   }, [transcript.length]);
 

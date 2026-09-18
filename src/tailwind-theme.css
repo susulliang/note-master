@@ -581,6 +581,15 @@ body[data-ui-scale="small"] {
     animation: cat-pop 260ms ease-out;
   }
 
+  /* Amber pulsing glow for keyword-alert thought bubbles. */
+  @keyframes cat-alert-glow {
+    0%, 100% { box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+    50%      { box-shadow: 0 0 22px rgba(245, 158, 11, 0.8); }
+  }
+  .animate-cat-alert-glow {
+    animation: cat-alert-glow 1.6s ease-in-out infinite;
+  }
+
   .mini-bar-run {
     width: 30%;
     animation: mini-bar-run 1.1s ease-in-out infinite;
