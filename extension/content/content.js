@@ -83,8 +83,8 @@
     // 10-digit form but keep +1 prefix for display.
     if (d.length === 11 && d[0] === '1') d = d.slice(1);
     if (d.length !== 10) return ''; // reject anything that absorbed extra digits
-    const plus = raw.trim().startsWith('+') ? '+1 ' : '';
-    return `${plus}(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+    // Render as xxx-xxx-xxxx (10-digit NA format, no country-code prefix).
+    return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
   }
 
 

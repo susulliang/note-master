@@ -2261,7 +2261,20 @@ async function pushToTicketApp(force = false) {
     if (keyFieldsEqual(state.lastPushedKeyFields || {}, keyFields)) {
       return { ok: false, skipped: 'Key fields unchanged since last push.' };
     }
-    fields = keyFields;
+    // Payload uses the ORIGINAL formatted value (e.g. "(234) 567-8901");
+    // keyFields (digits-normalized) is only for dedupe above.
+    fields = {};
+    for (const k of KEY_PUSH_FIELDS) {
+      if (ccpData[k] != null && String(ccpData[k]).trim() !== '') fields[k] = ccpData[k];
+    }
+    // Fallback to aliases if the primary key is missing.
+    for (const k of KEY_PUSH_FIELDS) {
+      if (fields[k]) continue;
+      for (const alias of KEY_PUSH_FALLBACKS[k] || []) {
+        const av = ccpData[alias];
+        if (av != null && String(av).trim() !== '') { fields[k] = av; break; }
+      }
+    }
     mode = 'auto';
   }
 
