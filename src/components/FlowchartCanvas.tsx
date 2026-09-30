@@ -1,9 +1,10 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, LayoutGrid, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutGrid, Image as ImageIcon, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { cn } from '@/lib/utils';
+import AppPhotosPanel from '@/components/AppPhotosPanel';
 
 interface NodeConfig {
   id: string;
@@ -458,6 +459,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<string>(NODE_IDS.SOP_PANEL);
+  const [appPhotosOpen, setAppPhotosOpen] = useState(false);
   // Mirror of drawerTab for stable closures (avoid stale deps).
   const drawerTabRef = useRef(drawerTab);
   useEffect(() => {
@@ -1114,6 +1116,28 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   </button>
                 );
               })}
+
+              {/* App Use photos — browse app screenshots by model. Sits
+                  directly under the Live tab inside the copilot group. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAppPhotosOpen((v) => !v);
+                  if (drawerOpen) setDrawerOpen(false);
+                }}
+                title="App Use — browse app screenshots by model"
+                className={cn(
+                  'relative z-10 flex h-12 w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95',
+                  appPhotosOpen
+                    ? 'bg-foreground/10 text-foreground shadow-[0_0_14px_color-mix(in_oklab,var(--foreground)_18%,transparent)]'
+                    : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                )}
+              >
+                <ImageIcon className="size-5 transition-transform duration-200" />
+                <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
+                  App
+                </span>
+              </button>
             </div>
 
             {/* Section divider above the portaled toolbar controls */}
@@ -1297,6 +1321,21 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             })}
           </div>
         </div>
+
+        {/* App Use photos panel — anchored to the rail's right edge, opens
+            from the "App" pill below the Live tab in the copilot group. */}
+        {appPhotosOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setAppPhotosOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
+              <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
