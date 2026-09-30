@@ -2116,7 +2116,7 @@ Additional information (if needed): ${additional}${tldrLine}`;
       <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div
           className={cn(
-            'border-[1.5px] border-foreground/10 bg-card/50 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.14),0_8px_24px_-6px_rgba(0,0,0,0.28)] backdrop-blur-2xl backdrop-saturate-150',
+            'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
             // Capturing: the pill grows into a taller caption card with the
             // live customer subtitle stacked above the controls. Width is
             // content-driven (buttons never wrap to two lines) with a cap so

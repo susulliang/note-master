@@ -1225,7 +1225,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             eagerly exactly like the old pull-tabs did. */}
         <div
           className={cn(
-            'fixed inset-y-3 right-3 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/15 bg-card/90 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.18),inset_0_-1.5px_0_rgba(255,255,255,0.06),-6px_0_18px_-4px_rgba(0,0,0,0.38),-14px_0_36px_-10px_rgba(0,0,0,0.28)] backdrop-blur-xl backdrop-saturate-150 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
+            'fixed inset-y-3 right-3 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/12 bg-card/55 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),inset_0_-1.5px_0_rgba(255,255,255,0.04),-6px_0_18px_-4px_rgba(0,0,0,0.32),-14px_0_36px_-10px_rgba(0,0,0,0.22)] backdrop-blur-sm backdrop-saturate-125 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
             drawerOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.5rem)]'
           )}
           style={{ width: 'min(720px, calc(100vw - 6rem))' }}
