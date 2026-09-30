@@ -124,6 +124,7 @@ import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
+import ShiftsWorkspace from '@/components/ShiftsWorkspace';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
@@ -861,7 +862,31 @@ export default function TicketNotesPage() {
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** Top-level work view: Call Notes flowchart (default) or Case Trak board. */
-  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak'>('callNotes');
+  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak' | 'shifts'>('callNotes');
+  // The Shifts roster workspace is HIDDEN by default — pressing Shift+S
+  // reveals its rail pill and switches to it (kept out of the default UI;
+  // it's an internal GZ-OPS roster, not part of the agent-facing flow).
+  const [shiftsUnlocked, setShiftsUnlocked] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'KeyS' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return; // don't hijack typing / selection
+      }
+      e.preventDefault();
+      setShiftsUnlocked(true);
+      setWorkView((prev) => (prev === 'shifts' ? prev : 'shifts'));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   /** "[OVER24]" report batches pushed by the extension (popup button
    *  "Import Over 24h Report Cases"). Accumulates across imports so the
    *  Case Trak board can merge every batch whenever it mounts. */
@@ -1977,6 +2002,8 @@ Additional information (if needed): ${additional}${tldrLine}`;
               activeView={workView}
               onViewChange={setWorkView}
               caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
+              shiftsContent={<ShiftsWorkspace />}
+              shiftsEnabled={shiftsUnlocked}
               railBottomSlotRef={setRailControlsSlot}
               collapsedNodes={collapsedNodes}
               onToggleNodeCollapsed={handleToggleNodeCollapsed}

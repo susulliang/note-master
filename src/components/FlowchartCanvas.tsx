@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { FilePen, LayoutGrid, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutGrid, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -76,12 +76,18 @@ interface FlowchartCanvasProps {
   onIncrementCustomerAddressCount?: () => void;
   /** Email-prompt glow for the email address node */
   emailGlow?: 'need' | 'done';
-  /** Top-level work view: the Call Notes flowchart canvas, or the Case Trak board. */
-  activeView?: 'callNotes' | 'caseTrak';
-  /** Switch between Call Notes and Case Trak. */
-  onViewChange?: (view: 'callNotes' | 'caseTrak') => void;
+  /** Top-level work view: the Call Notes flowchart canvas, the Case Trak
+   *  board, or the (hidden-by-default) Shifts roster workspace. */
+  activeView?: 'callNotes' | 'caseTrak' | 'shifts';
+  /** Switch between Call Notes, Case Trak and Shifts. */
+  onViewChange?: (view: 'callNotes' | 'caseTrak' | 'shifts') => void;
   /** Content rendered in the canvas area when activeView === 'caseTrak'. */
   caseTrakContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'shifts'
+   *  (agent roster workspace — rail pill hidden until unlocked via Shift+S). */
+  shiftsContent?: React.ReactNode;
+  /** Reveal the hidden Shifts work-view pill in the left rail. */
+  shiftsEnabled?: boolean;
   /** Portal target slot at the bottom of the left rail pill. The page
    *  passes a callback ref here and portals the global toolbar controls
    *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
@@ -95,7 +101,7 @@ interface FlowchartCanvasProps {
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
-export type WorkView = 'callNotes' | 'caseTrak';
+export type WorkView = 'callNotes' | 'caseTrak' | 'shifts';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -392,12 +398,21 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   activeView = 'callNotes',
   onViewChange,
   caseTrakContent,
+  shiftsContent,
+  shiftsEnabled = false,
   railBottomSlotRef,
   collapsedNodes,
   onToggleNodeCollapsed,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
+
+  // Work-view pills shown in the rail — the Shifts roster workspace is a
+  // hidden view (activated with Shift+S via shiftsEnabled).
+  const railViews = useMemo<WorkView[]>(
+    () => (shiftsEnabled ? ['callNotes', 'caseTrak', 'shifts'] : ['callNotes', 'caseTrak']),
+    [shiftsEnabled]
+  );
 
   // Pull-tab bookmark panels — NONE left: the 24H tracker moved into the
   // copilot drawer (v0.2.0), so the left-edge pull-tab layer is now empty.
@@ -975,6 +990,14 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         </div>
       )}
 
+      {/* Shifts workspace — agent roster (hidden work view; unlocked with
+          Shift+S). Same full-canvas layout as the Case Trak board. */}
+      {activeView === 'shifts' && (
+        <div className="h-full min-h-full w-full pl-[92px]">
+          {shiftsContent}
+        </div>
+      )}
+
         {/* Unified left rail — ONE floating vertical pill spanning the full
             page height. Work-view tabs + bookmarks up top, global toolbar
             controls portaled into the bottom slot.
@@ -1001,24 +1024,27 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               center (cap radius = 32px; pill h-12 = 48px → center at
               8 + 24 = 32px). pb-4 keeps the bottom controls as before. */}
           <div className="relative z-10 flex h-full flex-col items-center pt-2 pb-4">
-            {/* Work views (Notes / Trak) — sliding green highlight tracks the
-                active view. */}
+            {/* Work views (Notes / Trak / [Shifts]) — sliding green highlight
+                tracks the active view. The Shifts pill stays hidden until the
+                user unlocks it with Shift+S (ShiftsEnabled prop). */}
             <div className="relative flex flex-col gap-1">
               <span
                 className="pointer-events-none absolute inset-x-0 z-0 rounded-full bg-primary shadow-[0_0_14px_color-mix(in_oklab,var(--primary)_50%,transparent)] transition-[top] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
                 style={{
-                  top: activeView === 'callNotes' ? 0 : 52,
+                  top: railViews.indexOf(activeView) >= 0 ? railViews.indexOf(activeView) * 52 : 0,
                   height: 48,
                 }}
               />
-              {(['callNotes', 'caseTrak'] as const).map((view) => {
+              {railViews.map((view) => {
                 const active = activeView === view;
                 const label =
                   view === 'callNotes'
                     ? 'Call Notes — active call workspace'
-                    : 'Case Trak Board — case lifecycle stages';
-                const short = view === 'callNotes' ? 'Notes' : 'Trak';
-                const Icon = view === 'callNotes' ? FilePen : LayoutGrid;
+                    : view === 'caseTrak'
+                      ? 'Case Trak Board — case lifecycle stages'
+                      : 'Shifts — service agent roster (hidden workspace, Shift+S)';
+                const short = view === 'callNotes' ? 'Notes' : view === 'caseTrak' ? 'Trak' : 'Shifts';
+                const Icon = view === 'callNotes' ? FilePen : view === 'caseTrak' ? LayoutGrid : CalendarDays;
                 return (
                   <button
                     key={view}
