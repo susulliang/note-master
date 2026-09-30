@@ -2175,6 +2175,15 @@ function normalizePhone(v) {
   return digits;
 }
 
+/** Format a phone number as xxx-xxx-xxxx for display in the ticket app.
+ *  Reuses normalizePhone to get the canonical 10-digit form, then inserts
+ *  dashes. Non-NA / short numbers are passed through unchanged. */
+function formatPhone(v) {
+  const digits = normalizePhone(v);
+  if (digits.length !== 10) return v == null ? '' : String(v);
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 /** Build the identity snapshot (phone + contact name) used for change
  *  detection + auto push. Falls back to aliases scrapers sometimes produce,
  *  always returns strings. */
@@ -2276,6 +2285,12 @@ async function pushToTicketApp(force = false) {
       }
     }
     mode = 'auto';
+  }
+
+  // Always ship the contact number as xxx-xxx-xxxx regardless of how the
+  // scraper captured it (CCP extractor, SF label-value rows, subject line).
+  if (fields && fields.contactNumber != null) {
+    fields.contactNumber = formatPhone(fields.contactNumber);
   }
 
   const payload = {
