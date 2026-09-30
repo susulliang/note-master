@@ -2267,8 +2267,14 @@ async function pushToTicketApp(force = false) {
       diagRecord('push:skipped', { force, reason: 'no phone number in CCP data', contactNumber: keyFields.contactNumber ?? null });
       return { ok: false, skipped: 'CCP phone panel not showing a phone number.' };
     }
-    if (keyFieldsEqual(state.lastPushedKeyFields || {}, keyFields)) {
-      return { ok: false, skipped: 'Key fields unchanged since last push.' };
+    // Dedupe on the phone number ALONE. The customer name may be captured
+    // inconsistently between scrapes (present on one, absent on the next),
+    // which would defeat a full-object comparison and re-push the same
+    // number every minute. "One push per number" is what the agent wants.
+    const lastPushedPhone = (state.lastPushedKeyFields || {}).contactNumber;
+    if (lastPushedPhone && lastPushedPhone === keyFields.contactNumber) {
+      diagRecord('push:skipped', { force, reason: 'phone number already pushed', contactNumber: keyFields.contactNumber });
+      return { ok: false, skipped: 'Phone number already pushed since last change.' };
     }
     // Payload uses the ORIGINAL formatted value (e.g. "(234) 567-8901");
     // keyFields (digits-normalized) is only for dedupe above.

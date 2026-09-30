@@ -90,9 +90,11 @@ export default function SkuLookupCard({
     return () => document.removeEventListener('mousedown', onDoc);
   }, [showResults]);
 
-  // Debounce the part-name query.
+  // Debounce the part-name query. 500 ms gives the agent time to finish a
+  // word before we re-filter the (large) parts list — keeps typing smooth
+  // and stops the dropdown from re-rendering on every single keystroke.
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search), 250);
+    const t = setTimeout(() => setDebounced(search), 500);
     return () => clearTimeout(t);
   }, [search]);
 
