@@ -96,7 +96,7 @@ export function loadSkuMeta(): Promise<SkuMeta> {
  * mid-call is worse than showing it.
  */
 export const REGION_BUCKETS = [
-  { id: 'NA', label: 'NA', aliases: ['US', 'USA', 'CA', 'AMAZON', 'TARGET', 'NORTH', 'BEST', 'BUY'] },
+  { id: 'NA', label: 'NA', aliases: ['US', 'USA', 'CA', 'AMR', 'AMAZON', 'TARGET', 'NORTH', 'BEST', 'BUY'] },
   { id: 'EU', label: 'EU', aliases: ['EU', 'EUROPE', 'DE', 'CH', 'FR', 'IT', 'ES', 'ITRLY', 'TUR', 'TR', 'IL', 'ISR', 'ISREAL', 'ISRAEL', 'ME', 'CZECH', 'NORWAY', 'SWIZERLAND', 'SWITZERLAND', 'BULGARIA', 'UKR', 'UKRAINE', 'UKRAIN', 'RUS', 'RUSSIA', 'BRAZIL', 'MEXICO', 'CHILE', 'ARGENTINA', 'IR', 'IRAN', 'POLAND'] },
   { id: 'UK', label: 'UK', aliases: ['UK', 'BRITAIN'] },
   { id: 'JP', label: 'JP', aliases: ['JP', 'JAPAN', 'JANPAN'] },
