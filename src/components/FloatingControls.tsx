@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RotateCcw, History, Settings, Type, Boxes, AlertTriangle } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Boxes, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -24,6 +24,7 @@ import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
 import type { KeywordAlert } from '@/hooks/use-cat-assistant';
+import AppPhotosPanel from '@/components/AppPhotosPanel';
 
 interface RailControlsProps {
   theme: ThemeId;
@@ -107,6 +108,7 @@ export default function RailControls({
   const [engineOpen, setEngineOpen] = useState(false);
   const [boxesOpen, setBoxesOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [appPhotosOpen, setAppPhotosOpen] = useState(false);
 
   return (
     <>
@@ -127,6 +129,7 @@ export default function RailControls({
               setAlertsOpen((v) => !v);
               if (engineOpen) setEngineOpen(false);
               if (boxesOpen) setBoxesOpen(false);
+              if (appPhotosOpen) setAppPhotosOpen(false);
             }}
             className={cn(RAIL_BTN, alertsOpen && 'bg-amber-500/15 text-amber-400')}
             aria-label="Keyword alerts"
@@ -155,6 +158,23 @@ export default function RailControls({
               {history.length > 99 ? '99+' : history.length}
             </span>
           )}
+        </Button>
+
+        {/* App Use photos — browse app screenshots grouped by product type → model. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            setAppPhotosOpen((v) => !v);
+            if (engineOpen) setEngineOpen(false);
+            if (boxesOpen) setBoxesOpen(false);
+            if (alertsOpen) setAlertsOpen(false);
+          }}
+          className={cn(RAIL_BTN, appPhotosOpen && 'bg-foreground/10 text-foreground')}
+          aria-label="App use photos"
+          title="App Use — browse app screenshots by model"
+        >
+          <ImageIcon className="size-[18px]" />
         </Button>
 
         <AlertDialog>
@@ -197,6 +217,7 @@ export default function RailControls({
             onClick={() => {
               setBoxesOpen((v) => !v);
               if (engineOpen) setEngineOpen(false);
+              if (appPhotosOpen) setAppPhotosOpen(false);
             }}
             className={cn(RAIL_BTN, boxesOpen && 'bg-foreground/10 text-foreground')}
             aria-label="Toggle gridboxes"
@@ -237,6 +258,7 @@ export default function RailControls({
             onClick={() => {
               setEngineOpen((v) => !v);
               if (boxesOpen) setBoxesOpen(false);
+              if (appPhotosOpen) setAppPhotosOpen(false);
             }}
             className={cn(RAIL_BTN, engineOpen && 'bg-foreground/10 text-foreground')}
             aria-label="Engine settings"
@@ -274,6 +296,20 @@ export default function RailControls({
             onClose={onToggleHistory}
           />
         </div>
+      )}
+
+      {/* App Use photos panel — anchored to the rail's right edge. */}
+      {appPhotosOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setAppPhotosOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
+            <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
+          </div>
+        </>
       )}
 
       {/* BOXES gridbox visibility panel — small glass card anchored to the

@@ -74,3 +74,6 @@ __pycache__/
 
 # SKU spare-parts source workbooks (696 MB) — rebuild via scripts/build-sku-db.mjs, output ships as public/sku-db
 SKU_202609/
+
+# App screenshot source material — rebuild via scripts/build-app-photos.mjs, output ships as public/app-photos
+App_Screenshots/
