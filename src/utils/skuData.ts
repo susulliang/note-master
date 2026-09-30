@@ -35,9 +35,23 @@ export interface SkuDb {
   parts: SkuPart[];
 }
 
-let skuDbPromise: Promise<SkuDb> | null = null;
+export interface SkuMeta {
+  filesProcessed: number;
+  rowsExtracted: number;
+  partsDeduped: number;
+  uniqueModels: number;
+  uniqueModelList: string[];
+  workbookOrigMB: number;
+  outputJsonKB: number;
+  outputImagesKB: number;
+  imagesMatchedInSources: number;
+  imagesThumbnailed: number;
+}
 
-/** Fetch + memoize the SKU index (single 5 MB JSON, browser-cached). */
+let skuDbPromise: Promise<SkuDb> | null = null;
+let skuMetaPromise: Promise<SkuMeta> | null = null;
+
+/** Fetch + memoize the SKU index (single ~8 MB JSON, browser-cached). */
 export function loadSkuDb(): Promise<SkuDb> {
   if (!skuDbPromise) {
     skuDbPromise = fetch('/sku-db/sku-index.json')
@@ -51,6 +65,22 @@ export function loadSkuDb(): Promise<SkuDb> {
       });
   }
   return skuDbPromise;
+}
+
+/** Fetch + memoize the build meta (uniqueModelList for the override dropdown). */
+export function loadSkuMeta(): Promise<SkuMeta> {
+  if (!skuMetaPromise) {
+    skuMetaPromise = fetch('/sku-db/_meta.json')
+      .then((r) => {
+        if (!r.ok) throw new Error(`_meta.json HTTP ${r.status}`);
+        return r.json() as Promise<SkuMeta>;
+      })
+      .catch((err) => {
+        skuMetaPromise = null;
+        throw err;
+      });
+  }
+  return skuMetaPromise;
 }
 
 // ---------------------------------------------------------------------------

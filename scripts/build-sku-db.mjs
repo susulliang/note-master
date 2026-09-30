@@ -30,7 +30,7 @@ function detectHeaderMap(headerRow) {
   for (let i = 0; i < headerRow.length; i++) {
     const raw = String(headerRow[i] ?? '').trim().toLowerCase();
     if (!raw) continue;
-    if (/(part\s*number|sap[-_ ]?id)/.test(raw)) map[i] = 'sku';
+    if (/(part\s*number|sap[-_ ]?id|^sap$)/.test(raw)) map[i] = 'sku';
     else if (/(名称|parts?\s*name|chinese)/.test(raw)) map[i] = 'zh';
     else if (/(description|english|英文)/.test(raw)) map[i] = 'en';
     else if (/(type|类型)/.test(raw)) map[i] = 'type';
@@ -224,6 +224,7 @@ for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
 
     const rowAnchorMap = extractSheetImages(zip, sheetName, mediaMap, sheetRefMap);
 
+    let emptyStreak = 0;
     for (let r = headerIdx + 1; r < grid.length; r++) {
       const row = grid[r];
       const get = (field) => {
@@ -234,7 +235,14 @@ for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
       };
 
       const sku = get('sku').replace(/\s+/g, ' ');
-      if (!sku || !/\d/.test(sku)) continue;
+      if (!sku || !/\d/.test(sku)) {
+        // Some workbooks have formatting down to row 1,048,576 with no data.
+        // Bail after 50 consecutive empty rows to avoid grinding 1M rows.
+        emptyStreak++;
+        if (emptyStreak > 50) break;
+        continue;
+      }
+      emptyStreak = 0;
 
       const model = isStation ? `${fileModel} Station` : fileModel;
       modelRegistry.add(model);

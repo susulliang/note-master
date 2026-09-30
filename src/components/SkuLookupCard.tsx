@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Warehouse, Search, Loader2, PackageSearch, ImageOff } from 'lucide-react';
+import { Bot, Warehouse, Search, Loader2, PackageSearch, ImageOff, Unlink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   loadSkuDb,
+  loadSkuMeta,
   matchSkuModels,
   searchSkuParts,
   skuFieldValue,
@@ -10,6 +11,7 @@ import {
   REGION_BUCKETS,
   type RegionId,
   type SkuDb,
+  type SkuMeta,
   type SkuPart,
 } from '@/utils/skuData';
 
@@ -42,6 +44,7 @@ export default function SkuLookupCard({
   onChange: (val: string) => void;
 }) {
   const [db, setDb] = useState<SkuDb | null>(null);
+  const [meta, setMeta] = useState<SkuMeta | null>(null);
   const [dbError, setDbError] = useState(false);
   const [station, setStation] = useState<'robot' | 'station'>('robot');
   const [region, setRegion] = useState<RegionId>('NA');
@@ -50,17 +53,25 @@ export default function SkuLookupCard({
   const [selected, setSelected] = useState<SkuPart | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [wantsDb, setWantsDb] = useState(false);
+  // Auxiliary/override model picker — when set, forces a specific DB model
+  // (from _meta.uniqueModelList) instead of the fuzzy match from the model
+  // gridbox. Empty string = "use fuzzy match".
+  const [overrideModel, setOverrideModel] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Load the 5 MB index lazily: once a model is picked OR the agent focuses
+  // Load the index + meta lazily: once a model is picked OR the agent focuses
   // the part search — never on app start.
   useEffect(() => {
     if (db || dbError) return;
     if (!robotModel.trim() && !wantsDb) return;
     let alive = true;
-    loadSkuDb()
-      .then((d) => alive && setDb(d))
+    Promise.all([loadSkuDb(), loadSkuMeta()])
+      .then(([d, m]) => {
+        if (!alive) return;
+        setDb(d);
+        setMeta(m);
+      })
       .catch(() => alive && setDbError(true));
     return () => {
       alive = false;
@@ -91,18 +102,23 @@ export default function SkuLookupCard({
     [db, robotModel]
   );
 
+  // Effective model filter: override dropdown wins over fuzzy match. The
+  // override lets the agent force an exact DB model when the fuzzy match
+  // misfires (e.g. form has "X12" but no list auto-matched).
+  const effectiveModels = overrideModel ? [overrideModel] : (modelMatch?.models ?? []);
+
   // With an EMPTY query this lists every part matching the classifiers
   // (model → robot/station → region), alphabetical by SKU — browse mode.
   const results = useMemo(() => {
     if (!db) return [];
     return searchSkuParts(db, {
-      models: modelMatch?.models ?? [],
+      models: effectiveModels,
       station,
       region,
       query: debounced,
-      limit: 30,
+      limit: 50,
     });
-  }, [db, debounced, modelMatch, station, region]);
+  }, [db, debounced, effectiveModels, station, region]);
 
   // Auto-pick a single unambiguous hit; a fresh pick overwrites the field.
   useEffect(() => {
@@ -117,11 +133,11 @@ export default function SkuLookupCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results]);
 
-  // Model / station / region changes invalidate the current pick.
+  // Model / station / region / override changes invalidate the current pick.
   useEffect(() => {
     setSelected(null);
     setShowResults(false);
-  }, [robotModel, station, region]);
+  }, [robotModel, station, region, overrideModel]);
 
   const pick = (part: SkuPart) => {
     setSelected(part);
@@ -157,82 +173,133 @@ export default function SkuLookupCard({
   }
 
   // ── Active card ─────────────────────────────────────────────────────────
+  // NOTE: no overflow-hidden on the root — the results dropdown is absolutely
+  // positioned below the search input and must be able to overflow the card.
+  // Rounded corners are preserved per-row (header gets rounded-t, preview
+  // gets rounded-b).
   return (
-    <div ref={rootRef} className="overflow-hidden rounded-md border border-accent/25 bg-accent/[0.04]">
-      {/* Row 1 — station toggle + region filter */}
-      <div className="flex items-center gap-1.5 border-b border-accent/15 bg-accent/10 px-1.5 py-1">
-        <div className="flex overflow-hidden rounded border border-border/60" role="group" aria-label="Part side">
-          <button
-            type="button"
-            onClick={() => setStation('robot')}
-            title="Robot parts"
+    <div ref={rootRef} className="rounded-md border border-accent/25 bg-accent/[0.04]">
+      {/* Row 1 — classifier controls: Robot/Station toggle on its own line,
+          region selector on the next line (per v0.2.5 layout request). */}
+      <div className="border-b border-accent/15 bg-accent/10 px-1.5 py-1.5 rounded-t-md overflow-hidden">
+        {/* Line A — Robot ↔ Station sheet classifier */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex overflow-hidden rounded border border-border/60" role="group" aria-label="Part side">
+            <button
+              type="button"
+              onClick={() => setStation('robot')}
+              title="Robot parts"
+              className={cn(
+                'flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
+                station === 'robot'
+                  ? 'bg-accent/25 text-accent'
+                  : 'text-muted-foreground/70 hover:text-foreground'
+              )}
+            >
+              <Bot className="size-3" />
+              Robot
+            </button>
+            <button
+              type="button"
+              onClick={() => setStation('station')}
+              title="Base-station parts"
+              className={cn(
+                'flex items-center gap-1 border-l border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
+                station === 'station'
+                  ? 'bg-accent/25 text-accent'
+                  : 'text-muted-foreground/70 hover:text-foreground'
+              )}
+            >
+              <Warehouse className="size-3" />
+              Station
+            </button>
+          </div>
+
+          {/* Model classifier status — override (forced) or fuzzy match */}
+          <span
             className={cn(
-              'flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
-              station === 'robot'
-                ? 'bg-accent/25 text-accent'
-                : 'text-muted-foreground/70 hover:text-foreground'
+              'ml-auto flex min-w-0 max-w-[55%] items-center gap-1 truncate text-[9px]',
+              overrideModel
+                ? 'text-accent'
+                : modelMatch?.models.length
+                  ? 'text-muted-foreground'
+                  : 'text-amber-500/90'
             )}
+            title={
+              overrideModel
+                ? `Forced model (override): ${overrideModel}`
+                : modelMatch?.models.length
+                  ? modelMatch.models.join(' / ')
+                  : robotModel.trim()
+                    ? `No parts list matches "${robotModel}" — searching all models. Use the Model dropdown below to force one.`
+                    : 'Pick a Robot Model above to narrow the search'
+            }
           >
-            <Bot className="size-3" />
-            Robot
-          </button>
-          <button
-            type="button"
-            onClick={() => setStation('station')}
-            title="Base-station parts"
-            className={cn(
-              'flex items-center gap-1 border-l border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
-              station === 'station'
-                ? 'bg-accent/25 text-accent'
-                : 'text-muted-foreground/70 hover:text-foreground'
+            {overrideModel ? (
+              <>
+                <Unlink className="size-3 shrink-0" />
+                <span className="truncate">{overrideModel}</span>
+              </>
+            ) : robotModel.trim() ? (
+              modelMatch?.models.length ? (
+                modelMatch.models.length === 1 ? (
+                  modelMatch.models[0]
+                ) : (
+                  `${modelMatch.models[0]} +${modelMatch.models.length - 1}`
+                )
+              ) : (
+                `No list for “${robotModel}” — all models`
+              )
+            ) : (
+              'Model: pick above'
             )}
-          >
-            <Warehouse className="size-3" />
-            Station
-          </button>
+          </span>
         </div>
 
-        <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          Region
-        </span>
-        <select
-          value={region}
-          onChange={(e) => setRegion(e.target.value as RegionId)}
-          title="Market region filter (parts with no market tag are always shown)"
-          className="h-5 rounded border border-border/60 bg-card/60 px-1 text-[10px] font-semibold text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40"
-        >
-          {REGION_BUCKETS.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.label}
-            </option>
-          ))}
-          <option value="ALL">All</option>
-        </select>
+        {/* Line B — Region filter (default NA) */}
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Region
+          </span>
+          <select
+            value={region}
+            onChange={(e) => setRegion(e.target.value as RegionId)}
+            title="Market region filter (parts with no market tag are always shown)"
+            className="h-5 rounded border border-border/60 bg-card/60 px-1 text-[10px] font-semibold text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            {REGION_BUCKETS.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.label}
+              </option>
+            ))}
+            <option value="ALL">All</option>
+          </select>
+        </div>
 
-        {/* Model classifier status */}
-        <span
-          className={cn(
-            'ml-auto min-w-0 max-w-[45%] truncate text-[9px]',
-            modelMatch?.models.length
-              ? 'text-muted-foreground'
-              : 'text-amber-500/90'
-          )}
-          title={
-            modelMatch?.models.length
-              ? modelMatch.models.join(' / ')
-              : robotModel.trim()
-                ? `No parts list matches "${robotModel}" — searching all models`
-                : 'Pick a Robot Model above to narrow the search'
-          }
-        >
-          {robotModel.trim()
-            ? modelMatch?.models.length
-              ? modelMatch.models.length === 1
-                ? modelMatch.models[0]
-                : `${modelMatch.models[0]} +${modelMatch.models.length - 1}`
-              : `No list for “${robotModel}” — all models`
-            : 'Model: pick above'}
-        </span>
+        {/* Line C — Auxiliary model override (exception handling). Lists every
+            unique model in the DB (from _meta.json). Selecting one FORCES that
+            exact model, overriding the fuzzy match from the model gridbox. */}
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Model
+          </span>
+          <select
+            value={overrideModel}
+            onChange={(e) => setOverrideModel(e.target.value)}
+            title="Force a specific parts-list model (overrides the fuzzy match from the Robot Model box above)"
+            className={cn(
+              'h-5 min-w-0 flex-1 rounded border bg-card/60 px-1 text-[10px] font-semibold text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40',
+              overrideModel ? 'border-accent/60 text-accent' : 'border-border/60'
+            )}
+          >
+            <option value="">Auto (fuzzy match)</option>
+            {meta?.uniqueModelList.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Row 2 — debounced part-name search */}
@@ -303,9 +370,9 @@ export default function SkuLookupCard({
                   )}
                 </button>
               ))}
-              {results.length === 30 && (
+              {results.length === 50 && (
                 <div className="border-t border-border/40 bg-background/40 px-2 py-1 text-[9px] text-muted-foreground/70">
-                  First 30 matches — type to narrow down
+                  First 50 matches — type to narrow down
                 </div>
               )}
               </>
@@ -316,7 +383,7 @@ export default function SkuLookupCard({
 
       {/* Row 3 — picked-part preview (picture + details) */}
       {selected && (
-        <div className="flex items-center gap-2 border-t border-accent/15 bg-card/40 px-1.5 py-1.5">
+        <div className="flex items-center gap-2 border-t border-accent/15 bg-card/40 px-1.5 py-1.5 rounded-b-md">
           {selected.thumb ? (
             <img
               src={skuThumbUrl(selected)}
