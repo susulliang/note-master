@@ -25,6 +25,8 @@ import {
  *      no market tag are always kept — never hide a part mid-call). NA by
  *      default.
  *   4. Free-text part-name search (English AND 中文), debounced 250 ms.
+ *      With NOTHING typed, the dropdown lists every part matching the
+ *      classifiers above (browse mode, alphabetical by SKU).
  *
  * One match → auto-fills the SKU field with "SKU — English part name".
  * Multiple matches → dropdown list to pick from. The picked part's picture
@@ -47,13 +49,15 @@ export default function SkuLookupCard({
   const [debounced, setDebounced] = useState('');
   const [selected, setSelected] = useState<SkuPart | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [wantsDb, setWantsDb] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Load the 5 MB index lazily: once a model is picked OR the agent focuses
   // the part search — never on app start.
   useEffect(() => {
     if (db || dbError) return;
-    if (!robotModel.trim() && document.activeElement !== searchRef.current) return;
+    if (!robotModel.trim() && !wantsDb) return;
     let alive = true;
     loadSkuDb()
       .then((d) => alive && setDb(d))
@@ -61,7 +65,19 @@ export default function SkuLookupCard({
     return () => {
       alive = false;
     };
-  }, [db, dbError, robotModel]);
+  }, [db, dbError, robotModel, wantsDb]);
+
+  // Click anywhere outside the card closes the results dropdown.
+  useEffect(() => {
+    if (!showResults) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showResults]);
 
   // Debounce the part-name query.
   useEffect(() => {
@@ -75,8 +91,10 @@ export default function SkuLookupCard({
     [db, robotModel]
   );
 
+  // With an EMPTY query this lists every part matching the classifiers
+  // (model → robot/station → region), alphabetical by SKU — browse mode.
   const results = useMemo(() => {
-    if (!db || !debounced.trim()) return [];
+    if (!db) return [];
     return searchSkuParts(db, {
       models: modelMatch?.models ?? [],
       station,
@@ -123,7 +141,7 @@ export default function SkuLookupCard({
   if (!db) {
     return (
       <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-card/30 px-2 py-1 text-[10px] text-muted-foreground">
-        {robotModel.trim() ? (
+        {robotModel.trim() || wantsDb ? (
           <>
             <Loader2 className="size-3 animate-spin text-accent" />
             Loading spare-parts database…
@@ -131,18 +149,16 @@ export default function SkuLookupCard({
         ) : (
           <>
             <PackageSearch className="size-3 text-accent/70" />
-            Type a part name to search the SKU database
+            Pick a model or focus the search to browse all parts
           </>
         )}
       </div>
     );
   }
 
-  const searching = debounced.trim().length > 0;
-
   // ── Active card ─────────────────────────────────────────────────────────
   return (
-    <div className="overflow-hidden rounded-md border border-accent/25 bg-accent/[0.04]">
+    <div ref={rootRef} className="overflow-hidden rounded-md border border-accent/25 bg-accent/[0.04]">
       {/* Row 1 — station toggle + region filter */}
       <div className="flex items-center gap-1.5 border-b border-accent/15 bg-accent/10 px-1.5 py-1">
         <div className="flex overflow-hidden rounded border border-border/60" role="group" aria-label="Part side">
@@ -226,21 +242,27 @@ export default function SkuLookupCard({
           ref={searchRef}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onFocus={() => setShowResults(true)}
+          onFocus={() => {
+            setWantsDb(true);
+            setShowResults(true);
+          }}
           placeholder="Search part name / 零件名 / SKU…"
           className="h-6 w-full rounded border border-border/60 bg-card/60 pl-7 pr-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:border-accent/40 focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-ring/30"
         />
 
-        {/* Results dropdown — click to pick when several parts match */}
-        {searching && showResults && (
+        {/* Results dropdown — browse-all when the query is empty, filtered
+            matches when typing; click a row to pick */}
+        {showResults && (
           <div className="custom-scrollbar absolute left-1.5 right-1.5 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-card shadow-xl backdrop-blur-xl">
             {results.length === 0 ? (
               <div className="px-2 py-2 text-[10px] text-muted-foreground">
-                No {station === 'station' ? 'station ' : ''}parts
-                {region !== 'ALL' ? ` (${region})` : ''} match “{debounced}”
+                {debounced.trim()
+                  ? `No ${station === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''} match “${debounced}”`
+                  : `No ${station === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''}${robotModel.trim() ? ` for “${robotModel}”` : ' found'}`}
               </div>
             ) : (
-              results.map((p) => (
+              <>
+              {results.map((p) => (
                 <button
                   key={`${p.model}|${p.sku}`}
                   type="button"
@@ -280,7 +302,13 @@ export default function SkuLookupCard({
                     </span>
                   )}
                 </button>
-              ))
+              ))}
+              {results.length === 30 && (
+                <div className="border-t border-border/40 bg-background/40 px-2 py-1 text-[9px] text-muted-foreground/70">
+                  First 30 matches — type to narrow down
+                </div>
+              )}
+              </>
             )}
           </div>
         )}
