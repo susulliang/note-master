@@ -329,6 +329,29 @@ function ComboboxField({
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  // Local input state updates on every keystroke so typing stays responsive.
+  // The parent form's onChange (which triggers a full canvas re-render) is
+  // debounced below — that's what was making the robot model box feel laggy.
+  const [localValue, setLocalValue] = useState(value);
+
+  // Keep local input in sync when the value changes externally (auto-fill,
+  // reset, selecting from another source), but don't clobber while typing.
+  useEffect(() => {
+    if (value !== localValue) setLocalValue(value);
+  }, [value]);
+
+  // Debounce both the form commit and the dropdown-open trigger. 500 ms after
+  // the agent stops typing, we push the value to the form and (if non-empty)
+  // reveal the filtered dropdown — so a single keystroke no longer pops the
+  // menu or re-renders the canvas.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (localValue !== value) onChange(localValue);
+      if (localValue.trim()) setOpen(true);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [localValue]);
+
   // Group options by "Category::" prefix when present (e.g. issue types);
   // un-prefixed option sets (e.g. robot models) fall back to one flat group.
   const groups = useMemo(() => {
@@ -343,8 +366,10 @@ function ComboboxField({
     return Array.from(map.entries());
   }, [options]);
 
+  // Filter against the local value so the list narrows as you type (cheap —
+  // just an array filter), even though the form commit is debounced.
   const filteredGroups = useMemo(() => {
-    const query = value.trim().toLowerCase();
+    const query = localValue.trim().toLowerCase();
     if (!query) return groups;
     return groups
       .map(
@@ -352,7 +377,7 @@ function ComboboxField({
           [cat, items.filter((o) => o.toLowerCase().includes(query))] as [string, string[]]
       )
       .filter(([, items]) => items.length > 0);
-  }, [groups, value]);
+  }, [groups, localValue]);
 
   const totalFiltered = filteredGroups.reduce((n, [, items]) => n + items.length, 0);
   const truncated = totalFiltered > COMBOBOX_MAX_RENDERED;
@@ -368,7 +393,7 @@ function ComboboxField({
     })
     .filter((g): g is [string, string[]] => g !== null && g[1].length > 0);
 
-  const isCustomValue = value.trim().length > 0 && !options.includes(value);
+  const isCustomValue = localValue.trim().length > 0 && !options.includes(localValue);
 
   return (
     <div className="px-2.5 py-1.5">
@@ -380,18 +405,16 @@ function ComboboxField({
       )}
       <div ref={wrapperRef} className="relative flex items-center">
         <Input
-          value={value}
+          value={localValue}
           onChange={(e) => {
-            onChange(e.target.value);
-            // Open dropdown on first keystroke so filtering is visible,
-            // but NOT on focus — clicking the input should immediately
-            // let the agent start typing (no Popover steal-focus flash,
-            // which felt like a "second click" in practice).
-            if (!open) setOpen(true);
+            // Update local state immediately for responsive typing; the form
+            // commit + dropdown open are debounced (see effect above) so a
+            // single keystroke doesn't re-render the canvas or pop the menu.
+            setLocalValue(e.target.value);
           }}
           onFocus={() => {
             onFocus();
-            // Don't auto-open here — chevron click or first keystroke open it.
+            // Don't auto-open here — chevron click or the debounce timer open it.
           }}
           onBlur={onBlur}
           onKeyDown={(e) => {
@@ -441,7 +464,7 @@ function ComboboxField({
               <CommandList className="max-h-[280px]">
                 {filteredGroups.length === 0 ? (
                   <CommandEmpty>
-                    {value.trim()
+                    {localValue.trim()
                       ? 'No match — your text will be kept as a custom value'
                       : 'No options'}
                   </CommandEmpty>
@@ -459,6 +482,7 @@ function ComboboxField({
                             key={opt}
                             value={opt}
                             onSelect={() => {
+                              setLocalValue(opt);
                               onChange(opt);
                               setOpen(false);
                             }}
@@ -467,7 +491,7 @@ function ComboboxField({
                             <Check
                               className={cn(
                                 'size-3.5 shrink-0',
-                                value === opt ? 'opacity-100' : 'opacity-0'
+                                localValue === opt ? 'opacity-100' : 'opacity-0'
                               )}
                             />
                             <span className="truncate">{display}</span>
