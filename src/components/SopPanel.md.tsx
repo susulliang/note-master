@@ -55,6 +55,69 @@ function unescapeMd(s: string): string {
   return s.replace(/\\([\\`*_{}\[\]()#+\-.!|>&~=])/g, '$1');
 }
 
+/**
+ * Minimal inline renderer for short plain-text strings like SOP heading
+ * titles (used in the heading dropdown and the active-section header).
+ * Handles `**bold**`, `__bold__`, `*italic*`, `_italic_` and backslash
+ * escapes — strips the markers and styles the wrapped text. Intentionally
+ * no images / links / code (those live in renderBodyMarkdown for full
+ * body content). Returns a React fragment so callers can drop it in.
+ */
+export function renderInlineText(s: string): React.ReactNode {
+  type Tok = { kind: 'text' | 'strong' | 'em'; val: string };
+  const tokens: Tok[] = [];
+  const pushText = (t: string) => {
+    if (!t) return;
+    const last = tokens[tokens.length - 1];
+    if (last && last.kind === 'text') last.val += t;
+    else tokens.push({ kind: 'text', val: t });
+  };
+  let pos = 0;
+  while (pos < s.length) {
+    const rest = s.slice(pos);
+    // Backslash escape — preserve the 2-char sequence, unescapeMd flattens it.
+    if (s[pos] === '\\' && /^\\[\\`*_{}\[\]()#+\-.!|>&~=]/.test(rest)) {
+      pushText(s.slice(pos, pos + 2));
+      pos += 2;
+      continue;
+    }
+    // Bold: **foo** / __foo__
+    const mb = /^(\*\*|__)([\s\S]*?)\1/.exec(rest);
+    if (mb && (mb[2] || '').trim().length > 0) {
+      tokens.push({ kind: 'strong', val: mb[2] || '' });
+      pos += mb[0].length;
+      continue;
+    }
+    // Italic: *foo* / _foo_
+    const mi = /^(\*|_)([\s\S]*?)\1/.exec(rest);
+    if (mi && (mi[2] || '').length > 0) {
+      tokens.push({ kind: 'em', val: mi[2] || '' });
+      pos += mi[0].length;
+      continue;
+    }
+    pushText(s[pos] || '');
+    pos += 1;
+  }
+  return (
+    <>
+      {tokens.map((t, k) => {
+        switch (t.kind) {
+          case 'text':
+            return <span key={k}>{unescapeMd(t.val)}</span>;
+          case 'strong':
+            return (
+              <strong key={k} className="font-semibold text-foreground">
+                {renderInlineText(t.val)}
+              </strong>
+            );
+          case 'em':
+            return <em key={k}>{renderInlineText(t.val)}</em>;
+        }
+      })}
+    </>
+  );
+}
+
 /** Split a GFM pipe table row. Strips leading/trailing pipes, then splits
  *  on UNESCAPED `|` only. `\|` backslash escapes are preserved as-is and
  *  flattened later by `unescapeMd` when the cell renders. */

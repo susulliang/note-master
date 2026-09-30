@@ -1015,7 +1015,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             • rounded-full on a tall narrow bar = half-circle caps top and
               bottom; a right-biased layered shadow "casts" the pill onto
               the canvas for the protruded look. */}
-        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]">
+        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]" style={{ fontFamily: 'var(--font-condensed)' }}>
           {/* Glass background layer — carries all surface styling.
               Idle: subtle shadow only; hover (on the outer container, via
               group-hover/rail): a normal amount of shadow.

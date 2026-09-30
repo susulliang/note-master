@@ -9,7 +9,7 @@ import {
 import { extractJsonLoose } from '@/lib/llm-parser';
 import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolveSopImageSrc, renderBodyMarkdown } from './SopPanel.md';
+import { resolveSopImageSrc, renderBodyMarkdown, renderInlineText } from './SopPanel.md';
 
 /* SOP handbook is split into numbered section files (01_…, 02_…, …) under
  * /SOP so the handbook can be updated section-by-section. We glob all .md
@@ -381,7 +381,7 @@ export default function SopPanel({
       )}
       {llmResult && (
         <div className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary/90">
-          <strong>AI picked:</strong> <span className="font-semibold">{byId.get(llmResult.bestId)?.title ?? llmResult.bestId}</span>
+          <strong>AI picked:</strong> <span className="font-semibold">{byId.get(llmResult.bestId)?.title ? renderInlineText(byId.get(llmResult.bestId)!.title) : llmResult.bestId}</span>
           {llmResult.reason && <span className="ml-2 text-primary/75">— {llmResult.reason}</span>}
         </div>
       )}
@@ -479,7 +479,7 @@ export default function SopPanel({
                     )}
                   >
                     <span className="font-mono text-[10px] text-muted-foreground/70 shrink-0 w-12">{s.id}</span>
-                    <span className="truncate">{s.title}</span>
+                    <span className="truncate">{renderInlineText(s.title)}</span>
                     <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60">H{s.level}</span>
                   </button>
                 );
@@ -531,7 +531,7 @@ export default function SopPanel({
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
                   {activeSection.id} · H{activeSection.level} · {activeSection.bodyLines.length} body lines
                 </div>
-                <div className="mt-0.5 text-[14px] font-bold text-foreground">{activeSection.title}</div>
+                <div className="mt-0.5 text-[14px] font-bold text-foreground">{renderInlineText(activeSection.title)}</div>
               </div>
               {pinned && (
                 <span className="rounded-full border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent/90">
