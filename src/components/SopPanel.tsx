@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import sopRaw from '../../SOP/SOP.md?raw';
 import {
   indexSopMarkdown,
   scoreKeywordCandidates,
@@ -11,6 +10,22 @@ import { extractJsonLoose } from '@/lib/llm-parser';
 import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveSopImageSrc, renderBodyMarkdown } from './SopPanel.md';
+
+/* SOP handbook is split into numbered section files (01_…, 02_…, …) under
+ * /SOP so the handbook can be updated section-by-section. We glob all .md
+ * files, drop the INDEX, sort by filename, and concatenate into one raw
+ * string so indexSopMarkdown builds a single unified heading tree. */
+const sopModules = import.meta.glob('/SOP/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+const sopRaw = Object.entries(sopModules)
+  .filter(([key]) => !/000_INDEX\.md$/.test(key))
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, content]) => content)
+  .join('\n\n');
 
 /** Min shape of the parser hook's exposed `generate` return. The cloud
  *  DeepSeek completion returns the same shape so the two backends share a
