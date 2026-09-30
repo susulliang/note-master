@@ -151,6 +151,7 @@ export interface TicketPanelsContextShape {
 export const TicketPanelsContext = createContext<TicketPanelsContextShape | null>(null);
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { snToPin } from '@/lib/sn-pin';
+import ModelFirmwareCard from './ModelFirmwareCard';
 
 export type NodeType =
   | 'start'
@@ -255,6 +256,9 @@ export interface FlowNodeProps {
   onMinimize?: () => void;
   /** Monospace input (serial numbers etc.) — disambiguates 0/O, 1/I. */
   mono?: boolean;
+  /** Robot Model node: when a model is selected, the gridbox expands with
+   *  the model's newest firmware version + update notes (v0.2.1). */
+  showFirmware?: boolean;
   /** Progressive disclosure: when true the node renders as a slim one-line
    *  "+ <collapsedLabel>" toggle instead of the full field. */
   collapsed?: boolean;
@@ -520,6 +524,7 @@ function FlowNodeComponent({
   emailGlow,
   onMinimize,
   mono = false,
+  showFirmware = false,
   collapsed = false,
   onToggleCollapsed,
   collapsedLabel,
@@ -811,16 +816,23 @@ function FlowNodeComponent({
 
     if (type === 'select') {
       return (
-        <ComboboxField
-          label={label}
-          value={typeof value === 'string' ? value : ''}
-          options={options}
-          onChange={onChange}
-          onFocus={handleFocus}
-          onBlur={onBlur}
-          icon={Icon}
-          width={width}
-        />
+        <div>
+          <ComboboxField
+            label={label}
+            value={typeof value === 'string' ? value : ''}
+            options={options}
+            onChange={onChange}
+            onFocus={handleFocus}
+            onBlur={onBlur}
+            icon={Icon}
+            width={width}
+          />
+          {showFirmware && typeof value === 'string' && value.trim() && (
+            <div className="px-2.5 pb-1.5">
+              <ModelFirmwareCard model={value} />
+            </div>
+          )}
+        </div>
       );
     }
 

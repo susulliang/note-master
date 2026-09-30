@@ -28,6 +28,8 @@ interface NodeConfig {
   panelContent?: React.ReactNode;
   /** Monospace input (serial numbers etc.) */
   mono?: boolean;
+  /** Robot Model node: expands with the newest firmware card on selection */
+  firmwareModel?: boolean;
   /** Progressive disclosure: node renders collapsed until expanded */
   collapsible?: boolean;
   collapsedLabel?: string;
@@ -952,6 +954,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             onIncrementAddressCount={node.id === NODE_IDS.CUSTOMER_NAME ? onIncrementCustomerAddressCount : undefined}
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
             mono={node.mono}
+            showFirmware={node.firmwareModel}
             collapsed={node.collapsible ? collapsedNodes?.[node.id] ?? false : undefined}
             onToggleCollapsed={
               node.collapsible && onToggleNodeCollapsed

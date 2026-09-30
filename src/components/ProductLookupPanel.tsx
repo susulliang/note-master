@@ -18,6 +18,8 @@ import {
   FileSearch,
   Newspaper,
   ChevronDown,
+  CircuitBoard,
+  Smartphone,
 } from 'lucide-react';
 import {
   findModels,
@@ -36,6 +38,12 @@ import {
   type NewsHit,
   type NewsItem,
 } from '@/utils/newsData';
+import {
+  loadSoftwareUpdatesIndex,
+  searchSoftwareUpdates,
+  type SoftwareUpdateEntry,
+  type SoftwareUpdateHit,
+} from '@/utils/softwareUpdatesData';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { renderBodyMarkdown, resolveSopImageSrc } from './SopPanel.md';
@@ -57,7 +65,7 @@ interface ProductLookupPanelProps {
   onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
-type TabKind = 'specs' | 'errors' | 'faq' | 'templates' | 'news' | 'scientist' | 'free' | 'selling';
+type TabKind = 'specs' | 'errors' | 'faq' | 'templates' | 'news' | 'firmware' | 'appupdates' | 'scientist' | 'free' | 'selling';
 
 interface Tab {
   kind: TabKind;
@@ -76,6 +84,10 @@ const TABS_META: Array<Omit<Tab, 'count'>> = [
   { kind: 'templates', label: 'Matches', icon: FileSearch },
   // Knowledge updates curated from the Feishu 知识点分享群 (v0.2.0).
   { kind: 'news', label: 'News & Updates', icon: Newspaper },
+  // Firmware OTA history + ECOVACS HOME app release notes pulled from the
+  // Feishu "Ecovacs NA 查询宝典" spreadsheet (v0.2.1).
+  { kind: 'firmware', label: 'Firmwares', icon: CircuitBoard },
+  { kind: 'appupdates', label: 'App Updates', icon: Smartphone },
   { kind: 'scientist', label: '代号 · Scientist', icon: Tag },
   { kind: 'free', label: 'All Search', icon: Search },
   { kind: 'selling', label: '卖点 · Pitch', icon: Sparkles },
@@ -331,6 +343,44 @@ export default function ProductLookupPanel({
     [newsIndex, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
   );
 
+  // --- Software updates (Firmwares / App Updates tabs) ----------------------
+  // Parsed from the software_updates/ markdown chunks, loaded async after
+  // first paint (same pattern as the news index above).
+  const [suIndex, setSuIndex] = useState<SoftwareUpdateEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadSoftwareUpdatesIndex().then((idx) => {
+      if (alive) setSuIndex(idx);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const firmwareHits: SoftwareUpdateHit[] = useMemo(
+    () =>
+      suIndex
+        ? searchSoftwareUpdates(
+            suIndex,
+            manualQueryDebounced || `${robotModelDebounced} ${issueTypeDebounced} ${issueDescDebounced}`,
+            8,
+            'firmware'
+          )
+        : [],
+    [suIndex, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
+  );
+  const appHits: SoftwareUpdateHit[] = useMemo(
+    () =>
+      suIndex
+        ? searchSoftwareUpdates(
+            suIndex,
+            manualQueryDebounced || `${robotModelDebounced} ${issueTypeDebounced} ${issueDescDebounced}`,
+            8,
+            'app'
+          )
+        : [],
+    [suIndex, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
+  );
+
   const counts = useMemo<Record<TabKind, number>>(
     () => ({
       specs: specSections.reduce((sum, s) => sum + s.rows.length, 0),
@@ -340,6 +390,16 @@ export default function ProductLookupPanel({
       // Show live matches when a query is active, otherwise the total
       // number of curated updates (browse case). 0 while still loading.
       news: newsIndex ? (newsHits.length > 0 ? newsHits.length : newsIndex.length) : 0,
+      firmware: suIndex
+        ? firmwareHits.length > 0
+          ? firmwareHits.length
+          : suIndex.filter((e) => e.kind === 'firmware').length
+        : 0,
+      appupdates: suIndex
+        ? appHits.length > 0
+          ? appHits.length
+          : suIndex.filter((e) => e.kind === 'app').length
+        : 0,
       selling: sellingHits.length,
       scientist: scientistHits.length,
       free: freeHits.length,
@@ -473,6 +533,12 @@ export default function ProductLookupPanel({
           <MatchesTab matches={templateMatches ?? []} onOpenTemplate={onOpenTemplate} />
         )}
         {activeTab === 'news' && <NewsTab hits={newsHits} index={newsIndex} />}
+        {activeTab === 'firmware' && (
+          <SoftwareUpdatesTab hits={firmwareHits} index={suIndex} kind="firmware" />
+        )}
+        {activeTab === 'appupdates' && (
+          <SoftwareUpdatesTab hits={appHits} index={suIndex} kind="app" />
+        )}
         {activeTab === 'selling' && <SellingTab rows={sellingHits} />}
         {activeTab === 'scientist' && <ScientistTab rows={scientistHits} />}
         {activeTab === 'free' && <FreeTab hits={freeHits} />}
@@ -564,6 +630,102 @@ function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null })
             {isOpen && (
               <div className="markdown-body px-2 py-1.5 text-[11px] leading-relaxed">
                 {renderBodyMarkdown(prepare(item.bodyLines))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Firmwares / App Updates tab — OTA history parsed from the
+ *  software_updates/ markdown chunks (one accordion item per release
+ *  entry). Mirrors the News & Updates accordion; firmware entries show the
+ *  model list + version as the title, app entries the app version. */
+function SoftwareUpdatesTab({
+  hits,
+  index,
+  kind,
+}: {
+  hits: SoftwareUpdateHit[];
+  index: SoftwareUpdateEntry[] | null;
+  kind: 'firmware' | 'app';
+}) {
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  // Markdown chunks still loading — async skeleton (see loadSoftwareUpdatesIndex).
+  if (index === null) {
+    return (
+      <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        <span className="text-[11px]">
+          {kind === 'firmware' ? 'Loading firmware history…' : 'Loading app updates…'}
+        </span>
+      </div>
+    );
+  }
+
+  const kindEntries = index.filter((e) => e.kind === kind);
+  const matched = hits.length > 0;
+  const items = matched ? hits.map((h) => h.item) : kindEntries.slice(0, 12);
+
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={kind === 'firmware' ? CircuitBoard : Smartphone}
+        text={
+          kind === 'firmware'
+            ? 'No firmware records yet.'
+            : 'No app update records yet.'
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="px-1 text-[10px] text-muted-foreground/80">
+        {matched
+          ? `Matched ${items.length} ${kind === 'firmware' ? 'firmware update' : 'app update'}${items.length > 1 ? 's' : ''} for the current ticket.`
+          : `Latest ${items.length} ${kind === 'firmware' ? 'firmware updates' : 'app versions'} (newest first).`}
+      </p>
+      {items.map((item) => {
+        const isOpen = openId === item.id;
+        const title =
+          item.kind === 'app' ? `ECOVACS HOME ${item.version}` : item.models.join(' / ');
+        return (
+          <div
+            key={item.id}
+            className={cn(
+              'overflow-hidden rounded-md border transition-all',
+              'border-primary/20 bg-primary/[0.03] hover:bg-primary/[0.05]'
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setOpenId(isOpen ? null : item.id)}
+              className="flex w-full items-start gap-2 border-b border-primary/15 bg-primary/10 px-2 py-1 text-left"
+            >
+              <span className="mt-0.5 shrink-0 rounded bg-primary/20 px-1 text-[9px] font-bold text-primary">
+                {item.date ? item.date.slice(2) : item.dateLabel}
+              </span>
+              <span className="min-w-0 flex-1 text-[11px] font-semibold leading-snug">
+                {title}
+              </span>
+              <span className="mt-0.5 shrink-0 rounded bg-accent/20 px-1 text-[9px] font-bold text-accent">
+                {item.version}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'mt-0.5 size-3 shrink-0 text-muted-foreground/60 transition-transform',
+                  isOpen && 'rotate-180'
+                )}
+              />
+            </button>
+            {isOpen && (
+              <div className="markdown-body max-h-[320px] overflow-y-auto px-2 py-1.5 text-[11px] leading-relaxed">
+                {renderBodyMarkdown(item.bodyLines)}
               </div>
             )}
           </div>

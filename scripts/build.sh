@@ -65,9 +65,11 @@ fi
 #     regardless of which route the browser resolves. Under 4 MB total.
 SOP_SRC="$ROOT/SOP"
 NEWS_SRC="$ROOT/news"
+SOFTWARE_SRC="$ROOT/software_updates"
 # Same mirroring as SOP/ for the news/ knowledge updates (served under
-# `${CLIENT_BASE_PATH}/news/…` by the Product Lookup "News & Updates" tab).
-for CONTENT_SRC in "$SOP_SRC" "$NEWS_SRC"; do
+# `${CLIENT_BASE_PATH}/news/…` by the Product Lookup "News & Updates" tab)
+# and software_updates/ (Firmwares / App Updates tabs + firmware cards).
+for CONTENT_SRC in "$SOP_SRC" "$NEWS_SRC" "$SOFTWARE_SRC"; do
   SEGMENT="$(basename "$CONTENT_SRC")"
   if [ -d "$CONTENT_SRC" ]; then
     # 1. Copy the folder into every deploy output folder (base-root path)

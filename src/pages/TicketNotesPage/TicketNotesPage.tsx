@@ -186,6 +186,8 @@ interface NodeConfig {
   pinFromValue?: boolean;
   /** Render the input in a monospace font (serial numbers etc.) */
   mono?: boolean;
+  /** Robot Model node: expands with the newest firmware card on selection */
+  firmwareModel?: boolean;
   /** Progressive disclosure: node starts collapsed to a slim one-line
    *  toggle button and expands on demand (e.g. Shipping Address, which is
    *  only needed for parts/RMA calls — a minority of tickets). */
@@ -231,6 +233,9 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: Bot,
+    // v0.2.1 — expands the gridbox with the model's newest firmware
+    // version + update notes (fuzzy series match, see softwareUpdatesData).
+    firmwareModel: true,
   },
   {
     id: NODE_IDS.SKU_NUMBER,

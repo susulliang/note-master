@@ -24,7 +24,7 @@ import tailwindcss from '@tailwindcss/vite';
  * best-effort safety net but build.sh owns the copy step.
  */
 function sopFolderPlugin(): Plugin {
-  const URL_SEGMENTS = ['SOP', 'news'] as const;
+  const URL_SEGMENTS = ['SOP', 'news', 'software_updates'] as const;
   let basePrefix = '/';
 
   return {
