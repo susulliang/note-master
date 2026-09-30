@@ -30,6 +30,9 @@ interface NodeConfig {
   mono?: boolean;
   /** Robot Model node: expands with the newest firmware card on selection */
   firmwareModel?: boolean;
+  /** SKU Number node: expands with the spare-parts lookup card (model-classified,
+   *  robot/station split, region filter, EN+ZH search, picture preview) */
+  skuLookup?: boolean;
   /** Progressive disclosure: node renders collapsed until expanded */
   collapsible?: boolean;
   collapsedLabel?: string;
@@ -970,6 +973,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
             mono={node.mono}
             showFirmware={node.firmwareModel}
+            showSkuLookup={node.skuLookup}
+            skuRobotModel={
+              node.skuLookup ? String(formData[NODE_IDS.DEEBOT_MODEL] ?? '') : undefined
+            }
             collapsed={node.collapsible ? collapsedNodes?.[node.id] ?? false : undefined}
             onToggleCollapsed={
               node.collapsible && onToggleNodeCollapsed

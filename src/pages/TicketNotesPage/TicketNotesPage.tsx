@@ -189,6 +189,10 @@ interface NodeConfig {
   mono?: boolean;
   /** Robot Model node: expands with the newest firmware card on selection */
   firmwareModel?: boolean;
+  /** SKU Number node: expands with the spare-parts lookup card (model
+   *  classifier, robot/station split, region filter, EN+ZH search, picture
+   *  preview) */
+  skuLookup?: boolean;
   /** Progressive disclosure: node starts collapsed to a slim one-line
    *  toggle button and expands on demand (e.g. Shipping Address, which is
    *  only needed for parts/RMA calls — a minority of tickets). */
@@ -246,6 +250,11 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: Barcode,
+    // v0.3.0 — expands the gridbox with the spare-parts lookup: model
+    // classifier (fuzzy, from the Robot Model box above) → robot/station
+    // split → region filter (NA default) → EN+ZH part-name search. Picking a
+    // part fills "SKU — English part name" and shows its picture preview.
+    skuLookup: true,
   },
   {
     id: NODE_IDS.SERIAL_NUMBER,

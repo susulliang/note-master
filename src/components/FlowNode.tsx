@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import SkuLookupCard from '@/components/SkuLookupCard';
 import {
   Popover,
   PopoverContent,
@@ -259,6 +260,13 @@ export interface FlowNodeProps {
   /** Robot Model node: when a model is selected, the gridbox expands with
    *  the model's newest firmware version + update notes (v0.2.1). */
   showFirmware?: boolean;
+  /** SKU Number node: renders the spare-parts lookup card under the input —
+   *  model-classified (fuzzy), robot/station split, region-filtered, EN+ZH
+   *  part-name search with picture preview (v0.3.0). */
+  showSkuLookup?: boolean;
+  /** Live value of the Robot Model field — drives the SKU lookup's primary
+   *  classifier. */
+  skuRobotModel?: string;
   /** Progressive disclosure: when true the node renders as a slim one-line
    *  "+ <collapsedLabel>" toggle instead of the full field. */
   collapsed?: boolean;
@@ -525,6 +533,8 @@ function FlowNodeComponent({
   onMinimize,
   mono = false,
   showFirmware = false,
+  showSkuLookup = false,
+  skuRobotModel,
   collapsed = false,
   onToggleCollapsed,
   collapsedLabel,
@@ -985,6 +995,15 @@ function FlowNodeComponent({
                 </div>
               </div>
             )}
+          </div>
+        )}
+        {showSkuLookup && (
+          <div className="mt-1.5">
+            <SkuLookupCard
+              robotModel={skuRobotModel ?? ''}
+              value={strValue}
+              onChange={(val) => onChange(val)}
+            />
           </div>
         )}
         {showQuickInserts && quickTextGroups ? (

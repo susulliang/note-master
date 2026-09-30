@@ -71,3 +71,6 @@ __pycache__/
 # Whisper bench model mirror cache
 .bench-cache/
 */.bench-cache/
+
+# SKU spare-parts source workbooks (696 MB) — rebuild via scripts/build-sku-db.mjs, output ships as public/sku-db
+SKU_202609/
