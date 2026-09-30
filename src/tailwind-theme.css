@@ -318,6 +318,42 @@
   --scrollbar-thumb-hover: hsl(120 12% 46%);
 }
 
+/* Breezy — light theme built from a 5-stop aqua→plum palette
+   (#BCF8EC, #AED9E0, #9FA0C3, #8B687F, #7B435B). Canvas background is
+   #AED9E0 as specified; cards use the pale mint #BCF8EC; primary is the
+   dark plum #7B435B with #8B687F as the softer accent. */
+:root[data-theme="breezy"] {
+  color-scheme: light;
+  --background: hsl(188 45% 78%);         /* #AED9E0 — canvas */
+  --foreground: hsl(330 28% 18%);
+  --card: hsl(168 81% 86%);               /* #BCF8EC — pale mint */
+  --card-foreground: hsl(330 28% 18%);
+  --popover: hsl(168 81% 86%);
+  --popover-foreground: hsl(330 28% 18%);
+  --primary: hsl(334 30% 37%);            /* #7B435B — dark plum */
+  --primary-foreground: hsl(188 50% 96%);
+  --secondary: hsl(238 23% 69%);          /* #9FA0C3 — periwinkle */
+  --secondary-foreground: hsl(330 28% 18%);
+  --muted: hsl(188 30% 72%);
+  --muted-foreground: hsl(330 22% 30%);
+  --accent: hsl(321 14% 48%);             /* #8B687F — mauve */
+  --accent-foreground: hsl(188 50% 96%);
+  --info: hsl(200 60% 45%);
+  --info-foreground: hsl(188 60% 97%);
+  --destructive: hsl(0 65% 45%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(150 45% 38%);
+  --success-foreground: hsl(150 60% 96%);
+  --warning: hsl(30 80% 45%);
+  --warning-foreground: hsl(40 100% 96%);
+  --border: hsl(238 20% 62%);
+  --input: hsl(188 35% 70%);
+  --ring: hsl(334 30% 37%);               /* #7B435B */
+  --scrollbar-track: hsl(188 30% 72%);
+  --scrollbar-thumb: hsl(238 18% 55%);
+  --scrollbar-thumb-hover: hsl(238 20% 42%);
+}
+
 /* Evening — dim dark (dusk) */
 :root[data-theme="evening"] {
   color-scheme: dark;
@@ -437,6 +473,7 @@
 :root[data-theme="afternoon"],
 :root[data-theme="slate-light"],
 :root[data-theme="neutral"],
+:root[data-theme="breezy"],
 :root[data-theme="moss"] {
   --field-bg: color-mix(in oklab, var(--card) 90%, black 10%);
 }
