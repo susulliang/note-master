@@ -2,7 +2,6 @@ import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEven
 import { FilePen, LayoutGrid, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
-import type { TemplateEntry } from '@/lib/amr-templates';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { cn } from '@/lib/utils';
 
@@ -23,12 +22,15 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  templateMatches?: TemplateEntry[];
-  onOpenTemplate?: (template: TemplateEntry) => void;
   /** HIDDEN: press-and-hold the field to reveal its derived PIN (SN node) */
   pinFromValue?: boolean;
   /** Embedded React content for 'transcript' and 'ticketTracker' panel nodes */
   panelContent?: React.ReactNode;
+  /** Monospace input (serial numbers etc.) */
+  mono?: boolean;
+  /** Progressive disclosure: node renders collapsed until expanded */
+  collapsible?: boolean;
+  collapsedLabel?: string;
 }
 
 interface FlowchartCanvasProps {
@@ -83,6 +85,11 @@ interface FlowchartCanvasProps {
    *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
    *  inside the unified pill without breaking FlowchartCanvas memoization. */
   railBottomSlotRef?: React.Ref<HTMLDivElement>;
+  /** Progressive disclosure: node ids currently rendered collapsed to their
+   *  one-line toggle (e.g. Shipping Address until an address is parsed or a
+   *  replacement resolution is chosen). */
+  collapsedNodes?: Record<string, boolean>;
+  onToggleNodeCollapsed?: (id: string) => void;
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
@@ -170,12 +177,6 @@ function estimateNodeHeight(node: NodeConfig, value: string | string[]): number 
   if (node.type === 'start' || node.type === 'agent') {
     // up to ~3 lines of text
     return base + 56;
-  }
-  if (node.type === 'templates') {
-    // label + wrapped match chip rows (or the empty-state hint line)
-    const matches = node.templateMatches ?? [];
-    const chipRows = matches.length > 0 ? estimateChipRows(matches.map((t) => t.name), width - 20) : 1;
-    return base + 24 + chipRows * 28;
   }
   if (node.type === 'select') {
     return base + 56; // label + combobox input + padding
@@ -390,35 +391,18 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   onViewChange,
   caseTrakContent,
   railBottomSlotRef,
+  collapsedNodes,
+  onToggleNodeCollapsed,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
-  // Pull-tab bookmark panels — these float free of the flow layout. Each is
-  // collapsed (only its left-edge tab shows) until the agent clicks the tab,
-  // at which point the box slides out into the canvas. Transcript defaults
-  // open because the agent needs it live during a call.
-  const PULL_TAB_PANEL_IDS = useMemo(
-    () => [
-      NODE_IDS.TRANSCRIPT_PANEL,
-      NODE_IDS.TICKET_TRACKER,
-      NODE_IDS.TEMPLATE_MATCHES,
-      NODE_IDS.PRODUCT_LOOKUP,
-      NODE_IDS.SOP_PANEL,
-    ],
-    []
-  );
+  // Pull-tab bookmark panels — NONE left: the 24H tracker moved into the
+  // copilot drawer (v0.2.0), so the left-edge pull-tab layer is now empty.
+  // Kept as a mechanism in case a future panel needs left-edge docking.
+  const PULL_TAB_PANEL_IDS = useMemo(() => [] as string[], []);
   const pullTabSet = useMemo(() => new Set<string>(PULL_TAB_PANEL_IDS), [PULL_TAB_PANEL_IDS]);
-  const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({
-    [NODE_IDS.TRANSCRIPT_PANEL]: true,
-    [NODE_IDS.TICKET_TRACKER]: true,
-    [NODE_IDS.TEMPLATE_MATCHES]: true,
-    [NODE_IDS.PRODUCT_LOOKUP]: true,
-    [NODE_IDS.SOP_PANEL]: true,
-  });
-  const togglePanel = useCallback((id: string) => {
-    setCollapsedPanels((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, []);
+  const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({});
   const minimizePanel = useCallback((id: string) => {
     setCollapsedPanels((prev) => ({ ...prev, [id]: true }));
   }, []);
@@ -430,6 +414,68 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     () => pullTabNodes.filter((n) => !collapsedPanels[n.id]),
     [pullTabNodes, collapsedPanels]
   );
+
+  // Knowledge & Copilot drawer — 24H Ticket Tracker / SOP Guides / Product
+  // Lookup / Live Transcript. (Matching Templates folded into Product
+  // Lookup's "Matches" tab in v0.2.0.) These used to be left-edge floating
+  // pull-tabs that stacked over the flow canvas; they now live in ONE
+  // integrated slide-out drawer on the right edge with internal tabs. All
+  // stay mounted (display:none when inactive) so their data loads eagerly
+  // like before.
+  const DRAWER_PANEL_IDS = useMemo(
+    () => [
+      NODE_IDS.TICKET_TRACKER,
+      NODE_IDS.SOP_PANEL,
+      NODE_IDS.PRODUCT_LOOKUP,
+      NODE_IDS.TRANSCRIPT_PANEL,
+    ],
+    []
+  );
+  const drawerSet = useMemo(() => new Set<string>(DRAWER_PANEL_IDS), [DRAWER_PANEL_IDS]);
+  const drawerNodes = useMemo(
+    () => nodes.filter((n) => drawerSet.has(n.id)),
+    [nodes, drawerSet]
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<string>(NODE_IDS.SOP_PANEL);
+  // Mirror of drawerTab for stable closures (avoid stale deps).
+  const drawerTabRef = useRef(drawerTab);
+  useEffect(() => {
+    drawerTabRef.current = drawerTab;
+  }, [drawerTab]);
+  const openDrawerTab = useCallback(
+    (id: string) => {
+      // Clicking the rail pill of the already-active tab toggles the drawer
+      // closed; any other click activates that tab and opens the drawer.
+      if (drawerOpen && drawerTabRef.current === id) {
+        setDrawerOpen(false);
+      } else {
+        setDrawerTab(id);
+        setDrawerOpen(true);
+      }
+    },
+    [drawerOpen]
+  );
+  const drawerTabMeta = useMemo(
+    () =>
+      ({
+        [NODE_IDS.TICKET_TRACKER]: { label: '24H Ticket Tracker', short: '24H' },
+        [NODE_IDS.SOP_PANEL]: { label: 'SOP Guides', short: 'SOP' },
+        [NODE_IDS.PRODUCT_LOOKUP]: { label: 'Product Lookup', short: 'Product' },
+        [NODE_IDS.TRANSCRIPT_PANEL]: { label: 'Live Transcript', short: 'Live' },
+      }) as Record<string, { label: string; short: string }>,
+    []
+  );
+  const visibleDrawerTabs = useMemo(
+    () => DRAWER_PANEL_IDS.filter((id) => !hiddenNodes?.has(id)) as string[],
+    [DRAWER_PANEL_IDS, hiddenNodes]
+  );
+  // Keep the active tab valid if its panel gets hidden via the Boxes menu.
+  useEffect(() => {
+    if (visibleDrawerTabs.length > 0 && !visibleDrawerTabs.includes(drawerTab)) {
+      setDrawerTab(visibleDrawerTabs[0]);
+    }
+  }, [visibleDrawerTabs, drawerTab]);
   // Real rendered node heights reported by FlowNode ResizeObservers — the
   // layout uses these (falling back to estimates) so space adjusts
   // dynamically when nodes expand/collapse or content grows
@@ -519,7 +565,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     const clamped = nodes
       // Pull-tab panels are rendered in their own floating layer, never in
       // the main flow grid.
-      .filter((n) => !hiddenNodes?.has(n.id) && !pullTabSet.has(n.id))
+      .filter((n) => !hiddenNodes?.has(n.id) && !pullTabSet.has(n.id) && !drawerSet.has(n.id))
       .map((n) => {
         const rawW = widthOverrides[n.id] ?? n.width ?? 240;
         const clampedMax = isWideLayout && LEFT_COL_IDS_WIDE.includes(n.id)
@@ -879,7 +925,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             zIndex={
               dragging?.id === node.id
                 ? 50
-                : node.type === 'templates' || node.quickTexts
+                : node.quickTexts
                   ? 10
                   : undefined
             }
@@ -897,8 +943,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             customQuickTexts={node.customQuickTexts}
             onAddQuickText={node.onAddQuickText}
             onRemoveQuickText={node.onRemoveQuickText}
-            templateMatches={node.templateMatches}
-            onOpenTemplate={node.onOpenTemplate}
             parsedSource={parsedFields?.[node.id] ?? null}
             enablePinBubble={node.pinFromValue}
             panelContent={node.panelContent}
@@ -907,6 +951,14 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             addressCount={node.id === NODE_IDS.CUSTOMER_NAME ? customerAddressCount : undefined}
             onIncrementAddressCount={node.id === NODE_IDS.CUSTOMER_NAME ? onIncrementCustomerAddressCount : undefined}
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
+            mono={node.mono}
+            collapsed={node.collapsible ? collapsedNodes?.[node.id] ?? false : undefined}
+            onToggleCollapsed={
+              node.collapsible && onToggleNodeCollapsed
+                ? () => onToggleNodeCollapsed(node.id)
+                : undefined
+            }
+            collapsedLabel={node.collapsedLabel}
           />
         ))}
       </div>
@@ -946,7 +998,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               center (cap radius = 32px; pill h-12 = 48px → center at
               8 + 24 = 32px). pb-4 keeps the bottom controls as before. */}
           <div className="relative z-10 flex h-full flex-col items-center pt-2 pb-4">
-            {/* Work-view pills — sliding green highlight tracks the active view */}
+            {/* Work views (Notes / Trak) — sliding green highlight tracks the
+                active view. */}
             <div className="relative flex flex-col gap-1">
               <span
                 className="pointer-events-none absolute inset-x-0 z-0 rounded-full bg-primary shadow-[0_0_14px_color-mix(in_oklab,var(--primary)_50%,transparent)] transition-[top] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
@@ -957,7 +1010,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               />
               {(['callNotes', 'caseTrak'] as const).map((view) => {
                 const active = activeView === view;
-                const label = view === 'callNotes' ? 'Call Notes' : 'Case Trak';
+                const label =
+                  view === 'callNotes'
+                    ? 'Call Notes — active call workspace'
+                    : 'Case Trak Board — case lifecycle stages';
                 const short = view === 'callNotes' ? 'Notes' : 'Trak';
                 const Icon = view === 'callNotes' ? FilePen : LayoutGrid;
                 return (
@@ -971,7 +1027,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                         ? 'text-primary-foreground'
                         : 'text-muted-foreground hover:text-foreground'
                     )}
-                    title={`Switch to ${label}`}
+                    title={label}
                   >
                     <Icon className="size-5" />
                     <span className="text-[8px] font-bold uppercase leading-tight tracking-tight">
@@ -985,36 +1041,38 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             {/* Section divider */}
             <div className="my-2 h-px w-8 shrink-0 bg-foreground/10" aria-hidden="true" />
 
-            {/* Pull-tab bookmark pills — the flexible middle section scrolls
-                silently when the viewport is too short for everything */}
+            {/* Knowledge & copilot drawer pills: 24H Ticket Tracker, SOP
+                Guides, Product Lookup, Live Transcript, Matching Templates.
+                All open the integrated slide-out drawer on the RIGHT edge
+                (tabbed, never stacked floating boxes over the canvas). */}
             <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {pullTabNodes.map((node) => {
-                const isCollapsed = collapsedPanels[node.id] ?? true;
+              {visibleDrawerTabs.map((panelId) => {
+                const node = drawerNodes.find((n) => n.id === panelId);
+                if (!node) return null;
                 const Icon = node.icon;
-                const shortLabel = (node.label ?? '')
-                  .split(/[\s·]/)[0]
-                  .slice(0, 7);
+                const meta = drawerTabMeta[panelId];
+                const active = drawerOpen && drawerTab === panelId;
                 return (
                   <button
-                    key={`tab-${node.id}`}
+                    key={`drawer-${panelId}`}
                     type="button"
-                    onClick={() => togglePanel(node.id)}
-                    title={node.label}
+                    onClick={() => openDrawerTab(panelId)}
+                    title={meta ? `${meta.label} — opens the right-side copilot drawer` : node.label}
                     className={cn(
                       'relative z-10 flex h-12 w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95',
-                      isCollapsed
-                        ? 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
-                        : 'bg-accent/15 text-accent shadow-[0_0_14px_color-mix(in_oklab,var(--accent)_35%,transparent)]'
+                      active
+                        ? 'bg-accent/15 text-accent shadow-[0_0_14px_color-mix(in_oklab,var(--accent)_35%,transparent)]'
+                        : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
                     )}
                   >
                     {Icon && <Icon className="size-5 transition-transform duration-200" />}
                     <span className={cn(
                       'text-[8px] font-semibold uppercase leading-tight tracking-tight',
-                      isCollapsed ? 'text-muted-foreground' : 'text-accent'
+                      active ? 'text-accent' : 'text-muted-foreground'
                     )}>
-                      {shortLabel}
+                      {meta?.short ?? 'Panel'}
                     </span>
-                    {!isCollapsed && (
+                    {active && (
                       <span className="absolute right-1.5 top-1.5 size-1.5 animate-in zoom-in rounded-full bg-accent" />
                     )}
                   </button>
@@ -1086,8 +1144,6 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                     customQuickTexts={node.customQuickTexts}
                     onAddQuickText={node.onAddQuickText}
                     onRemoveQuickText={node.onRemoveQuickText}
-                    templateMatches={node.templateMatches}
-                    onOpenTemplate={node.onOpenTemplate}
                     parsedSource={parsedFields?.[node.id] ?? null}
                     enablePinBubble={node.pinFromValue}
                     panelContent={node.panelContent}
@@ -1099,6 +1155,111 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               );
             });
           })()}
+        </div>
+
+        {/* Knowledge & Copilot drawer — integrated slide-out on the RIGHT
+            edge. Replaces the old floating pull-tab boxes that stacked over
+            the flow canvas: SOP Guides, Product Lookup and the Live
+            Transcript now share one tabbed drawer. All three panels stay
+            mounted (inactive ones display:none) so their data keeps loading
+            eagerly exactly like the old pull-tabs did. */}
+        <div
+          className={cn(
+            'fixed inset-y-3 right-3 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/15 bg-card/90 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.18),inset_0_-1.5px_0_rgba(255,255,255,0.06),-6px_0_18px_-4px_rgba(0,0,0,0.38),-14px_0_36px_-10px_rgba(0,0,0,0.28)] backdrop-blur-xl backdrop-saturate-150 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
+            drawerOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.5rem)]'
+          )}
+          style={{ width: 'min(720px, calc(100vw - 6rem))' }}
+          aria-hidden={!drawerOpen}
+        >
+          {/* Drawer header — tab switcher + close */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-foreground/10 px-2.5 py-2">
+            {visibleDrawerTabs.map((panelId) => {
+              const meta = drawerTabMeta[panelId];
+              const active = drawerTab === panelId;
+              return (
+                <button
+                  key={`drawer-tab-${panelId}`}
+                  type="button"
+                  onClick={() => setDrawerTab(panelId)}
+                  className={cn(
+                    'rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200',
+                    active
+                      ? 'bg-accent/20 text-accent shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_25%,transparent)]'
+                      : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                  )}
+                >
+                  {meta?.label ?? panelId}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(false)}
+              title="Close drawer (Esc or click the rail pill again)"
+              className="ml-auto flex size-7 items-center justify-center rounded-full text-muted-foreground transition-all duration-200 hover:scale-110 hover:bg-foreground/10 hover:text-foreground active:scale-90"
+              aria-label="Close copilot drawer"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                className="size-4"
+              >
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Drawer body — one panel visible at a time; all stay mounted.
+              Each panel stretches to the drawer's FULL height. */}
+          <div className="relative min-h-0 flex-1 overflow-y-auto">
+            {drawerNodes.map((node) => {
+              const isActive = drawerTab === node.id;
+              return (
+                <div
+                  key={`drawer-panel-${node.id}`}
+                  className="absolute inset-0 p-2"
+                  style={{ display: isActive ? undefined : 'none' }}
+                >
+                  <FlowNode
+                    id={node.id}
+                    type={node.type}
+                    label={node.label}
+                    text={node.text}
+                    value={formData[node.id] ?? (node.type === 'dynamic-list' ? [] : '')}
+                    onChange={(val, discrete) => onFieldChange(node.id, val, discrete)}
+                    onFocus={onNodeFocus}
+                    onBlur={onNodeBlur}
+                    isActive={activeNodeId === node.id}
+                    position={{ x: 0, y: 0 }}
+                    zIndex={30}
+                    onDragStart={handleDragStart}
+                    onHeightChange={handleNodeHeightChange}
+                    options={node.options}
+                    accent={node.accent}
+                    inputType={node.inputType}
+                    width={680}
+                    textareaRows={node.textareaRows}
+                    autoFocus={false}
+                    icon={node.icon}
+                    quickTexts={node.quickTexts}
+                    quickTextGroups={node.quickTextGroups}
+                    customQuickTexts={node.customQuickTexts}
+                    onAddQuickText={node.onAddQuickText}
+                    onRemoveQuickText={node.onRemoveQuickText}
+                    parsedSource={parsedFields?.[node.id] ?? null}
+                    enablePinBubble={node.pinFromValue}
+                    panelContent={node.panelContent}
+                    hangUpLoading={undefined}
+                    quickInsertHidden={quickInsertHidden}
+                    bare
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

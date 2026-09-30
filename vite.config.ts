@@ -7,12 +7,14 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 /**
- * Serves the workspace-level SOP/ folder (SOP.md + assets/) under the
- * app-base-scoped URL prefix `${base}SOP/*` during `vite dev` only.
+ * Serves the workspace-level static content folders (SOP/ and news/) under
+ * the app-base-scoped URL prefixes `${base}SOP/*` and `${base}news/*`
+ * during `vite dev` only.
  *
- * SopPanel's `resolveSopImageSrc` produces `${BASE_URL}SOP/…` URLs,
- * matching this middleware's accepted prefix. For production builds the
- * SOP folder is copied into every deploy output folder by
+ * SopPanel's `resolveSopImageSrc` produces `${BASE_URL}SOP/…` URLs and the
+ * Product Lookup "News & Updates" tab produces `${BASE_URL}news/…` URLs,
+ * matching this middleware's accepted prefixes. For production builds the
+ * folders are copied into every deploy output folder by
  * `scripts/build.sh` directly (it has the authoritative ROOT path and
  * knows the 4-folder Miaoda layout) rather than via this plugin's
  * closeBundle hook — some container/cwd combinations cause
@@ -22,7 +24,7 @@ import tailwindcss from '@tailwindcss/vite';
  * best-effort safety net but build.sh owns the copy step.
  */
 function sopFolderPlugin(): Plugin {
-  const SOP_URL_SEGMENT = 'SOP';
+  const URL_SEGMENTS = ['SOP', 'news'] as const;
   let basePrefix = '/';
 
   return {
@@ -35,7 +37,10 @@ function sopFolderPlugin(): Plugin {
       // NOTE: use process.cwd() (which inside `vite` dev at repo root is
       // correct) — not config.root, because some Miaoda wrappers set a
       // synthetic root that misses the /workspace/SOP folder.
-      const sopRoot = path.join(process.cwd(), 'SOP');
+      const folderRoots = URL_SEGMENTS.map((seg) => ({
+        seg,
+        root: path.join(process.cwd(), seg),
+      }));
       server.middlewares.use((req, _res, next) => {
         const reqUrl = req.url ?? '';
         // Vite module requests (e.g. `import sopRaw from '../../SOP/SOP.md?raw'`
@@ -47,27 +52,28 @@ function sopFolderPlugin(): Plugin {
           return;
         }
         const rawUrl = reqUrl.split('?')[0]!;
-        let rel: string | null = null;
-        const basePrefixed = basePrefix + SOP_URL_SEGMENT;
-        if (rawUrl.startsWith(basePrefixed + '/') || rawUrl === basePrefixed) {
-          rel = decodeURIComponent(rawUrl.slice(basePrefixed.length + 1));
-        } else {
-          const absPrefixed = '/' + SOP_URL_SEGMENT;
-          if (rawUrl.startsWith(absPrefixed + '/') || rawUrl === absPrefixed) {
-            rel = decodeURIComponent(rawUrl.slice(absPrefixed.length + 1));
+        for (const { seg, root } of folderRoots) {
+          let rel: string | null = null;
+          const basePrefixed = basePrefix + seg;
+          if (rawUrl.startsWith(basePrefixed + '/') || rawUrl === basePrefixed) {
+            rel = decodeURIComponent(rawUrl.slice(basePrefixed.length + 1));
+          } else {
+            const absPrefixed = '/' + seg;
+            if (rawUrl.startsWith(absPrefixed + '/') || rawUrl === absPrefixed) {
+              rel = decodeURIComponent(rawUrl.slice(absPrefixed.length + 1));
+            }
           }
-        }
-        if (rel !== null) {
-          const target = path.normalize(path.join(sopRoot, rel));
-          if (target.startsWith(sopRoot) && existsSync(target)) {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const fs = require('node:fs');
-            const statSync = fs.statSync(target);
-            if (statSync.isFile()) {
-              const contentType = contentTypeFor(target);
-              _res.setHeader('Content-Type', contentType);
-              _res.setHeader('Cache-Control', 'public, max-age=3600');
-              return fs.createReadStream(target).pipe(_res);
+          if (rel !== null) {
+            const target = path.normalize(path.join(root, rel));
+            if (target.startsWith(root) && existsSync(target)) {
+              const fs = require('node:fs');
+              const statSync = fs.statSync(target);
+              if (statSync.isFile()) {
+                const contentType = contentTypeFor(target);
+                _res.setHeader('Content-Type', contentType);
+                _res.setHeader('Cache-Control', 'public, max-age=3600');
+                return fs.createReadStream(target).pipe(_res);
+              }
             }
           }
         }
@@ -80,24 +86,23 @@ function sopFolderPlugin(): Plugin {
       // This hook only runs when `vite build` is invoked directly
       // (standalone/vercel) and only fires if `scripts/build.sh` hasn't
       // already produced the same folder.
-      const sopSrc = path.join(process.cwd(), 'SOP');
-      // config.build.outDir might be a relative path. resolve via cwd.
-      // We can't read it from configResolved here — closeBundle's this
-      // value isn't a plugin ctx with direct access; infer from common.
       const outDirRel = 'dist/client';
       try {
-        await stat(sopSrc);
-        const bases = ['/', basePrefix];
-        const seen = new Set<string>();
-        for (const b of bases) {
-          const sub = (b === '/' ? '' : b.replace(/^\/+/, '')) + SOP_URL_SEGMENT;
-          const dst = path.resolve(process.cwd(), outDirRel, sub);
-          const norm = path.normalize(dst);
-          if (seen.has(norm)) continue;
-          seen.add(norm);
-          await mkdir(path.dirname(norm), { recursive: true });
-          cpSync(sopSrc, norm, { recursive: true, errorOnExist: false });
-          this.info?.(`ecovacs-sop-folder: copied ${sopSrc} → ${norm}`);
+        for (const seg of URL_SEGMENTS) {
+          const src = path.join(process.cwd(), seg);
+          await stat(src);
+          const bases = ['/', basePrefix];
+          const seen = new Set<string>();
+          for (const b of bases) {
+            const sub = (b === '/' ? '' : b.replace(/^\/+/, '')) + seg;
+            const dst = path.resolve(process.cwd(), outDirRel, sub);
+            const norm = path.normalize(dst);
+            if (seen.has(norm)) continue;
+            seen.add(norm);
+            await mkdir(path.dirname(norm), { recursive: true });
+            cpSync(src, norm, { recursive: true, errorOnExist: false });
+            this.info?.(`ecovacs-sop-folder: copied ${src} → ${norm}`);
+          }
         }
       } catch (e) {
         // Non-fatal: build.sh will retry at repo-root immediately after.

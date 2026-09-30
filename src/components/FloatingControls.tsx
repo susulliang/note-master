@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RotateCcw, History, Settings, Type, Mic, MicOff, Boxes, AlertTriangle } from 'lucide-react';
+import { RotateCcw, History, Settings, Type, Boxes, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -36,10 +36,12 @@ interface RailControlsProps {
   onClearHistory: () => void;
   uiScale: UiScale;
   onToggleUiScale: () => void;
-  /** CCP tab-audio + mic capture → local Whisper auto-fill (both speakers) */
-  callSupported: boolean;
-  callCapturing: boolean;
-  onToggleCall: () => void;
+  /** CCP tab-audio + mic capture state — only used by the engine settings
+   *  panel (the standalone mic rail button moved to the sticky bottom
+   *  call bar in v0.2.0). */
+  callSupported?: boolean;
+  callCapturing?: boolean;
+  onToggleCall?: () => void;
   /** Engine settings panel (gear): whisper/LLM state + handlers */
   engine?: EngineState;
   parser?: ParserState;
@@ -215,37 +217,6 @@ export default function RailControls({
           </Button>
         )}
 
-        {callSupported && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleCall}
-            className={cn(
-              RAIL_BTN,
-              callCapturing &&
-                'bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive'
-            )}
-            aria-label={callCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
-            title={
-              callCapturing
-                ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
-                : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
-            }
-          >
-            {callCapturing ? (
-              <MicOff className="size-[18px]" />
-            ) : (
-              <Mic className="size-[18px]" />
-            )}
-            {callCapturing && (
-              <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
-              </span>
-            )}
-          </Button>
-        )}
-
         <Button
           variant="ghost"
           size="icon"
@@ -384,9 +355,9 @@ export default function RailControls({
               parser={parser}
               cloud={cloud}
               transcript={transcript ?? []}
-              isCapturing={callCapturing}
+              isCapturing={!!callCapturing}
               isTranscribing={!!isTranscribing}
-              onToggleCapture={onToggleCall}
+              onToggleCapture={() => onToggleCall?.()}
               onClose={() => setEngineOpen(false)}
             />
           </div>

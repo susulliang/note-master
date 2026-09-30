@@ -13,19 +13,32 @@ import { resolveSopImageSrc, renderBodyMarkdown } from './SopPanel.md';
 
 /* SOP handbook is split into numbered section files (01_…, 02_…, …) under
  * /SOP so the handbook can be updated section-by-section. We glob all .md
- * files, drop the INDEX, sort by filename, and concatenate into one raw
- * string so indexSopMarkdown builds a single unified heading tree. */
-const sopModules = import.meta.glob('/SOP/*.md', {
+ * files LAZILY (no `eager`) — the markdown chunks are fetched after the app
+ * shell has painted so the initial load isn't blocked by the handbook text.
+ * Once resolved we drop the INDEX, sort by filename, and concatenate into
+ * one raw string so indexSopMarkdown builds a single unified heading tree. */
+const sopLoaders = import.meta.glob('/SOP/*.md', {
   query: '?raw',
   import: 'default',
-  eager: true,
-}) as Record<string, string>;
+}) as Record<string, () => Promise<string>>;
 
-const sopRaw = Object.entries(sopModules)
-  .filter(([key]) => !/000_INDEX\.md$/.test(key))
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([, content]) => content)
-  .join('\n\n');
+/** Lazily load + concatenate all SOP section files (cached promise). */
+let sopRawPromise: Promise<string> | null = null;
+function loadSopRaw(): Promise<string> {
+  if (!sopRawPromise) {
+    sopRawPromise = (async () => {
+      const entries = await Promise.all(
+        Object.entries(sopLoaders).map(async ([key, load]) => [key, await load()] as const)
+      );
+      return entries
+        .filter(([key]) => !/000_INDEX\.md$/.test(key))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, content]) => content)
+        .join('\n\n');
+    })();
+  }
+  return sopRawPromise;
+}
 
 /** Min shape of the parser hook's exposed `generate` return. The cloud
  *  DeepSeek completion returns the same shape so the two backends share a
@@ -82,7 +95,20 @@ export default function SopPanel({
   quickInsertHidden = false,
 }: SopPanelProps) {
   // --- index -----------------------------------------------------------
-  const sections = useMemo<SopSection[]>(() => indexSopMarkdown(sopRaw), []);
+  // Handbook markdown is loaded asynchronously AFTER first paint (see
+  // loadSopRaw) so the app shell renders immediately; until the chunks
+  // arrive we render a lightweight loading state.
+  const [sopRaw, setSopRaw] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadSopRaw().then((raw) => {
+      if (alive) setSopRaw(raw);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const sections = useMemo<SopSection[]>(() => (sopRaw ? indexSopMarkdown(sopRaw) : []), [sopRaw]);
   const byId = useMemo(() => {
     const m = new Map<string, SopSection>();
     for (const s of sections) m.set(s.id, s);
@@ -298,6 +324,16 @@ export default function SopPanel({
     return chain;
   })();
 
+  // Handbook chunks still loading — skeleton instead of the full panel.
+  if (sopRaw === null) {
+    return (
+      <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        <span className="text-[11px]">Loading SOP handbook…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-[280px] flex-col gap-2">
       {/* Status row: SOP stats + AI rerank button */}
@@ -464,7 +500,7 @@ export default function SopPanel({
           a node drag. Users interact with text selection, scroll, image
           clicks etc. without accidentally nudging the box. */}
       <div
-        className="flex-1 overflow-y-auto rounded-md border border-foreground/10 bg-background/40 px-3 py-2.5 max-h-[260px]"
+        className="min-h-0 flex-1 overflow-y-auto rounded-md border border-foreground/10 bg-background/40 px-3 py-2.5"
         onMouseDownCapture={(e) => {
           // Text selection / scroll / img click / link click — all need to
           // bypass the FlowNode outer drag-handler.

@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   memo,
   useContext,
@@ -27,7 +27,6 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { TemplateEntry } from '@/lib/amr-templates';
 
 /**
  * Supplies the live React content for the two panel-node toolboxes that sit
@@ -160,7 +159,6 @@ export type NodeType =
   | 'select'
   | 'dynamic-list'
   | 'hangup'
-  | 'templates'
   | 'transcript'
   | 'ticketTracker'
   | 'sop'
@@ -212,9 +210,6 @@ export interface FlowNodeProps {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  /** Fuzzy-matched templates (AMR emails + macro TBS steps) for the typed issue text */
-  templateMatches?: TemplateEntry[];
-  onOpenTemplate?: (template: TemplateEntry) => void;
   /** Stacking order within the nodes layer (chips-bearing boxes sit higher) */
   zIndex?: number;
   /** Reports the node's actual rendered height so the layout adjusts dynamically */
@@ -255,10 +250,23 @@ export interface FlowNodeProps {
     *  slow pulse (email already filled). */
    emailGlow?: 'need' | 'done';
    /** When set, the node is a pull-tab bookmark panel: render a minimize
-    *  (chevron-left) button in its header that calls this to collapse the
-    *  panel back into its left-edge tab. */
-   onMinimize?: () => void;
- }
+   *  (chevron-left) button in its header that calls this to collapse the
+   *  panel back into its left-edge tab. */
+  onMinimize?: () => void;
+  /** Monospace input (serial numbers etc.) — disambiguates 0/O, 1/I. */
+  mono?: boolean;
+  /** Progressive disclosure: when true the node renders as a slim one-line
+   *  "+ <collapsedLabel>" toggle instead of the full field. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+  collapsedLabel?: string;
+  /** Drawer-embedded rendering: strips this node's own glass-box chrome
+   *  (border / glow / rounded frame) and its title row so the tool's
+   *  content lays out directly inside the copilot drawer — the drawer's
+   *  tab already names the tool, so the inner title would be a duplicate
+   *  "panel within a panel". */
+  bare?: boolean;
+}
 
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
 // accentBorders = resting glass with a faint tinted edge; accentGlows = active
@@ -501,8 +509,6 @@ function FlowNodeComponent({
   customQuickTexts,
   onAddQuickText,
   onRemoveQuickText,
-  templateMatches,
-  onOpenTemplate,
   zIndex,
   onHeightChange,
   parsedSource = null,
@@ -513,6 +519,11 @@ function FlowNodeComponent({
   onIncrementAddressCount,
   emailGlow,
   onMinimize,
+  mono = false,
+  collapsed = false,
+  onToggleCollapsed,
+  collapsedLabel,
+  bare = false,
 }: FlowNodeProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -746,76 +757,6 @@ function FlowNodeComponent({
       );
     }
 
-    if (type === 'templates') {
-      const matches = templateMatches ?? [];
-      return (
-        <div className="px-2.5 py-1.5">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {Icon && <Icon className="size-3.5 text-accent/70" />}
-            <span className="flex-1 truncate">{label}</span>
-            {matches.length > 0 && (
-              <span className="rounded-full bg-accent/15 px-1.5 text-[9px] font-semibold text-accent">
-                {matches.length}
-              </span>
-            )}
-            {onMinimize && (
-              <button
-                type="button"
-                onClick={onMinimize}
-                title="Minimize to tab"
-                className="ml-auto -mr-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent/10 hover:text-accent"
-              >
-                <ChevronLeft className="size-3.5" />
-              </button>
-            )}
-          </div>
-          {matches.length > 0 && onOpenTemplate ? (
-            <div className="flex flex-wrap gap-1">
-              {matches.map((tpl) => (
-                <button
-                  key={`${tpl.kind}-${tpl.file}`}
-                  type="button"
-                  onClick={() => onOpenTemplate(tpl)}
-                  title={`Open ${tpl.category}: ${tpl.name}`}
-                  className={cn(
-                    'glass-chip h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold',
-                    tpl.kind === 'amr' && 'glass-chip-accent'
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'mr-1 rounded px-1 text-[8px] font-bold uppercase tracking-wider',
-                      tpl.kind === 'amr' && 'bg-accent/20 text-accent',
-                      tpl.kind === 'tbs' && 'bg-primary/20 text-primary',
-                      tpl.kind === 'err' && 'bg-destructive/25 text-destructive',
-                      tpl.kind === 'macro' &&
-                        'bg-emerald-500/25 text-emerald-600 dark:text-emerald-300',
-                      tpl.kind === 'faq' && 'bg-warning/25 text-warning'
-                    )}
-                  >
-                    {tpl.kind === 'amr'
-                      ? 'AMR'
-                      : tpl.kind === 'tbs'
-                        ? 'TBS'
-                        : tpl.kind === 'err'
-                          ? 'ERR'
-                          : tpl.kind === 'macro'
-                            ? 'MACRO'
-                            : 'FAQ'}
-                  </span>
-                  {tpl.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[11px] text-muted-foreground/80">
-              No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, MACRO shortcuts, and real FAQs.
-            </p>
-          )}
-        </div>
-      );
-    }
-
     if (
       type === 'transcript' ||
       type === 'ticketTracker' ||
@@ -835,8 +776,17 @@ function FlowNodeComponent({
               ? panelsCtx?.sopContent
               : panelsCtx?.productContent) ?? panelContent;
       return (
-        <div className="px-2.5 py-1.5">
-          {label && (
+        <div
+          className={cn(
+            'px-2.5',
+            bare
+              ? // Drawer mode: stretch to the drawer body's full height and
+                // force the embedded tool panel to fill it end-to-end.
+                'flex h-full flex-col py-0.5'
+              : 'py-1.5'
+          )}
+        >
+          {!bare && label && (
             <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {Icon && <Icon className="size-3.5 text-accent/70" />}
               <span className="flex-1 truncate">{label}</span>
@@ -852,7 +802,7 @@ function FlowNodeComponent({
               )}
             </div>
           )}
-          <div data-panel-body className="min-h-0">
+          <div data-panel-body className={cn('min-h-0', bare && 'flex flex-1 flex-col [&>*]:h-full')}>
             {content}
           </div>
         </div>
@@ -933,6 +883,31 @@ function FlowNodeComponent({
     // input type
     const strValue = typeof value === 'string' ? value : '';
     const pin = enablePinBubble ? snToPin(strValue) : null;
+    // Progressive disclosure — collapsed variant: a slim one-line toggle
+    // (e.g. "+ Add Shipping Address for Parts/RMA"). Expands on click; the
+    // parent auto-expands it when an address is parsed or the resolution
+    // mentions a replacement.
+    if (collapsed && onToggleCollapsed) {
+      return (
+        <div className="px-2.5 py-1.5">
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            title={collapsedLabel ?? label}
+            className="flex w-full items-center gap-2 rounded-lg border border-dashed border-foreground/25 px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-accent/60 hover:bg-accent/10 hover:text-accent active:scale-[0.98]"
+          >
+            <Plus className="size-3.5 shrink-0" />
+            <span className="truncate">{collapsedLabel ?? label}</span>
+            {strValue.trim().length > 0 && (
+              <span
+                className="ml-auto size-1.5 shrink-0 rounded-full bg-success"
+                title="A value is already captured — click to edit"
+              />
+            )}
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="px-2.5 py-1.5">
         {label && (
@@ -981,7 +956,7 @@ function FlowNodeComponent({
               onChange={(e) => onChange(e.target.value)}
               onFocus={handleFocus}
               onBlur={onBlur}
-              className="h-9 text-sm"
+              className={cn('h-9 text-sm', mono && 'font-mono tracking-wide')}
               placeholder="Type here..."
             />
             {/* HIDDEN PIN bubble — press-and-hold the field to reveal */}
@@ -1186,19 +1161,30 @@ function FlowNodeComponent({
         left: position.x,
         top: position.y,
         width,
+        // Bare mode (copilot drawer): fill the drawer body's full height
+        // AND width so the embedded tool panel spans it end-to-end.
+        ...(bare ? { width: '100%', height: '100%' } : {}),
         ...(zIndex !== undefined ? { zIndex } : {}),
       }}
       className={cn(
-        'absolute cursor-grab select-none rounded-xl transition-all duration-200 active:cursor-grabbing',
+        'absolute cursor-grab select-none transition-all duration-200 active:cursor-grabbing',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
-        // Embedded panel nodes (transcript / 24h tracker) carry the same
-        // glass-card frame + accent border + active glow as every other
-        // gridbox in the canvas. The inner panel root no longer ships its
-        // own glass-panel wrapping — we keep a single outer frame, exactly
-        // like the input / select / dynamic-list nodes.
-        isActive
-          ? cn(accentGlows[accent], 'animate-pulse-slow')
-          : accentBorders[accent],
+        // Bare mode (copilot drawer): no glass-box frame of its own — the
+        // drawer shell provides the chrome and the tab names the tool, so
+        // the content lays out directly inside it (no panel-within-panel).
+        bare
+          ? 'flex flex-col rounded-none border-0 bg-transparent shadow-none'
+          : cn(
+              'rounded-xl',
+              // Embedded panel nodes (transcript / 24h tracker) carry the same
+              // glass-card frame + accent border + active glow as every other
+              // gridbox in the canvas. The inner panel root no longer ships its
+              // own glass-panel wrapping — we keep a single outer frame, exactly
+              // like the input / select / dynamic-list nodes.
+              isActive
+                ? cn(accentGlows[accent], 'animate-pulse-slow')
+                : accentBorders[accent]
+            ),
         // For panel bodies (which contain readable caption text / tracker
         // rows) re-enable user-select so agents can highlight and copy.
         isPanelNode &&

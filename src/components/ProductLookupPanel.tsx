@@ -15,6 +15,9 @@ import {
   Loader2,
   HelpCircle,
   Languages,
+  FileSearch,
+  Newspaper,
+  ChevronDown,
 } from 'lucide-react';
 import {
   findModels,
@@ -26,6 +29,13 @@ import {
   type GoatErrorCode,
   type ModelMatch,
 } from '@/utils/productData';
+import type { TemplateEntry } from '@/lib/amr-templates';
+import {
+  loadNewsIndex,
+  searchNews,
+  type NewsHit,
+  type NewsItem,
+} from '@/utils/newsData';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { renderBodyMarkdown, resolveSopImageSrc } from './SopPanel.md';
@@ -41,9 +51,13 @@ interface ProductLookupPanelProps {
   issueType?: string;
   /** Hide clickable quick-pick model chips during voice capture */
   quickInsertHidden?: boolean;
+  /** AMR / TBS / ERR / MACRO / FAQ template matches (from the Detailed
+   *  Issue Description) — folded in as the "Matches" tab (v0.2.0). */
+  templateMatches?: TemplateEntry[];
+  onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
-type TabKind = 'specs' | 'errors' | 'faq' | 'scientist' | 'free' | 'selling';
+type TabKind = 'specs' | 'errors' | 'faq' | 'templates' | 'news' | 'scientist' | 'free' | 'selling';
 
 interface Tab {
   kind: TabKind;
@@ -57,6 +71,11 @@ const TABS_META: Array<Omit<Tab, 'count'>> = [
   { kind: 'errors', label: 'Error Codes', icon: AlertTriangle },
   // FAQ tab inserted here (after Errors). Selling/Pitch moved to last (pitch demoted).
   { kind: 'faq', label: 'FAQ', icon: HelpCircle },
+  // Matching templates (AMR / TBS / ERR / MACRO / FAQ) folded in as a tab
+  // (v0.2.0) instead of a standalone drawer panel.
+  { kind: 'templates', label: 'Matches', icon: FileSearch },
+  // Knowledge updates curated from the Feishu 知识点分享群 (v0.2.0).
+  { kind: 'news', label: 'News & Updates', icon: Newspaper },
   { kind: 'scientist', label: '代号 · Scientist', icon: Tag },
   { kind: 'free', label: 'All Search', icon: Search },
   { kind: 'selling', label: '卖点 · Pitch', icon: Sparkles },
@@ -79,6 +98,8 @@ export default function ProductLookupPanel({
   issueDescription = '',
   issueType = '',
   quickInsertHidden = false,
+  templateMatches,
+  onOpenTemplate,
 }: ProductLookupPanelProps) {
   const index = useMemo(() => getProductIndex(), []);
   const [manualQuery, setManualQuery] = useState('');
@@ -284,16 +305,46 @@ export default function ProductLookupPanel({
     return searchFaqs(index, { model: activeModel, query, limit: 25 });
   }, [index, pinnedModel, robotModelDebounced, manualQueryDebounced, issueTypeDebounced, issueDescDebounced]);
 
+  // --- News & Updates hits (Feishu knowledge-sharing digest) -----------------
+  // The news markdown chunks load asynchronously AFTER first paint so the
+  // app shell renders immediately (see loadNewsIndex); hits stay empty
+  // until the index resolves.
+  const [newsIndex, setNewsIndex] = useState<NewsItem[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadNewsIndex().then((idx) => {
+      if (alive) setNewsIndex(idx);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const newsHits: NewsHit[] = useMemo(
+    () =>
+      newsIndex
+        ? searchNews(
+            newsIndex,
+            manualQueryDebounced || `${robotModelDebounced} ${issueTypeDebounced} ${issueDescDebounced}`,
+            8
+          )
+        : [],
+    [newsIndex, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
+  );
+
   const counts = useMemo<Record<TabKind, number>>(
     () => ({
       specs: specSections.reduce((sum, s) => sum + s.rows.length, 0),
       errors: errorCodeHits.length,
       faq: faqHits.length,
+      templates: templateMatches?.length ?? 0,
+      // Show live matches when a query is active, otherwise the total
+      // number of curated updates (browse case). 0 while still loading.
+      news: newsIndex ? (newsHits.length > 0 ? newsHits.length : newsIndex.length) : 0,
       selling: sellingHits.length,
       scientist: scientistHits.length,
       free: freeHits.length,
     }),
-    [specSections, errorCodeHits, faqHits, sellingHits, scientistHits, freeHits]
+    [specSections, errorCodeHits, faqHits, sellingHits, scientistHits, freeHits, templateMatches, newsIndex, newsHits]
   );
 
   // Auto-switch to the tab with the most useful content
@@ -414,10 +465,14 @@ export default function ProductLookupPanel({
       </div>
 
       {/* --- Tab content: scrollable body --- */}
-      <div className="custom-scrollbar -mr-1 max-h-[340px] overflow-y-auto pr-1 text-[11px]">
+      <div className="custom-scrollbar -mr-1 min-h-0 flex-1 overflow-y-auto pr-1 text-[11px]">
         {activeTab === 'specs' && <SpecsTab sections={specSections} modelName={selectedModelName} />}
         {activeTab === 'errors' && <ErrorCodesTab rows={errorCodeHits} />}
         {activeTab === 'faq' && <FaqTab hits={faqHits} />}
+        {activeTab === 'templates' && (
+          <MatchesTab matches={templateMatches ?? []} onOpenTemplate={onOpenTemplate} />
+        )}
+        {activeTab === 'news' && <NewsTab hits={newsHits} index={newsIndex} />}
         {activeTab === 'selling' && <SellingTab rows={sellingHits} />}
         {activeTab === 'scientist' && <ScientistTab rows={scientistHits} />}
         {activeTab === 'free' && <FreeTab hits={freeHits} />}
@@ -427,6 +482,154 @@ export default function ProductLookupPanel({
 }
 
 /* ---------------- Sub components ---------------------------------------- */
+
+/**
+ * News & Updates tab — knowledge updates curated from the Feishu
+ * 知识点分享群 (one accordion item per markdown file under news/).
+ * Body renders through the shared SOP markdown renderer; relative
+ * `assets/…` image refs are rewritten to the served `${BASE}news/assets/…`
+ * URL prefix before rendering.
+ */
+function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  // Markdown chunks still loading — async skeleton (see loadNewsIndex).
+  if (index === null) {
+    return (
+      <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        <span className="text-[11px]">Loading knowledge updates…</span>
+      </div>
+    );
+  }
+
+  const matched = hits.length > 0;
+  const items = matched ? hits.map((h) => h.item) : index.slice(0, 12);
+
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={Newspaper}
+        text="No knowledge updates available yet."
+      />
+    );
+  }
+
+  // Rewrite relative image refs to the dev-served news assets URL. Leading
+  // "/" keeps resolveSopImageSrc in pass-through mode (no SOP/ rewrite).
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
+  const prepare = (lines: string[]) =>
+    lines.map((l) => l.replace(/\]\(assets\//g, `](${base}news/assets/`));
+
+  return (
+    <div className="space-y-2">
+      <p className="px-1 text-[10px] text-muted-foreground/80">
+        {matched
+          ? `Matched ${items.length} update${items.length > 1 ? 's' : ''} for the current ticket.`
+          : `Latest ${items.length} knowledge updates (newest first).`}
+      </p>
+      {items.map((item) => {
+        const isOpen = openId === item.id;
+        return (
+          <div
+            key={item.id}
+            className={cn(
+              'overflow-hidden rounded-md border transition-all',
+              'border-primary/20 bg-primary/[0.03] hover:bg-primary/[0.05]'
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setOpenId(isOpen ? null : item.id)}
+              className="flex w-full items-start gap-2 border-b border-primary/15 bg-primary/10 px-2 py-1 text-left"
+            >
+              <span className="mt-0.5 shrink-0 rounded bg-primary/20 px-1 text-[9px] font-bold text-primary">
+                {item.date.slice(5)}
+              </span>
+              <span className="min-w-0 flex-1 text-[11px] font-semibold leading-snug">
+                {item.title}
+              </span>
+              {item.author && (
+                <span className="mt-0.5 shrink-0 text-[9px] text-muted-foreground/80">
+                  {item.author}
+                </span>
+              )}
+              <ChevronDown
+                className={cn(
+                  'mt-0.5 size-3 shrink-0 text-muted-foreground/60 transition-transform',
+                  isOpen && 'rotate-180'
+                )}
+              />
+            </button>
+            {isOpen && (
+              <div className="markdown-body px-2 py-1.5 text-[11px] leading-relaxed">
+                {renderBodyMarkdown(prepare(item.bodyLines))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Matching templates tab — AMR emails / TBS steps / error codes / MACRO
+ *  shortcuts / real FAQs matched from the Detailed Issue Description.
+ *  Chip UI ported from the former standalone templates panel (v0.2.0). */
+function MatchesTab({
+  matches,
+  onOpenTemplate,
+}: {
+  matches: TemplateEntry[];
+  onOpenTemplate?: (template: TemplateEntry) => void;
+}) {
+  if (matches.length === 0 || !onOpenTemplate) {
+    return (
+      <EmptyState
+        icon={FileSearch}
+        text="No matches yet — type in the Detailed Issue Description to find AMR emails, TBS steps, error codes, MACRO shortcuts, and real FAQs."
+      />
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1 py-1">
+      {matches.map((tpl) => (
+        <button
+          key={`${tpl.kind}-${tpl.file}`}
+          type="button"
+          onClick={() => onOpenTemplate(tpl)}
+          title={`Open ${tpl.category}: ${tpl.name}`}
+          className={cn(
+            'glass-chip h-7 min-w-0 max-w-full truncate rounded-md px-2 text-[11px] font-semibold',
+            tpl.kind === 'amr' && 'glass-chip-accent'
+          )}
+        >
+          <span
+            className={cn(
+              'mr-1 rounded px-1 text-[8px] font-bold uppercase tracking-wider',
+              tpl.kind === 'amr' && 'bg-accent/20 text-accent',
+              tpl.kind === 'tbs' && 'bg-primary/20 text-primary',
+              tpl.kind === 'err' && 'bg-destructive/25 text-destructive',
+              tpl.kind === 'macro' && 'bg-emerald-500/25 text-emerald-600 dark:text-emerald-300',
+              tpl.kind === 'faq' && 'bg-warning/25 text-warning'
+            )}
+          >
+            {tpl.kind === 'amr'
+              ? 'AMR'
+              : tpl.kind === 'tbs'
+                ? 'TBS'
+                : tpl.kind === 'err'
+                  ? 'ERR'
+                  : tpl.kind === 'macro'
+                    ? 'MACRO'
+                    : 'FAQ'}
+          </span>
+          {tpl.name}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function EmptyState({ icon: Icon, text }: { icon: React.ComponentType<{ className?: string }>; text: string }) {
   return (

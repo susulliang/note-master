@@ -105,15 +105,20 @@ import {
   CheckCircle2,
   StickyNote,
   ShoppingBag,
-  FileSearch,
+  FilePen,
   Package,
   Mic,
+  MicOff,
   ListTodo,
   BookOpen,
   Search,
+  PhoneOff,
+  Loader2,
+  Wand2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import RailControls from '@/components/FloatingControls';
+import { cn } from '@/lib/utils';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
 import TemplatePanel from '@/components/TemplatePanel';
@@ -177,10 +182,16 @@ interface NodeConfig {
   customQuickTexts?: string[];
   onAddQuickText?: (text: string) => void;
   onRemoveQuickText?: (text: string) => void;
-  templateMatches?: TemplateEntry[];
-  onOpenTemplate?: (template: TemplateEntry) => void;
   /** HIDDEN: press-and-hold the field to reveal its derived PIN (SN node) */
   pinFromValue?: boolean;
+  /** Render the input in a monospace font (serial numbers etc.) */
+  mono?: boolean;
+  /** Progressive disclosure: node starts collapsed to a slim one-line
+   *  toggle button and expands on demand (e.g. Shipping Address, which is
+   *  only needed for parts/RMA calls — a minority of tickets). */
+  collapsible?: boolean;
+  /** Label shown on the collapsed toggle button. */
+  collapsedLabel?: string;
 }
 
 const NODES: NodeConfig[] = [
@@ -236,8 +247,11 @@ const NODES: NodeConfig[] = [
     label: 'Serial Number',
     inputType: 'text',
     accent: 'default',
-    width: 200,
+    // 200 -> 300: serials are long alphanumeric strings that truncated
+    // visually at 200px; mono font makes 0/O, 1/I unambiguous.
+    width: 300,
     icon: Hash,
+    mono: true,
     // HIDDEN: press-and-hold the field ~600ms → floating PIN bubble (snToPin)
     pinFromValue: true,
   },
@@ -250,14 +264,8 @@ const NODES: NodeConfig[] = [
     width: 220,
     icon: ShoppingBag,
   },
-  {
-    id: NODE_IDS.TEMPLATE_MATCHES,
-    type: 'templates',
-    label: 'Matching Templates',
-    accent: 'default',
-    width: 480,
-    icon: FileSearch,
-  },
+  // TEMPLATE_MATCHES node removed (v0.2.0): matching templates now live in
+  // Product Lookup as its "Matches" tab instead of a standalone panel.
   {
     id: NODE_IDS.ISSUE_TYPE,
     type: 'select',
@@ -294,6 +302,12 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: MapPin,
+    // Progressive disclosure: >60% of calls are how-to / pairing /
+    // troubleshooting with no parts shipment, so the field stays collapsed
+    // behind a one-line toggle. It auto-expands when the LLM detects an
+    // address or the resolution mentions a replacement/RMA.
+    collapsible: true,
+    collapsedLabel: 'Add Shipping Address for Parts/RMA',
   },
   {
     id: NODE_IDS.RESOLUTION_SUMMARY,
@@ -323,12 +337,9 @@ const NODES: NodeConfig[] = [
     text: "🙋 Is there anything else I can help you with?",
     accent: 'blue',
   },
-  {
-    id: NODE_IDS.HANG_UP,
-    type: 'hangup',
-    accent: 'red',
-    width: 280,
-  },
+  // HANG_UP node removed (v0.2.0): the sticky bottom call bar owns
+  // "End Call and Generate Note" — it's viewport-pinned so agents never
+  // scroll to end a call.
   // Side tool panels: seated directly in the flowchart canvas as draggable
   // boxes. Actual live content (VoiceCaptionPanel / TicketTrackerPanel)
   // is injected from the component body via FlowchartCanvas override props
@@ -379,7 +390,6 @@ const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.SHIPPING_ADDRESS]: '',
   [NODE_IDS.RESOLUTION_SUMMARY]: '',
   [NODE_IDS.ADDITIONAL_NOTES]: '',
-  [NODE_IDS.HANG_UP]: '',
 };
 
 // Quick-insert quick texts: built-in defaults per field, plus user-added custom
@@ -729,6 +739,46 @@ export default function TicketNotesPage() {
     () => new Set(hiddenNodeIds),
     [hiddenNodeIds]
   );
+  /**
+   * Progressive disclosure — nodes rendered as a slim one-line toggle until
+   * expanded (v0.2.0). Shipping Address starts collapsed: >60% of calls are
+   * how-to / pairing / troubleshooting where nothing ships. It auto-expands
+   * when (a) any engine auto-fills an address, or (b) the resolution
+   * mentions a replacement / RMA / parts shipment. Persisted so a session
+   * reload keeps the agent's manual choice.
+   */
+  const [collapsedNodes, setCollapsedNodes] = useScopedState<Record<string, boolean>>(
+    'ecovacs_ticket_collapsed_nodes',
+    { [NODE_IDS.SHIPPING_ADDRESS]: true }
+  );
+  const handleToggleNodeCollapsed = useCallback(
+    (id: string) => {
+      setCollapsedNodes((prev) => ({ ...prev, [id]: !prev[id] }));
+    },
+    [setCollapsedNodes]
+  );
+  /** Expand a collapsed node (no-op when already expanded). */
+  const expandNode = useCallback(
+    (id: string) => {
+      setCollapsedNodes((prev) => (prev[id] ? { ...prev, [id]: false } : prev));
+    },
+    [setCollapsedNodes]
+  );
+  /** (b) Replacement / RMA / parts-shipment resolutions need a shipping
+   *  address — expand the collapsed toggle automatically. */
+  const resolutionText = typeof formData[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
+    ? (formData[NODE_IDS.RESOLUTION_SUMMARY] as string)
+    : '';
+  useEffect(() => {
+    if (!resolutionText) return;
+    if (
+      /\b(replace(?:ment|d)?|rma|spare parts?|reship|resend|ship|shipping|exchange|warranty part)\b/i.test(
+        resolutionText
+      )
+    ) {
+      expandNode(NODE_IDS.SHIPPING_ADDRESS);
+    }
+  }, [resolutionText, expandNode]);
   /** The gridboxes the user asked for toggle controls for — a stable
    *  ordered list we render in the BOXES dropdown. Labels match their
    *  request exactly plus the matching-template panel added later. */
@@ -740,7 +790,8 @@ export default function TicketNotesPage() {
       { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
       { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
-      { id: NODE_IDS.TEMPLATE_MATCHES, label: 'Matching template' },
+      // TEMPLATE_MATCHES toggle removed (v0.2.0): matches live in Product
+      // Lookup's "Matches" tab now.
       // Product lookup moved above SOP in the canvas → toggles follow the
       // same visual order.
       { id: NODE_IDS.PRODUCT_LOOKUP, label: 'Product lookup' },
@@ -1071,13 +1122,6 @@ export default function TicketNotesPage() {
   const nodes = useMemo(
     () =>
       NODES.map((n) => {
-        if (n.id === NODE_IDS.TEMPLATE_MATCHES) {
-          return {
-            ...n,
-            templateMatches,
-            onOpenTemplate: handleOpenTemplate,
-          };
-        }
         const target = QUICK_TEXT_NODE_TARGETS[n.id];
         if (!target) return n;
         const customs = getCustomQuickTexts(target, {
@@ -1110,10 +1154,8 @@ export default function TicketNotesPage() {
       customResolutionQuickTexts,
       customPurchaseQuickTexts,
       customIssueQuickTexts,
-      templateMatches,
       handleAddQuickText,
       handleRemoveQuickText,
-      handleOpenTemplate,
     ]
   );
 
@@ -1229,6 +1271,13 @@ Additional information (if needed): ${additional}${tldrLine}`;
       const nodeId = FIELD_TO_NODE[fieldId];
       if (!nodeId) return;
 
+      // Progressive disclosure (v0.2.0): any engine auto-filling an address
+      // expands the collapsed Shipping Address toggle so the agent can
+      // verify it — the LLM "detected an address" case.
+      if (nodeId === NODE_IDS.SHIPPING_ADDRESS && value.trim().length > 0) {
+        expandNode(nodeId);
+      }
+
       const current = formData[nodeId];
       const curTrimmed = typeof current === 'string' ? current.trimEnd() : '';
       const priorSource = parsedFields[nodeId];
@@ -1336,7 +1385,7 @@ Additional information (if needed): ${additional}${tldrLine}`;
         });
       }
     },
-    [formData, setFormData, pushUndo, parsedFields]
+    [formData, setFormData, pushUndo, parsedFields, expandNode]
   );
 
   /** Stable forwarder for useCcpExtensionBridge: defined HERE immediately
@@ -1692,6 +1741,35 @@ Additional information (if needed): ${additional}${tldrLine}`;
       const text = buildNoteText(formDataRef.current, callNow.lastParseTldr()?.zh);
       setNoteText(text);
       setShowOutput(true);
+
+      // Step 4 (v0.2.0 ACW acceleration): auto-copy the formatted note to
+      // the clipboard the moment the call ends, with a subtle toast. The
+      // agent can paste into Salesforce before the modal even finishes
+      // animating. Fire-and-forget — a clipboard failure (non-secure
+      // context, permission denied) never blocks the modal; the manual
+      // copy buttons in OutputModal remain the fallback.
+      try {
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            try {
+              toast.success('Note auto-copied to clipboard', {
+                description: 'Paste it anywhere — the output modal still lets you edit + re-copy.',
+              });
+            } catch {
+              /* Toaster not mounted — modal buttons still work */
+            }
+          },
+          () => {
+            try {
+              toast.error('Auto-copy failed — use the Copy buttons in the modal');
+            } catch {
+              /* ignore */
+            }
+          }
+        );
+      } catch {
+        /* navigator.clipboard unavailable — modal buttons still work */
+      }
     } finally {
       hangUpInFlightRef.current = false;
       setHangUpRunning(false);
@@ -1866,6 +1944,8 @@ Additional information (if needed): ${additional}${tldrLine}`;
                   issueDescription={String(formData[NODE_IDS.DETAILED_ISSUE] ?? '')}
                   issueType={String(formData[NODE_IDS.ISSUE_TYPE] ?? '')}
                   quickInsertHidden={true}
+                  templateMatches={templateMatches}
+                  onOpenTemplate={handleOpenTemplate}
                 />
               ),
             }}
@@ -1893,6 +1973,8 @@ Additional information (if needed): ${additional}${tldrLine}`;
               onViewChange={setWorkView}
               caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
               railBottomSlotRef={setRailControlsSlot}
+              collapsedNodes={collapsedNodes}
+              onToggleNodeCollapsed={handleToggleNodeCollapsed}
             />
           </TicketPanelsContext.Provider>
         </main>
@@ -1971,6 +2053,178 @@ Additional information (if needed): ${additional}${tldrLine}`;
           />,
           railControlsSlot
         )}
+
+      {/* Sticky call bar (v0.2.0 ACW acceleration) — only in the NOTES
+          canvas. Owns BOTH call controls: the CCP tab-audio + mic capture
+          toggle (moved here from the left rail) and the viewport-pinned
+          "End Call and Generate Note" CTA, so agents never scroll to end a
+          call. The old in-flow Hang Up node is gone — its function lives
+          entirely here. */}
+      {workView === 'callNotes' && (() => {
+        const capturing = call.isCapturing;
+        // Live customer subtitle — the customer's last 3 utterances, newest
+        // at the bottom, rendered like a scrolling caption strip. ("agent"
+        // turns are skipped; 'recording' mode mixes both speakers so its
+        // lines are kept.)
+        const customerLines = capturing
+          ? call.transcript
+              .filter((e) => e.speaker !== 'agent' && e.text.trim().length > 0)
+              .slice(-3)
+          : [];
+        return (
+      <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div
+          className={cn(
+            'border-[1.5px] border-foreground/15 bg-card/85 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.18),0_10px_30px_-8px_rgba(0,0,0,0.4)] backdrop-blur-xl backdrop-saturate-150',
+            // Capturing: the pill grows into a taller caption card with the
+            // live customer subtitle stacked above the controls. Width is
+            // content-driven (buttons never wrap to two lines) with a cap so
+            // the subtitle truncates on narrow viewports.
+            capturing
+              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
+              : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
+          )}
+        >
+          {/* Scrolling customer subtitle (capture on only) */}
+          {capturing && customerLines.length > 0 && (
+            <div
+              className="flex min-h-[3.2rem] flex-col justify-center gap-0.5 overflow-hidden px-1"
+              title="Live customer transcription"
+            >
+              {customerLines.map((line, idx) => (
+                <p
+                  key={`${idx}-${line.text.slice(0, 24)}`}
+                  className={cn(
+                    'truncate text-sm leading-snug animate-in fade-in slide-in-from-bottom-1 duration-300',
+                    // Newest (last) line is the live one — brighter.
+                    idx === customerLines.length - 1
+                      ? 'font-medium text-foreground'
+                      : 'text-muted-foreground/80'
+                  )}
+                  title={line.text}
+                >
+                  <span className="mr-1.5 select-none text-[9px] font-bold uppercase tracking-widest text-accent/80">
+                    Customer
+                  </span>
+                  {line.text}
+                </p>
+              ))}
+            </div>
+          )}
+          {capturing && customerLines.length === 0 && (
+            <p className="min-h-[1.2rem] px-1 text-[11px] italic text-muted-foreground/70">
+              Listening for the customer's voice…
+            </p>
+          )}
+
+          <div
+            className={cn(
+              'flex items-center gap-3 whitespace-nowrap',
+              capturing ? 'justify-center' : ''
+            )}
+          >
+          {/* Call capture toggle (moved from the left rail) */}
+          {call.isSupported && (
+            <button
+              type="button"
+              onClick={handleToggleCall}
+              className={cn(
+                'relative flex items-center justify-center rounded-full transition-all duration-200 hover:scale-110 active:scale-90',
+                capturing ? 'size-10' : 'size-9',
+                call.isCapturing
+                  ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
+                  : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
+              )}
+              aria-label={call.isCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
+              title={
+                call.isCapturing
+                  ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
+                  : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
+              }
+            >
+              {call.isCapturing ? (
+                <MicOff className={capturing ? 'size-5' : 'size-[18px]'} />
+              ) : (
+                <Mic className={capturing ? 'size-5' : 'size-[18px]'} />
+              )}
+              {call.isCapturing && (
+                <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Live capture status */}
+          <div className="flex items-center gap-2" title="Capture status">
+            {(call.isCapturing || voice.isListening) ? (
+              <>
+                <span className="relative flex size-2.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/70" />
+                  <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-destructive">
+                  REC
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="size-2.5 rounded-full bg-muted-foreground/40" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">
+                  Idle
+                </span>
+              </>
+            )}
+          </div>
+          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          {/* Fill Notes — same engine as the green "Parse" button in the
+              Live Call Transcript panel: sends the full transcript window
+              to the cloud parser and auto-fills the ticket fields. */}
+          <button
+            type="button"
+            onClick={() => void call.cloudParse('full')}
+            disabled={call.isCloudParsing || call.transcript.length === 0}
+            className={cn(
+              'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-success font-bold text-success-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--success)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50',
+              capturing ? 'px-4 py-1.5 text-[13px]' : 'px-3.5 py-1.5 text-xs'
+            )}
+            title={
+              call.transcript.length === 0
+                ? 'No transcript yet — capture the call first, then parse it into the notes'
+                : 'Parse the transcript and auto-fill the ticket fields (same as the Parse button in the Live Transcript panel)'
+            }
+          >
+            {call.isCloudParsing ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="size-3.5" />
+            )}
+            {call.isCloudParsing ? 'Filling…' : 'Fill Notes'}
+          </button>
+          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={handleHangUp}
+            disabled={hangUpRunning}
+            className={cn(
+              'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-destructive font-bold text-destructive-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--destructive)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70',
+              capturing ? 'px-4 py-1.5 text-[13px]' : 'px-3.5 py-1.5 text-xs'
+            )}
+            title="End the call, generate the note and auto-copy it to the clipboard"
+          >
+            {hangUpRunning ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PhoneOff className="size-3.5" />
+            )}
+            {hangUpRunning ? 'Generating…' : 'End Call and Generate Note'}
+          </button>
+          </div>
+        </div>
+      </div>
+        );
+      })()}
 
       {/* NOTE: OutputModal reads TicketPanelsContext.openCase / applyCaseFields /
          extensionConnection to push notes to SF. In the 0.1.21 cycle we had it

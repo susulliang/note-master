@@ -64,30 +64,33 @@ fi
 #     so we mirror SOP/ into every output folder to guarantee a hit
 #     regardless of which route the browser resolves. Under 4 MB total.
 SOP_SRC="$ROOT/SOP"
-if [ -d "$SOP_SRC" ]; then
-  # 1. Copy SOP/ into every deploy output folder (base-root SOP/ path)
-  for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
-    mkdir -p "$dst"
-    cp -r "$SOP_SRC" "$dst/"
-  done
-  # 2. If Miaoda app base path exists (CLIENT_BASE_PATH = /app/$MIAODA_APP_ID),
-  #    also mirror SOP under the scoped subdirectory inside each output
-  #    folder so URLs like /app/X123/SOP/assets/image%2054.png resolve,
-  #    matching what resolveSopImageSrc produces via BASE_URL.
-  if [ -n "${CLIENT_BASE_PATH}" ]; then
-    # strip leading '/' to get a relative path inside the output folder
-    REL_BASE="${CLIENT_BASE_PATH#/}"
-    if [ -n "${REL_BASE}" ]; then
-      for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
-        target="$dst/$REL_BASE/SOP"
-        mkdir -p "$(dirname "$target")"
-        # Remove any stale copy so we don't mix old 图片和附件 + new assets
-        rm -rf "$target"
-        cp -r "$SOP_SRC" "$target"
-      done
+NEWS_SRC="$ROOT/news"
+# Same mirroring as SOP/ for the news/ knowledge updates (served under
+# `${CLIENT_BASE_PATH}/news/…` by the Product Lookup "News & Updates" tab).
+for CONTENT_SRC in "$SOP_SRC" "$NEWS_SRC"; do
+  SEGMENT="$(basename "$CONTENT_SRC")"
+  if [ -d "$CONTENT_SRC" ]; then
+    # 1. Copy the folder into every deploy output folder (base-root path)
+    for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
+      mkdir -p "$dst"
+      cp -r "$CONTENT_SRC" "$dst/"
+    done
+    # 2. If Miaoda app base path exists (CLIENT_BASE_PATH = /app/$MIAODA_APP_ID),
+    #    also mirror the folder under the scoped subdirectory inside each
+    #    output folder so URLs like /app/X123/<segment>/assets/x.jpg resolve.
+    if [ -n "${CLIENT_BASE_PATH}" ]; then
+      REL_BASE="${CLIENT_BASE_PATH#/}"
+      if [ -n "${REL_BASE}" ]; then
+        for dst in "$OUTPUT" "$OUTPUT_RESOURCE" "$OUTPUT_STATIC" "$ROOT/dist/output_capabilities"; do
+          target="$dst/$REL_BASE/$SEGMENT"
+          mkdir -p "$(dirname "$target")"
+          rm -rf "$target"
+          cp -r "$CONTENT_SRC" "$target"
+        done
+      fi
     fi
   fi
-fi
+done
 
 # 4. shared/static → dist/output_static/ (exclude source extensions)
 #
