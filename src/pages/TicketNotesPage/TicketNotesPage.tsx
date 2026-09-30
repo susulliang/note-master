@@ -713,7 +713,7 @@ export default function TicketNotesPage() {
       },
       {
         id: 'kw-supervisor',
-        keyword: 'Superviser',
+        keyword: 'Supervisor',
         alert:
           'Please kindly and politely inform user that our supervisor is not available and we are able to take any questions and notes.',
       },
