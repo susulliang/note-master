@@ -543,6 +543,19 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     }
   }, [containerWidth, dragging, hasOverrides, onLayoutReset]);
 
+  // When the copilot drawer is popped out on a wide canvas, reserve its
+  // width from the layout math so every gridbox flows into the left
+  // (uncovered) region of the canvas instead of being hidden behind the
+  // drawer. The real containerWidth is still used for resize detection
+  // above; this narrower width only drives node positioning/sizing.
+  const DRAWER_RESERVED_PX = 720;
+  const layoutContainerWidth = useMemo(() => {
+    if (drawerOpen && containerWidth > DRAWER_RESERVED_PX + 360) {
+      return containerWidth - DRAWER_RESERVED_PX;
+    }
+    return containerWidth;
+  }, [containerWidth, drawerOpen]);
+
   // -------------------------------------------------------------------------
   // Compute the 3 : 4 ratio wide-layout decision ONCE and share it across
   // layout math + rendered node widths. Left column gets 3/7 of usable
@@ -553,7 +566,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // -------------------------------------------------------------------------
   const LEFT_COL_IDS_WIDE: Array<string> = [];
   const totalInset = CANVAS_MARGIN * 2 + MIN_COL_GAP;
-  const usableWidth = Math.max(0, containerWidth - totalInset);
+  const usableWidth = Math.max(0, layoutContainerWidth - totalInset);
   const leftColumnWidthPxRaw = (usableWidth * LEFT_COL_RATIO_NUM) / RATIO_DENOM;
   const leftColumnWidthPx = Math.max(
     LEFT_COL_MIN_PX,
@@ -563,8 +576,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const anyLeftColVisible = LEFT_COL_IDS_WIDE.some((id) => !hiddenNodes?.has(id) && nodes.some((n) => n.id === id));
   const isWideLayout = Boolean(
     anyLeftColVisible &&
-      containerWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
-      containerWidth - flowPaneCandidateLeft - CANVAS_MARGIN >= RIGHT_COL_MIN_FLOW_PX
+      layoutContainerWidth >= WIDE_SCREEN_CANVAS_WIDTH &&
+      layoutContainerWidth - flowPaneCandidateLeft - CANVAS_MARGIN >= RIGHT_COL_MIN_FLOW_PX
   );
   const widthOverrides: Record<string, number> = useMemo(() => {
     if (!isWideLayout) return {};
@@ -583,7 +596,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // widest natural width so the grid looks balanced (no ragged right edges
   // inside a group). Left-column panels are excluded.
   const effectiveNodes = useMemo(() => {
-    const avail = Math.max(140, containerWidth - CANVAS_MARGIN * 2 - LEFT_RAIL_RESERVED);
+    const avail = Math.max(140, layoutContainerWidth - CANVAS_MARGIN * 2 - LEFT_RAIL_RESERVED);
     const clamped = nodes
       // Pull-tab panels are rendered in their own floating layer, never in
       // the main flow grid.
@@ -591,7 +604,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       .map((n) => {
         const rawW = widthOverrides[n.id] ?? n.width ?? 240;
         const clampedMax = isWideLayout && LEFT_COL_IDS_WIDE.includes(n.id)
-          ? Math.max(LEFT_COL_MIN_PX, containerWidth - CANVAS_MARGIN)
+          ? Math.max(LEFT_COL_MIN_PX, layoutContainerWidth - CANVAS_MARGIN)
           : avail;
         const w = Math.min(rawW, clampedMax);
         return w !== n.width ? { ...n, width: w } : n;
@@ -614,7 +627,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       const u = uniformById.get(n.id);
       return u && u !== n.width ? { ...n, width: u } : n;
     });
-  }, [nodes, containerWidth, hiddenNodes, widthOverrides, isWideLayout]);
+  }, [nodes, layoutContainerWidth, hiddenNodes, widthOverrides, isWideLayout]);
 
   // Measured height with estimate fallback
   const heightOf = useCallback(
@@ -624,8 +637,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(effectiveNodes, containerWidth, heightOf, hiddenNodes, widthOverrides),
-    [effectiveNodes, containerWidth, heightOf, hiddenNodes, widthOverrides]
+    () => computeDefaultLayout(effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides),
+    [effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides]
   );
 
   const effectivePositions = useMemo(() => {
@@ -664,13 +677,13 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   // Canvas extent grows to fit dragged nodes — no right/bottom drag limit
   const canvasWidth = useMemo(() => {
-    let w = containerWidth;
+    let w = layoutContainerWidth;
     for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
       if (p) w = Math.max(w, p.x + n.width + 80);
     }
     return w;
-  }, [effectiveNodes, effectivePositions, containerWidth]);
+  }, [effectiveNodes, effectivePositions, layoutContainerWidth]);
 
   const canvasHeight = useMemo(() => {
     let h = 400;
@@ -1225,7 +1238,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             eagerly exactly like the old pull-tabs did. */}
         <div
           className={cn(
-            'fixed inset-y-3 right-3 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/12 bg-card/55 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),inset_0_-1.5px_0_rgba(255,255,255,0.04),-6px_0_18px_-4px_rgba(0,0,0,0.32),-14px_0_36px_-10px_rgba(0,0,0,0.22)] backdrop-blur-sm backdrop-saturate-125 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
+            'fixed top-3 right-3 bottom-28 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/12 bg-card/55 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),inset_0_-1.5px_0_rgba(255,255,255,0.04),-6px_0_18px_-4px_rgba(0,0,0,0.32),-14px_0_36px_-10px_rgba(0,0,0,0.22)] backdrop-blur-sm backdrop-saturate-125 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
             drawerOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.5rem)]'
           )}
           style={{ width: 'min(720px, calc(100vw - 6rem))' }}
