@@ -153,6 +153,7 @@ export const TicketPanelsContext = createContext<TicketPanelsContextShape | null
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { snToPin } from '@/lib/sn-pin';
 import ModelFirmwareCard from './ModelFirmwareCard';
+import PhoneticPopover from './PhoneticPopover';
 
 export type NodeType =
   | 'start'
@@ -229,6 +230,9 @@ export interface FlowNodeProps {
    * Serial Number node only.
    */
   enablePinBubble?: boolean;
+  /** Show the phonetic-alphabet popover ("Az" button) next to the label —
+   *  used on the Email Address field so agents can spell out serials. */
+  phonetic?: boolean;
   /**
    * Arbitrary React content rendered inside a glass-panel node for the
    * 'transcript' and 'ticketTracker' panel node types. Allows embedding
@@ -549,6 +553,7 @@ function FlowNodeComponent({
   onHeightChange,
   parsedSource = null,
   enablePinBubble = false,
+  phonetic = false,
   panelContent,
   hangUpLoading = false,
   addressCount,
@@ -974,6 +979,7 @@ function FlowNodeComponent({
             ) : (
               label
             )}
+            {phonetic && <PhoneticPopover className="ml-auto" />}
           </div>
         )}
         {inputType === 'textarea' ? (

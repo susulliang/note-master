@@ -37,6 +37,8 @@ interface NodeConfig {
   /** Progressive disclosure: node renders collapsed until expanded */
   collapsible?: boolean;
   collapsedLabel?: string;
+  /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
+  phonetic?: boolean;
 }
 
 interface FlowchartCanvasProps {
@@ -987,6 +989,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             onIncrementAddressCount={node.id === NODE_IDS.CUSTOMER_NAME ? onIncrementCustomerAddressCount : undefined}
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
             mono={node.mono}
+            phonetic={node.phonetic}
             showFirmware={node.firmwareModel}
             showSkuLookup={node.skuLookup}
             skuRobotModel={

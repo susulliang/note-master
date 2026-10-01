@@ -125,6 +125,7 @@ import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
 import ShiftsWorkspace from '@/components/ShiftsWorkspace';
+import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
@@ -199,6 +200,8 @@ interface NodeConfig {
   collapsible?: boolean;
   /** Label shown on the collapsed toggle button. */
   collapsedLabel?: string;
+  /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node). */
+  phonetic?: boolean;
 }
 
 const NODES: NodeConfig[] = [
@@ -308,6 +311,7 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 400,
     icon: Mail,
+    phonetic: true,
   },
   {
     id: NODE_IDS.SHIPPING_ADDRESS,
@@ -2261,6 +2265,8 @@ Additional information (if needed): ${additional}${tldrLine}`;
             )}
             {hangUpRunning ? 'Generating…' : 'End Call and Generate Note'}
           </button>
+          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <QuickRepliesMenu />
           </div>
         </div>
       </div>
