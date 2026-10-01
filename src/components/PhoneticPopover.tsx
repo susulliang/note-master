@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
-import { BookOpen, Copy, Check } from 'lucide-react';
+import { useState } from 'react';
+import { BookOpen, ChevronDown, Copy, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * Compact phonetic-alphabet callout — opens from an "Az" icon button on the
- * Email field gridbox (and any other field that opts in via `phonetic: true`).
- * Useful for agents spelling out serial numbers to customers who need to
- * read them back. The copy button copies the whole table as plain text.
+ * Inline phonetic-alphabet callout — hidden by default, toggled by the
+ * "Az" icon button next to the Email field label (and any field that opts
+ * in via `phonetic: true`). Expands inline in the gridbox below the input,
+ * so the email field stays editable while the table is open. Useful for
+ * agents spelling out serial numbers to customers who need to read them
+ * back. The Copy button copies the whole table as plain text.
  */
 
 const PHONETIC: { char: string; word: string }[] = [
@@ -39,23 +41,6 @@ function toPlain(): string {
 export default function PhoneticPopover({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   const copy = async () => {
     try {
@@ -66,11 +51,11 @@ export default function PhoneticPopover({ className }: { className?: string }) {
   };
 
   return (
-    <div ref={ref} className={cn('relative inline-block', className)}>
+    <div className={cn(className)}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Phonetic alphabet — click to open"
+        title={open ? 'Hide phonetic alphabet' : 'Show phonetic alphabet'}
         className={cn(
           'flex h-5 w-8 items-center justify-center rounded border text-[9px] font-bold tracking-wider transition-colors',
           open
@@ -79,10 +64,13 @@ export default function PhoneticPopover({ className }: { className?: string }) {
         )}
       >
         Az
+        <ChevronDown
+          className={cn('ml-0.5 size-2.5 transition-transform', open && 'rotate-180')}
+        />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 w-[280px] rounded-lg border border-border bg-popover p-2 shadow-xl">
-          <div className="mb-1.5 flex items-center justify-between">
+        <div className="mt-1 overflow-hidden rounded-md border border-border/50 bg-card/50 p-1.5">
+          <div className="mb-1 flex items-center justify-between">
             <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               <BookOpen className="size-3" /> Phonetic Alphabet
             </div>
@@ -95,7 +83,7 @@ export default function PhoneticPopover({ className }: { className?: string }) {
               {copied ? 'Copied' : 'Copy'}
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-0.5 text-[10px]">
+          <div className="grid grid-cols-4 gap-x-2 gap-y-0.5 text-[10px]">
             {PHONETIC.map((p) => (
               <div key={p.char} className="flex items-center gap-1">
                 <span className="w-3.5 font-mono font-bold text-primary">{p.char}</span>
@@ -103,11 +91,11 @@ export default function PhoneticPopover({ className }: { className?: string }) {
               </div>
             ))}
           </div>
-          <div className="mt-1.5 border-t border-border/40 pt-1">
+          <div className="mt-1 border-t border-border/40 pt-1">
             <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
               Specials
             </div>
-            <div className="grid grid-cols-2 gap-0.5 text-[10px]">
+            <div className="grid grid-cols-4 gap-x-2 gap-y-0.5 text-[10px]">
               {SPECIALS.map((p) => (
                 <div key={p.char} className="flex items-center gap-1">
                   <span className="w-3.5 font-mono font-bold text-primary">{p.char}</span>
