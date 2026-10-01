@@ -156,7 +156,13 @@ export function loadSoftwareUpdatesIndex(): Promise<SoftwareUpdateEntry[]> {
       const entries = await Promise.all(
         Object.entries(suLoaders).map(async ([key, load]) => [key, await load()] as const)
       );
-      return entries.flatMap(([key, raw]) => parseFile(key, raw));
+      const all = entries.flatMap(([key, raw]) => parseFile(key, raw));
+      // Standardize order once at the data entry: newest first. The Firmwares
+      // and App Updates browse tabs slice the first N entries off the index,
+      // so it must already be newest-first here. searchSoftwareUpdates() and
+      // getLatestFirmwareForModel() re-sort explicitly and are unaffected.
+      all.sort((a, b) => b.date.localeCompare(a.date));
+      return all;
     })();
   }
   return suIndexPromise;
