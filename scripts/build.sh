@@ -66,10 +66,12 @@ fi
 SOP_SRC="$ROOT/SOP"
 NEWS_SRC="$ROOT/news"
 SOFTWARE_SRC="$ROOT/software_updates"
+QUICKREPLY_SRC="$ROOT/quick_reply"
 # Same mirroring as SOP/ for the news/ knowledge updates (served under
-# `${CLIENT_BASE_PATH}/news/…` by the Product Lookup "News & Updates" tab)
-# and software_updates/ (Firmwares / App Updates tabs + firmware cards).
-for CONTENT_SRC in "$SOP_SRC" "$NEWS_SRC" "$SOFTWARE_SRC"; do
+# `${CLIENT_BASE_PATH}/news/…` by the Product Lookup "News & Updates" tab),
+# software_updates/ (Firmwares / App Updates tabs + firmware cards), and
+# quick_reply/ (Quick Responses email templates in the bottom call bar).
+for CONTENT_SRC in "$SOP_SRC" "$NEWS_SRC" "$SOFTWARE_SRC" "$QUICKREPLY_SRC"; do
   SEGMENT="$(basename "$CONTENT_SRC")"
   if [ -d "$CONTENT_SRC" ]; then
     # 1. Copy the folder into every deploy output folder (base-root path)

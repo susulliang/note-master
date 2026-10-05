@@ -24,7 +24,7 @@ import tailwindcss from '@tailwindcss/vite';
  * best-effort safety net but build.sh owns the copy step.
  */
 function sopFolderPlugin(): Plugin {
-  const URL_SEGMENTS = ['SOP', 'news', 'software_updates'] as const;
+  const URL_SEGMENTS = ['SOP', 'news', 'software_updates', 'quick_reply'] as const;
   let basePrefix = '/';
 
   return {
@@ -130,6 +130,8 @@ function contentTypeFor(filePath: string): string {
       return 'image/bmp';
     case '.md':
       return 'text/markdown; charset=utf-8';
+    case '.html':
+      return 'text/html; charset=utf-8';
     case '.txt':
       return 'text/plain; charset=utf-8';
     case '.pdf':
