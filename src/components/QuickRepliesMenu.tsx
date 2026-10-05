@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, MessageSquareText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -112,7 +113,14 @@ export default function QuickRepliesMenu({ className }: { className?: string }) 
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
   const previewTimer = useRef<number | null>(null);
-  const hideTimer = useRef<number | null>(null);
+
+  // Auto-hide the preview 3s after it (last) appeared — driven by state,
+  // so it always fires regardless of mouse jitter across items.
+  useEffect(() => {
+    if (!previewId) return undefined;
+    const t = window.setTimeout(() => setPreviewId(null), PREVIEW_DURATION);
+    return () => clearTimeout(t);
+  }, [previewId]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -143,14 +151,12 @@ export default function QuickRepliesMenu({ className }: { className?: string }) 
 
   const clearPreviewTimers = () => {
     if (previewTimer.current) { clearTimeout(previewTimer.current); previewTimer.current = null; }
-    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
   };
 
   const handleItemEnter = (id: string) => {
     clearPreviewTimers();
     previewTimer.current = window.setTimeout(() => {
       setPreviewId(id);
-      hideTimer.current = window.setTimeout(() => setPreviewId(null), PREVIEW_DURATION);
     }, PREVIEW_HOVER_DELAY);
   };
 
@@ -288,23 +294,24 @@ export default function QuickRepliesMenu({ className }: { className?: string }) 
         </div>
       )}
 
-      {/* Centered hover-preview of the rendered HTML template */}
-      {previewQr && (
+      {/* Centered hover-preview of the rendered HTML template (portal → body so it's truly viewport-centered) */}
+      {previewQr && createPortal(
         <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="flex max-h-[80vh] w-[min(720px,92vw)] flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
-            <div className="flex items-center gap-2 border-b border-border/50 bg-[#0ea5e9]/10 px-3 py-2">
+          <div className="flex max-h-[80vh] w-[min(720px,92vw)] flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/55 shadow-2xl backdrop-blur-md backdrop-saturate-125">
+            <div className="flex items-center gap-2 border-b border-border/40 bg-[#0ea5e9]/10 px-3 py-2 backdrop-blur-sm">
               <MessageSquareText className="size-4 text-[#0ea5e9]" />
               <span className="truncate text-[12px] font-bold">{previewQr.title}</span>
-              <span className="ml-auto shrink-0 rounded bg-background/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+              <span className="ml-auto shrink-0 rounded bg-background/40 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
                 preview · auto-hides in 3s
               </span>
             </div>
             <div
-              className="qr-preview overflow-y-auto px-4 py-3 text-[13px] leading-relaxed text-foreground"
+              className="qr-preview overflow-y-auto bg-card/30 px-4 py-3 text-[13px] leading-relaxed text-foreground backdrop-blur-sm"
               dangerouslySetInnerHTML={{ __html: previewQr.html }}
             />
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
