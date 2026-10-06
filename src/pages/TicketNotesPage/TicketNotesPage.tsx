@@ -115,8 +115,20 @@ import {
   PhoneOff,
   Loader2,
   Wand2,
+  RotateCcw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
@@ -727,6 +739,24 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_hidden_nodes',
     []
   );
+  // Gridboxes whose panel toggles were removed — always visible. Any stale
+  // hidden ids from earlier sessions are purged so they can't get stuck.
+  const ALWAYS_VISIBLE_NODES = useMemo(
+    () =>
+      new Set<string>([
+        NODE_IDS.TRANSCRIPT_PANEL,
+        NODE_IDS.SERIAL_NUMBER,
+        NODE_IDS.PRODUCT_LOOKUP,
+        NODE_IDS.SOP_PANEL,
+      ]),
+    []
+  );
+  useEffect(() => {
+    setHiddenNodeIds((prev) => {
+      const next = prev.filter((id) => !ALWAYS_VISIBLE_NODES.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [setHiddenNodeIds, ALWAYS_VISIBLE_NODES]);
   /**
    * Live-transcript keyword alerts — the cat pops an amber thought bubble
    * whenever it hears one of these keywords during a call. Editable from
@@ -799,22 +829,14 @@ export default function TicketNotesPage() {
     }
   }, [resolutionText, expandNode]);
   /** The gridboxes the user asked for toggle controls for — a stable
-   *  ordered list we render in the BOXES dropdown. Labels match their
-   *  request exactly plus the matching-template panel added later. */
+   *  ordered list we render in the BOXES dropdown. Call transcript, serial
+   *  number, product lookup and SOP are always visible (toggles removed). */
   const GRIDBOX_VISIBILITY_TOGGLES = useMemo(
     () => [
       { id: NODE_IDS.SHIPPING_ADDRESS, label: 'Shipping address' },
-      { id: NODE_IDS.TRANSCRIPT_PANEL, label: 'Call Transcript' },
       { id: NODE_IDS.TICKET_TRACKER, label: '24H tracker' },
       { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
-      { id: NODE_IDS.SERIAL_NUMBER, label: 'SERIAL Number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
-      // TEMPLATE_MATCHES toggle removed (v0.2.0): matches live in Product
-      // Lookup's "Matches" tab now.
-      // Product lookup moved above SOP in the canvas → toggles follow the
-      // same visual order.
-      { id: NODE_IDS.PRODUCT_LOOKUP, label: 'Product lookup' },
-      { id: NODE_IDS.SOP_PANEL, label: 'SOP box' },
     ],
     []
   );
@@ -2034,7 +2056,6 @@ Additional information (if needed): ${additional}${tldrLine}`;
           <RailControls
             theme={theme}
             onCycleTheme={handleCycleTheme}
-            onReset={handleReset}
             historyOpen={showHistory}
             onToggleHistory={handleToggleHistory}
             history={history}
@@ -2267,6 +2288,47 @@ Additional information (if needed): ${additional}${tldrLine}`;
           </button>
           <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
           <QuickRepliesMenu />
+
+          {/* Reset — the rightmost control on the call bar (moved here from
+              the left rail). Confirm dialog guards the destructive wipe;
+              hovering ramps up a red warning state so agents don't click it
+              by accident mid-call. */}
+          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'group flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-200 active:scale-90',
+                  capturing ? 'size-10' : 'size-9',
+                  // Hover → red warning: destructive tint + glow + spin
+                  'hover:scale-110 hover:bg-destructive/15 hover:text-destructive hover:shadow-[0_0_18px_color-mix(in_oklab,var(--destructive)_55%,transparent)]'
+                )}
+                aria-label="Reset form"
+                title="Reset — clears all ticket data, captions and transcript (cannot be undone)"
+              >
+                <RotateCcw className="size-[18px] transition-transform duration-300 group-hover:-rotate-360" />
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent className="glass-panel rounded-2xl">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will clear all ticket data, captions and transcript, and reset node
+                  positions. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleReset}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Reset
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           </div>
         </div>
       </div>

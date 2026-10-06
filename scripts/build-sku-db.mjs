@@ -1,5 +1,5 @@
-﻿/** SKU DB builder — v2, concurrent images, per-file progress. */
-import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
+/** SKU DB builder — v2, concurrent images, per-file progress. */
+import { readdirSync, readFileSync, existsSync, mkdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -9,12 +9,15 @@ const AdmZip = (await import('adm-zip')).default;
 const sharp = (await import('sharp')).default;
 
 // --- Config -------------------------------------------------------------
-const SRC_DIR = 'SKU_202609';
+const SRC_DIR = 'SKU_202610';
 const OUT_DIR = 'public/sku-db';
 const OUT_IMAGES = join(OUT_DIR, 'images');
 const SKU_JSON = join(OUT_DIR, 'sku-index.json');
 const META_JSON = join(OUT_DIR, '_meta.json');
 const CONCURRENCY = 6; // parallel sharp workers
+// Thumbnails are named by part index — wipe the previous build so stale
+// images (from a differently-sized index) don't linger in the output.
+rmSync(OUT_IMAGES, { recursive: true, force: true });
 mkdirSync(OUT_IMAGES, { recursive: true });
 
 // --- Helpers ------------------------------------------------------------
@@ -178,7 +181,9 @@ async function runBatched(items, worker, concurrency = 6) {
 }
 
 // --- MAIN ---------------------------------------------------------------
-const files = readdirSync(SRC_DIR).filter((f) => f.toLowerCase().endsWith('.xlsx'));
+const files = readdirSync(SRC_DIR).filter(
+  (f) => f.toLowerCase().endsWith('.xlsx') && !f.startsWith('~$') // skip Excel lock files
+);
 const allParts = [];
 const modelRegistry = new Set();
 let totalOrigKB = 0;
@@ -341,7 +346,7 @@ for (const p of finalParts) delete p._imgAnchorRow;
 const data = {
   format: '2',
   builtAt: new Date().toISOString(),
-  source: 'SKU_202609 (124 xlsx)',
+  source: `${SRC_DIR} (${files.length} xlsx)`,
   imageSizes: { width: 64, height: 64, format: 'webp', quality: 40 },
   parts: finalParts,
 };

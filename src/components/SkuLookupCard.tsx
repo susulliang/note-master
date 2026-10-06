@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bot, Warehouse, Search, Loader2, PackageSearch, ImageOff, Unlink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -58,7 +59,12 @@ export default function SkuLookupCard({
   // gridbox. Empty string = "use fuzzy match".
   const [overrideModel, setOverrideModel] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Viewport rect of the search input — the results dropdown is portaled to
+  // <body> (position: fixed) so it floats above every gridbox / canvas node.
+  const [dropRect, setDropRect] = useState<{ left: number; top: number; width: number } | null>(null);
 
   // Load the index + meta lazily: once a model is picked OR the agent focuses
   // the part search — never on app start.
@@ -78,16 +84,42 @@ export default function SkuLookupCard({
     };
   }, [db, dbError, robotModel, wantsDb]);
 
-  // Click anywhere outside the card closes the results dropdown.
+  // Click anywhere outside the card (or the portaled dropdown) closes it.
   useEffect(() => {
     if (!showResults) return;
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (
+        rootRef.current && !rootRef.current.contains(t) &&
+        dropRef.current && !dropRef.current.contains(t)
+      ) {
         setShowResults(false);
       }
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
+  }, [showResults]);
+
+  // Track the search input's viewport rect while the dropdown is open, so the
+  // fixed-position portal stays glued to the input while the canvas scrolls.
+  useEffect(() => {
+    if (!showResults) {
+      setDropRect(null);
+      return;
+    }
+    const measure = () => {
+      const el = searchWrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setDropRect({ left: r.left, top: r.bottom, width: r.width });
+    };
+    measure();
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
+    };
   }, [showResults]);
 
   // Debounce the part-name query. 500 ms gives the agent time to finish a
@@ -107,7 +139,37 @@ export default function SkuLookupCard({
   // Effective model filter: override dropdown wins over fuzzy match. The
   // override lets the agent force an exact DB model when the fuzzy match
   // misfires (e.g. form has "X12" but no list auto-matched).
-  const effectiveModels = overrideModel ? [overrideModel] : (modelMatch?.models ?? []);
+  const effectiveModels = useMemo(
+    () => (overrideModel ? [overrideModel] : (modelMatch?.models ?? [])),
+    [overrideModel, modelMatch]
+  );
+
+  // Does the current model scope contain separate robot / station parts?
+  // Only then is the Robot ↔ Station toggle meaningful — single-sided
+  // workbooks (most older models) hide it and lock the existing side.
+  const scope = useMemo(() => {
+    if (!db) return { hasRobot: false, hasStation: false };
+    const modelSet = effectiveModels.length ? new Set(effectiveModels) : null;
+    let hasRobot = false;
+    let hasStation = false;
+    for (const p of db.parts) {
+      if (modelSet && !modelSet.has(p.model)) continue;
+      if (p.isStation) {
+        if (!hasStation) hasStation = true;
+      } else if (!hasRobot) hasRobot = true;
+      if (hasRobot && hasStation) break;
+    }
+    return { hasRobot, hasStation };
+  }, [db, effectiveModels]);
+
+  const showSideToggle = scope.hasRobot && scope.hasStation;
+  // Both sides → honour the toggle; only one side → search that side
+  // regardless of the (hidden) toggle state.
+  const effectiveStation: 'robot' | 'station' = showSideToggle
+    ? station
+    : scope.hasStation
+      ? 'station'
+      : 'robot';
 
   // With an EMPTY query this lists every part matching the classifiers
   // (model → robot/station → region), alphabetical by SKU — browse mode.
@@ -115,12 +177,12 @@ export default function SkuLookupCard({
     if (!db) return [];
     return searchSkuParts(db, {
       models: effectiveModels,
-      station,
+      station: effectiveStation,
       region,
       query: debounced,
       limit: 50,
     });
-  }, [db, debounced, effectiveModels, station, region]);
+  }, [db, debounced, effectiveModels, effectiveStation, region]);
 
   // Auto-pick a single unambiguous hit; a fresh pick overwrites the field.
   useEffect(() => {
@@ -132,7 +194,6 @@ export default function SkuLookupCard({
     }
     setShowResults(true);
     // onChange is the node's field setter — stable per node.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results]);
 
   // Model / station / region / override changes invalidate the current pick.
@@ -184,18 +245,33 @@ export default function SkuLookupCard({
       {/* Row 1 — classifier controls: Robot/Station toggle on its own line,
           region selector on the next line (per v0.2.5 layout request). */}
       <div className="border-b border-accent/15 bg-accent/10 px-1.5 py-1.5 rounded-t-md overflow-hidden">
-        {/* Line A — Robot ↔ Station sheet classifier */}
+        {/* Line A — Robot ↔ Station sheet classifier. Greyed out (not
+            hidden) when the matched model has no separate robot/station
+            sheets, so the layout stays stable. */}
         <div className="flex items-center gap-1.5">
-          <div className="flex overflow-hidden rounded border border-border/60" role="group" aria-label="Part side">
+          <div
+            className={cn(
+              'flex overflow-hidden rounded border border-border/60',
+              !showSideToggle && 'cursor-not-allowed opacity-40'
+            )}
+            role="group"
+            aria-label="Part side"
+            title={
+              showSideToggle
+                ? undefined
+                : 'This parts list has no separate robot/station sheets — both sides are searched together'
+            }
+          >
             <button
               type="button"
+              disabled={!showSideToggle}
               onClick={() => setStation('robot')}
               title="Robot parts"
               className={cn(
-                'flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
-                station === 'robot'
+                'flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed',
+                showSideToggle && station === 'robot'
                   ? 'bg-accent/25 text-accent'
-                  : 'text-muted-foreground/70 hover:text-foreground'
+                  : 'text-muted-foreground/70 hover:text-foreground disabled:hover:text-muted-foreground/70'
               )}
             >
               <Bot className="size-3" />
@@ -203,13 +279,14 @@ export default function SkuLookupCard({
             </button>
             <button
               type="button"
+              disabled={!showSideToggle}
               onClick={() => setStation('station')}
               title="Base-station parts"
               className={cn(
-                'flex items-center gap-1 border-l border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors',
-                station === 'station'
+                'flex items-center gap-1 border-l border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed',
+                showSideToggle && station === 'station'
                   ? 'bg-accent/25 text-accent'
-                  : 'text-muted-foreground/70 hover:text-foreground'
+                  : 'text-muted-foreground/70 hover:text-foreground disabled:hover:text-muted-foreground/70'
               )}
             >
               <Warehouse className="size-3" />
@@ -217,10 +294,30 @@ export default function SkuLookupCard({
             </button>
           </div>
 
-          {/* Model classifier status — override (forced) or fuzzy match */}
+          <span className="ml-auto text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Region
+          </span>
+          <select
+            value={region}
+            onChange={(e) => setRegion(e.target.value as RegionId)}
+            title="Market region filter (parts with no market tag are always shown)"
+            className="h-5 rounded border border-border/60 bg-card/60 px-1 text-[10px] font-semibold text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            {REGION_BUCKETS.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.label}
+              </option>
+            ))}
+            <option value="ALL">All</option>
+          </select>
+        </div>
+
+        {/* Line B — Model classifier status, own full-width line (was squeezed
+            next to the toggle and truncated). Override (forced) or fuzzy match */}
+        <div className="mt-1">
           <span
             className={cn(
-              'ml-auto flex min-w-0 max-w-[55%] items-center gap-1 truncate text-[9px]',
+              'flex min-w-0 items-center gap-1 text-[9px]',
               overrideModel
                 ? 'text-accent'
                 : modelMatch?.models.length
@@ -244,38 +341,18 @@ export default function SkuLookupCard({
               </>
             ) : robotModel.trim() ? (
               modelMatch?.models.length ? (
-                modelMatch.models.length === 1 ? (
-                  modelMatch.models[0]
-                ) : (
-                  `${modelMatch.models[0]} +${modelMatch.models.length - 1}`
-                )
+                <span className="truncate">
+                  {modelMatch.models.length === 1
+                    ? modelMatch.models[0]
+                    : `${modelMatch.models[0]} +${modelMatch.models.length - 1}`}
+                </span>
               ) : (
-                `No list for “${robotModel}” — all models`
+                <span className="truncate">No list for “{robotModel}” — all models</span>
               )
             ) : (
               'Model: pick above'
             )}
           </span>
-        </div>
-
-        {/* Line B — Region filter (default NA) */}
-        <div className="mt-1 flex items-center gap-1.5">
-          <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-            Region
-          </span>
-          <select
-            value={region}
-            onChange={(e) => setRegion(e.target.value as RegionId)}
-            title="Market region filter (parts with no market tag are always shown)"
-            className="h-5 rounded border border-border/60 bg-card/60 px-1 text-[10px] font-semibold text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40"
-          >
-            {REGION_BUCKETS.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.label}
-              </option>
-            ))}
-            <option value="ALL">All</option>
-          </select>
         </div>
 
         {/* Line C — Auxiliary model override (exception handling). Lists every
@@ -305,7 +382,7 @@ export default function SkuLookupCard({
       </div>
 
       {/* Row 2 — debounced part-name search */}
-      <div className="relative px-1.5 py-1.5">
+      <div ref={searchWrapRef} className="relative px-1.5 py-1.5">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
         <input
           ref={searchRef}
@@ -318,19 +395,26 @@ export default function SkuLookupCard({
           placeholder="Search part name / 零件名 / SKU…"
           className="h-6 w-full rounded border border-border/60 bg-card/60 pl-7 pr-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:border-accent/40 focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-ring/30"
         />
+      </div>
 
-        {/* Results dropdown — browse-all when the query is empty, filtered
-            matches when typing; click a row to pick */}
-        {showResults && (
-          <div className="custom-scrollbar absolute left-1.5 right-1.5 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-card shadow-xl backdrop-blur-xl">
-            {results.length === 0 ? (
-              <div className="px-2 py-2 text-[10px] text-muted-foreground">
-                {debounced.trim()
-                  ? `No ${station === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''} match “${debounced}”`
-                  : `No ${station === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''}${robotModel.trim() ? ` for “${robotModel}”` : ' found'}`}
-              </div>
-            ) : (
-              <>
+      {/* Results dropdown — portaled to <body> so canvas nodes / other
+          gridboxes (each with its own stacking context from backdrop-blur)
+          can never paint over it. Browse-all when the query is empty,
+          filtered matches when typing; click a row to pick */}
+      {showResults && dropRect && createPortal(
+        <div
+          ref={dropRef}
+          className="custom-scrollbar fixed z-[9999] max-h-56 overflow-y-auto rounded-md border border-border/70 bg-card/70 shadow-2xl shadow-black/50 backdrop-blur-2xl backdrop-saturate-150"
+          style={{ left: dropRect.left, top: dropRect.top + 4, width: dropRect.width }}
+        >
+          {results.length === 0 ? (
+            <div className="px-2 py-2 text-[10px] text-muted-foreground">
+              {debounced.trim()
+                ? `No ${effectiveStation === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''} match “${debounced}”`
+                : `No ${effectiveStation === 'station' ? 'station ' : ''}parts${region !== 'ALL' ? ` (${region})` : ''}${robotModel.trim() ? ` for “${robotModel}”` : ' found'}`}
+            </div>
+          ) : (
+            <>
               {results.map((p) => (
                 <button
                   key={`${p.model}|${p.sku}`}
@@ -377,11 +461,11 @@ export default function SkuLookupCard({
                   First 50 matches — type to narrow down
                 </div>
               )}
-              </>
-            )}
-          </div>
-        )}
-      </div>
+            </>
+          )}
+        </div>,
+        document.body
+      )}
 
       {/* Row 3 — picked-part preview (picture + details) */}
       {selected && (

@@ -1,9 +1,9 @@
 /**
  * SKU spare-parts database (v0.3.0).
  *
- * Built offline from the 124 Ecovacs spare-parts workbooks (SKU_202609) by
+ * Built offline from the 124 Ecovacs spare-parts workbooks (SKU_202610) by
  * scripts/build-sku-db.mjs → public/sku-db/sku-index.json + images/*.webp.
- * ~11,840 parts × 158 models, ~5 MB JSON + ~6 MB thumbnails (64×64 WebP).
+ * ~19,000 parts × 170 models, ~8 MB JSON + ~7 MB thumbnails (64×64 WebP).
  *
  * This module lazily fetches that JSON once, then serves:
  *   - fuzzy model matching (form's "X2 OMNI" → db "DEEBOT X2 OMNI Station")

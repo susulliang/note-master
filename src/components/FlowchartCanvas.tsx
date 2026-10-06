@@ -1347,7 +1347,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setAppPhotosOpen(false)}
               aria-hidden="true"
             />
-            <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
+            <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
               <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
             </div>
           </>

@@ -1,17 +1,6 @@
 import { useState } from 'react';
-import { RotateCcw, History, Settings, Type, Boxes, AlertTriangle } from 'lucide-react';
+import { History, Settings, Type, Boxes, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
 import HistoryPanel from '@/components/HistoryPanel';
 import EngineSettingsPanel, {
@@ -28,7 +17,6 @@ import type { KeywordAlert } from '@/hooks/use-cat-assistant';
 interface RailControlsProps {
   theme: ThemeId;
   onCycleTheme: () => void;
-  onReset: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
   history: NoteHistoryEntry[];
@@ -80,7 +68,6 @@ const RAIL_BTN =
 export default function RailControls({
   theme,
   onCycleTheme,
-  onReset,
   historyOpen,
   onToggleHistory,
   history,
@@ -157,38 +144,6 @@ export default function RailControls({
           )}
         </Button>
 
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={RAIL_BTN}
-              aria-label="Reset form"
-              title="Reset"
-            >
-              <RotateCcw className="size-[18px] transition-transform duration-300 hover:-rotate-90" />
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent className="glass-panel rounded-2xl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Reset all fields?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will clear all ticket data, captions and transcript, and reset node
-                positions. This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={onReset}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Reset
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
         {/* Gridbox visibility toggles — the BOXES button + dropdown panel. */}
         {gridboxVisibility && (
           <Button
@@ -200,7 +155,7 @@ export default function RailControls({
             }}
             className={cn(RAIL_BTN, boxesOpen && 'bg-foreground/10 text-foreground')}
             aria-label="Toggle gridboxes"
-            title="Gridboxes — show / hide Shipping address, Transcript, 24h tracker, SOP, SKU, Serial, Additional notes, Matching template"
+            title="Gridboxes — show / hide Shipping address, 24h tracker, SKU, Additional notes"
           >
             <Boxes className="size-[18px]" />
             {/* If any toggle is currently turned OFF, show a small amber

@@ -71,9 +71,9 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
   }, [activeModelId]);
 
   return (
-    <div className="glass-panel w-[360px] max-w-[90vw] rounded-2xl shadow-2xl">
+    <div className="flex h-full w-[540px] max-w-[calc(100vw-7rem)] flex-col rounded-2xl border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-foreground/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <ImageIcon className="size-4 text-primary" />
           <div>
@@ -95,7 +95,7 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
 
       {/* Product type tabs */}
       {index && (
-        <div className="flex flex-wrap gap-1 border-b border-foreground/10 px-3 py-2">
+        <div className="flex shrink-0 flex-wrap gap-1 border-b border-foreground/10 px-3 py-2">
           {index.productTypes.map((pt) => (
             <button
               key={pt}
@@ -124,7 +124,7 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
 
       {/* Model selector dropdown */}
       {index && (
-        <div className="relative px-3 py-2">
+        <div className="relative shrink-0 px-3 py-2">
           <button
             type="button"
             onClick={() => setModelListOpen((v) => !v)}
@@ -148,7 +148,7 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
           </button>
 
           {modelListOpen && (
-            <div className="absolute left-3 right-3 top-[calc(100%-2px)] z-10 max-h-64 overflow-y-auto rounded-lg border border-foreground/10 bg-card shadow-xl">
+            <div className="absolute left-3 right-3 top-[calc(100%-2px)] z-10 max-h-64 overflow-y-auto rounded-lg border border-foreground/10 bg-card/85 shadow-xl backdrop-blur-md backdrop-saturate-125">
               {models.map((m) => (
                 <button
                   key={m.id}
@@ -174,7 +174,7 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
       )}
 
       {/* Photo grid */}
-      <div className="max-h-[55vh] overflow-y-auto px-3 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {error && (
           <div className="py-8 text-center text-[12px] text-destructive">
             Failed to load photo index: {error}

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useContext } from 'react';
-import { Copy, Check, X, Pencil, Eye, Code2, Upload, Loader2, Minus, CircleAlert } from 'lucide-react';
+import { Copy, Check, X, Eye, Code2, Upload, Loader2, Minus, CircleAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -7,7 +7,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -723,10 +722,6 @@ export default function OutputModal({
             <span className="text-primary">📋</span>
             Ticket Note Generated
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Pencil className="size-3.5" />
-            Preview the bold highlights above — use Show Source to edit the raw note. Copy writes both rich and plain text.
-          </DialogDescription>
         </DialogHeader>
 
         {/* Click-to-copy contact chips (bullet-dotted) */}
@@ -965,9 +960,6 @@ export default function OutputModal({
             </Button>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Auto-copy = <span className="font-mono text-primary">rich text only</span>. Use the Plain button for raw markdown.
-        </p>
       </DialogContent>
     </Dialog>
   );
