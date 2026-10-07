@@ -14,6 +14,13 @@ import {
   familyKey,
 } from '@/lib/transcript-noise';
 import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
+import { extractJsonLoose, renderTranscript } from '@/lib/llm-parser';
+import { generateWithDeepseek } from '@/lib/cloud-parser';
+import {
+  buildQaScoringPrompt,
+  QA_CHECKLIST_ITEMS,
+  type QaScores,
+} from '@/data/qaCallChecklist';
 import type { CallTranscriber } from './use-local-transcriber';
 
 // Re-exported for components that consume capture state (VoiceCaptionPanel).
@@ -230,6 +237,12 @@ export function useCallCapture(
   const [hasMic, setHasMic] = useState(false);
   /** True while DEBUG RECORDING mode is capturing (single source, no mic) */
   const [isRecordingDebug, setIsRecordingDebug] = useState(false);
+  /** QA checklist scores from the last LLM scoring pass (null = never run) */
+  const [qaScores, setQaScores] = useState<QaScores | null>(null);
+  /** True while the LLM QA scoring call is in flight */
+  const [isQaScoring, setIsQaScoring] = useState(false);
+  /** One-sentence weakest-area note from the last QA scoring pass */
+  const [qaSummary, setQaSummary] = useState<string>('');
 
   const displayStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -679,6 +692,65 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
   }, [applyLlmFields, armIdleParse, buildPriorValues]);
 
   /**
+   * LLM QA checklist scoring — fired alongside (never blocking) the cloud
+   * parse. Reads the SAME transcript window the parse just consumed, sends
+   * the weighted call-QA checklist, and stores per-item 0..max scores for
+   * the bottom-bar QA menu progress bars. Failures are silent: the menu
+   * simply keeps the previous scores.
+   */
+  const runQaScoring = useCallback(async (): Promise<void> => {
+    if (entriesRef.current.length === 0) return;
+    setIsQaScoring(true);
+    try {
+      const { system, user } = buildQaScoringPrompt(
+        renderTranscript(entriesRef.current, 16_000)
+      );
+      const { text } = await generateWithDeepseek(system, user, 1024);
+      const parsed = extractJsonLoose(text) as {
+        scores?: Record<string, unknown>;
+        summary?: unknown;
+      } | null;
+      if (parsed && typeof parsed.scores === 'object' && parsed.scores !== null) {
+        const next: QaScores = {};
+        for (const item of QA_CHECKLIST_ITEMS) {
+          const v = (parsed.scores as Record<string, unknown>)[item.id];
+          const n = typeof v === 'number' ? v : Number.parseFloat(String(v));
+          if (Number.isFinite(n)) next[item.id] = Math.max(0, Math.min(item.max, n));
+        }
+        if (Object.keys(next).length > 0) setQaScores(next);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim()) {
+          setQaSummary(parsed.summary.trim().slice(0, 200));
+        }
+      }
+    } catch {
+      /* scoring is best-effort — keep previous scores on failure */
+    } finally {
+      setIsQaScoring(false);
+    }
+  }, []);
+
+  /**
+   * DEBUG: replace the live transcript with pasted text. Parses
+   * "AGENT: …" / "CUSTOMER: …" (any case) lines — the same shape
+   * renderTranscript() emits — so a copied prompt window can be pasted
+   * back to test the parse / QA scoring pipeline without a live call.
+   */
+  const loadTranscriptText = useCallback((raw: string): void => {
+    const entries: TranscriptEntry[] = [];
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim();
+      if (!text) continue;
+      const m = text.match(/^(agent|customer|recording)\s*:\s*(.+)$/i);
+      const speaker = m
+        ? (m[1].toLowerCase() as Speaker)
+        : 'customer';
+      entries.push({ speaker, text: m ? m[2].trim() : text });
+    }
+    entriesRef.current = entries;
+    setTranscript(entries);
+  }, []);
+
+  /**
    * On-demand DeepSeek cloud parse — the explicit "Cloud parse" buttons.
    *
    * Semantics differ from the local parser's append-guard on purpose:
@@ -703,6 +775,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     setIsCloudParsing(true);
     try {
       const { fields, tldr } = await cloud.parse(entriesRef.current, buildPriorValues(), mode);
+      // QA checklist scoring rides along with every explicit parse — best
+      // effort, never blocks or fails the field application below.
+      void runQaScoring();
       // Remember the bilingual TLDR even when the reply carried no fields —
       // a whole-call summary is still note-worthy. Partial tolerance: keep
       // the previous half when the model omitted one of the two.
@@ -736,7 +811,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       cloudRunningRef.current = false;
       setIsCloudParsing(false);
     }
-  }, [buildPriorValues]);
+  }, [buildPriorValues, runQaScoring]);
 
   /**
    * Idle-tick: parse now when the queue has drained, the throttle window
@@ -1288,6 +1363,8 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     setTranscript([]);
     setSuggestions([]);
     setSegmentsSent(0);
+    setQaScores(null);
+    setQaSummary('');
   }, []);
 
   // Cleanup on unmount
@@ -1334,6 +1411,14 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
      *  mode = 'concise' keeps 2–4 primary issues + 2–4 main fix steps. */
     cloudParse: runCloudParse,
     isCloudParsing,
+    /** QA checklist scores from the last parse's scoring pass (null = none) */
+    qaScores,
+    /** True while the QA scoring LLM call is in flight */
+    isQaScoring,
+    /** One-sentence weakest-area note from the last QA scoring pass */
+    qaSummary,
+    /** DEBUG: replace the transcript with pasted "AGENT:/CUSTOMER:" text */
+    loadTranscriptText,
     /** True once any `cloudParse('full'|'concise')` call completed with ≥1 field
      *  applied this session, OR the hang-up auto-full-parse completed.
      *  Reset when the agent calls clear() or the Reset page button wipes the

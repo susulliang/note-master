@@ -20,6 +20,7 @@ import {
   ChevronDown,
   CircuitBoard,
   Smartphone,
+  GitCompare,
 } from 'lucide-react';
 import {
   findModels,
@@ -30,6 +31,7 @@ import {
   type FreeSearchHit,
   type GoatErrorCode,
   type ModelMatch,
+  type ProductIndex,
 } from '@/utils/productData';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import {
@@ -46,6 +48,14 @@ import {
 } from '@/utils/softwareUpdatesData';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { DEEBOT_MODELS } from '@/data/ticket';
 import { renderBodyMarkdown, resolveSopImageSrc } from './SopPanel.md';
 
 interface ProductLookupPanelProps {
@@ -105,6 +115,54 @@ const TABS_META: Array<Omit<Tab, 'count'>> = [
  * A manual search input sits at the top for spot queries (e.g. "water tank
  * capacity", "error 601", "scientist code for X2 OMNI").
  */
+
+export interface SpecSection {
+  sheetTitle: string;
+  section: string;
+  rows: Array<{ spec: string; value: string }>;
+}
+
+/**
+ * Resolve all spec sections for a given model name by token-matching against
+ * each comparison sheet. Returns sections grouped by sheet with {spec, value}
+ * rows. Token matching handles case variants ("T90 PRO OMNI Care" vs "CARE").
+ */
+function getSpecSectionsForModel(index: ProductIndex, modelName: string): SpecSection[] {
+  if (!modelName) return [];
+  const tokens = new Set<string>();
+  for (const t of index.allModels) {
+    if (t.name.toLowerCase() === modelName.toLowerCase()) {
+      for (const tk of t.tokens) tokens.add(tk);
+    }
+  }
+  const results: SpecSection[] = [];
+  for (const c of index.comparisons) {
+    // Find best-matching model in this sheet
+    let best: { name: string; score: number } | null = null;
+    for (const m of c.models) {
+      const ts = c.modelTokens.get(m);
+      if (!ts) continue;
+      let score = 0;
+      for (const tok of ts) if (tokens.has(tok)) score += 1;
+      if (score > 0 && (!best || score > best.score)) best = { name: m, score };
+      // Direct string hit wins instantly
+      if (m.toLowerCase() === modelName.toLowerCase()) {
+        best = { name: m, score: 999 };
+        break;
+      }
+    }
+    if (!best) continue;
+    for (const [section, modelMap] of Object.entries(c.sections)) {
+      const entries = modelMap[best.name];
+      if (!entries) continue;
+      const rows = Object.entries(entries).map(([spec, value]) => ({ spec, value }));
+      if (rows.length === 0) continue;
+      results.push({ sheetTitle: c.sheetTitle, section, rows });
+    }
+  }
+  return results;
+}
+
 export default function ProductLookupPanel({
   robotModel,
   issueDescription = '',
@@ -188,47 +246,23 @@ export default function ProductLookupPanel({
   }, [pinnedModel, modelHits]);
 
   // Specs: group across comparisons for the chosen model name
-  const specSections = useMemo(() => {
-    if (!selectedModelName) return [];
-    // Need to token-match because "T90 PRO OMNI CARE" might be stored as
-    // "T90 PRO OMNI Care" or a different case variant depending on sheet.
-    const tokens = new Set<string>();
-    for (const t of index.allModels) {
-      if (t.name.toLowerCase() === selectedModelName.toLowerCase()) {
-        for (const tk of t.tokens) tokens.add(tk);
-      }
-    }
-    const results: Array<{
-      sheetTitle: string;
-      section: string;
-      rows: Array<{ spec: string; value: string }>;
-    }> = [];
-    for (const c of index.comparisons) {
-      // Find best-matching model in this sheet
-      let best: { name: string; score: number } | null = null;
-      for (const m of c.models) {
-        const ts = c.modelTokens.get(m);
-        if (!ts) continue;
-        let score = 0;
-        for (const tok of ts) if (tokens.has(tok)) score += 1;
-        if (score > 0 && (!best || score > best.score)) best = { name: m, score };
-        // Direct string hit wins instantly
-        if (m.toLowerCase() === selectedModelName.toLowerCase()) {
-          best = { name: m, score: 999 };
-          break;
-        }
-      }
-      if (!best) continue;
-      for (const [section, modelMap] of Object.entries(c.sections)) {
-        const entries = modelMap[best.name];
-        if (!entries) continue;
-        const rows = Object.entries(entries).map(([spec, value]) => ({ spec, value }));
-        if (rows.length === 0) continue;
-        results.push({ sheetTitle: c.sheetTitle, section, rows });
-      }
-    }
-    return results;
-  }, [index, selectedModelName]);
+  const specSections = useMemo(
+    () => getSpecSectionsForModel(index, selectedModelName),
+    [index, selectedModelName]
+  );
+
+  // --- Spec comparison (second model) ---------------------------------------
+  // A separate model selector lets agents compare two models' specs side by
+  // side. Only active when a compare model is picked AND its specs load.
+  const [compareModel, setCompareModel] = useState<string | null>(null);
+  const compareSpecSections = useMemo(
+    () => (compareModel ? getSpecSectionsForModel(index, compareModel) : []),
+    [index, compareModel]
+  );
+  // All unique model names from the product index — drives the compare dropdown.
+  // Reuses the exact same list as the Robot Model dropdown (DEEBOT_MODELS) so
+  // agents compare against models they can actually select in the form.
+  const allModelNames = useMemo(() => DEEBOT_MODELS, []);
 
   // --- Error code rows --------------------------------------------------------
   const errorCodeHits: GoatErrorCode[] = useMemo(() => {
@@ -453,6 +487,39 @@ export default function ProductLookupPanel({
             Auto: {robotModel.length > 22 ? robotModel.slice(0, 22) + '…' : robotModel}
           </div>
         )}
+        {/* Compare-with model selector — renders a 2-column spec table when set */}
+        <div className="flex shrink-0 items-center gap-1">
+          <GitCompare className="size-3 text-muted-foreground" />
+          <Select
+            value={compareModel ?? '__none__'}
+            onValueChange={(v) => setCompareModel(v === '__none__' ? null : v)}
+          >
+            <SelectTrigger
+              className="h-6 w-[130px] !border-border/50 !bg-card/60 px-2 text-[10px] font-semibold text-foreground/80 hover:!border-primary/40"
+              title="Compare specs side by side with another model"
+            >
+              <SelectValue placeholder="Compare…" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[320px] text-[11px]">
+              <SelectItem value="__none__">— No comparison —</SelectItem>
+              {allModelNames.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {compareModel && (
+            <button
+              type="button"
+              onClick={() => setCompareModel(null)}
+              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              title="Clear comparison"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* --- Quick-pick model chips — hidden during voice capture --- */}
@@ -526,7 +593,16 @@ export default function ProductLookupPanel({
 
       {/* --- Tab content: scrollable body --- */}
       <div className="custom-scrollbar -mr-1 min-h-0 flex-1 overflow-y-auto pr-1 text-[11px]">
-        {activeTab === 'specs' && <SpecsTab sections={specSections} modelName={selectedModelName} />}
+        {activeTab === 'specs' && (
+          <SpecsTab
+            modelA={{ name: selectedModelName, sections: specSections }}
+            modelB={
+              compareModel && compareSpecSections.length > 0
+                ? { name: compareModel, sections: compareSpecSections }
+                : undefined
+            }
+          />
+        )}
         {activeTab === 'errors' && <ErrorCodesTab rows={errorCodeHits} />}
         {activeTab === 'faq' && <FaqTab hits={faqHits} />}
         {activeTab === 'templates' && (
@@ -803,34 +879,73 @@ function EmptyState({ icon: Icon, text }: { icon: React.ComponentType<{ classNam
 }
 
 function SpecsTab({
-  sections,
-  modelName,
+  modelA,
+  modelB,
 }: {
-  sections: Array<{
-    sheetTitle: string;
-    section: string;
-    rows: Array<{ spec: string; value: string }>;
-  }>;
-  modelName: string;
+  modelA: { name: string; sections: SpecSection[] };
+  modelB?: { name: string; sections: SpecSection[] };
 }) {
-  if (sections.length === 0) {
+  const compare = !!modelB;
+  if (modelA.sections.length === 0 && (!modelB || modelB.sections.length === 0)) {
     return (
       <EmptyState
         icon={Package}
         text={
-          modelName
-            ? `No spec sections loaded for "${modelName}". Pick a model or type a spec keyword.`
+          modelA.name
+            ? `No spec sections loaded for "${modelA.name}". Pick a model or type a spec keyword.`
             : 'Select a DEEBOT / GOAT / WINBOT model above → specs appear here.'
         }
       />
     );
   }
-  // Group sections by sheet
-  const bySheet = new Map<string, typeof sections>();
-  for (const s of sections) {
-    if (!bySheet.has(s.sheetTitle)) bySheet.set(s.sheetTitle, []);
-    bySheet.get(s.sheetTitle)!.push(s);
+
+  // Merge both models' sections by (sheetTitle, section) so specs align
+  // row-by-row. Specs present in only one model leave the other column blank.
+  const bMap = new Map<string, Map<string, string>>();
+  if (modelB) {
+    for (const s of modelB.sections) {
+      const key = `${s.sheetTitle}|||${s.section}`;
+      if (!bMap.has(key)) bMap.set(key, new Map());
+      for (const r of s.rows) bMap.get(key)!.set(r.spec, r.value);
+    }
   }
+
+  interface MergedRow { spec: string; valueA: string; valueB: string; }
+  interface MergedSection { sheetTitle: string; section: string; rows: MergedRow[]; }
+
+  const merged: MergedSection[] = [];
+  const seenKeys = new Set<string>();
+  for (const s of modelA.sections) {
+    const key = `${s.sheetTitle}|||${s.section}`;
+    seenKeys.add(key);
+    const bRows = bMap.get(key) ?? new Map<string, string>();
+    const rows: MergedRow[] = s.rows.map((r) => ({
+      spec: r.spec,
+      valueA: r.value,
+      valueB: bRows.get(r.spec) ?? '',
+    }));
+    for (const spec of bRows.keys()) {
+      if (!rows.find((r) => r.spec === spec)) {
+        rows.push({ spec, valueA: '', valueB: bRows.get(spec)! });
+      }
+    }
+    merged.push({ sheetTitle: s.sheetTitle, section: s.section, rows });
+  }
+  if (modelB) {
+    for (const s of modelB.sections) {
+      const key = `${s.sheetTitle}|||${s.section}`;
+      if (seenKeys.has(key)) continue;
+      const rows: MergedRow[] = s.rows.map((r) => ({ spec: r.spec, valueA: '', valueB: r.value }));
+      merged.push({ sheetTitle: s.sheetTitle, section: s.section, rows });
+    }
+  }
+
+  const bySheet = new Map<string, MergedSection[]>();
+  for (const m of merged) {
+    if (!bySheet.has(m.sheetTitle)) bySheet.set(m.sheetTitle, []);
+    bySheet.get(m.sheetTitle)!.push(m);
+  }
+
   return (
     <div className="space-y-3">
       {Array.from(bySheet.entries()).map(([sheetTitle, secs]) => (
@@ -845,16 +960,37 @@ function SpecsTab({
                 <ChevronRight className="size-3" />
                 {s.section}
               </div>
+              {/* Column header row with bold model names (compare mode only) */}
+              {compare && (
+                <div
+                  className={cn(
+                    'grid gap-2 border-b border-border/60 bg-primary/5 px-2 py-1 text-[10px] font-extrabold',
+                    'grid-cols-[28%_1fr_1fr]'
+                  )}
+                >
+                  <div className="text-muted-foreground">Spec</div>
+                  <div className="truncate text-primary" title={modelA.name}>{modelA.name}</div>
+                  <div className="truncate text-primary" title={modelB!.name}>{modelB!.name}</div>
+                </div>
+              )}
               <div className="divide-y divide-border/40">
                 {s.rows.map((r) => (
                   <div
-                    key={r.spec + r.value.slice(0, 10)}
-                    className="grid grid-cols-[40%_1fr] gap-2 px-2 py-1.5 hover:bg-foreground/[0.03]"
+                    key={r.spec + r.valueA.slice(0, 10) + r.valueB.slice(0, 10)}
+                    className={cn(
+                      'grid gap-2 px-2 py-1.5 hover:bg-foreground/[0.03]',
+                      compare ? 'grid-cols-[28%_1fr_1fr]' : 'grid-cols-[40%_1fr]'
+                    )}
                   >
                     <div className="truncate font-bold text-foreground/85">{r.spec}</div>
                     <div className="whitespace-pre-wrap break-words text-foreground/75 leading-relaxed">
-                      {r.value}
+                      {r.valueA || <span className="text-muted-foreground/40">—</span>}
                     </div>
+                    {compare && (
+                      <div className="whitespace-pre-wrap break-words text-foreground/75 leading-relaxed">
+                        {r.valueB || <span className="text-muted-foreground/40">—</span>}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

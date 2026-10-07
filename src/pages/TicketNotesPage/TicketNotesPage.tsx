@@ -69,6 +69,7 @@ import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
 import ShiftsWorkspace from '@/components/ShiftsWorkspace';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
+import QaChecklistMenu from '@/components/QaChecklistMenu';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import SopPanel from '@/components/SopPanel';
 import ProductLookupPanel from '@/components/ProductLookupPanel';
@@ -886,6 +887,10 @@ export default function TicketNotesPage() {
    *  off a second (stale) pass. */
   const hangUpInFlightRef = useRef(false);
   const [hangUpRunning, setHangUpRunning] = useState(false);
+  /** DEBUG transcript editor — double-click the bottom-bar subtitle to open,
+   *  paste an "AGENT:/CUSTOMER:" transcript, apply to test parse + QA scoring. */
+  const [transcriptEditing, setTranscriptEditing] = useState(false);
+  const [transcriptDraft, setTranscriptDraft] = useState('');
   // AMR template search + viewer
   const [templateMatches, setTemplateMatches] = useState<TemplateEntry[]>([]);
   const [openTemplate, setOpenTemplate] = useState<TemplateEntry | null>(null);
@@ -2092,20 +2097,70 @@ Additional information (if needed): ${additional}`;
         <div
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
-            // Capturing: the pill grows into a taller caption card with the
-            // live customer subtitle stacked above the controls. Width is
-            // content-driven (buttons never wrap to two lines) with a cap so
-            // the subtitle truncates on narrow viewports.
-            capturing
-              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
+            // Capturing (or editing the debug transcript): the pill grows
+            // into a taller caption card with the live customer subtitle
+            // stacked above the controls. Width is content-driven (buttons
+            // never wrap to two lines) with a cap so the subtitle truncates
+            // on narrow viewports.
+            capturing || transcriptEditing
+              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] w-[min(44rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
               : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
           )}
         >
+          {/* DEBUG transcript editor — double-click the subtitle to open,
+              paste an "AGENT:/CUSTOMER:" transcript, Apply to load it into
+              the parse pipeline (tests Fill Notes + QA scoring). */}
+          {transcriptEditing && (
+            <div className="flex w-full flex-col gap-1.5 px-1">
+              <textarea
+                value={transcriptDraft}
+                onChange={(e) => setTranscriptDraft(e.target.value)}
+                rows={6}
+                spellCheck={false}
+                placeholder={'AGENT: Thank you for calling Ecovacs support, my name is…\nCUSTOMER: Hi, my DEEBOT won\u2019t charge…'}
+                className="w-full resize-y rounded-lg border border-border/60 bg-card/60 p-2 font-mono text-[11px] leading-relaxed text-foreground outline-none backdrop-blur-sm focus:border-primary/50"
+                autoFocus
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-muted-foreground/70">
+                  One line per turn — prefix with AGENT: or CUSTOMER:
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTranscriptEditing(false)}
+                    className="rounded-full px-2.5 py-1 text-[10px] font-bold text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      call.loadTranscriptText(transcriptDraft);
+                      setTranscriptEditing(false);
+                    }}
+                    className="rounded-full bg-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground transition-all hover:scale-105 active:scale-95"
+                  >
+                    Apply Transcript
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Scrolling customer subtitle (capture on only) */}
-          {capturing && customerLines.length > 0 && (
+          {!transcriptEditing && capturing && customerLines.length > 0 && (
             <div
               className="flex min-h-[3.2rem] flex-col justify-center gap-0.5 overflow-hidden px-1"
-              title="Live customer transcription"
+              title="Live customer transcription — double-click to paste a transcript (debug)"
+              onDoubleClick={() => {
+                setTranscriptDraft(
+                  call.transcript
+                    .map((e) => `${e.speaker === 'agent' ? 'AGENT' : e.speaker === 'recording' ? 'RECORDING' : 'CUSTOMER'}: ${e.text}`)
+                    .join('\n')
+                );
+                setTranscriptEditing(true);
+              }}
             >
               {customerLines.map((line, idx) => (
                 <p
@@ -2127,8 +2182,19 @@ Additional information (if needed): ${additional}`;
               ))}
             </div>
           )}
-          {capturing && customerLines.length === 0 && (
-            <p className="min-h-[1.2rem] px-1 text-[11px] italic text-muted-foreground/70">
+          {!transcriptEditing && capturing && customerLines.length === 0 && (
+            <p
+              className="min-h-[1.2rem] px-1 text-[11px] italic text-muted-foreground/70"
+              title="Double-click to paste a transcript (debug)"
+              onDoubleClick={() => {
+                setTranscriptDraft(
+                  call.transcript
+                    .map((e) => `${e.speaker === 'agent' ? 'AGENT' : e.speaker === 'recording' ? 'RECORDING' : 'CUSTOMER'}: ${e.text}`)
+                    .join('\n')
+                );
+                setTranscriptEditing(true);
+              }}
+            >
               Listening for the customer's voice…
             </p>
           )}
@@ -2172,8 +2238,20 @@ Additional information (if needed): ${additional}`;
             </button>
           )}
 
-          {/* Live capture status */}
-          <div className="flex items-center gap-2" title="Capture status">
+          {/* Live capture status — double-click also opens the debug
+              transcript editor (works while idle, no capture needed). */}
+          <div
+            className="flex items-center gap-2"
+            title="Capture status — double-click to paste a transcript (debug)"
+            onDoubleClick={() => {
+              setTranscriptDraft(
+                call.transcript
+                  .map((e) => `${e.speaker === 'agent' ? 'AGENT' : e.speaker === 'recording' ? 'RECORDING' : 'CUSTOMER'}: ${e.text}`)
+                  .join('\n')
+              );
+              setTranscriptEditing(true);
+            }}
+          >
             {(call.isCapturing || voice.isListening) ? (
               <>
                 <span className="relative flex size-2.5">
@@ -2218,6 +2296,14 @@ Additional information (if needed): ${additional}`;
             )}
             {call.isCloudParsing ? 'Filling…' : 'Fill Notes'}
           </button>
+          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          {/* QA checklist — yellow pill; shows the call-QA completion status
+              scored by the same AI parse that fills the notes. */}
+          <QaChecklistMenu
+            scores={call.qaScores}
+            scoring={call.isQaScoring}
+            summary={call.qaSummary}
+          />
           <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
           <button
             type="button"

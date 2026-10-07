@@ -1,9 +1,9 @@
 /**
- * GZ-OPS Ecovacs NA Roster — October 2026 (V0921) — baked from the Feishu
+ * GZ-OPS Ecovacs NA Roster — October 2026 — baked from the Feishu
  * spreadsheet "GZ-OPS-Ecovacs NA Roster October 2026 - V0921." (Sheet3).
- * Shift values are the sheet's COMPUTED cells (formulas in the source stay
- * untouched — this is a read-only snapshot; edits made in the Shifts
- * workspace are local to the app session and never written back).
+ * Snapshot timestamp: 2026-10-01. Shift values are the sheet's COMPUTED
+ * cells (formulas stay untouched — read-only snapshot; edits made in the
+ * Shifts workspace are local to the app session and never written back).
  *
  * The roster window spans 2026-09-26 → 2026-10-31 (agents' weekly rows
  * start on Saturday, so the last week of September bleeds into the Oct
@@ -17,7 +17,7 @@ export interface RosterAgent {
   zh: string;
   /** English name — the display/filter key. */
   en: string;
-  /** Main skill: SV / TL / T2 / T3 … */
+  /** Main skill: SV / TL / T2 / T3 / FR Call / DTC … */
   skill: string;
   hired: string;
   joined: string;
@@ -136,6 +136,7 @@ export const SHIFT_CATALOG: ShiftDef[] = [
   { code: 'AL', time: '—', category: 'leave' },
   { code: '调休', time: '—', category: 'comp' },
   { code: 'TR-A22', time: '22:00–07:00 (training)', category: 'training' },
+  { code: 'Farewell', time: '—', category: 'other' },
   { code: 'A21', time: '21:00–06:00', category: 'night' },
   { code: 'A22', time: '22:00–07:00', category: 'night' },
   { code: 'A23', time: '23:00–08:00', category: 'night' },
@@ -166,4 +167,10 @@ export const SHIFT_CATALOG: ShiftDef[] = [
   { code: 'B22', time: '22:00–07:00 (三工)', category: 'night' },
   { code: 'B23', time: '23:00–08:00 (三工)', category: 'night' },
   { code: 'B01', time: '01:00–10:00 (三工)', category: 'midnight' },
+  { code: '事假', time: '— personal leave', category: 'leave' },
+  { code: '病假', time: '— sick leave', category: 'leave' },
+  { code: '年假', time: '— annual leave', category: 'leave' },
+  { code: '产假', time: '— maternity leave', category: 'leave' },
+  { code: '行政', time: '— admin', category: 'other' },
+  { code: '休息', time: '— rest', category: 'off' },
 ];
