@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils';
 import {
   QA_CALL_CHECKLIST,
   QA_CHECKLIST_TOTAL,
-  QA_BONUS_ITEM_IDS,
   type QaScores,
 } from '@/data/qaCallChecklist';
 
@@ -16,17 +15,20 @@ interface QaChecklistMenuProps {
   className?: string;
 }
 
-/** Progress-bar color by completion ratio — red / amber / green bands. */
+/** Progress-bar color by completion ratio — red / amber / yellow-green / teal
+ *  bands: yellowish green from 70%, teal green from 80%. */
 function ratioColor(ratio: number | null): string {
   if (ratio === null) return 'bg-muted-foreground/25';
-  if (ratio >= 0.8) return 'bg-emerald-500';
+  if (ratio >= 0.8) return 'bg-teal-500';
+  if (ratio >= 0.7) return 'bg-lime-500';
   if (ratio >= 0.5) return 'bg-amber-500';
   return 'bg-red-500';
 }
 
 function ratioTextClass(ratio: number | null): string {
   if (ratio === null) return 'text-muted-foreground/60';
-  if (ratio >= 0.8) return 'text-emerald-500';
+  if (ratio >= 0.8) return 'text-teal-500';
+  if (ratio >= 0.7) return 'text-lime-500';
   if (ratio >= 0.5) return 'text-amber-500';
   return 'text-red-500';
 }
@@ -40,6 +42,9 @@ function ratioTextClass(ratio: number | null): string {
  */
 export default function QaChecklistMenu({ scores, scoring, summary, className }: QaChecklistMenuProps) {
   const [open, setOpen] = useState(false);
+  /** Hidden by default — press Shift+C to reveal the LLM "weakest area"
+   *  comment (kept out of the way during live calls). */
+  const [showSummary, setShowSummary] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   /** Fixed-position anchor (viewport coords) for the portaled dropdown. */
@@ -58,7 +63,8 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
     return () => window.removeEventListener('resize', measure);
   }, [open]);
 
-  // Outside click closes the dropdown.
+  // Outside click closes the dropdown. Shift+C reveals the hidden
+  // "weakest area" LLM comment (works while the menu is open).
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e: MouseEvent) => {
@@ -66,6 +72,7 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
+      if (e.shiftKey && (e.key === 'C' || e.key === 'c')) setShowSummary((v) => !v);
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -75,19 +82,10 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
     };
   }, [open]);
 
-  // Base vs bonus split — the overall ratio is the BASE score over the base
-  // total (100 pts); bonus (优秀加分项目) points show as a "+N" add-on.
-  const baseTotal = scores
-    ? Object.entries(scores)
-        .filter(([id]) => !QA_BONUS_ITEM_IDS.has(id))
-        .reduce((n, [, v]) => n + v, 0)
-    : 0;
-  const bonusTotal = scores
-    ? Object.entries(scores)
-        .filter(([id]) => QA_BONUS_ITEM_IDS.has(id))
-        .reduce((n, [, v]) => n + v, 0)
-    : 0;
-  const overallRatio = scores ? baseTotal / QA_CHECKLIST_TOTAL : null;
+  // Bonus points are folded straight into the displayed total (X+N over the
+  // 100-pt base) — no separate "+N" readout.
+  const totalScore = scores ? Object.values(scores).reduce((n, v) => n + v, 0) : 0;
+  const overallRatio = scores ? totalScore / QA_CHECKLIST_TOTAL : null;
 
   return (
     <div ref={rootRef} className={cn('relative flex shrink-0 items-center', className)}>
@@ -142,19 +140,20 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
               </div>
               <div className={cn('text-[11px] font-extrabold tabular-nums', ratioTextClass(overallRatio))}>
                 {scores
-                  ? `${Math.round(baseTotal)} / ${QA_CHECKLIST_TOTAL}${bonusTotal > 0 ? ` +${Math.round(bonusTotal)}` : ''}`
+                  ? `${Math.round(totalScore)} / ${QA_CHECKLIST_TOTAL}`
                   : scoring ? 'Scoring…' : 'Not scored'}
               </div>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-foreground/10">
               <div
                 className={cn('h-full rounded-full transition-all duration-500', ratioColor(overallRatio))}
-                style={{ width: overallRatio !== null ? `${Math.max(2, overallRatio * 100)}%` : '0%' }}
+                style={{ width: overallRatio !== null ? `${Math.min(100, Math.max(2, overallRatio * 100))}%` : '0%' }}
               />
             </div>
-            {summary && scores && (
+            {summary && scores && showSummary && (
               <div className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
                 <span className="font-bold text-foreground/70">Weakest area:</span> {summary}
+                <span className="ml-1 text-muted-foreground/50">(Shift+C to hide)</span>
               </div>
             )}
           </div>
@@ -175,13 +174,14 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
                   {dim.items.map((item) => {
                     const val = scores?.[item.id];
                     const isBonus = dim.bonus === true;
-                    // Bonus bars: emerald when earned, neutral gray at 0 (a
-                    // zero bonus is NORMAL, not a red-flag miss like base).
+                    // Bonus bars use the shared color bands when earned, but
+                    // stay neutral gray at 0 (a zero bonus is NORMAL, not a
+                    // red-flag miss like base items).
                     const ratio = typeof val === 'number' ? val / item.max : null;
                     const bonusColor = (r: number | null) =>
-                      r !== null && r > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/25';
+                      r !== null && r > 0 ? ratioColor(r) : 'bg-muted-foreground/25';
                     const bonusText = (r: number | null) =>
-                      r !== null && r > 0 ? 'text-emerald-500' : 'text-muted-foreground/60';
+                      r !== null && r > 0 ? ratioTextClass(r) : 'text-muted-foreground/60';
                     return (
                       <div key={item.id} title={item.criteria}>
                         <div className="mb-0.5 flex items-baseline justify-between gap-2">
