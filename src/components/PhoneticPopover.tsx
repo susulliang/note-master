@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { BookOpen, Copy, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * Compact phonetic-alphabet callout — opens as a floating popover from the
- * "Az" icon button next to the Email field label (and any field that opts in
- * via `phonetic: true`). Frosted glass background so the gridbox underneath
- * stays legible while the popover is open. Useful for agents spelling out
- * serial numbers to customers who need to read them back.
+ * Phonetic-alphabet helpers for the Email Address gridbox. The "Az" toggle
+ * (PhoneticToggle) expands the node box itself downwards with an animation
+ * to reveal an inline horizontal table (PhoneticTable) — no floating
+ * popover — so agents can spell out email addresses without the table
+ * covering neighbouring fields.
  */
 
 const PHONETIC: { char: string; word: string }[] = [
@@ -37,26 +37,37 @@ function toPlain(): string {
   return `Phonetic alphabet: ${a}. Specials: ${b}.`;
 }
 
-export default function PhoneticPopover({ className }: { className?: string }) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+/** The "Az" pill button — controlled so the owning node can expand itself. */
+export function PhoneticToggle({
+  open,
+  onOpenChange,
+  className,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenChange(!open)}
+      title={open ? 'Hide phonetic alphabet' : 'Show phonetic alphabet'}
+      className={cn(
+        'flex h-5 w-8 items-center justify-center rounded border text-[9px] font-bold tracking-wider transition-colors',
+        open
+          ? 'border-primary/50 bg-primary/15 text-primary'
+          : 'border-border/60 bg-card/60 text-muted-foreground hover:border-primary/40 hover:text-primary',
+        className
+      )}
+    >
+      Az
+    </button>
+  );
+}
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+/** Horizontal phonetic table rendered INLINE inside the expanded node. */
+export function PhoneticTable() {
+  const [copied, setCopied] = useState(false);
 
   const copy = async () => {
     try {
@@ -67,64 +78,39 @@ export default function PhoneticPopover({ className }: { className?: string }) {
   };
 
   return (
-    <div ref={ref} className={cn('relative inline-block', className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        title={open ? 'Hide phonetic alphabet' : 'Show phonetic alphabet'}
-        className={cn(
-          'flex h-5 w-8 items-center justify-center rounded border text-[9px] font-bold tracking-wider transition-colors',
-          open
-            ? 'border-primary/50 bg-primary/15 text-primary'
-            : 'border-border/60 bg-card/60 text-muted-foreground hover:border-primary/40 hover:text-primary'
-        )}
-      >
-        Az
-      </button>
-      {open && (
-        <div
-          className={cn(
-            'absolute left-0 top-full z-50 mt-1.5 w-[300px] rounded-xl border border-border/50 p-2 shadow-2xl',
-            'bg-background/60 backdrop-blur-xl backdrop-saturate-150',
-            'ring-1 ring-inset ring-white/10'
-          )}
-        >
-          <div className="mb-1.5 flex items-center justify-between">
-            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              <BookOpen className="size-3" /> Phonetic Alphabet
-            </div>
-            <button
-              type="button"
-              onClick={copy}
-              className="flex items-center gap-1 rounded border border-border/60 bg-card/40 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-            >
-              {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-0.5 text-[10px]">
-            {PHONETIC.map((p) => (
-              <div key={p.char} className="flex items-center gap-1">
-                <span className="w-3.5 font-mono font-bold text-primary">{p.char}</span>
-                <span className="text-muted-foreground">{p.word}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-1.5 border-t border-border/40 pt-1">
-            <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-              Specials
-            </div>
-            <div className="grid grid-cols-2 gap-0.5 text-[10px]">
-              {SPECIALS.map((p) => (
-                <div key={p.char} className="flex items-center gap-1">
-                  <span className="w-3.5 font-mono font-bold text-primary">{p.char}</span>
-                  <span className="text-muted-foreground">{p.word}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+    <div className="rounded-lg border border-border/40 bg-foreground/[0.03] p-2">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          <BookOpen className="size-3" /> Phonetic Alphabet
         </div>
-      )}
+        <button
+          type="button"
+          onClick={copy}
+          className="flex items-center gap-1 rounded border border-border/60 bg-card/40 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+        >
+          {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(58px,1fr))] gap-x-1 gap-y-0.5 text-[10px]">
+        {PHONETIC.map((p) => (
+          <div key={p.char} className="flex items-baseline gap-1">
+            <span className="font-mono font-bold text-primary">{p.char}</span>
+            <span className="truncate text-muted-foreground">{p.word}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 border-t border-border/30 pt-1.5 text-[10px]">
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+          Specials
+        </span>
+        {SPECIALS.map((p) => (
+          <span key={p.char} className="flex items-baseline gap-1">
+            <span className="font-mono font-bold text-primary">{p.char}</span>
+            <span className="text-muted-foreground">{p.word}</span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

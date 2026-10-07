@@ -155,7 +155,7 @@ export default function RailControls({
             }}
             className={cn(RAIL_BTN, boxesOpen && 'bg-foreground/10 text-foreground')}
             aria-label="Toggle gridboxes"
-            title="Gridboxes — show / hide Shipping address, 24h tracker, SKU, Additional notes"
+            title="Gridboxes — show / hide Shipping address, 24h tracker, SKU, Order number, Additional notes"
           >
             <Boxes className="size-[18px]" />
             {/* If any toggle is currently turned OFF, show a small amber

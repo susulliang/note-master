@@ -275,9 +275,9 @@ export function useCallCapture(
   const lastCloudParseSuccessRef = useRef<{ at: number; mode: 'full' | 'concise' } | null>(null);
   /** Bilingual whole-call TLDR from the last successful cloud parse (the
    *  prompt asks for it on every Parse / Concise click). The ZH half is
-   *  appended to the note's Additional information at note generation;
-   *  a reply missing one half keeps the previous half instead of
-   *  blanking it. */
+   *  written by the page directly into the Additional Notes box
+   *  (replacing the previous TLDR line); a reply missing one half keeps
+   *  the previous half instead of blanking it. */
   const parseTldrRef = useRef<{ en: string; zh: string } | null>(null);
   const segmentTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);

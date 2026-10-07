@@ -1868,11 +1868,20 @@
   /**
    * Insert an HTML fragment into a contenteditable rich-text editor
    * (the SF chatter publisher is Quill-based): focus → selectAll →
-   * delete → execCommand('insertHTML', html) → input/change/blur chain.
-   * Unlike insertText this carries formatting (<strong>, <br>) verbatim
-   * and does not truncate the payload at the first newline.
+   * delete → insert → input/change/blur chain.
+   *
+   * Insertion strategy (v0.2.21):
+   *   1. SYNTHETIC PASTE carrying text/html (+ text/plain). Quill's own
+   *      clipboard converter maps <p> blocks and <br> soft breaks to
+   *      exactly one line each — this is the faithful path.
+   *   2. execCommand('insertHTML') fallback. Chrome's fragment insertion
+   *      DOUBLES bare <br> sequences into visible empty lines in the SF
+   *      publisher — the "blank line between every note line" artefact
+   *      agents reported. The app now sends paragraph-based HTML
+   *      (<p> per blank-line block, <br> only within a block), which
+   *      survives this path too.
    */
-  function nativeInsertHtml(el, html) {
+  async function nativeInsertHtml(el, html, plainText) {
     if (!el || !el.isContentEditable) return false;
     try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
     try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
@@ -1880,8 +1889,18 @@
     try { document.execCommand('delete', false, null); } catch { /* ignore */ }
     let ok = false;
     try {
-      ok = document.execCommand('insertHTML', false, html);
+      const dt = new DataTransfer();
+      dt.setData('text/html', html);
+      if (plainText) dt.setData('text/plain', String(plainText));
+      el.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true, cancelable: true, clipboardData: dt,
+      }));
+      await $sleep(140);
+      ok = (el.innerText || '').trim().length > 0;
     } catch { ok = false; }
+    if (!ok) {
+      try { ok = document.execCommand('insertHTML', false, html); } catch { ok = false; }
+    }
     if (ok) {
       $fire(el, new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText' }));
       $fire(el, new InputEvent('change', { bubbles: true, cancelable: true }));
@@ -1946,15 +1965,31 @@
    */
   async function clickInlineEdit(labelAliases) {
     const aliases = Array.isArray(labelAliases) ? labelAliases : [labelAliases];
-    const labels = $qa(document, '.slds-form-element__label, legend, label');
+    const labels = $qa(document, '.slds-form-element__label, legend, label, .test-id__field-label');
+    // Scored matching instead of first-hit: exact (100) > startsWith (60) >
+    // contains (30), earlier aliases win ties. A loose alias like "Name"
+    // (customerName) can otherwise hijack the "Account Name" layout item
+    // when it appears earlier in the DOM.
     let hit = null;
+    let bestScore = 0;
     for (const lbl of labels) {
       const txt = (lbl.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) continue;
-      const matched = aliases.some((a) => typeof a === 'string'
-        ? txt.toLowerCase() === a.toLowerCase() || txt.toLowerCase().includes(a.toLowerCase())
-        : a.test(txt));
-      if (matched) { hit = lbl; break; }
+      const low = txt.toLowerCase();
+      for (let ai = 0; ai < aliases.length; ai++) {
+        const a = aliases[ai];
+        let score = 0;
+        if (typeof a === 'string') {
+          const av = a.toLowerCase();
+          if (low === av) score = 100;
+          else if (low.startsWith(av)) score = 60;
+          else if (low.includes(av)) score = 30;
+        } else if (a.test(txt)) {
+          score = 80;
+        }
+        score = Math.max(0, score - ai);
+        if (score > bestScore) { bestScore = score; hit = lbl; }
+      }
     }
     if (!hit) {
       // Fallback: look for layout items that have the inline-edit button
@@ -2081,19 +2116,25 @@
     // text matches (button/a with title or text exactly "Post").
     const findPostTab = () => {
       const direct = document.querySelector(
-        'a.tabHeader[data-target-selection-name="FeedItem.TextPostTab"], a[title="Post"].tabHeader'
+        'a.tabHeader[data-target-selection-name="FeedItem.TextPostTab"], a[title="Post"].tabHeader, [data-target-selection-name*="TextPostTab"]'
       );
-      if (direct) return { el: direct, via: 'tabHeader[data-target-selection-name]' };
-      const spans = Array.from(document.querySelectorAll('span.title, a[role="tab"], button[role="tab"], li.tabs__item a, .tabHeader, a[title="Post"], button[title="Post"]'));
-      const s = spans.find((x) => {
+      if (direct) return { el: direct.closest('a, button') || direct, via: 'tabHeader[data-target-selection-name]' };
+      const cands = Array.from(document.querySelectorAll(
+        'span.title, a[role="tab"], button[role="tab"], li.tabs__item a, .tabHeader, a[title="Post"], button[title="Post"], [role="tab"][aria-label], .slds-tabs_default__link, .slds-tabs_scoped__link'
+      ));
+      const s = cands.find((x) => {
         const t = (x.textContent || '').trim();
-        const ttl = (x.getAttribute('title') || '').trim();
+        const ttl = (x.getAttribute('title') || x.getAttribute('aria-label') || '').trim();
         return t === 'Post' || ttl === 'Post';
       });
       if (s) return { el: s.closest('a, button') || s, via: 'text/title="Post"' };
       return null;
     };
-    const tabHit = findPostTab();
+    // The chatter feed (and its Post tab) lazy-renders after the record page
+    // settles — poll briefly instead of failing on the very first miss
+    // (agents hit "Post tab not found" when the push raced the feed mount).
+    let tabHit = findPostTab();
+    for (let i = 0; i < 10 && !tabHit; i++) { await $sleep(150); tabHit = findPostTab(); }
     if (!tabHit) { result.postBody.detail = 'no "Post" tab header found on the Case feed'; return result; }
     result.postBody.tabFound = true;
     result.postBody.tabVia = tabHit.via;
@@ -2162,7 +2203,7 @@
       // (a full note once landed as just its "**Notes**" heading line).
       let ok = false;
       if (opts?.html && editor.isContentEditable) {
-        ok = nativeInsertHtml(editor, String(opts.html));
+        ok = await nativeInsertHtml(editor, String(opts.html), body != null ? String(body) : null);
         if (ok) result.postBody.htmlUsed = true;
       }
       if (!ok) {
@@ -2226,23 +2267,44 @@
       fields: {},
       saveEach: _opts?.saveEach === true,
     };
-    // (1) Post tab + note body
-    if (fields.postBody != null) {
-      const r = await clickPostTabAndWrite(fields.postBody, {
-        publish: !!fields.postPublish,
-        // Rich-text rendering supplied by the app (**bold** → <strong>,
-        // lines → <br>) — inserted via execCommand('insertHTML') so the
-        // publisher keeps formatting and the full multi-line body.
-        html: fields.postBodyHtml || null,
-      });
-      Object.assign(out, r);
+    // (1) Editable layout fields FIRST — each open-save serial.
+    //
+    // The editable fields live on the record's Details tab. When the Case
+    // currently shows another tab (Related / feed view), the field labels
+    // are not in the DOM at all, and every inline edit reports "No label
+    // found". If no target label is visible, click the Details tab first
+    // (best-effort). Doing the fields BEFORE the Post write also means a
+    // tab switch can never discard the note sitting in the publisher.
+    const labelAliasesAll = [
+      'Phone', 'Contact Name', 'Account Name', 'AMR Model',
+    ];
+    const anyTargetLabelVisible = () => {
+      const t = (document.body.innerText || '');
+      return labelAliasesAll.some((a) => t.toLowerCase().includes(a.toLowerCase()));
+    };
+    if (!anyTargetLabelVisible()) {
+      try {
+        const detailsTab = Array.from(document.querySelectorAll(
+          'a.tabHeader[data-target-selection-name="RecordFieldTab"], .tabHeader, [role="tab"], .slds-tabs_default__item a, .slds-tabs_scoped__item a'
+        )).find((x) => {
+          const t = (x.textContent || '').trim();
+          const ttl = (x.getAttribute('title') || x.getAttribute('aria-label') || '').trim();
+          return t === 'Details' || ttl === 'Details';
+        });
+        if (detailsTab) { detailsTab.click(); await $sleep(600); }
+      } catch { /* best-effort — label search will report per-field */ }
     }
-    // (2) Editable layout fields — each open-save serial
+    // Aliases use plain strings, not strict regexes: string matching here
+    // is "contains" (case-insensitive), which tolerates the label
+    // decorations real layouts add (asterisks, help icons, wrapping
+    // whitespace, section prefixes). Strict ^…$ anchors failed on the
+    // agent's actual 2026 layout (e.g. "Contact Name *" never matched
+    // /^Contact Name$/).
     const defs = [
-      { key: 'contactPhone', labelAliases: ['Phone', 'Contact Phone', 'Mobile Phone', 'Mobile', 'Telephone'], kind: 'text' },
-      { key: 'customerName', labelAliases: [/^Contact Name$/, /^Name$/, /^Contact$/], kind: 'auto' },
-      { key: 'accountName',  labelAliases: [/^Account Name$/], kind: 'lookup' },
-      { key: 'amrModelNo',   labelAliases: [/^AMR Model No\.?$/i, 'AMR Model', 'Model No'], kind: 'lookup' },
+      { key: 'contactPhone', labelAliases: ['Phone', 'Contact Phone', 'Phone Number', 'Contact Number', 'Mobile Phone', 'Mobile', 'Telephone'], kind: 'text' },
+      { key: 'customerName', labelAliases: ['Contact Name', 'Contact', 'Name'], kind: 'auto' },
+      { key: 'accountName',  labelAliases: ['Account Name'], kind: 'lookup' },
+      { key: 'amrModelNo',   labelAliases: ['AMR Model No', 'AMR Model Number', 'AMR Model', 'Model No'], kind: 'lookup' },
     ];
     for (const d of defs) {
       const v = fields[d.key];
@@ -2255,6 +2317,20 @@
         // If an edit got stuck open, cancel so the next one is clean
         await clickFooterCancel();
       }
+    }
+    // (2) Post tab + note body LAST — ends on the feed with the note in
+    // the publisher for the agent to proofread, and no later step can
+    // navigate away and discard it.
+    if (fields.postBody != null) {
+      const r = await clickPostTabAndWrite(fields.postBody, {
+        publish: !!fields.postPublish,
+        // Rich-text rendering supplied by the app (**bold** → <strong>,
+        // paragraph blocks → <p>, lines → <br>) — inserted via synthetic
+        // paste (insertHTML fallback) so the publisher keeps formatting
+        // with exactly one line per note line.
+        html: fields.postBodyHtml || null,
+      });
+      Object.assign(out, r);
     }
     // Aggregate status for caller
     const all = [out.postBody, ...Object.values(out.fields)].filter(Boolean);

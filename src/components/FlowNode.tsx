@@ -153,7 +153,7 @@ export const TicketPanelsContext = createContext<TicketPanelsContextShape | null
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { snToPin } from '@/lib/sn-pin';
 import ModelFirmwareCard from './ModelFirmwareCard';
-import PhoneticPopover from './PhoneticPopover';
+import { PhoneticToggle, PhoneticTable } from './PhoneticPopover';
 
 export type NodeType =
   | 'start'
@@ -233,6 +233,10 @@ export interface FlowNodeProps {
   /** Show the phonetic-alphabet popover ("Az" button) next to the label —
    *  used on the Email Address field so agents can spell out serials. */
   phonetic?: boolean;
+  /** Small hyperlink tag pinned to the top right of the label row — opens
+   *  an external admin/eshop site in a new window (SKU "BSD", Order
+   *  Number "Eshop"). */
+  headerTag?: { label: string; href: string };
   /**
    * Arbitrary React content rendered inside a glass-panel node for the
    * 'transcript' and 'ticketTracker' panel node types. Allows embedding
@@ -554,6 +558,7 @@ function FlowNodeComponent({
   parsedSource = null,
   enablePinBubble = false,
   phonetic = false,
+  headerTag,
   panelContent,
   hangUpLoading = false,
   addressCount,
@@ -575,6 +580,8 @@ function FlowNodeComponent({
   const [showAddQuickText, setShowAddQuickText] = useState(false);
   const [newQuickText, setNewQuickText] = useState('');
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+  /** Phonetic table expanded inline under the field (Email Address "Az"). */
+  const [phoneticOpen, setPhoneticOpen] = useState(false);
   // Per-field opt-out so the agent can reveal chips on one node even when
   // capture hides them globally.
   const [quickInsertOverride, setQuickInsertOverride] = useState<Record<string, boolean>>({});
@@ -979,7 +986,26 @@ function FlowNodeComponent({
             ) : (
               label
             )}
-            {phonetic && <PhoneticPopover className="ml-auto" />}
+            {headerTag && (
+              <a
+                href={headerTag.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${headerTag.label} — ${headerTag.href}`}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="ml-auto flex h-5 items-center rounded border border-border/60 bg-card/60 px-1.5 text-[9px] font-bold tracking-wider text-muted-foreground transition-colors hover:border-accent/50 hover:bg-accent/10 hover:text-accent"
+              >
+                {headerTag.label}
+              </a>
+            )}
+            {phonetic && (
+              <PhoneticToggle
+                open={phoneticOpen}
+                onOpenChange={setPhoneticOpen}
+                className="ml-auto"
+              />
+            )}
           </div>
         )}
         {inputType === 'textarea' ? (
@@ -1025,6 +1051,21 @@ function FlowNodeComponent({
                 </div>
               </div>
             )}
+          </div>
+        )}
+        {/* Phonetic table — the node box expands downwards in place (no
+            popover). The 0fr→1fr grid-rows trick animates height smoothly;
+            the node's ResizeObserver keeps the SVG edges glued on. */}
+        {phonetic && (
+          <div
+            className={cn(
+              'grid transition-all duration-300 ease-out',
+              phoneticOpen ? 'mt-2 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            )}
+          >
+            <div className="overflow-hidden">
+              <PhoneticTable />
+            </div>
           </div>
         )}
         {showSkuLookup && (

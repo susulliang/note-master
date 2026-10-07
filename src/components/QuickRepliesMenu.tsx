@@ -138,7 +138,7 @@ let measureCtx: CanvasRenderingContext2D | null = null;
 function measureTitle(title: string): number {
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
   if (!measureCtx) return title.length * 6;
-  measureCtx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+  measureCtx.font = '700 13px ui-sans-serif, system-ui, sans-serif';
   return Math.ceil(measureCtx.measureText(title).width);
 }
 
@@ -426,29 +426,45 @@ function RadialDial({
     return () => clearTimeout(t);
   }, [mounted, items.length]);
 
-  // Card layout — greedy packing onto three concentric arcs (outer →
-  // inner), walking each arc left → right. Widest cards claim spots first
-  // (they need the roomy outer arc); every candidate is checked for
-  // axis-aligned overlap against already-placed cards, so cards stagger
-  // naturally and the fan fills rim → center with no overlaps and no empty
-  // middle. `order` (placement sequence) drives the fan-out stagger.
+  // Group the templates by intent and give each group its own angular
+  // sector of the disc (proportional to member count, walked left → right)
+  // so the fan reads as labeled clusters instead of one undifferentiated
+  // ring.
+  const groupSectors = useMemo(() => {
+    const map = new Map<string, QuickReply[]>();
+    for (const qr of items) {
+      const list = map.get(qr.group);
+      if (list) list.push(qr);
+      else map.set(qr.group, [qr]);
+    }
+    const groups = [...map.values()];
+    let cursor = DIAL_ARC_FROM;
+    return groups.map((members) => {
+      const share = ((DIAL_ARC_FROM - DIAL_ARC_TO) * members.length) / items.length;
+      const from = cursor;
+      const to = Math.max(DIAL_ARC_TO, cursor - share);
+      cursor = to;
+      return { group: members[0].group, members, from, to };
+    });
+  }, [items]);
+
+  // Card layout — within each group's sector, cards are greedily packed onto
+  // the three concentric arcs (outer → inner), walking the sector left →
+  // right; widest cards claim spots first. Every candidate is checked for
+  // axis-aligned overlap against ALL placed cards, so neighboring clusters
+  // never collide. If a group's sector is full, a card spills to any free
+  // arc spot (best-effort clustering); the column stack above the disc
+  // remains the last resort. `order` (placement sequence) drives the
+  // fan-out stagger, so cards animate out group by group.
   const cards = useMemo(() => {
-    const sorted = [...items]
-      .map((qr) => ({ qr, textW: measureTitle(qr.title) }))
-      .sort((a, b) => b.textW - a.textW);
     const H_GAP = 18;
     const V_GAP = 12;
     const HALF_H = 26; // approximate half card height
-    const out: Array<{ qr: QuickReply; order: number; w: number; dx: number; dy: number }> = [];
     const boxes: Array<{ l: number; t: number; r: number; b: number }> = [];
-    for (const c of sorted) {
-      const w = Math.max(CARD_W_MIN, Math.min(CARD_W_MAX, c.textW + 30));
+    const tryPlace = (w: number, degFrom: number, degTo: number) => {
       const hw = w / 2;
-      let dx = 0;
-      let dy = 0;
-      let found = false;
       for (const r of DIAL_ARC_RADII) {
-        for (let deg = DIAL_ARC_FROM; deg >= DIAL_ARC_TO; deg -= DIAL_ARC_STEP) {
+        for (let deg = degFrom; deg >= degTo; deg -= DIAL_ARC_STEP) {
           const a = (deg * Math.PI) / 180;
           const x = Math.cos(a) * r;
           const y = -Math.sin(a) * r;
@@ -462,26 +478,35 @@ function RadialDial({
               box.b + V_GAP > o.t
           );
           if (!clash) {
-            dx = x;
-            dy = y;
             boxes.push(box);
-            found = true;
-            break;
+            return { dx: x, dy: y };
           }
         }
-        if (found) break;
       }
-      if (!found) {
-        // All arc spots taken (far more templates than expected) — stack
-        // the remainder in columns above the disc.
-        const k = out.length;
-        dx = (k % 2 === 0 ? -1 : 1) * (110 + Math.floor(k / 2) * 40);
-        dy = -FAN_R_OUT - 80 - Math.floor(k / 2) * 80;
+      return null;
+    };
+    const out: Array<{ qr: QuickReply; order: number; w: number; dx: number; dy: number }> = [];
+    for (const sector of groupSectors) {
+      const sorted = sector.members
+        .map((qr) => ({ qr, textW: measureTitle(qr.title) }))
+        .sort((a, b) => b.textW - a.textW);
+      for (const c of sorted) {
+        const w = Math.max(CARD_W_MIN, Math.min(CARD_W_MAX, c.textW + 30));
+        // 1) the group's own sector, 2) spill anywhere free, 3) column stack.
+        let spot = tryPlace(w, sector.from, sector.to);
+        if (!spot) spot = tryPlace(w, DIAL_ARC_FROM, DIAL_ARC_TO);
+        if (!spot) {
+          const k = out.length;
+          spot = {
+            dx: (k % 2 === 0 ? -1 : 1) * (110 + Math.floor(k / 2) * 40),
+            dy: -FAN_R_OUT - 80 - Math.floor(k / 2) * 80,
+          };
+        }
+        out.push({ qr: c.qr, order: out.length, w, dx: spot.dx, dy: spot.dy });
       }
-      out.push({ qr: c.qr, order: out.length, w, dx, dy });
     }
     return out;
-  }, [items]);
+  }, [groupSectors]);
 
   // Fit the fan inside the viewport. A zero-size marker div at the button
   // center is measured (the fan itself is portaled to <body> at z-30, UNDER
@@ -651,7 +676,7 @@ function RadialDial({
               >
                 {c.qr.group}
               </span>
-              <span className="line-clamp-2 break-words text-[11px] font-bold leading-tight text-foreground">
+              <span className="line-clamp-2 break-words text-[13px] font-bold leading-tight text-foreground">
                 {c.qr.title}
               </span>
               {copied && (

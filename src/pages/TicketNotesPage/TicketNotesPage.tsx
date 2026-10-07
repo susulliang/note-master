@@ -2,95 +2,26 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 // ---------------------------------------------------------------------------
-// Typewriter animation for auto-filled fields
+// Cloud-parse TLDR → Additional Notes helper
 // ---------------------------------------------------------------------------
-// When SF scrape / LLM / regex fills a field, we don't just slam the value
-// into the input — we stream it character-by-character so the agent sees
-// the field "come alive". Fast enough (~12ms per char) that it doesn't get
-// in the way, but slow enough to feel like the app is helping you rather
-// than replacing you.
-//
-// The real value + side effects (undo, llmBasesRef, parsedFields) are
-// applied IMMEDIATELY — only the visual display is delayed. This keeps
-// Hang Up, LLM, and the form state consistent even mid-animation.
+// Whenever a cloud LLM parse (Parse / Concise / hang-up auto-parse) lands a
+// Chinese whole-call TLDR, it is written directly into the Additional Notes
+// box. This helper replaces the previous "Chinese Summary:" line in place
+// so repeated parses never pile up; if no line exists yet it is appended
+// after the agent-typed notes.
+const TLDR_LINE_PREFIX = 'Chinese Summary:';
 
-type TypewriterHandle = { cancel: () => void };
-
-function startTypewriter(
-  setFormData: React.Dispatch<React.SetStateAction<Record<string, string | string[]>>>,
-  nodeId: string,
-  target: string,
-  opts?: { skipUnderChars?: number; stepMs?: number }
-): TypewriterHandle {
-  const skipUnder = opts?.skipUnderChars ?? 20;
-  const stepMs = opts?.stepMs ?? 12;
-  // Short values (phone, name, model) — just set instantly, no animation
-  if (target.length < skipUnder) {
-    setFormData((prev) => ({ ...prev, [nodeId]: target }));
-    return { cancel: () => {} };
+function withTldrLine(notes: string, zh: string): string {
+  const lines = notes.split('\n');
+  const idx = lines.findIndex((l) => l.startsWith(TLDR_LINE_PREFIX));
+  if (idx >= 0) {
+    lines[idx] = `${TLDR_LINE_PREFIX} ${zh}`;
+    return lines.join('\n');
   }
-
-  // Find the <input> or <textarea> for this nodeId — we'll drive the
-  // animation by directly mutating its DOM value so React never sees
-  // 120 intermediate state updates (each of which would cascade into
-  // ProductLookupPanel / SopPanel / TemplatePanel searches). Only the
-  // final setState call below triggers one single search pass.
-  const $el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
-    `[data-field-id="${CSS.escape(nodeId)}"]`
-  );
-  if (!$el) {
-    // DOM not mounted yet — fall back to a single setState
-    setFormData((prev) => ({ ...prev, [nodeId]: target }));
-    return { cancel: () => {} };
-  }
-
-  let cancelled = false;
-  let timerId: number | null = null;
-  let written = 0;
-  const total = target.length;
-  const perFrame = Math.max(1, Math.round(total / 100)); // ~100 frames max
-
-  const tick = () => {
-    if (cancelled) return;
-    written = Math.min(total, written + perFrame);
-
-    // --- DOM-only visual update (no React re-render) ---
-    // Directly set the input's value — this skips React's virtual DOM
-    // diff entirely, so ProductLookupPanel / SopPanel / etc. never
-    // re-render mid-animation. The cursor also naturally moves to the
-    // end of the text since we're using native .value assignment.
-    try {
-      const prevLen = $el.value.length;
-      $el.value = target.slice(0, written);
-      // Fire a lightweight input event so any native listeners (e.g.
-      // char counter) update — but NOT React's onChange, which calls
-      // setFormData and would break the whole point of this animation.
-      $el.dispatchEvent(new Event('input', { bubbles: false }));
-      // If the element had focus, keep caret at end
-      if (document.activeElement === $el && prevLen !== written) {
-        $el.setSelectionRange($el.value.length, $el.value.length);
-      }
-    } catch { /* element removed from DOM mid-animation */ }
-
-    if (written < total && !cancelled) {
-      timerId = window.setTimeout(tick, stepMs) as unknown as number;
-    } else if (!cancelled) {
-      // --- Done: ONE React setState for the final value ---
-      setFormData((prev) => ({ ...prev, [nodeId]: target }));
-    }
-  };
-
-  timerId = window.setTimeout(tick, stepMs) as unknown as number;
-  return {
-    cancel: () => {
-      cancelled = true;
-      if (timerId !== null) { window.clearTimeout(timerId); timerId = null; }
-      // Don't call setState here — the caller (handleFieldChange for
-      // human edits, or handleAutoFill for a newer value) is about to
-      // overwrite with the right thing.
-    },
-  };
+  const trimmed = notes.replace(/\s+$/, '');
+  return trimmed ? `${trimmed}\n\n${TLDR_LINE_PREFIX} ${zh}` : `${TLDR_LINE_PREFIX} ${zh}`;
 }
+
 import { Toaster, toast } from 'sonner';
 import {
   User,
@@ -212,8 +143,11 @@ interface NodeConfig {
   collapsible?: boolean;
   /** Label shown on the collapsed toggle button. */
   collapsedLabel?: string;
-  /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node). */
+  /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
+  /** Hyperlink tag pinned to the top right of the node's label row
+   *  (SKU "BSD" → Besender admin, Order Number "Eshop" → Ecovacs intl SSO). */
+  headerTag?: { label: string; href: string };
 }
 
 const NODES: NodeConfig[] = [
@@ -265,6 +199,8 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: Barcode,
+    // "BSD" tag — opens the Besender BSD admin login in a new window.
+    headerTag: { label: 'BSD', href: 'https://bms.besender.com/bsdAdmin/login' },
     // v0.3.0 — expands the gridbox with the spare-parts lookup: model
     // classifier (fuzzy, from the Robot Model box above) → robot/station
     // split → region filter (NA default) → EN+ZH part-name search. Picking a
@@ -284,6 +220,18 @@ const NODES: NodeConfig[] = [
     mono: true,
     // HIDDEN: press-and-hold the field ~600ms → floating PIN bubble (snToPin)
     pinFromValue: true,
+  },
+  {
+    id: NODE_IDS.ORDER_NUMBER,
+    type: 'input',
+    label: 'Order Number',
+    inputType: 'text',
+    accent: 'default',
+    width: 200,
+    icon: Package,
+    // "Eshop" tag — opens the Ecovacs intl SSO (e-shop orders) in a new
+    // window. Visibility is toggleable from the Boxes rail panel.
+    headerTag: { label: 'Eshop', href: 'https://eco-intl-sso.ecovacs.com/login' },
   },
   {
     id: NODE_IDS.PURCHASE_INFO,
@@ -414,6 +362,7 @@ const INITIAL_FORM_DATA: Record<string, string | string[]> = {
   [NODE_IDS.DEEBOT_MODEL]: '',
   [NODE_IDS.SKU_NUMBER]: '',
   [NODE_IDS.SERIAL_NUMBER]: '',
+  [NODE_IDS.ORDER_NUMBER]: '',
   [NODE_IDS.ISSUE_TYPE]: '',
   [NODE_IDS.DETAILED_ISSUE]: '',
   [NODE_IDS.PURCHASE_INFO]: '',
@@ -836,6 +785,7 @@ export default function TicketNotesPage() {
       { id: NODE_IDS.SHIPPING_ADDRESS, label: 'Shipping address' },
       { id: NODE_IDS.TICKET_TRACKER, label: '24H tracker' },
       { id: NODE_IDS.SKU_NUMBER, label: 'SKU box' },
+      { id: NODE_IDS.ORDER_NUMBER, label: 'Order number box' },
       { id: NODE_IDS.ADDITIONAL_NOTES, label: 'Additional note box' },
     ],
     []
@@ -951,9 +901,6 @@ export default function TicketNotesPage() {
    * front of every later LLM value instead of the appends piling up.
    */
   const llmBasesRef = useRef<Record<string, string>>({});
-  /** Per-field handles of running typewriter animations — cancelled when a
-   *  human edits the field or when a new animation for the same field starts */
-  const typewriterRef = useRef<Record<string, TypewriterHandle>>({});
 
   // Apply theme to document via data-theme attribute
   useEffect(() => {
@@ -1020,10 +967,6 @@ export default function TicketNotesPage() {
 
   const handleFieldChange = useCallback(
     (id: string, value: string | string[], discrete?: boolean) => {
-      // Human edit — immediately cancel any running typewriter for this
-      // field so we don't race the user's keystrokes.
-      typewriterRef.current[id]?.cancel();
-      delete typewriterRef.current[id];
       if (UNDO_FIELDS.has(id) && typeof value === 'string') {
         const prev = formData[id];
         if (typeof prev === 'string') pushUndo(id, prev, Boolean(discrete));
@@ -1225,33 +1168,33 @@ export default function TicketNotesPage() {
   );
 
   const buildNoteText = useCallback(
-    (data: Record<string, string | string[]>, tldrZh?: string): string => {
-    const getStr = (key: string) => {
-      const v = data[key];
-      return typeof v === 'string' ? v : '';
-    };
+    (data: Record<string, string | string[]>): string => {
+      const getStr = (key: string) => {
+        const v = data[key];
+        return typeof v === 'string' ? v : '';
+      };
 
-    // Chinese whole-call TLDR from the last Parse / Concise click rides
-    // along with the Additional information section (agent-typed notes
-    // first, the bilingual summary the LLM returned last).
-    const additional = getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A';
-    const tldrLine = tldrZh ? `\nChinese Summary: ${tldrZh}` : '';
+      // The Chinese whole-call TLDR lives inside the Additional Notes box
+      // (written there on every cloud parse), so it rides into the note as
+      // part of the agent-visible notes — no separate line needed here.
+      const additional = getStr(NODE_IDS.ADDITIONAL_NOTES) || 'N/A';
 
-    return `**Notes**
+      return `**Notes**
 
 Customer Name: ${getStr(NODE_IDS.CUSTOMER_NAME) || 'N/A'}
 Contact number: ${getStr(NODE_IDS.CONTACT_NUMBER) || 'N/A'}
 Email address: ${getStr(NODE_IDS.EMAIL_ADDRESS) || 'N/A'}
 Current shipping address: ${getStr(NODE_IDS.SHIPPING_ADDRESS) || 'N/A'}
 Serial Number: ${getStr(NODE_IDS.SERIAL_NUMBER) || 'N/A'}
+Order Number: ${getStr(NODE_IDS.ORDER_NUMBER) || 'N/A'}
 Robot Model: ${getStr(NODE_IDS.DEEBOT_MODEL) || 'N/A'}
 SKU: ${getStr(NODE_IDS.SKU_NUMBER) || 'N/A'}
 Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
 
-Additional information (if needed): ${additional}${tldrLine}`;
-  }, []);
+Additional information (if needed): ${additional}`;
+    }, []);
 
   /** Always-fresh mirror of the form data — the hang-up flow generates the
    *  note only AFTER an async drain/finalize, when the closure would be stale */
@@ -1400,31 +1343,17 @@ Additional information (if needed): ${additional}${tldrLine}`;
       const base = llmBasesRef.current[nodeId] ?? '';
       const plan = mergeAutoFill(curTrimmed, priorSource, base, value, source);
 
-      // Compute what the merged value WILL be, immediately, so we can:
-      //  1. Update formDataRef.current synchronously (Hang Up / LLM sees
-      //     the final value even mid-animation)
-      //  2. Start a typewriter for the visual fill on top of it
+      // Compute what the merged value WILL be and apply it immediately —
+      // no typewriter animation, parsed values land at full speed.
       let merged = plan;
       if (typeof current === 'string' && current.trimEnd() !== curTrimmed) {
         merged = mergeAutoFill(current.trimEnd(), priorSource, base, value, source);
       }
       if (merged.next !== curTrimmed) {
-        // Cancel any previous typewriter on this field
-        typewriterRef.current[nodeId]?.cancel();
-        delete typewriterRef.current[nodeId];
-
         // Update the live formDataRef IMMEDIATELY — Hang Up, LLM, and
         // other consumers read from here, not from React state.
         formDataRef.current = { ...formDataRef.current, [nodeId]: merged.next };
-
-        // Visual typewriter animation. Short values (< 20 chars — phone,
-        // name, model, sku) skip animation and set instantly. Long text
-        // (issue description, resolution) streams character by character.
-        const handle = startTypewriter(setFormData, nodeId, merged.next, {
-          skipUnderChars: 20,
-          stepMs: 8,
-        });
-        typewriterRef.current[nodeId] = handle;
+        setFormData((prev) => ({ ...prev, [nodeId]: merged.next }));
       }
 
       if (plan.base !== null) llmBasesRef.current[nodeId] = plan.base;
@@ -1533,6 +1462,27 @@ Additional information (if needed): ${additional}${tldrLine}`;
     transcript: call.transcript,
     cloudGenerate: sopCloudGenerateEnabled ? sopCloudGenerate : undefined,
   });
+
+  // ---------------------------------------------------------------------
+  //  Cloud-parse TLDR → Additional Notes. Whenever a Parse / Concise /
+  //  hang-up auto-parse round-trip finishes, the Chinese whole-call TLDR
+  //  is written directly into the Additional Notes box (replacing the
+  //  previous TLDR line so repeated parses never pile up). It then flows
+  //  into the final note as part of the agent-visible notes.
+  // ---------------------------------------------------------------------
+  const prevCloudParsingRef = useRef(false);
+  useEffect(() => {
+    const wasParsing = prevCloudParsingRef.current;
+    prevCloudParsingRef.current = call.isCloudParsing;
+    if (!wasParsing || call.isCloudParsing) return;
+    const zh = call.lastParseTldr()?.zh;
+    if (!zh) return;
+    const cur = formDataRef.current[NODE_IDS.ADDITIONAL_NOTES];
+    const curStr = typeof cur === 'string' ? cur : '';
+    const next = withTldrLine(curStr, zh);
+    formDataRef.current = { ...formDataRef.current, [NODE_IDS.ADDITIONAL_NOTES]: next };
+    setFormData((prev) => ({ ...prev, [NODE_IDS.ADDITIONAL_NOTES]: next }));
+  }, [call.isCloudParsing, call.lastParseTldr]);
 
   // -------------------------------------------------------------------------
   //  Keyword alert dictionary handlers (toolbar ⚠ menu).
@@ -1803,7 +1753,7 @@ Additional information (if needed): ${additional}${tldrLine}`;
       // Step 2 & 3: build the note from what is NOW on the form and open
       // the modal. ALWAYS runs regardless of capture errors above — this
       // is the actual "one click shows the note" guarantee.
-      const text = buildNoteText(formDataRef.current, callNow.lastParseTldr()?.zh);
+      const text = buildNoteText(formDataRef.current);
       setNoteText(text);
       setShowOutput(true);
 
@@ -1994,7 +1944,7 @@ Additional information (if needed): ${additional}${tldrLine}`;
                   issueTypeId={NODE_IDS.ISSUE_TYPE}
                   detailedIssueId={NODE_IDS.DETAILED_ISSUE}
                   purchaseInfoId={NODE_IDS.PURCHASE_INFO}
-                  getFinalNote={() => buildNoteText(formData, call.lastParseTldr()?.zh)}
+                  getFinalNote={() => buildNoteText(formData)}
                   cloudGenerate={sopCloudGenerateEnabled ? sopCloudGenerate : undefined}
                   llmGenerate={llmParser.enabled ? llmParser.generate : null}
                   llmStatus={llmParser.status}

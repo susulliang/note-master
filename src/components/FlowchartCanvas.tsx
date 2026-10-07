@@ -39,6 +39,8 @@ interface NodeConfig {
   collapsedLabel?: string;
   /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
+  /** Hyperlink tag pinned to the top right of the node's label row */
+  headerTag?: { label: string; href: string };
 }
 
 interface FlowchartCanvasProps {
@@ -990,6 +992,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
             mono={node.mono}
             phonetic={node.phonetic}
+            headerTag={node.headerTag}
             showFirmware={node.firmwareModel}
             showSkuLookup={node.skuLookup}
             skuRobotModel={

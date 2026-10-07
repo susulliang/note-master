@@ -31,7 +31,11 @@ function stripMarkdownBold(text: string): string {
 
 /** Convert the note markdown into the minimal semantic HTML pushed into the
  *  Salesforce chatter Post editor: HTML-escaped text, `**bold**` →
- *  <strong>, every source line kept verbatim and joined with <br>. No
+ *  <strong>. Layout is paragraph-based: a blank source line becomes a <p>
+ *  boundary (one empty rendered line), consecutive source lines inside a
+ *  block are joined with single <br> soft breaks. Never emit consecutive
+ *  <br><br> — the SF publisher's insertion path turns those into doubled
+ *  empty lines (the "blank line between every note line" artefact). No
  *  wrapper div / inline styles — the SF publisher (Quill) keeps only the
  *  formatting it understands, so the note lands exactly as the preview
  *  shows it, bold included. */
@@ -40,10 +44,13 @@ function noteMarkdownToHtml(md: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+  const inline = (line: string) =>
+    esc(line).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   return md
-    .split(/\r?\n/)
-    .map((line) => esc(line).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'))
-    .join('<br>');
+    .split(/\r?\n\s*\r?\n/)
+    .filter((block) => block.trim().length > 0)
+    .map((block) => `<p>${block.split(/\r?\n/).map(inline).join('<br>')}</p>`)
+    .join('');
 }
 
 /** Convert a raw markdown note string into safe(ish) HTML for the clipboard
@@ -391,10 +398,11 @@ export default function OutputModal({
         r = await applyCaseFields({
           fields: {
             postBody: f.postBody,
-            // Rich-text version — the content script inserts it via
-            // execCommand('insertHTML') so the Post keeps the bold headings
-            // (insertText mangles multi-line bodies at the first \n, which
-            // is how a push once landed with only the "**Notes**" heading).
+            // Rich-text version — the content script inserts it into the
+            // publisher (synthetic paste carrying text/html, insertHTML
+            // fallback) so the Post keeps the bold headings with exactly
+            // one line per note line (bare <br>-chain HTML used to render
+            // an empty line between every line).
             postBodyHtml: noteMarkdownToHtml(f.postBody),
             postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
             amrModelNo: f.amrModelNo,
