@@ -2098,12 +2098,11 @@ Additional information (if needed): ${additional}`;
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
             // Capturing (or editing the debug transcript): the pill grows
-            // into a taller caption card with the live customer subtitle
-            // stacked above the controls. Width is content-driven (buttons
-            // never wrap to two lines) with a cap so the subtitle truncates
-            // on narrow viewports.
+            // UPWARD — height expands for the subtitle, width stays
+            // content-driven by the controls row (never clipped), with a
+            // cap so the subtitle truncates on narrow viewports.
             capturing || transcriptEditing
-              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] w-[min(44rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
+              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
               : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
           )}
         >
@@ -2118,7 +2117,7 @@ Additional information (if needed): ${additional}`;
                 rows={6}
                 spellCheck={false}
                 placeholder={'AGENT: Thank you for calling Ecovacs support, my name is…\nCUSTOMER: Hi, my DEEBOT won\u2019t charge…'}
-                className="w-full resize-y rounded-lg border border-border/60 bg-card/60 p-2 font-mono text-[11px] leading-relaxed text-foreground outline-none backdrop-blur-sm focus:border-primary/50"
+                className="w-[38rem] max-w-full resize-y rounded-lg border border-border/60 bg-card/60 p-2 font-mono text-[11px] leading-relaxed text-foreground outline-none backdrop-blur-sm focus:border-primary/50"
                 autoFocus
               />
               <div className="flex items-center justify-between">

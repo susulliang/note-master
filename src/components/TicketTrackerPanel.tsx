@@ -183,7 +183,6 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
     // with 3 simultaneous chrome.tabs operations, and each toast tells the
     // agent exactly which case was opened.
     for (const c of top) {
-      // eslint-disable-next-line no-await-in-loop
       await doOpenOne(c, { newTab: true });
     }
     if (leftOver > 0) toast.info(`Opened ${top.length} of ${cases.length} (open-all cap = ${OPEN_ALL_MAX}).`);

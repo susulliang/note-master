@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ClipboardCheck, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -39,6 +40,22 @@ function ratioTextClass(ratio: number | null): string {
 export default function QaChecklistMenu({ scores, scoring, summary, className }: QaChecklistMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  /** Fixed-position anchor (viewport coords) for the portaled dropdown. */
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
+
+  // Measure the button and convert to a fixed-position anchor whenever the
+  // dropdown opens (or the viewport resizes while open).
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const measure = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) setAnchor({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
 
   // Outside click closes the dropdown.
   useEffect(() => {
@@ -65,6 +82,7 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
   return (
     <div ref={rootRef} className={cn('relative flex shrink-0 items-center', className)}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
@@ -91,13 +109,19 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
         )}
       </button>
 
-      {/* Dropdown — frosted checklist panel above the button */}
-      <div
-        className={cn(
-          'absolute bottom-full left-1/2 z-50 mb-2 w-[340px] -translate-x-1/2 transition-[opacity,transform] duration-200',
-          open ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1.5 opacity-0'
-        )}
-      >
+      {/* Dropdown — portaled to <body> so its backdrop-blur samples the PAGE,
+          not the already-blurred bottom bar (a backdrop-filter ancestor would
+          clip the child's blur to its own surface, making the glass vanish). */}
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            className={cn(
+              'fixed z-[70] w-[340px] -translate-x-1/2 transition-[opacity,transform] duration-200',
+              open ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1.5 opacity-0'
+            )}
+            style={{ left: anchor.left, bottom: anchor.bottom + 8 }}
+          >
         <div className="max-h-[min(60vh,30rem)] overflow-y-auto rounded-2xl border-[1.5px] border-foreground/10 bg-card/75 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-xl backdrop-saturate-150">
           {/* Header + overall bar */}
           <div className="sticky top-0 z-10 border-b border-foreground/10 bg-card/85 px-3 py-2 backdrop-blur-xl">
@@ -179,7 +203,9 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
             )}
           </div>
         </div>
-      </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
