@@ -1870,24 +1870,39 @@
    * (the SF chatter publisher is Quill-based): focus → selectAll →
    * delete → insert → input/change/blur chain.
    *
-   * Insertion strategy (v0.2.21):
+   * Insertion cascade (v0.2.22), each step VERIFIED by counting landed
+   * non-empty lines against the expected count:
    *   1. SYNTHETIC PASTE carrying text/html (+ text/plain). Quill's own
    *      clipboard converter maps <p> blocks and <br> soft breaks to
-   *      exactly one line each — this is the faithful path.
-   *   2. execCommand('insertHTML') fallback. Chrome's fragment insertion
-   *      DOUBLES bare <br> sequences into visible empty lines in the SF
-   *      publisher — the "blank line between every note line" artefact
-   *      agents reported. The app now sends paragraph-based HTML
-   *      (<p> per blank-line block, <br> only within a block), which
-   *      survives this path too.
+   *      exactly one line each — the faithful path.
+   *   2. LINE-BY-LINE insertHTML + insertLineBreak. Chrome's single-shot
+   *      execCommand('insertHTML') FLATTENS <p> blocks — every line merges
+   *      into one (the "no line breaks at all" artefact) and doubles bare
+   *      <br><br> (the earlier "empty line between every line" artefact).
+   *      Inserting one line at a time with an explicit break command
+   *      between lines can do neither.
+   *   3. LINE-BY-LINE insertText + insertLineBreak (plain text, breaks
+   *      still guaranteed — last resort).
    */
   async function nativeInsertHtml(el, html, plainText) {
     if (!el || !el.isContentEditable) return false;
-    try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
-    try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
-    $fire(el, 'focus');
-    try { document.execCommand('delete', false, null); } catch { /* ignore */ }
+    const focusAndClear = () => {
+      try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
+      try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
+      $fire(el, 'focus');
+      try { document.execCommand('delete', false, null); } catch { /* ignore */ }
+    };
+    const srcLines = String(plainText || '').split(/\r?\n/);
+    const expectedLines = srcLines.filter((l) => l.trim()).length;
+    const landedLines = () => (el.innerText || '').split(/\r?\n/).filter((l) => l.trim()).length;
+    const landedOk = () => {
+      const t = (el.innerText || '').trim();
+      return t.length > 0 && (expectedLines <= 1 || landedLines() >= Math.max(1, expectedLines - 1));
+    };
+
+    focusAndClear();
     let ok = false;
+    // (1) Synthetic paste
     try {
       const dt = new DataTransfer();
       dt.setData('text/html', html);
@@ -1895,12 +1910,40 @@
       el.dispatchEvent(new ClipboardEvent('paste', {
         bubbles: true, cancelable: true, clipboardData: dt,
       }));
-      await $sleep(140);
-      ok = (el.innerText || '').trim().length > 0;
+      await $sleep(160);
+      ok = landedOk();
     } catch { ok = false; }
+
+    // (2) Line-by-line insertHTML + explicit break commands
     if (!ok) {
-      try { ok = document.execCommand('insertHTML', false, html); } catch { ok = false; }
+      focusAndClear();
+      try {
+        const escHtml = (s) => s
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        for (let i = 0; i < srcLines.length; i++) {
+          const h = lineHtml(srcLines[i]);
+          if (h) { try { document.execCommand('insertHTML', false, h); } catch { /* ignore */ } }
+          if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
+        }
+        await $sleep(80);
+        ok = landedOk();
+      } catch { ok = false; }
     }
+
+    // (3) Line-by-line plain text (bold lost, breaks guaranteed)
+    if (!ok) {
+      focusAndClear();
+      try {
+        for (let i = 0; i < srcLines.length; i++) {
+          if (srcLines[i]) { try { document.execCommand('insertText', false, srcLines[i]); } catch { /* ignore */ } }
+          if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
+        }
+        await $sleep(80);
+        ok = (el.innerText || '').trim().length > 0;
+      } catch { ok = false; }
+    }
+
     if (ok) {
       $fire(el, new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText' }));
       $fire(el, new InputEvent('change', { bubbles: true, cancelable: true }));
@@ -1965,47 +2008,58 @@
    */
   async function clickInlineEdit(labelAliases) {
     const aliases = Array.isArray(labelAliases) ? labelAliases : [labelAliases];
-    const labels = $qa(document, '.slds-form-element__label, legend, label, .test-id__field-label');
-    // Scored matching instead of first-hit: exact (100) > startsWith (60) >
-    // contains (30), earlier aliases win ties. A loose alias like "Name"
-    // (customerName) can otherwise hijack the "Account Name" layout item
-    // when it appears earlier in the DOM.
+    // Scored matching: exact (100) > startsWith (60) > contains (30),
+    // earlier aliases win ties. Prevents a loose alias like "Name"
+    // (customerName) hijacking the "Account Name" layout item.
+    const scoredAlias = (rest) => {
+      let best = 0;
+      for (let ai = 0; ai < aliases.length; ai++) {
+        const a = aliases[ai];
+        if (typeof a !== 'string') {
+          if (a.test(rest)) best = Math.max(best, 80 - ai);
+          continue;
+        }
+        const av = a.toLowerCase();
+        const rl = rest.toLowerCase();
+        let s = 0;
+        if (rl === av) s = 100;
+        else if (rl.startsWith(av)) s = 60;
+        else if (rl.includes(av)) s = 30;
+        best = Math.max(best, s - ai);
+      }
+      return best;
+    };
+    // PRIMARY (2026 layout): every editable field exposes a pencil trigger
+    // button carrying title="Edit <Label>" (e.g. "Edit AMR Model No.",
+    // "Edit Account Name" — verified against the agent's Case DOM). Much
+    // more precise than label containers, and immune to lazy-mount
+    // label/assistive-text quirks.
     let hit = null;
     let bestScore = 0;
+    for (const b of $qa(document, 'button.test-id__inline-edit-trigger, button[title^="Edit "]')) {
+      const title = (b.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      if (!/^Edit\s+/i.test(title)) continue;
+      const rest = title.replace(/^Edit\s+/i, '');
+      const s = scoredAlias(rest);
+      if (s > bestScore) { bestScore = s; hit = b; }
+    }
+    if (hit) {
+      try { hit.click(); } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+      await $sleep(320); // let LWC swap the editor in
+      const wrapper = hit.closest(
+        'records-record-layout-item, .slds-form-element, .test-id__field-label-container, lightning-output-field, div'
+      ) || document.body;
+      return { wrapper, aliasUsed: aliases[0], via: 'trigger-title' };
+    }
+    // SECONDARY: label containers (older layouts / non-Console pages).
+    const labels = $qa(document, '.slds-form-element__label, legend, label, .test-id__field-label');
     for (const lbl of labels) {
       const txt = (lbl.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) continue;
-      const low = txt.toLowerCase();
-      for (let ai = 0; ai < aliases.length; ai++) {
-        const a = aliases[ai];
-        let score = 0;
-        if (typeof a === 'string') {
-          const av = a.toLowerCase();
-          if (low === av) score = 100;
-          else if (low.startsWith(av)) score = 60;
-          else if (low.includes(av)) score = 30;
-        } else if (a.test(txt)) {
-          score = 80;
-        }
-        score = Math.max(0, score - ai);
-        if (score > bestScore) { bestScore = score; hit = lbl; }
-      }
+      const s = scoredAlias(txt);
+      if (s > bestScore) { bestScore = s; hit = lbl; }
     }
     if (!hit) {
-      // Fallback: look for layout items that have the inline-edit button
-      // title matching the alias
-      const btns = $qa(document, 'button[title]');
-      for (const b of btns) {
-        const t = (b.getAttribute('title') || '').replace(/^Edit\s+/, '');
-        const ok = aliases.some((a) => typeof a === 'string'
-          ? t.toLowerCase() === a.toLowerCase() || t.toLowerCase().includes(a.toLowerCase())
-          : a.test(t));
-        if (ok && /^Edit\s+/.test(b.getAttribute('title') || '')) { hit = b; break; }
-      }
-      if (hit?.tagName === 'BUTTON') {
-        try { hit.click(); await $sleep(260); return { wrapper: hit.closest('records-record-layout-item, .slds-form-element, .test-id__field-label-container, lightning-output-field, div') || document.body }; }
-        catch (e) { return { ok: false, error: String(e?.message || e) }; }
-      }
       return { ok: false, error: `No label "${aliases[0]}" found for inline edit.` };
     }
     const layoutItem = hit.closest(
@@ -2135,7 +2189,7 @@
     // (agents hit "Post tab not found" when the push raced the feed mount).
     let tabHit = findPostTab();
     for (let i = 0; i < 10 && !tabHit; i++) { await $sleep(150); tabHit = findPostTab(); }
-    if (!tabHit) { result.postBody.detail = 'no "Post" tab header found on the Case feed'; return result; }
+    if (!tabHit) { result.postBody.detail = 'no "Post" tab found on the Case feed — make sure the Case is showing its Chatter/Feed panel (the feed lazy-loads; scroll it into view if closed)'; return result; }
     result.postBody.tabFound = true;
     result.postBody.tabVia = tabHit.via;
     try { tabHit.el.click(); } catch (e) { result.postBody.error = String(e?.message || e); return result; }
@@ -2283,6 +2337,8 @@
       return labelAliasesAll.some((a) => t.toLowerCase().includes(a.toLowerCase()));
     };
     if (!anyTargetLabelVisible()) {
+      // (a) record pages keep editable fields on the Details tab — click it
+      //     if present.
       try {
         const detailsTab = Array.from(document.querySelectorAll(
           'a.tabHeader[data-target-selection-name="RecordFieldTab"], .tabHeader, [role="tab"], .slds-tabs_default__item a, .slds-tabs_scoped__item a'
@@ -2293,6 +2349,28 @@
         });
         if (detailsTab) { detailsTab.click(); await $sleep(600); }
       } catch { /* best-effort — label search will report per-field */ }
+      // (b) 2026 layouts render field sections inside lazy
+      //     laf-progressive-container shells that only mount when scrolled
+      //     near. Sweep the scroller (bottom → back) to force the fields
+      //     into the DOM, then re-check once.
+      if (!anyTargetLabelVisible()) {
+        try {
+          const scrollers = [
+            document.querySelector('.console-center-item'),
+            document.querySelector('[role="main"]'),
+            document.scrollingElement,
+            document.body,
+          ].filter(Boolean);
+          for (const sc of scrollers) {
+            try { sc.scrollTop = sc.scrollHeight; } catch { /* ignore */ }
+          }
+          await $sleep(400);
+          for (const sc of scrollers) {
+            try { sc.scrollTop = 0; } catch { /* ignore */ }
+          }
+          await $sleep(400);
+        } catch { /* best-effort */ }
+      }
     }
     // Aliases use plain strings, not strict regexes: string matching here
     // is "contains" (case-insensitive), which tolerates the label
