@@ -1,11 +1,12 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, LayoutGrid, Image as ImageIcon, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutGrid, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { cn } from '@/lib/utils';
 import AppPhotosPanel from '@/components/AppPhotosPanel';
 import QaPanel from '@/components/QaPanel';
+import ManualsPanel from '@/components/ManualsPanel';
 
 interface NodeConfig {
   id: string;
@@ -467,6 +468,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const [drawerTab, setDrawerTab] = useState<string>(NODE_IDS.SOP_PANEL);
   const [appPhotosOpen, setAppPhotosOpen] = useState(false);
   const [qaOpen, setQaOpen] = useState(false);
+  const [manualsOpen, setManualsOpen] = useState(false);
   // Mirror of drawerTab for stable closures (avoid stale deps).
   const drawerTabRef = useRef(drawerTab);
   useEffect(() => {
@@ -1167,6 +1169,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 type="button"
                 onClick={() => {
                   setQaOpen((v) => !v);
+                  if (manualsOpen) setManualsOpen(false);
                   if (drawerOpen) setDrawerOpen(false);
                 }}
                 title="QA Standards — quality inspection handbook"
@@ -1180,6 +1183,29 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 <ClipboardCheck className="size-5 transition-transform duration-200" />
                 <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
                   QA
+                </span>
+              </button>
+
+              {/* Product Manuals — official instruction-manual PDFs. Sits
+                  directly under the QA pill inside the copilot group. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setManualsOpen((v) => !v);
+                  if (qaOpen) setQaOpen(false);
+                  if (drawerOpen) setDrawerOpen(false);
+                }}
+                title="Product Manuals — official Ecovacs instruction-manual PDFs"
+                className={cn(
+                  'relative z-10 flex h-12 w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95',
+                  manualsOpen
+                    ? 'bg-foreground/10 text-foreground shadow-[0_0_14px_color-mix(in_oklab,var(--foreground)_18%,transparent)]'
+                    : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                )}
+              >
+                <BookOpen className="size-5 transition-transform duration-200" />
+                <span className="text-[8px] font-semibold uppercase leading-tight tracking-tight text-muted-foreground">
+                  Manual
                 </span>
               </button>
             </div>
@@ -1392,6 +1418,21 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             />
             <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
               <QaPanel onClose={() => setQaOpen(false)} />
+            </div>
+          </>
+        )}
+
+        {/* Product Manuals panel — anchored to the rail's right edge, opens
+            from the "Manual" pill below the QA button in the copilot group. */}
+        {manualsOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setManualsOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
+              <ManualsPanel onClose={() => setManualsOpen(false)} />
             </div>
           </>
         )}
