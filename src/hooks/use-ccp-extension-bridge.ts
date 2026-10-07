@@ -134,7 +134,7 @@ export interface CcpExtensionBridge {
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;
-      accountName?: string;
+      emailAddress?: string;
       contactPhone?: string;
     };
     tabId?: number;
@@ -1065,10 +1065,15 @@ export function useCcpExtensionBridge({
       try {
         const result = await new Promise<any>((resolve) => {
           let timedOut = false;
+          // The SF push flow legitimately takes 20–60s (panel edits + the
+          // record edit form + saves) — a 12s cap made the app give up while
+          // the content script was still working (fields only appeared on
+          // the second push). Long leash for pushes; snappy for the rest.
+          const timeoutMs = (payload as any)?.type === 'EXT_APPLY_CASE_FIELDS' ? 120000 : 12000;
           const timer = window.setTimeout(() => {
             timedOut = true;
             resolve({ ok: false, error: 'Extension bridge request timed out.' });
-          }, 12000);
+          }, timeoutMs);
           pendingReqRef.current[reqId] = (v: any) => {
             if (timedOut) return;
             clearTimeout(timer);
@@ -1307,7 +1312,7 @@ export function useCcpExtensionBridge({
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;
-      accountName?: string;
+      emailAddress?: string;
       contactPhone?: string;
     };
     tabId?: number;

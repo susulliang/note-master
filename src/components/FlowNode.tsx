@@ -64,7 +64,7 @@ export interface TicketPanelsContextShape {
       postPublish?: boolean;
       amrModelNo?: string;
       customerName?: string;
-      accountName?: string;
+      emailAddress?: string;
       contactPhone?: string;
     };
     tabId?: number;

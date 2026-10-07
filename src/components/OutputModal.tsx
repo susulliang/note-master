@@ -152,16 +152,15 @@ export default function OutputModal({
   };
 
   // Parse extra fields for "Push to Salesforce Case" (beyond the 3 chip ones)
-  //   - Deebot Model / Serial / SKU / Email / Shipping Address / Phone → for
-  //     this iteration we only expose the 4 editable SF fields the user
-  //     explicitly asked about: AMR Model No. (← deebotModel), Name
-  //     (customerName) → customerName/contact field, Account Name → account
-  //     if available else customerName, Phone → contactNumber.
+  //   - Per the agent's Case layout: Phone / Last Name / Email are inline
+  //     editable in the Contact Details panel; AMR Model No. lives in the
+  //     Issue Type panel (edit mode). Contact Name / Account Name on the
+  //     Case are NOT editable there — dropped on purpose.
   const pushableFields = useMemo<{
     postBody: string;
     amrModelNo?: string;
     customerName?: string;
-    accountName?: string;
+    emailAddress?: string;
     contactPhone?: string;
   }>(() => {
     const text = editableText;
@@ -171,13 +170,13 @@ export default function OutputModal({
     };
     const phone = oneLine('Contact number') || oneLine('Contact Number') || oneLine('Phone');
     const name = oneLine('Customer Name');
+    const email = oneLine('Email address') || oneLine('Email Address') || oneLine('Email');
     const model = oneLine('Deebot Model') || oneLine('Robot Model') || oneLine('Model') || oneLine('Product Model') || oneLine('AMR Model No.');
-    const accountName = oneLine('Account Name') || name;
     return {
       postBody: text,
       amrModelNo: model,
       customerName: name,
-      accountName,
+      emailAddress: email,
       contactPhone: phone,
     };
   }, [editableText]);
@@ -389,7 +388,7 @@ export default function OutputModal({
           phone: f.contactPhone,
           model: f.amrModelNo,
           name: f.customerName,
-          account: f.accountName,
+          email: f.emailAddress,
           bodyLen: f.postBody?.length ?? 0,
         };
       } catch { /* ignore */ }
@@ -407,7 +406,7 @@ export default function OutputModal({
             postPublish: false, // never auto-publish — let the agent proofread Post tab before Publish
             amrModelNo: f.amrModelNo,
             customerName: f.customerName,
-            accountName: f.accountName,
+            emailAddress: f.emailAddress,
             contactPhone: f.contactPhone,
           },
         });
@@ -503,8 +502,8 @@ export default function OutputModal({
       // (2) Editable SF fields
       const labels: Record<string, string> = {
         contactPhone: 'Phone',
-        customerName: 'Contact Name',
-        accountName:  'Account Name',
+        customerName: 'Last Name',
+        emailAddress: 'Email',
         amrModelNo:   'AMR Model No.',
       };
       const fields = (r.fields ?? {}) as Record<string, any>;
@@ -887,7 +886,7 @@ export default function OutputModal({
               className="gap-1.5"
               title={
                 applyCaseFields
-                  ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Name / Account Name / Phone via inline edit."
+                  ? "Open Post tab on the agent's current Lightning Case tab, paste the formatted note into the publisher, and try writing AMR Model No. / Last Name / Email / Phone via inline edit."
                   : extConn?.diagnostics
                     ? [
                         'Extension bridge not connected yet.',

@@ -1867,25 +1867,26 @@
 
   /**
    * Insert an HTML fragment into a contenteditable rich-text editor
-   * (the SF chatter publisher is Quill-based): focus → selectAll →
-   * delete → insert → input/change/blur chain.
+   * (the SF chatter publisher). Every step is VERIFIED against the source
+   * line structure — the editor must show exactly the source's lines,
+   * no more (extra blank lines) and no fewer (merged lines).
    *
-   * Insertion cascade (v0.2.22), each step VERIFIED by counting landed
-   * non-empty lines against the expected count:
-   *   1. SYNTHETIC PASTE carrying text/html (+ text/plain). Quill's own
-   *      clipboard converter maps <p> blocks and <br> soft breaks to
-   *      exactly one line each — the faithful path.
-   *   2. LINE-BY-LINE insertHTML + insertLineBreak. Chrome's single-shot
-   *      execCommand('insertHTML') FLATTENS <p> blocks — every line merges
-   *      into one (the "no line breaks at all" artefact) and doubles bare
-   *      <br><br> (the earlier "empty line between every line" artefact).
-   *      Inserting one line at a time with an explicit break command
-   *      between lines can do neither.
-   *   3. LINE-BY-LINE insertText + insertLineBreak (plain text, breaks
-   *      still guaranteed — last resort).
+   * Insertion cascade (v0.2.23):
+   *   1. LINE-BY-LINE insertHTML (keeps **bold**) + insertLineBreak
+   *      between lines. Chrome's single-shot insertHTML flattens <p>
+   *      blocks ("no line breaks at all") and doubles bare <br><br>
+   *      ("empty line between every line"); one line at a time with an
+   *      explicit break command can do neither.
+   *   2. SYNTHETIC PASTE of PLAIN TEXT only (no text/html flavour — the
+   *      SF rich-text fork turns every pasted block boundary into
+   *      block + empty block, which is where the doubled blank lines
+   *      came from). Bold lost, single breaks kept.
+   *   3. LINE-BY-LINE insertText + insertLineBreak (plain).
+   *   4. Single-shot insertText of the whole body (last resort).
    */
   async function nativeInsertHtml(el, html, plainText) {
     if (!el || !el.isContentEditable) return false;
+    void html; // rich formatting is attempted in step 1 only
     const focusAndClear = () => {
       try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
       try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
@@ -1893,45 +1894,50 @@
       try { document.execCommand('delete', false, null); } catch { /* ignore */ }
     };
     const srcLines = String(plainText || '').split(/\r?\n/);
-    const expectedLines = srcLines.filter((l) => l.trim()).length;
-    const landedLines = () => (el.innerText || '').split(/\r?\n/).filter((l) => l.trim()).length;
-    const landedOk = () => {
-      const t = (el.innerText || '').trim();
-      return t.length > 0 && (expectedLines <= 1 || landedLines() >= Math.max(1, expectedLines - 1));
+    // Expected TOTAL rendered lines — blank source lines included. The
+    // landed structure must match the source exactly (±1 for editor
+    // trailing-newline quirks); "at least N lines" was not enough — a
+    // paste that doubles every break still passes that check.
+    const expectedTotal = Math.max(1, srcLines.length);
+    const landedTotal = () =>
+      (el.innerText || '').replace(/[\r\n]+$/, '').split(/\r?\n/).length;
+    const linesOk = () => {
+      const n = landedTotal();
+      return n > 0 && Math.abs(n - expectedTotal) <= 1;
     };
 
     focusAndClear();
     let ok = false;
-    // (1) Synthetic paste
+
+    // (1) Line-by-line insertHTML (bold) + explicit single breaks
     try {
-      const dt = new DataTransfer();
-      dt.setData('text/html', html);
-      if (plainText) dt.setData('text/plain', String(plainText));
-      el.dispatchEvent(new ClipboardEvent('paste', {
-        bubbles: true, cancelable: true, clipboardData: dt,
-      }));
-      await $sleep(160);
-      ok = landedOk();
+      const escHtml = (s) => s
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      for (let i = 0; i < srcLines.length; i++) {
+        const h = lineHtml(srcLines[i]);
+        if (h) { try { document.execCommand('insertHTML', false, h); } catch { /* ignore */ } }
+        if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
+      }
+      await $sleep(120);
+      ok = linesOk();
     } catch { ok = false; }
 
-    // (2) Line-by-line insertHTML + explicit break commands
+    // (2) Synthetic paste, plain text only
     if (!ok) {
       focusAndClear();
       try {
-        const escHtml = (s) => s
-          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        for (let i = 0; i < srcLines.length; i++) {
-          const h = lineHtml(srcLines[i]);
-          if (h) { try { document.execCommand('insertHTML', false, h); } catch { /* ignore */ } }
-          if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
-        }
-        await $sleep(80);
-        ok = landedOk();
+        const dt = new DataTransfer();
+        dt.setData('text/plain', String(plainText || ''));
+        el.dispatchEvent(new ClipboardEvent('paste', {
+          bubbles: true, cancelable: true, clipboardData: dt,
+        }));
+        await $sleep(160);
+        ok = linesOk();
       } catch { ok = false; }
     }
 
-    // (3) Line-by-line plain text (bold lost, breaks guaranteed)
+    // (3) Line-by-line insertText + insertLineBreak (plain)
     if (!ok) {
       focusAndClear();
       try {
@@ -1939,6 +1945,16 @@
           if (srcLines[i]) { try { document.execCommand('insertText', false, srcLines[i]); } catch { /* ignore */ } }
           if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
         }
+        await $sleep(100);
+        ok = linesOk();
+      } catch { ok = false; }
+    }
+
+    // (4) Single-shot insertText of the whole body
+    if (!ok) {
+      focusAndClear();
+      try {
+        document.execCommand('insertText', false, String(plainText || ''));
         await $sleep(80);
         ok = (el.innerText || '').trim().length > 0;
       } catch { ok = false; }
@@ -1968,7 +1984,7 @@
     try { nativeInput.click?.(); } catch { /* ignore */ }
     await $sleep(80);
     nativeTypeText(nativeInput, value);
-    await $sleep(350); // let the combobox query + render result popover
+    await $sleep(1000); // let the lookup query + render its result popover (server-side search)
     // Look for a dropdown cell (<ul role="listbox" + <li role="option">,
     // or the LWC popover containing a match whose innerText begins/equals
     // the typed value).  Prefer: closest combobox element document-wide,
@@ -2045,7 +2061,7 @@
     }
     if (hit) {
       try { hit.click(); } catch (e) { return { ok: false, error: String(e?.message || e) }; }
-      await $sleep(320); // let LWC swap the editor in
+      await $sleep(700); // let LWC swap the editor in
       const wrapper = hit.closest(
         'records-record-layout-item, .slds-form-element, .test-id__field-label-container, lightning-output-field, div'
       ) || document.body;
@@ -2098,6 +2114,136 @@
     return false;
   }
 
+  /** Open the edit form for the PANEL containing the target label. Panels
+   *  without per-field pencils expose an Edit button (or any sibling
+   *  field's pencil) that toggles the whole panel into an editable form.
+   *  Scoped on purpose: the record-header Edit opens the full "Edit Case"
+   *  modal, which we must never click from here. */
+  async function openPanelEditFor(labelAliases) {
+    const aliases = Array.isArray(labelAliases) ? labelAliases : [labelAliases];
+    // Locate the target label first — its enclosing panel is the scope.
+    let lblHit = null;
+    let best = 0;
+    for (const lbl of $qa(document, '.slds-form-element__label, legend, label, .test-id__field-label')) {
+      const txt = (lbl.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt) continue;
+      const low = txt.toLowerCase();
+      for (let ai = 0; ai < aliases.length; ai++) {
+        const av = String(aliases[ai]).toLowerCase();
+        let s = 0;
+        if (low === av) s = 100;
+        else if (low.startsWith(av)) s = 60;
+        else if (low.includes(av)) s = 30;
+        s = Math.max(0, s - ai);
+        if (s > best) { best = s; lblHit = lbl; }
+      }
+    }
+    if (!lblHit) return false;
+    const panel = lblHit.closest(
+      '.laf-progressive-container, .test-id__section, [class*="flexipageColumn"], .slds-card, .slds-section, .slds-accordion__section, lightning-accordion-section, .console-panel'
+    );
+    if (!panel) return false;
+    const btns = Array.from(panel.querySelectorAll(
+      'button[title^="Edit "], button[title="Edit"], button[aria-label="Edit"], button[name="Edit"], button.slds-button--edit'
+    ));
+    if (!btns.length) return false;
+    try { btns[0].click(); } catch { return false; }
+    await $sleep(1500); // let the editable form render
+    return true;
+  }
+
+  /** Open the RECORD-LEVEL edit form (the record header's Edit action).
+   *  Last resort ONLY — for panels whose fields have no local edit
+   *  affordance at all (e.g. the Issue Type accordion: lightning-output-field
+   *  read-only views, no pencils, no section Edit button — its fields only
+   *  become editable in the full record edit form). */
+  async function openRecordEdit() {
+    const btns = Array.from(document.querySelectorAll(
+      'button[title="Edit"], button[aria-label="Edit"], button[name="Edit"], button.slds-button--edit'
+    ));
+    if (!btns.length) return false;
+    // The record-header edit is the one NOT scoped inside a field section.
+    const btn = btns.find((b) => !b.closest(
+      '.laf-progressive-container, .test-id__section, [class*="flexipageColumn"], .slds-card, .slds-section, .slds-accordion__section, lightning-accordion-section, .console-panel'
+    )) || btns[0];
+    try { btn.click(); } catch { return false; }
+    // The full record form is big and lazy-renders its sections — poll until
+    // an edit form (modal / inline record form) is actually in the DOM
+    // instead of a fixed sleep (a fixed 1.1s sometimes raced the render,
+    // which is why the form appeared but nothing got set).
+    for (let i = 0; i < 30; i++) {
+      await $sleep(250);
+      if (document.querySelector(
+        'lightning-record-edit-form, records-record-edit-form, .slds-modal[role="dialog"], [data-render-mode-inline="form"]'
+      )) return true;
+    }
+    return true; // clicked regardless — setFieldInOpenForm retries patiently
+  }
+
+  /** Set a field inside an ALREADY-OPEN edit form (panel edit mode): find
+   *  its label, walk to the form element, set text/combobox. No per-field
+   *  save — the caller saves the whole panel once at the end.
+   *  opts.patient (default true): retry input resolution for ~3s — needed
+   *  right after an edit click while LWC swaps the inputs in. Pass false
+   *  for a quick probe (form already open → input exists or never will). */
+  async function setFieldInOpenForm(labelAliases, value, editorKind = 'auto', opts = {}) {
+    const patient = opts?.patient !== false;
+    const aliases = Array.isArray(labelAliases) ? labelAliases : [labelAliases];
+    let hit = null;
+    let best = 0;
+    for (const lbl of $qa(document, '.slds-form-element__label, legend, label, .test-id__field-label')) {
+      const txt = (lbl.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt) continue;
+      const low = txt.toLowerCase();
+      for (let ai = 0; ai < aliases.length; ai++) {
+        const av = String(aliases[ai]).toLowerCase();
+        let s = 0;
+        if (low === av) s = 100;
+        else if (low.startsWith(av)) s = 60;
+        else if (low.includes(av)) s = 30;
+        s = Math.max(0, s - ai);
+        if (s > best) { best = s; hit = lbl; }
+      }
+    }
+    if (!hit) return { ok: false, error: `No label "${aliases[0]}" found in the open form.` };
+    const wrap = hit.closest(
+      '.slds-form-element, records-record-layout-item, lightning-input-field, lightning-record-edit-form, div'
+    ) || document.body;
+    let kind = editorKind;
+    let combobox = null;
+    if (kind === 'auto') {
+      combobox = $qs(wrap, 'lightning-combobox, [role="combobox"]');
+      if (combobox) kind = 'combobox';
+      else {
+        const ta = $qs(wrap, 'textarea, [data-textarea]');
+        kind = ta ? 'textarea' : 'text';
+      }
+    }
+    if (kind === 'combobox' || kind === 'lookup') {
+      // Lookup fields in edit forms render as lightning-grouped-combobox /
+      // lightning-base-combobox with an inner input[role="textbox"] — the
+      // plain [role="combobox"] selector missed them (why AMR never set).
+      const picker = combobox || $qs(wrap,
+        'lightning-combobox, lightning-grouped-combobox, lightning-base-combobox, [role="combobox"], [role="textbox"][aria-haspopup], input.slds-combobox__input, input');
+      const r = await nativeSetCombobox(picker, String(value));
+      return r.ok
+        ? { ok: true, editorKind: kind, value: String(value).slice(0, 80), detail: r.picked === false ? 'typed, no popover match — verify in SF' : undefined }
+        : { ok: false, error: r.reason || 'combobox pick failed' };
+    }
+    const tries = patient ? 40 : 5;
+    const delay = patient ? 200 : 150;
+    let native = null;
+    for (let i = 0; i < tries && !native; i++) {
+      native = resolveNativeInput($qs(wrap, 'lightning-input, lightning-input-field, lightning-textarea, textarea, input'))
+        || $qs(wrap, 'input, textarea');
+      if (!native) await $sleep(delay);
+    }
+    const ok = nativeTypeText(native, String(value));
+    return ok
+      ? { ok: true, editorKind: kind, value: String(value).slice(0, 80) }
+      : { ok: false, error: `couldn't set input for ${aliases[0]}` };
+  }
+
   /**
    * Find one editable field by label aliases, enter edit mode, write value,
    * then click Save footer.  Returns a per-field result shape:
@@ -2124,20 +2270,31 @@
     }
     let result = { ok: false, error: 'editor not resolved' };
     if (kind === 'combobox' || kind === 'lookup') {
-      const picker = combobox || $qs(wrap, 'lightning-combobox, [role="combobox"]');
+      // Same broadened picker search as setFieldInOpenForm — lookup fields
+      // render as lightning-grouped/base-combobox with input[role="textbox"].
+      const picker = combobox || $qs(wrap,
+        'lightning-combobox, lightning-grouped-combobox, lightning-base-combobox, [role="combobox"], [role="textbox"][aria-haspopup], input.slds-combobox__input, input');
       const r = await nativeSetCombobox(picker, String(value));
       result = r.ok
         ? { ok: true, editorKind: kind, value: String(value).slice(0, 80), detail: r }
         : { ok: false, error: r.reason || 'combobox pick failed' };
     } else {
-      const wrapperEl = $qs(wrap, 'lightning-input, lightning-input-field, lightning-textarea, textarea, input');
-      const native = resolveNativeInput(wrapperEl) || $qs(wrap, 'input, textarea');
+      // LWC swaps the inline editor in asynchronously after the pencil
+      // click — retry patiently instead of failing on the first miss
+      // ("couldn't set native input" when the input hadn't rendered yet).
+      let wrapperEl = null;
+      let native = null;
+      for (let i = 0; i < 20 && !native; i++) {
+        wrapperEl = $qs(wrap, 'lightning-input, lightning-input-field, lightning-textarea, textarea, input');
+        native = resolveNativeInput(wrapperEl) || $qs(wrap, 'input, textarea');
+        if (!native) await $sleep(200);
+      }
       const ok = nativeTypeText(native, String(value));
       result = ok
         ? { ok: true, editorKind: kind, value: String(value).slice(0, 80) }
         : { ok: false, error: `couldn't set native input for ${labelAliases[0]}` };
     }
-    await $sleep(120);
+    await $sleep(200);
     // Save (if the page has a single footer Save it will commit the batch
     // and the next edit will re-open its inline edit fresh).
     const saved = await clickFooterSave();
@@ -2188,7 +2345,7 @@
     // settles — poll briefly instead of failing on the very first miss
     // (agents hit "Post tab not found" when the push raced the feed mount).
     let tabHit = findPostTab();
-    for (let i = 0; i < 10 && !tabHit; i++) { await $sleep(150); tabHit = findPostTab(); }
+    for (let i = 0; i < 20 && !tabHit; i++) { await $sleep(150); tabHit = findPostTab(); }
     if (!tabHit) { result.postBody.detail = 'no "Post" tab found on the Case feed — make sure the Case is showing its Chatter/Feed panel (the feed lazy-loads; scroll it into view if closed)'; return result; }
     result.postBody.tabFound = true;
     result.postBody.tabVia = tabHit.via;
@@ -2351,24 +2508,23 @@
       } catch { /* best-effort — label search will report per-field */ }
       // (b) 2026 layouts render field sections inside lazy
       //     laf-progressive-container shells that only mount when scrolled
-      //     near. Sweep the scroller (bottom → back) to force the fields
-      //     into the DOM, then re-check once.
+      //     near — a single jump to the bottom flashes past them without
+      //     giving the IntersectionObserver time to fire. Walk the page in
+      //     slow steps instead, then return to the top and settle.
       if (!anyTargetLabelVisible()) {
         try {
-          const scrollers = [
-            document.querySelector('.console-center-item'),
-            document.querySelector('[role="main"]'),
-            document.scrollingElement,
-            document.body,
-          ].filter(Boolean);
-          for (const sc of scrollers) {
-            try { sc.scrollTop = sc.scrollHeight; } catch { /* ignore */ }
+          const sc = document.querySelector('.console-center-item')
+            || document.querySelector('[role="main"]')
+            || document.scrollingElement
+            || document.body;
+          const max = sc.scrollHeight;
+          const step = Math.max(400, Math.ceil(max / 6));
+          for (let y = 0; y < max; y += step) {
+            try { sc.scrollTop = y; } catch { /* ignore */ }
+            await $sleep(260);
           }
-          await $sleep(400);
-          for (const sc of scrollers) {
-            try { sc.scrollTop = 0; } catch { /* ignore */ }
-          }
-          await $sleep(400);
+          try { sc.scrollTop = 0; } catch { /* ignore */ }
+          await $sleep(450);
         } catch { /* best-effort */ }
       }
     }
@@ -2378,34 +2534,106 @@
     // whitespace, section prefixes). Strict ^…$ anchors failed on the
     // agent's actual 2026 layout (e.g. "Contact Name *" never matched
     // /^Contact Name$/).
+    // Per the agent's Case layout:
+    //   - Phone / Last Name / Email → Contact Details panel (inline pencils,
+    //     each pencil toggles that panel into an editable form + Save).
+    //   - customerName goes into LAST NAME (agent instruction), NOT
+    //     "Contact Name" on the Case — that field is not editable there.
+    //   - AMR Model No. → the Issue Type panel (no pencil — opened via the
+    //     panel's own Edit button in the queued pass below).
+    //   - Account Name: dropped (not editable on this layout).
     const defs = [
       { key: 'contactPhone', labelAliases: ['Phone', 'Contact Phone', 'Phone Number', 'Contact Number', 'Mobile Phone', 'Mobile', 'Telephone'], kind: 'text' },
-      { key: 'customerName', labelAliases: ['Contact Name', 'Contact', 'Name'], kind: 'auto' },
-      { key: 'accountName',  labelAliases: ['Account Name'], kind: 'lookup' },
+      { key: 'customerName', labelAliases: ['Last Name', 'Lastname', 'Surname'], kind: 'text' },
+      { key: 'emailAddress', labelAliases: ['Email', 'Email Address'], kind: 'text' },
       { key: 'amrModelNo',   labelAliases: ['AMR Model No', 'AMR Model Number', 'AMR Model', 'Model No'], kind: 'lookup' },
     ];
+    // Fields that report "no inline-edit button / no label" are queued for
+    // the PANEL-EDIT pass below — this org's layout exposes no per-field
+    // pencils; a single Edit button toggles the whole panel into an
+    // editable form (inputs + Cancel/Save).
+    const queued = [];
     for (const d of defs) {
       const v = fields[d.key];
       if (v == null || String(v).trim() === '') { out.fields[d.key] = { ok: true, skipped: true }; continue; }
       try {
         const r = await editAndSet(d.labelAliases, v, d.kind);
-        out.fields[d.key] = r;
+        if (r && r.ok === false && /no inline-edit button|no label/i.test(String(r.error || ''))) {
+          queued.push({ d, v });
+        } else {
+          out.fields[d.key] = r;
+        }
       } catch (e) {
         out.fields[d.key] = { ok: false, error: String(e?.message || e) };
         // If an edit got stuck open, cancel so the next one is clean
         await clickFooterCancel();
+      }
+      await $sleep(400); // let SF's UI settle between fields
+    }
+    // Panel-edit pass, three steps per field (first that works wins):
+    //   (a) set DIRECTLY — the panel may already be in edit mode (left open
+    //       from a previous push or a manual edit: pencils hidden, no Edit
+    //       buttons left, but the inputs are right there);
+    //   (b) open the field's OWN panel edit form (scoped — never the
+    //       record-header "Edit Case" modal) and set;
+    //   (c) open the record-level edit form — last resort for panels with
+    //       no local edit affordance (the Issue Type accordion).
+    // Then Save (or Cancel on failure so the page is clean for the next).
+    if (queued.length) {
+      for (const { d, v } of queued) {
+        try {
+          // (a) Quick probe — if the panel is already in edit mode the input
+          //     exists right now; if it's in view mode no input will appear
+          //     (nothing was clicked), so fail fast and try (b).
+          let r = await setFieldInOpenForm(d.labelAliases, v, d.kind, { patient: false });
+          let via = 'already-open';
+          if (!r?.ok) {
+            const opened = await openPanelEditFor(d.labelAliases);
+            if (opened) {
+              r = await setFieldInOpenForm(d.labelAliases, v, d.kind);
+              via = 'panel-edit';
+            } else {
+              const recOpened = await openRecordEdit();
+              if (recOpened) {
+                r = await setFieldInOpenForm(d.labelAliases, v, d.kind);
+                via = 'record-edit';
+              } else {
+                r = { ok: false, error: 'Field not editable: no open form, no panel Edit button, no record Edit button found.' };
+              }
+            }
+          }
+          out.fields[d.key] = r;
+          if (r?.ok) {
+            const saved = await clickFooterSave();
+            await $sleep(1500); // let the save commit
+            r.detail = `${saved ? 'saved' : 'set (no Save button found — check SF)'} via ${via}`;
+            if (via === 'record-edit') {
+              // Close the full edit form if it stayed open after saving, so
+              // the chatter feed is reachable for the Post write.
+              await clickFooterCancel();
+              await $sleep(600);
+            }
+          } else {
+            await clickFooterCancel();
+            await $sleep(450);
+          }
+        } catch (e) {
+          out.fields[d.key] = { ok: false, error: String(e?.message || e) };
+          await clickFooterCancel();
+        }
       }
     }
     // (2) Post tab + note body LAST — ends on the feed with the note in
     // the publisher for the agent to proofread, and no later step can
     // navigate away and discard it.
     if (fields.postBody != null) {
+      await $sleep(700); // settle after field edits / save
       const r = await clickPostTabAndWrite(fields.postBody, {
         publish: !!fields.postPublish,
-        // Rich-text rendering supplied by the app (**bold** → <strong>,
-        // paragraph blocks → <p>, lines → <br>) — inserted via synthetic
-        // paste (insertHTML fallback) so the publisher keeps formatting
-        // with exactly one line per note line.
+        // Rich-text rendering supplied by the app (**bold** → <strong>) —
+        // inserted line-by-line with explicit break commands (verified
+        // against the source line structure) so the publisher shows
+        // exactly one line per note line.
         html: fields.postBodyHtml || null,
       });
       Object.assign(out, r);
