@@ -17,6 +17,9 @@ export interface QaItem {
   detail: string;
   /** Common deduction points (常见扣分点) — empty string means "暂无 / None" */
   deductions: string;
+  /** Bonus scenarios (加分情景) — only on 优秀加分项目 items; rendered in an
+   *  emerald "bonus" box instead of the red deduction box. */
+  note?: string;
 }
 
 export interface QaDimension {
@@ -196,6 +199,45 @@ export const QA_ZH: QaStandard = {
         },
       ],
     },
+    {
+      dimension: '优秀加分项目',
+      weight: '加分项',
+      items: [
+        {
+          item: '多一点提醒',
+          score: 5,
+          detail:
+            '主动提供咨讯&建议：积极提供客户需要的信息，或采取措施以避免未来可能出现的问题，避免客户再次来电。',
+          deductions: '',
+          note:
+            '加分项将直接在抽检评分总分中加分。（2024/9/24新增）具体加分情景包括但不仅限：\n' +
+            '① 减少或阻止资损，如运用业务知识和软技巧等成功将客户退款的诉求转化为换机，或退换/换机的诉求转化为维修。\n' +
+            '② 解决客户投诉或阻止投诉升级，如客户表示已经到发起lawsuit，agent运用业务知识解决客户问题并令客户成功撤诉。\n' +
+            '③ 收到客户的表扬信。',
+        },
+        {
+          item: '多一点微笑',
+          score: 5,
+          detail:
+            '当客户出现抱怨、消极等情绪时，保持乐观积极，同时感染客户，带给客户正能量。',
+          deductions: '',
+        },
+        {
+          item: '多一点挖掘',
+          score: 5,
+          detail:
+            '针对客户遇到的问题，通过多种方式探寻客户的意图，从而进一步选择更可行方案，或者记录需求反馈产品、流程优化。',
+          deductions: '',
+        },
+        {
+          item: '维护科沃斯品牌形象',
+          score: 20,
+          detail:
+            '面对客户质疑（包括对科沃斯的产品、人员、合作方等）时巧妙解释，维护科沃斯形象，扭转客户对品牌的看法。（如客户怀疑偏向品牌等问题）',
+          deductions: '',
+        },
+      ],
+    },
   ],
 };
 
@@ -360,6 +402,45 @@ export const QA_EN: QaStandard = {
             '3. The customer shows a strong tendency to file a formal complaint or is highly emotional.\n' +
             '4. The case has been going back and forth for over a month without resolution.',
           deductions: 'None',
+        },
+      ],
+    },
+    {
+      dimension: 'Bonus Points',
+      weight: 'Extra credit',
+      items: [
+        {
+          item: 'A Little Extra Heads-Up',
+          score: 5,
+          detail:
+            'Proactively offer information & advice: actively provide the information the customer needs, or take steps to prevent potential future issues and save the customer a repeat call.',
+          deductions: '',
+          note:
+            'Bonus points are added directly on top of the total inspection score. (Added 2024/9/24) Qualifying scenarios include, but are not limited to:\n' +
+            '① Reducing or preventing financial loss — e.g., using product knowledge and soft skills to successfully convert a refund request into a replacement, or a return/replacement request into a repair.\n' +
+            '② Resolving a complaint or stopping its escalation — e.g., the customer mentions they are about to file a lawsuit, and the agent uses product knowledge to resolve the issue so the customer withdraws it.\n' +
+            '③ Receiving a written compliment from the customer.',
+        },
+        {
+          item: 'A Little Extra Smile',
+          score: 5,
+          detail:
+            'When the customer shows frustration or negativity, stay optimistic and positive — lift the mood and bring good energy to the customer.',
+          deductions: '',
+        },
+        {
+          item: 'A Little Extra Digging',
+          score: 5,
+          detail:
+            'Explore the customer\u2019s underlying intent through multiple angles to land on a more workable solution, or log product/process improvement feedback.',
+          deductions: '',
+        },
+        {
+          item: 'Uphold the Ecovacs Brand Image',
+          score: 20,
+          detail:
+            'When the customer questions Ecovacs (its products, staff, or partners), respond tactfully, defend the brand\u2019s image, and turn the customer\u2019s perception around (e.g., the customer suspects the agent is siding with the brand).',
+          deductions: '',
         },
       ],
     },

@@ -86,6 +86,16 @@ export default function QaPanel({ onClose }: QaPanelProps) {
                     <div className="mb-1.5 whitespace-pre-wrap text-[10.5px] leading-relaxed text-foreground/80">
                       {item.detail}
                     </div>
+                    {item.note && (
+                      <div className="rounded-md border border-emerald-500/25 bg-emerald-500/[0.05] p-2">
+                        <div className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-400">
+                          {lang === 'zh' ? '加分情景' : 'Bonus Scenarios'}
+                        </div>
+                        <div className="whitespace-pre-wrap text-[10px] leading-relaxed text-emerald-300/90">
+                          {item.note}
+                        </div>
+                      </div>
+                    )}
                     {item.deductions && item.deductions.toLowerCase() !== 'none' && item.deductions !== '暂无' && (
                       <div className="rounded-md border border-red-500/20 bg-red-500/[0.04] p-2">
                         <div className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-red-400">

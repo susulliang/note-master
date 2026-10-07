@@ -20,6 +20,9 @@ export interface QaChecklistItem {
 export interface QaChecklistDimension {
   dimension: string;
   weight: string;
+  /** Extra-credit dimension (优秀加分项目): points add ON TOP of the 100-pt
+   *  base — the overall ratio uses the base total only, bonus shown as "+N". */
+  bonus?: boolean;
   items: QaChecklistItem[];
 }
 
@@ -117,13 +120,62 @@ export const QA_CALL_CHECKLIST: QaChecklistDimension[] = [
       },
     ],
   },
+  {
+    dimension: 'Bonus Points',
+    weight: 'Extra credit',
+    bonus: true,
+    items: [
+      {
+        id: 'bonusHeadsUp',
+        label: 'A little extra heads-up',
+        max: 5,
+        criteria:
+          'Agent proactively offered advice or information beyond the immediate ask — prevented a foreseeable future issue or a repeat call (e.g. turned a refund request into a replacement/repair, defused a lawsuit threat, or earned a written customer compliment).',
+      },
+      {
+        id: 'bonusSmile',
+        label: 'A little extra smile',
+        max: 5,
+        criteria:
+          'When the customer was frustrated or negative, the agent stayed upbeat and positive and lifted the customer\u2019s mood.',
+      },
+      {
+        id: 'bonusDigging',
+        label: 'A little extra digging',
+        max: 5,
+        criteria:
+          'Agent explored the customer\u2019s underlying intent from multiple angles to pick a more workable solution, or logged the need as product/process improvement feedback.',
+      },
+      {
+        id: 'bonusBrand',
+        label: 'Uphold the Ecovacs brand image',
+        max: 20,
+        criteria:
+          'When the customer questioned Ecovacs (product, staff, or partners), the agent responded tactfully, defended the brand, and turned the customer\u2019s perception around (e.g. customer suspected brand bias).',
+      },
+    ],
+  },
 ];
 
 /** Flat view of every item (id → item, ordered list) */
 export const QA_CHECKLIST_ITEMS: QaChecklistItem[] = QA_CALL_CHECKLIST.flatMap((d) => d.items);
 
-/** Total possible points — the denominator of the overall progress bar */
-export const QA_CHECKLIST_TOTAL = QA_CHECKLIST_ITEMS.reduce((n, i) => n + i.max, 0);
+/** Total possible points of the BASE checklist (bonus dimensions excluded) —
+ *  the denominator of the overall progress bar. */
+export const QA_CHECKLIST_TOTAL = QA_CALL_CHECKLIST
+  .filter((d) => !d.bonus)
+  .reduce((n, d) => n + d.items.reduce((m, i) => m + i.max, 0), 0);
+
+/** Total possible EXTRA-CREDIT points (优秀加分项目) — displayed as "+N" on
+ *  top of the base score, never part of the overall ratio denominator. */
+export const QA_CHECKLIST_BONUS_TOTAL = QA_CALL_CHECKLIST
+  .filter((d) => d.bonus)
+  .reduce((n, d) => n + d.items.reduce((m, i) => m + i.max, 0), 0);
+
+/** Item ids belonging to bonus dimensions (extra credit). */
+export const QA_BONUS_ITEM_IDS = new Set(
+  QA_CALL_CHECKLIST.filter((d) => d.bonus).flatMap((d) => d.items.map((i) => i.id))
+);
 
 /** Per-item score map returned by the LLM scorer (null = not scored yet) */
 export type QaScores = Record<string, number>;
@@ -155,13 +207,14 @@ export function buildQaScoringPrompt(
   transcriptText: string
 ): { system: string; user: string } {
   const checklistLines = QA_CHECKLIST_ITEMS.map(
-    (i) => `- "${i.id}" (max ${i.max} pts): ${i.label} — ${i.criteria}`
+    (i) => `- "${i.id}" (max ${i.max} pts${QA_BONUS_ITEM_IDS.has(i.id) ? ', BONUS extra credit' : ''}): ${i.label} — ${i.criteria}`
   ).join('\n');
   const system = [
     'You are a QA auditor scoring an Ecovacs North America CUSTOMER SUPPORT PHONE CALL (AGENT = support rep, CUSTOMER = caller).',
     'The transcript is machine-garbled ASR text — read for INTENT, not literally ("Acovox" = ECOVACS).',
     'Score EVERY checklist item from 0 to its max points based ONLY on transcript evidence. Partial credit is allowed (halves, e.g. 7.5).',
-    'When the transcript gives no evidence either way for an item, give a neutral mid score (50% of max) — do not zero it.',
+    'When the transcript gives no evidence either way for a BASE item, give a neutral mid score (50% of max) — do not zero it.',
+    'BONUS items (marked "BONUS extra credit", ids starting with "bonus") are extra-credit behaviors beyond the standard flow: score them STRICTLY on transcript evidence and give 0 when the call shows no bonus-worthy moment — never a neutral mid score.',
     'Reply with ONE JSON object only, no markdown fences, no explanations:',
     '{"scores": {"<id>": <number>, ...}, "summary": "<one short sentence on the weakest area>"}',
   ].join('\n');

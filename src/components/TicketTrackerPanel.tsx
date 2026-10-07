@@ -1,14 +1,14 @@
 import { useState, type KeyboardEvent } from 'react';
-import { Clock, Copy, ClipboardList, ExternalLink, Link as LinkIcon, RotateCcw, X } from 'lucide-react';
+import { Clock, Copy, ClipboardList, Link as LinkIcon, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import { TicketPanelsContext } from './FlowNode';
-import { useContext, useCallback } from 'react';
+import { useContext, useCallback, useEffect, useRef } from 'react';
 
 /** Quick statuses for an over-24h case — the chips on each row */
-const STATUS_OPTIONS = ['Over', 'D', 'KO', 'ELMA', 'DTC', 'WO'] as const;
+const STATUS_OPTIONS = ['OVER', 'D', 'KO', 'WINNIE', 'DTC', 'WO', 'CLOSED'] as const;
 type TrackerStatus = (typeof STATUS_OPTIONS)[number];
 
 /** One tracked case: the number as pasted + its current status +
@@ -42,15 +42,17 @@ function isValidLightningCaseUrl(raw: string): boolean {
   // Allowed hosts: lightning.force.com / salesforce / my.salesforce / force.com / branded console
   return /(^|\.)(lightning\.force\.com|salesforce\.com|my\.salesforce\.com|force\.com)(\/|:|$)/i.test(raw);
 }
-/** Maximum number of tabs the "Open all" header button will create.
- *  Keeps agents from accidentally spawning 40 tabs. */
-const OPEN_ALL_MAX = 3;
+/** Old chip labels → current labels (persisted rows may predate a rename). */
+const STATUS_MIGRATION: Record<string, TrackerStatus> = {
+  Over: 'OVER',
+  ELMA: 'WINNIE',
+};
 
 /**
  * OVER 24H TICKET TRACKER — a side tool toggled by the clock icon in the
  * floating toolbar. The agent pastes a block of case numbers, presses
- * Enter, and every case becomes a row with quick status chips (Over / D /
- * KO / ELMA / DTC / WO). "Copy" emits one "CASE STATUS" line per case —
+ * Enter, and every case becomes a row with quick status chips (OVER / D /
+ * KO / WINNIE / DTC / WO / CLOSED). "Copy" emits one "CASE STATUS" line per case —
  * the exact format the over-24h report expects — and "Reset" clears the
  * sheet. The list persists in localStorage so a refresh mid-shift keeps
  * the statuses.
@@ -72,6 +74,17 @@ const OPEN_ALL_MAX = 3;
  */
 export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
   const [cases, setCases] = useScopedState<TrackedCase[]>('ecovacs_ticket_24h_tracker', []);
+  // One-time migration: persisted rows may carry pre-rename status labels.
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current) return;
+    migratedRef.current = true;
+    setCases((prev) =>
+      prev.some((c) => c.status in STATUS_MIGRATION)
+        ? prev.map((c) => ({ ...c, status: STATUS_MIGRATION[c.status] ?? c.status }))
+        : prev
+    );
+  }, [setCases]);
   const [input, setInput] = useState('');
   const panelsCtx = useContext(TicketPanelsContext);
   const openCase = panelsCtx?.openCase;
@@ -109,7 +122,7 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
       added.push({
         key,
         number: caseNumber,
-        status: 'Over',
+        status: 'OVER',
         directCaseUrl: looksUrl && isValidLightningCaseUrl(token) ? token : null,
       });
     }
@@ -129,30 +142,8 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
     setCases((prev) => prev.map((c) => (c.key === key ? { ...c, status } : c)));
   };
 
-  const setDirectCaseUrl = (key: string): void => {
-    const c = cases.find((x) => x.key === key);
-    if (!c) return;
-    const initial = c.directCaseUrl || '';
-    const result = window.prompt(
-      `Paste the full Salesforce Lightning Case URL for ${c.number}.\nExample: https://ecovacs2020.lightning.force.com/lightning/r/Case/500aV…/view`,
-      initial
-    );
-    if (result == null) return; // user cancelled
-    const trimmed = result.trim();
-    if (!trimmed) { setCases((p) => p.map((x) => (x.key === key ? { ...x, directCaseUrl: null } : x))); toast.info(`Cleared URL for ${c.number}`); return; }
-    if (!isValidLightningCaseUrl(trimmed)) { toast.error('That URL does not look like a Salesforce/Lightning org.'); return; }
-    setCases((p) => p.map((x) => (x.key === key ? { ...x, directCaseUrl: trimmed } : x)));
-    toast.success(`Saved direct URL for ${c.number}`);
-  };
-
   const removeCase = (key: string): void => {
     setCases((prev) => prev.filter((c) => c.key !== key));
-  };
-
-  const copyCaseUrl = async (c: TrackedCase): Promise<void> => {
-    if (!c.directCaseUrl) { toast.info(`No direct URL saved for ${c.number}. Click "🔗 Paste URL" first.`); return; }
-    try { await navigator.clipboard.writeText(c.directCaseUrl); toast.success(`Copied URL for ${c.number}`); }
-    catch { toast.error('Clipboard unavailable.'); }
   };
 
   /** Open one case: prefers directCaseUrl, falls back to Console search via extension. */
@@ -172,21 +163,6 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
     }
     toast.error(r.error || `Couldn't open case ${c.number}.`);
   }, [openCase]);
-
-  /** Open the top-N cases via the extension (throttled, capped). */
-  const handleOpenAll = useCallback(async (): Promise<void> => {
-    if (!openCase) { toast.error('Extension bridge not connected. Reload Ecovacs Note Helper or paste direct Lightning URLs first.'); return; }
-    if (cases.length === 0) return;
-    const top = cases.slice(0, OPEN_ALL_MAX);
-    const leftOver = cases.length - top.length;
-    // Run them sequentially (not parallel) so the browser doesn't choke
-    // with 3 simultaneous chrome.tabs operations, and each toast tells the
-    // agent exactly which case was opened.
-    for (const c of top) {
-      await doOpenOne(c, { newTab: true });
-    }
-    if (leftOver > 0) toast.info(`Opened ${top.length} of ${cases.length} (open-all cap = ${OPEN_ALL_MAX}).`);
-  }, [cases, doOpenOne, openCase]);
 
   const handleCopy = async (): Promise<void> => {
     if (cases.length === 0) return;
@@ -219,18 +195,6 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
             </span>
           )}
         </div>
-        {cases.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void handleOpenAll()}
-            className="h-7 gap-1 rounded-full px-2 text-[10px] text-muted-foreground hover:text-foreground"
-            title={`Open top ${Math.min(OPEN_ALL_MAX, cases.length)} tracked cases in Salesforce Console (capped at ${OPEN_ALL_MAX} tabs).`}
-          >
-            <ExternalLink className="size-3.5" />
-            Open top {Math.min(OPEN_ALL_MAX, cases.length)}
-          </Button>
-        )}
       </div>
 
       {/* Paste area */}
@@ -263,22 +227,19 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
       ) : (
         <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
           {/* Table header */}
-          <div className="sticky top-0 z-[1] grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-b border-foreground/10 bg-card/95 px-3 py-1.5 backdrop-blur-sm">
+          <div className="sticky top-0 z-[1] grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-foreground/10 bg-card/95 px-3 py-1.5 backdrop-blur-sm">
             <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
               Case #
             </span>
             <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
               Status
             </span>
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Open
-            </span>
             <span className="w-4" aria-hidden="true" />
           </div>
           {cases.map((c) => (
             <div
               key={c.key}
-              className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-b border-foreground/5 px-3 py-1.5 hover:bg-foreground/[0.03]"
+              className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-foreground/5 px-3 py-1.5 hover:bg-foreground/[0.03]"
             >
               <span
                 className={cn(
@@ -315,44 +276,7 @@ export default function TicketTrackerPanel(_props: TicketTrackerPanelProps) {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => void doOpenOne(c)}
-                  className={cn(
-                    'flex size-5 items-center justify-center rounded-full transition-colors',
-                    openCase
-                      ? 'text-accent hover:bg-accent/15 hover:text-accent-foreground'
-                      : 'text-muted-foreground/40'
-                  )}
-                  aria-label={`Open case ${c.number} in Salesforce`}
-                  title={
-                    c.directCaseUrl
-                      ? `Open ${c.number} in Salesforce via the direct saved deep-link. Click the case number itself for the same action.`
-                      : `Open ${c.number} via Console search (requires any open SF tab + extension, or paste a direct URL using 🔗).`
-                  }
-                  disabled={!openCase && !c.directCaseUrl}
-                >
-                  <ExternalLink className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDirectCaseUrl(c.key)}
-                  className="flex size-5 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  aria-label={`Paste direct Lightning URL for ${c.number}`}
-                  title={c.directCaseUrl ? `Paste / update the saved direct Lightning Case URL for ${c.number}. (Clear = delete current URL)` : `Paste a full Lightning Case view URL for ${c.number} so the Open button uses the exact record deep-link.`}
-                >
-                  <LinkIcon className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void copyCaseUrl(c)}
-                  className="flex size-5 items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  aria-label={`Copy direct URL for ${c.number}`}
-                  title={c.directCaseUrl ? `Copy the saved direct URL for ${c.number}.` : `No direct URL saved yet. Use 🔗 above to paste one.`}
-                >
-                  <Copy className="size-3" />
-                </button>
+              <div className="flex items-center">
                 <button
                   type="button"
                   onClick={() => removeCase(c.key)}

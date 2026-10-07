@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import {
   QA_CALL_CHECKLIST,
   QA_CHECKLIST_TOTAL,
+  QA_BONUS_ITEM_IDS,
   type QaScores,
 } from '@/data/qaCallChecklist';
 
@@ -74,10 +75,19 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
     };
   }, [open]);
 
-  const total = scores
-    ? Object.values(scores).reduce((n, v) => n + v, 0)
+  // Base vs bonus split — the overall ratio is the BASE score over the base
+  // total (100 pts); bonus (优秀加分项目) points show as a "+N" add-on.
+  const baseTotal = scores
+    ? Object.entries(scores)
+        .filter(([id]) => !QA_BONUS_ITEM_IDS.has(id))
+        .reduce((n, [, v]) => n + v, 0)
     : 0;
-  const overallRatio = scores ? total / QA_CHECKLIST_TOTAL : null;
+  const bonusTotal = scores
+    ? Object.entries(scores)
+        .filter(([id]) => QA_BONUS_ITEM_IDS.has(id))
+        .reduce((n, [, v]) => n + v, 0)
+    : 0;
+  const overallRatio = scores ? baseTotal / QA_CHECKLIST_TOTAL : null;
 
   return (
     <div ref={rootRef} className={cn('relative flex shrink-0 items-center', className)}>
@@ -131,7 +141,9 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
                 Call QA Checklist
               </div>
               <div className={cn('text-[11px] font-extrabold tabular-nums', ratioTextClass(overallRatio))}>
-                {scores ? `${Math.round(total)} / ${QA_CHECKLIST_TOTAL}` : scoring ? 'Scoring…' : 'Not scored'}
+                {scores
+                  ? `${Math.round(baseTotal)} / ${QA_CHECKLIST_TOTAL}${bonusTotal > 0 ? ` +${Math.round(bonusTotal)}` : ''}`
+                  : scoring ? 'Scoring…' : 'Not scored'}
               </div>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-foreground/10">
@@ -162,7 +174,14 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
                 <div className="space-y-2">
                   {dim.items.map((item) => {
                     const val = scores?.[item.id];
+                    const isBonus = dim.bonus === true;
+                    // Bonus bars: emerald when earned, neutral gray at 0 (a
+                    // zero bonus is NORMAL, not a red-flag miss like base).
                     const ratio = typeof val === 'number' ? val / item.max : null;
+                    const bonusColor = (r: number | null) =>
+                      r !== null && r > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/25';
+                    const bonusText = (r: number | null) =>
+                      r !== null && r > 0 ? 'text-emerald-500' : 'text-muted-foreground/60';
                     return (
                       <div key={item.id} title={item.criteria}>
                         <div className="mb-0.5 flex items-baseline justify-between gap-2">
@@ -172,17 +191,17 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
                           <span
                             className={cn(
                               'shrink-0 text-[10px] font-bold tabular-nums',
-                              ratioTextClass(ratio)
+                              isBonus ? bonusText(ratio) : ratioTextClass(ratio)
                             )}
                           >
-                            {typeof val === 'number' ? `${val}/${item.max}` : `—/${item.max}`}
+                            {typeof val === 'number' ? `${isBonus && val > 0 ? '+' : ''}${val}/${item.max}` : `—/${item.max}`}
                           </span>
                         </div>
                         <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
                           <div
                             className={cn(
                               'h-full rounded-full transition-all duration-500',
-                              ratioColor(ratio)
+                              isBonus ? bonusColor(ratio) : ratioColor(ratio)
                             )}
                             style={{
                               width: ratio !== null ? `${Math.max(2, ratio * 100)}%` : '0%',
