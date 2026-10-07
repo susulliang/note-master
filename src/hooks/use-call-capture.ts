@@ -17,6 +17,7 @@ import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
 import { extractJsonLoose, renderTranscript } from '@/lib/llm-parser';
 import { generateWithDeepseek } from '@/lib/cloud-parser';
 import {
+  boostQaScore,
   buildQaScoringPrompt,
   QA_CHECKLIST_ITEMS,
   type QaScores,
@@ -715,7 +716,12 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
         for (const item of QA_CHECKLIST_ITEMS) {
           const v = (parsed.scores as Record<string, unknown>)[item.id];
           const n = typeof v === 'number' ? v : Number.parseFloat(String(v));
-          if (Number.isFinite(n)) next[item.id] = Math.max(0, Math.min(item.max, n));
+          // Inverse-Lorenz boost — the LLM scorer skews harsh, so lift each
+          // raw ratio through the inverted curve before storing.
+          if (Number.isFinite(n)) {
+            const clamped = Math.max(0, Math.min(item.max, n));
+            next[item.id] = clamped <= 0 ? 0 : boostQaScore(clamped, item.max);
+          }
         }
         if (Object.keys(next).length > 0) setQaScores(next);
         if (typeof parsed.summary === 'string' && parsed.summary.trim()) {

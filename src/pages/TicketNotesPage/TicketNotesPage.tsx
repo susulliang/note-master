@@ -64,6 +64,7 @@ import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
+import GbuPopup from '@/components/GbuPopup';
 import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
@@ -146,9 +147,11 @@ interface NodeConfig {
   collapsedLabel?: string;
   /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
-  /** Hyperlink tag pinned to the top right of the node's label row
-   *  (SKU "BSD" → Besender admin, Order Number "Eshop" → Ecovacs intl SSO). */
-  headerTag?: { label: string; href: string };
+  /** Small tag pinned to the top right of the label row. Either an external
+   *  link (`href`, opens in a new window — SKU "BSD", Order Number "Eshop")
+   *  or an in-app action (`onClick` — e.g. the Robot Model "GBU" lookup
+   *  table popup). */
+  headerTag?: { label: string; href?: string; onClick?: () => void };
 }
 
 const NODES: NodeConfig[] = [
@@ -878,6 +881,7 @@ export default function TicketNotesPage() {
    *  Case Trak board can merge every batch whenever it mounts. */
   const [caseReportImports, setCaseReportImports] = useState<CaseReportImportBatch[]>([]);
   const [showOutput, setShowOutput] = useState(false);
+  const [gbuOpen, setGbuOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
   /** Hang Up guard — prevents the "press twice" bug by guaranteeing the
@@ -1135,6 +1139,14 @@ export default function TicketNotesPage() {
   const nodes = useMemo(
     () =>
       NODES.map((n) => {
+        // Robot Model node: "GBU" tag opens the internal-code → marketing-name
+        // lookup table (fullscreen popup).
+        if (n.id === NODE_IDS.DEEBOT_MODEL) {
+          return {
+            ...n,
+            headerTag: { label: 'GBU', onClick: () => setGbuOpen(true) },
+          };
+        }
         const target = QUICK_TEXT_NODE_TARGETS[n.id];
         if (!target) return n;
         const customs = getCustomQuickTexts(target, {
@@ -2410,6 +2422,7 @@ Additional information (if needed): ${additional}`;
           noteText={noteText}
           onSaveToHistory={handleOutputClose}
         />
+        <GbuPopup open={gbuOpen} onOpenChange={setGbuOpen} />
       </TicketPanelsContext.Provider>
 
       <TemplatePanel

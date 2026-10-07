@@ -233,10 +233,11 @@ export interface FlowNodeProps {
   /** Show the phonetic-alphabet popover ("Az" button) next to the label —
    *  used on the Email Address field so agents can spell out serials. */
   phonetic?: boolean;
-  /** Small hyperlink tag pinned to the top right of the label row — opens
-   *  an external admin/eshop site in a new window (SKU "BSD", Order
-   *  Number "Eshop"). */
-  headerTag?: { label: string; href: string };
+  /** Small tag pinned to the top right of the label row. Either an external
+   *  link (`href`, opens in a new window — SKU "BSD", Order Number "Eshop")
+   *  or an in-app action (`onClick` — e.g. the Robot Model "GBU" lookup
+   *  table popup). */
+  headerTag?: { label: string; href?: string; onClick?: () => void };
   /**
    * Arbitrary React content rendered inside a glass-panel node for the
    * 'transcript' and 'ticketTracker' panel node types. Allows embedding
@@ -315,6 +316,8 @@ interface ComboboxFieldProps {
   icon?: LucideIcon;
   /** Node width — the dropdown matches the input width (min 300px) */
   width?: number;
+  /** Small pill pinned to the right of the label row (see HeaderTagPill) */
+  headerTag?: { label: string; href?: string; onClick?: () => void };
 }
 
 /**
@@ -323,6 +326,48 @@ interface ComboboxFieldProps {
  * so only the first COMBOBOX_MAX_RENDERED matches are mounted.
  */
 const COMBOBOX_MAX_RENDERED = 100;
+
+/** Small pill pinned to the right of a node's label row. External-link
+ *  variant (SKU "BSD" / Order Number "Eshop") opens href in a new window;
+ *  action variant (Robot Model "GBU") fires onClick (opens the in-app
+ *  lookup table). Shared by the plain label row and ComboboxField. */
+function HeaderTagPill({
+  headerTag,
+}: {
+  headerTag: { label: string; href?: string; onClick?: () => void };
+}) {
+  const pillClass =
+    'ml-auto flex h-5 items-center rounded border border-border/60 bg-card/60 px-1.5 text-[9px] font-bold tracking-wider text-muted-foreground transition-colors hover:border-accent/50 hover:bg-accent/10 hover:text-accent';
+  if (headerTag.href) {
+    return (
+      <a
+        href={headerTag.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${headerTag.label} — ${headerTag.href}`}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={pillClass}
+      >
+        {headerTag.label}
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={headerTag.label}
+      onClick={(e) => {
+        e.stopPropagation();
+        headerTag.onClick?.();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      className={pillClass}
+    >
+      {headerTag.label}
+    </button>
+  );
+}
 
 function ComboboxField({
   label,
@@ -333,6 +378,7 @@ function ComboboxField({
   onBlur,
   icon: Icon,
   width,
+  headerTag,
 }: ComboboxFieldProps) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -409,6 +455,7 @@ function ComboboxField({
         <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {Icon && <Icon className="size-3.5 text-accent/70" />}
           {label}
+          {headerTag && <HeaderTagPill headerTag={headerTag} />}
         </div>
       )}
       <div ref={wrapperRef} className="relative flex items-center">
@@ -867,6 +914,7 @@ function FlowNodeComponent({
             label={label}
             value={typeof value === 'string' ? value : ''}
             options={options}
+            headerTag={headerTag}
             onChange={onChange}
             onFocus={handleFocus}
             onBlur={onBlur}
@@ -986,19 +1034,7 @@ function FlowNodeComponent({
             ) : (
               label
             )}
-            {headerTag && (
-              <a
-                href={headerTag.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`${headerTag.label} — ${headerTag.href}`}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                className="ml-auto flex h-5 items-center rounded border border-border/60 bg-card/60 px-1.5 text-[9px] font-bold tracking-wider text-muted-foreground transition-colors hover:border-accent/50 hover:bg-accent/10 hover:text-accent"
-              >
-                {headerTag.label}
-              </a>
-            )}
+            {headerTag && <HeaderTagPill headerTag={headerTag} />}
             {phonetic && (
               <PhoneticToggle
                 open={phoneticOpen}

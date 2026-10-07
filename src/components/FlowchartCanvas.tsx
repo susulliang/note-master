@@ -40,8 +40,9 @@ interface NodeConfig {
   collapsedLabel?: string;
   /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
-  /** Hyperlink tag pinned to the top right of the node's label row */
-  headerTag?: { label: string; href: string };
+  /** Small tag pinned to the top right of the label row. Either an external
+   *  link (`href`, opens in a new window) or an in-app action (`onClick`). */
+  headerTag?: { label: string; href?: string; onClick?: () => void };
 }
 
 interface FlowchartCanvasProps {

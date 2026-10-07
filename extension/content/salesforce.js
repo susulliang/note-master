@@ -1871,22 +1871,22 @@
    * line structure — the editor must show exactly the source's lines,
    * no more (extra blank lines) and no fewer (merged lines).
    *
-   * Insertion cascade (v0.2.23):
-   *   1. LINE-BY-LINE insertHTML (keeps **bold**) + insertLineBreak
-   *      between lines. Chrome's single-shot insertHTML flattens <p>
-   *      blocks ("no line breaks at all") and doubles bare <br><br>
-   *      ("empty line between every line"); one line at a time with an
-   *      explicit break command can do neither.
-   *   2. SYNTHETIC PASTE of PLAIN TEXT only (no text/html flavour — the
-   *      SF rich-text fork turns every pasted block boundary into
-   *      block + empty block, which is where the doubled blank lines
-   *      came from). Bold lost, single breaks kept.
-   *   3. LINE-BY-LINE insertText + insertLineBreak (plain).
-   *   4. Single-shot insertText of the whole body (last resort).
+   * Insertion cascade (v0.2.24 — rich-first):
+   *   1. SYNTHETIC PASTE of RICH HTML — the whole note as ONE block:
+   *      lines joined by single inline <br>, bold as <strong>. No <p>
+   *      boundaries and no wrapper nesting — the SF Quill fork doubles
+   *      BLOCK boundaries (the old "empty line between every line"),
+   *      while a single inline-break block pastes 1:1 with formatting
+   *      intact. Bold landing is verified when the source has **.
+   *   2. LINE-BY-LINE insertHTML (keeps **bold**) + insertLineBreak
+   *      between lines.
+   *   3. SYNTHETIC PASTE of PLAIN TEXT only.
+   *   4. LINE-BY-LINE insertText + insertLineBreak (plain).
+   *   5. Single-shot insertText of the whole body (last resort).
    */
   async function nativeInsertHtml(el, html, plainText) {
     if (!el || !el.isContentEditable) return false;
-    void html; // rich formatting is attempted in step 1 only
+    void html; // rich HTML is rebuilt from the plain lines below (single-<br> shape)
     const focusAndClear = () => {
       try { el.focus({ preventScroll: false }); } catch { try { el.focus(); } catch { /* ignore */ } }
       try { document.execCommand('selectAll', false, null); } catch { /* ignore */ }
@@ -1905,25 +1905,49 @@
       const n = landedTotal();
       return n > 0 && Math.abs(n - expectedTotal) <= 1;
     };
+    const srcHasBold = /\*\*[^*]+\*\*/.test(String(plainText || ''));
+    const boldLanded = () => !srcHasBold || /<strong/i.test(el.innerHTML || '');
 
     focusAndClear();
     let ok = false;
 
-    // (1) Line-by-line insertHTML (bold) + explicit single breaks
-    try {
-      const escHtml = (s) => s
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-      for (let i = 0; i < srcLines.length; i++) {
-        const h = lineHtml(srcLines[i]);
-        if (h) { try { document.execCommand('insertHTML', false, h); } catch { /* ignore */ } }
-        if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
-      }
-      await $sleep(120);
-      ok = linesOk();
-    } catch { ok = false; }
+    // (1) Synthetic paste of RICH HTML — one block, inline <br>, <strong>
+    if (!ok) {
+      focusAndClear();
+      try {
+        const escHtml = (s) => s
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        const richHtml = '<div>' + srcLines.map(lineHtml).join('<br>') + '</div>';
+        const dt = new DataTransfer();
+        dt.setData('text/html', richHtml);
+        dt.setData('text/plain', String(plainText || ''));
+        el.dispatchEvent(new ClipboardEvent('paste', {
+          bubbles: true, cancelable: true, clipboardData: dt,
+        }));
+        await $sleep(200);
+        ok = linesOk() && boldLanded();
+      } catch { ok = false; }
+    }
 
-    // (2) Synthetic paste, plain text only
+    // (2) Line-by-line insertHTML (bold) + explicit single breaks
+    if (!ok) {
+      focusAndClear();
+      try {
+        const escHtml = (s) => s
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const lineHtml = (l) => escHtml(l).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        for (let i = 0; i < srcLines.length; i++) {
+          const h = lineHtml(srcLines[i]);
+          if (h) { try { document.execCommand('insertHTML', false, h); } catch { /* ignore */ } }
+          if (i < srcLines.length - 1) { try { document.execCommand('insertLineBreak'); } catch { /* ignore */ } }
+        }
+        await $sleep(120);
+        ok = linesOk() && boldLanded();
+      } catch { ok = false; }
+    }
+
+    // (3) Synthetic paste, plain text only
     if (!ok) {
       focusAndClear();
       try {
@@ -1937,7 +1961,7 @@
       } catch { ok = false; }
     }
 
-    // (3) Line-by-line insertText + insertLineBreak (plain)
+    // (4) Line-by-line insertText + insertLineBreak (plain)
     if (!ok) {
       focusAndClear();
       try {
@@ -1950,7 +1974,7 @@
       } catch { ok = false; }
     }
 
-    // (4) Single-shot insertText of the whole body
+    // (5) Single-shot insertText of the whole body
     if (!ok) {
       focusAndClear();
       try {

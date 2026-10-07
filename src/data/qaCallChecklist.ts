@@ -129,6 +129,24 @@ export const QA_CHECKLIST_TOTAL = QA_CHECKLIST_ITEMS.reduce((n, i) => n + i.max,
 export type QaScores = Record<string, number>;
 
 /**
+ * Inverse-Lorenz score boost. The LLM scorer is systematically harsh — raw
+ * ratios cluster low (0.4–0.7) even on good calls. Model the raw score ratio
+ * as a point on a Lorenz curve L(p) = p^α (α > 1, i.e. observed scores are
+ * "unevenly distributed" downward), then invert the curve to recover the
+ * underlying performance: boosted = raw^(1/α). This lifts mid scores the most
+ * (0.5 → ~0.65 with α=1.6) while leaving 0 and perfect scores untouched.
+ */
+const QA_BOOST_ALPHA = 1.6;
+
+export function boostQaScore(score: number, max: number): number {
+  if (max <= 0 || score <= 0) return Math.max(0, score);
+  const ratio = Math.min(1, score / max);
+  const boosted = Math.pow(ratio, 1 / QA_BOOST_ALPHA) * max;
+  // Snap to halves to match the checklist's partial-credit granularity.
+  return Math.min(max, Math.round(boosted * 2) / 2);
+}
+
+/**
  * Build the system+user prompt for the LLM QA scoring call. The model sees
  * the transcript plus the weighted checklist and must reply with ONE JSON
  * object of per-item scores (0..max, halves allowed).
