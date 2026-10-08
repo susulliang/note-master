@@ -5,8 +5,8 @@ description = "Ecovacs Ticket Notes — flowchart-driven call script desktop app
 authors = ["Ecovacs NA Ops"]
 license = "UNLICENSED"
 repository = "https://github.com/susulliang/note-master"
-edition = "2024"
-rust-version = "1.90"
+edition = "2021"
+rust-version = "1.80"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

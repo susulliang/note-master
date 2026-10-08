@@ -61,6 +61,25 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Double-check the target is actually installed (dtolnay/rust-toolchain
+      # should handle this, but explicit rustup is cheap and avoids silent
+      # "target not installed" failures during cargo build).
+      - name: Verify Rust target
+        run: |
+          rustup target list --installed
+          rustup target add ${{ matrix.target }} || true
+          rustc --version
+          cargo --version
+
+      - name: Install WebView2 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Tauri 2.x on Windows needs the WebView2 runtime. GitHub-hosted
+          # windows-latest runners have it pre-installed, but explicit install
+          # avoids "WebView2 not found" failures on newer images.
+          curl -L https://go.microsoft.com/fwlink/p/?LinkId=2124703 -o EvergreenBootstrapper.exe
+          .\EvergreenBootstrapper.exe /silent /install || echo "WebView2 already installed or install failed — continuing"
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
