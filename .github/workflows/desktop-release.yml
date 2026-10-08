@@ -41,15 +41,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        # Root-level file named 'nul' is an NTFS reserved device name —
-        # Windows runners can't materialize it. Non-cone sparse-checkout
-        # excludes only that one file; macOS/Linux runners also skip it
-        # (no build step needs it).
-        with:
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            **
-            !nul
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -108,7 +99,20 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.TAURI_SIGNING_KEYSTORE_PASSWORD }}
-        run: npx tauri build --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          # GitHub renders unset secrets as EMPTY-STRING env vars, and
+          # tauri-bundler treats a present-but-empty APPLE_ID as "notarize".
+          # Without Apple credentials that fails with "Team ID must be at
+          # least 3 characters" — so drop any empty credential vars first
+          # and build ad-hoc signed only.
+          for v in TAURI_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_KEYSTORE_PASSWORD; do
+            if [ -z "${!v:-}" ]; then
+              unset "$v"
+              echo "secret not configured — building without $v"
+            fi
+          done
+          npx tauri build --target ${{ matrix.target }}
 
       - name: Collect artifacts
         shell: bash
