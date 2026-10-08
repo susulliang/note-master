@@ -2355,7 +2355,7 @@ Additional information (if needed): ${additional}`;
                 disabled={call.isCapturing}
                 className="h-8 max-w-[190px] truncate rounded-md border border-foreground/10 bg-background/60 px-2 text-[11px] text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
                 title={
-                  "Customer audio source. 'System audio' captures everything the Mac plays (no BlackHole needed; macOS 13+ and a one-time permission prompt). Device entries record a single input — route your softphone's output into a loopback device (e.g. BlackHole) and pick it here."
+                  "Customer audio source. 'System audio' captures everything this computer plays — macOS via ScreenCaptureKit (macOS 13+, one-time permission), Windows via WASAPI loopback — no virtual driver needed. Device entries record a single input — route your softphone's output into a loopback device (e.g. BlackHole / VB-Cable) and pick it here."
                 }
               >
                 <option value="">
@@ -2366,7 +2366,7 @@ Additional information (if needed): ${additional}`;
                     : '— customer audio source —'}
                 </option>
                 <option value={SYSTEM_AUDIO_DEVICE}>
-                  ♪ System audio — everything the Mac plays (no driver needed)
+                  ♪ System audio — everything this computer plays (no driver needed)
                 </option>
                 {rustInputDevices.map((name) => (
                   <option key={name} value={name}>

@@ -28,3 +28,8 @@ cpal = "0.15"
 # macOS-only: ScreenCaptureKit system-audio capture (no virtual driver needed)
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "11", features = ["macos_13_0"] }
+
+# Windows-only: WASAPI loopback capture of the default render device
+# (system audio — the equivalent of ScreenCaptureKit on macOS)
+[target.'cfg(target_os = "windows")'.dependencies]
+wasapi = "0.25"

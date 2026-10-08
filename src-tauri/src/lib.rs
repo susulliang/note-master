@@ -21,8 +21,6 @@ struct AudioDevice {
 /// start_audio_capture); the app state only holds these Send+Sync Arcs.
 struct CaptureSession {
     buffer: Arc<Mutex<Vec<f32>>>,
-    /// (sum of squares, sample count) since the last level emit
-    energy: Arc<Mutex<(f64, u64)>>,
     active: Arc<AtomicBool>,
     sample_rate: u32,
     channels: u16,
@@ -259,7 +257,6 @@ async fn start_audio_capture(
     )?;
     *state.session.lock().unwrap() = Some(CaptureSession {
         buffer,
-        energy,
         active,
         sample_rate,
         channels,
@@ -295,7 +292,6 @@ async fn start_mic_capture(
     )?;
     *state.mic_session.lock().unwrap() = Some(CaptureSession {
         buffer,
-        energy,
         active,
         sample_rate,
         channels,
@@ -505,7 +501,6 @@ async fn start_system_audio_capture(
 
     *state.session.lock().unwrap() = Some(CaptureSession {
         buffer,
-        energy,
         active,
         sample_rate: SAMPLE_RATE,
         channels: 1, // handler downmixes to mono
@@ -513,11 +508,184 @@ async fn start_system_audio_capture(
     Ok(())
 }
 
-/// Non-macOS stub so the invoke table stays identical across platforms.
-#[cfg(not(target_os = "macos"))]
+/// Windows: WASAPI loopback capture of the DEFAULT RENDER device — records
+/// everything the system plays (the softphone's caller audio), no virtual
+/// loopback driver (VB-Cable) needed. This is the Windows equivalent of the
+/// macOS ScreenCaptureKit path above.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn start_system_audio_capture(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use wasapi::{
+        AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, SampleType, StreamMode,
+        WaveFormat,
+    };
+
+    // Replace any stale session first.
+    if let Some(old) = state.session.lock().unwrap().take() {
+        old.active.store(false, Ordering::SeqCst);
+    }
+
+    const SAMPLE_RATE: u32 = 48_000;
+    let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+    let energy: Arc<Mutex<(f64, u64)>> = Arc::new(Mutex::new((0.0, 0)));
+    let active = Arc::new(AtomicBool::new(true));
+
+    // The WASAPI COM objects are !Send, so the ENTIRE device lifecycle
+    // (open → poll → stop) happens on this dedicated thread; startup errors
+    // are reported back through a channel before the poll loop begins.
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let buf_tx = buffer.clone();
+    let en_tx = energy.clone();
+    let active_tx = active.clone();
+    let app_thread = app.clone();
+    std::thread::spawn(move || {
+        // COM multi-threaded apartment for WASAPI on this thread.
+        let _ = wasapi::initialize_mta();
+
+        let started = (|| -> Result<(AudioClient, AudioCaptureClient), String> {
+            let enumerator = DeviceEnumerator::new()
+                .map_err(|e| format!("cannot enumerate audio devices: {e}"))?;
+            let device = enumerator
+                .get_default_device(&Direction::Render)
+                .map_err(|e| format!("no default output device found: {e}"))?;
+            let mut client = device
+                .get_iaudioclient()
+                .map_err(|e| format!("cannot open audio client: {e}"))?;
+
+            // Request stereo f32 @ 48 kHz; shared-mode autoconvert means the
+            // audio engine converts from the device's real mix format.
+            let fmt = WaveFormat::new(
+                32,
+                32,
+                &SampleType::Float,
+                SAMPLE_RATE as usize,
+                2,
+                None,
+            );
+
+            // Loopback trick: initialize a CAPTURE direction on the RENDER
+            // device's client in shared mode — the wasapi crate turns that
+            // combination into AUDCLNT_STREAMFLAGS_LOOPBACK. Polling mode,
+            // because event-driven loopback is unreliable on Windows.
+            let mode = StreamMode::PollingShared {
+                autoconvert: true,
+                buffer_duration_hns: 2_000_000, // 200 ms
+            };
+            client
+                .initialize_client(&fmt, &Direction::Capture, &mode)
+                .map_err(|e| format!("cannot open loopback capture: {e}"))?;
+            let capture = client
+                .get_audiocaptureclient()
+                .map_err(|e| format!("cannot get capture client: {e}"))?;
+            client
+                .start_stream()
+                .map_err(|e| format!("cannot start loopback capture: {e}"))?;
+            Ok((client, capture))
+        })();
+
+        match started {
+            Ok((client, capture)) => {
+                let _ = tx.send(Ok(()));
+                // Poll every 20 ms, drain all pending packets, downmix stereo
+                // f32 to mono, accumulate energy; emit the input level 4x per
+                // second until the session is stopped.
+                let block_align = 8usize; // 2ch × f32
+                let mut scratch = vec![0u8; 1 << 20]; // ~2.7 s of 48 kHz stereo
+                let mut last_emit = std::time::Instant::now();
+                while active_tx.load(Ordering::SeqCst) {
+                    loop {
+                        let packet = match capture.get_next_packet_size() {
+                            Ok(Some(n)) => n,
+                            Ok(None) => 0,
+                            Err(e) => {
+                                log::warn!("loopback packet error: {e}");
+                                0
+                            }
+                        };
+                        if packet == 0 {
+                            break;
+                        }
+                        let read = capture.read_from_device(&mut scratch);
+                        match read {
+                            Ok((frames, info)) => {
+                                if frames == 0 || info.flags.silent {
+                                    continue;
+                                }
+                                let bytes = frames as usize * block_align;
+                                let mut b = buf_tx.lock().unwrap();
+                                let mut e = en_tx.lock().unwrap();
+                                for i in 0..(bytes / 8) {
+                                    let off = i * 8;
+                                    let l = f32::from_le_bytes([
+                                        scratch[off],
+                                        scratch[off + 1],
+                                        scratch[off + 2],
+                                        scratch[off + 3],
+                                    ]);
+                                    let r = f32::from_le_bytes([
+                                        scratch[off + 4],
+                                        scratch[off + 5],
+                                        scratch[off + 6],
+                                        scratch[off + 7],
+                                    ]);
+                                    let v = (l + r) / 2.0;
+                                    b.push(v);
+                                    e.0 += (v as f64) * (v as f64);
+                                    e.1 += 1;
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("loopback read error: {e}");
+                                break;
+                            }
+                        }
+                    }
+                    if last_emit.elapsed() >= Duration::from_millis(250) {
+                        last_emit = std::time::Instant::now();
+                        let (sum_sq, n) = {
+                            let mut e = en_tx.lock().unwrap();
+                            std::mem::take(&mut *e)
+                        };
+                        let level = if n > 0 {
+                            ((sum_sq / n as f64).sqrt() * 4.0).min(1.0)
+                        } else {
+                            0.0
+                        };
+                        let _ = app_thread.emit("customer-audio-level", level as f64);
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                let _ = client.stop_stream();
+                // client + capture dropped here, on the thread that created
+                // them — what COM wants.
+            }
+            Err(e) => {
+                let _ = tx.send(Err(e));
+            }
+        }
+    });
+
+    rx.recv()
+        .map_err(|_| "system-audio capture thread died".to_string())?
+        .map_err(|e| e)?;
+
+    *state.session.lock().unwrap() = Some(CaptureSession {
+        buffer,
+        active,
+        sample_rate: SAMPLE_RATE,
+        channels: 1, // poll loop downmixes to mono
+    });
+    Ok(())
+}
+
+/// Non-macOS/Windows stub so the invoke table stays identical across platforms.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 async fn start_system_audio_capture() -> Result<(), String> {
-    Err("System audio capture is only available on macOS".into())
+    Err("System audio capture is only available on macOS and Windows".into())
 }
 
 /// Minimal RIFF/WAVE writer — 16-bit PCM, universally decodable by
