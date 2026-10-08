@@ -215,7 +215,17 @@ export function useCallCapture(
   /** Optional: receives the LLM's fuzzy count of how many times the agent
    *  addressed the customer by name during the call. Drives the Customer
    *  Name node's lifecycle glow (red → yellow → green). */
-  onCustomerAddressCount?: (count: number) => void
+  onCustomerAddressCount?: (count: number) => void,
+  /** Optional: when set (Tauri desktop mode), the customer audio is captured
+   *  by the RUST side from this audio INPUT device NAME (not a browser
+   *  deviceId — WKWebView's enumerateDevices/getDisplayMedia are unreliable
+   *  there). Typically a virtual loopback device (BlackHole / VB-Cable) that
+   *  the softphone app's audio is routed into. */
+  customerAudioDeviceName?: string,
+  /** Optional: Tauri desktop mode — which input device NAME to record the
+   *  AGENT's mic from (Rust side, via cpal). Empty/undefined = the system
+   *  default microphone. */
+  agentMicDeviceName?: string
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -253,6 +263,23 @@ export function useCallCapture(
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const tabAnalyserRef = useRef<AnalyserNode | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  /** Rust-mode customer level, fed by 'customer-audio-level' events */
+  const rustCustomerLevelRef = useRef(0);
+  /** Rust-mode agent-mic level, fed by 'agent-audio-level' events */
+  const rustAgentLevelRef = useRef(0);
+  /** True while the Rust-side mic session is expected to deliver an agent
+   *  blob for each window (window-completeness signal, mirroring what
+   *  micRecorderRef.current means in browser mode). */
+  const rustMicExpectedRef = useRef(false);
+  /** Unlisten fns for the Rust level-event subscriptions */
+  const unlistenLevelRef = useRef<Array<() => void>>([]);
+  /** Capture-session generation token — a stale Rust segment loop must
+   *  never restart itself after a stop()/start() cycle. */
+  const captureGenRef = useRef(0);
+  /** Session epoch — bumped ONLY by start(). The tail segment of a stopping
+   *  capture must still be dispatched (Hang Up drains it), but only while
+   *  no NEW session has reset the pending window map. */
+  const sessionEpochRef = useRef(0);
   const rafRef = useRef<number | null>(null);
 
   const shouldCaptureRef = useRef(false);
@@ -333,10 +360,13 @@ export function useCallCapture(
   /** Latest paraphrase pass — lets the arm timer reach it without a cycle */
   const runParaphraseRef = useRef<() => Promise<void>>(() => undefined);
 
+  // Supported if we have MediaRecorder and EITHER getDisplayMedia (browser
+  // tab/screen share) OR a Rust customer-audio device (Tauri desktop mode,
+  // where getDisplayMedia is unreliable).
   const isSupported =
     typeof navigator !== 'undefined' &&
-    !!navigator.mediaDevices?.getDisplayMedia &&
-    typeof MediaRecorder !== 'undefined';
+    typeof MediaRecorder !== 'undefined' &&
+    (!!navigator.mediaDevices?.getDisplayMedia || !!customerAudioDeviceName);
 
   useEffect(() => {
     onAutoFillRef.current = onAutoFill;
@@ -872,8 +902,18 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       const now = performance.now();
       if (now - lastUpdate > 100) {
         lastUpdate = now;
-        setCustomerLevel(read(tabAnalyserRef.current));
-        setAgentLevel(read(micAnalyserRef.current));
+        // Browser mode reads the analysers; Rust mode (no analysers) mirrors
+        // the levels pushed by Rust events.
+        setCustomerLevel(
+          tabAnalyserRef.current
+            ? read(tabAnalyserRef.current)
+            : rustCustomerLevelRef.current
+        );
+        setAgentLevel(
+          micAnalyserRef.current
+            ? read(micAnalyserRef.current)
+            : rustAgentLevelRef.current
+        );
       }
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -886,6 +926,8 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     }
     tabAnalyserRef.current = null;
     micAnalyserRef.current = null;
+    rustCustomerLevelRef.current = 0;
+    rustAgentLevelRef.current = 0;
     setCustomerLevel(0);
     setAgentLevel(0);
   }, []);
@@ -1025,7 +1067,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       // Once every speaker that can produce audio for this window has
       // delivered its blob, the window can be queued right away — no need
       // to wait for the next window to start.
-      const agentExpected = !!micRecorderRef.current;
+      const agentExpected = !!micRecorderRef.current || rustMicExpectedRef.current;
       const windowComplete = !!bucket.customer && (!agentExpected || !!bucket.agent);
 
       if (windowComplete) {
@@ -1088,11 +1130,150 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     nextFlushSeqRef.current = 1;
     pendingRef.current.clear();
 
-    // 1. Capture the CCP tab — video: true is required for tab audio,
-    //    and the user must tick "Also share tab audio" in the share dialog.
-    //    In DEBUG RECORDING mode this is the ONLY source: the user shares
-    //    the tab PLAYING the recorded conversation (agent + customer on
-    //    one track) and the mic is never opened.
+    // -----------------------------------------------------------------
+    //  Tauri desktop mode — the RUST side captures the customer device.
+    //  WKWebView's getDisplayMedia is unreliable, so the agent picks an OS
+    //  input device (usually a virtual loopback like BlackHole carrying the
+    //  softphone app's audio) and Rust records it per segment window via
+    //  cpal. The agent mic still uses getUserMedia/MediaRecorder.
+    // -----------------------------------------------------------------
+    if (customerAudioDeviceName) {
+      const tauriAudio = await import('@/lib/tauri-audio');
+      captureGenRef.current += 1;
+      const gen = captureGenRef.current;
+      sessionEpochRef.current += 1;
+      const epoch = sessionEpochRef.current;
+      // The sentinel device name means: capture everything the system plays
+      // via ScreenCaptureKit instead of one input device via cpal.
+      const isSystemAudio = customerAudioDeviceName === tauriAudio.SYSTEM_AUDIO_DEVICE;
+      const startCustomerCapture = isSystemAudio
+        ? () => tauriAudio.startSystemAudioCapture()
+        : () => tauriAudio.startDeviceCapture(customerAudioDeviceName);
+
+      try {
+        await startCustomerCapture();
+      } catch (err) {
+        setError(
+          `Could not open ${
+            isSystemAudio ? 'system audio' : `"${customerAudioDeviceName}"`
+          }: ${(err as Error).message || err}`
+        );
+        shouldCaptureRef.current = false;
+        recordingDebugRef.current = false;
+        setIsRecordingDebug(false);
+        return;
+      }
+
+      // Agent mic — captured by the RUST side too (default input device via
+      // cpal). WKWebView's getUserMedia is unreliable, so the mic never goes
+      // through the webview in desktop mode. SKIPPED in DEBUG RECORDING mode
+      // (the recording already contains both parties).
+      let micOk = false;
+      if (!recordingDebug) {
+        try {
+          await tauriAudio.startMicCapture(agentMicDeviceName || undefined);
+          micOk = true;
+          rustMicExpectedRef.current = true;
+          setHasMic(true);
+        } catch (err) {
+          setHasMic(false);
+          setError(`Microphone unavailable: ${(err as Error).message || err}`);
+        }
+      } else {
+        setHasMic(false);
+      }
+
+      // Level subscriptions: customer + agent levels come from Rust events.
+      unlistenLevelRef.current.forEach((un) => un());
+      unlistenLevelRef.current = [];
+      unlistenLevelRef.current.push(
+        await tauriAudio.onCustomerLevel((lvl) => {
+          rustCustomerLevelRef.current = lvl;
+        })
+      );
+      if (micOk) {
+        unlistenLevelRef.current.push(
+          await tauriAudio.onAgentLevel((lvl) => {
+            rustAgentLevelRef.current = lvl;
+          })
+        );
+      }
+
+      // Rust-driven segment loop — replaces the tab recorder cadence:
+      // every window, record SEGMENT_MS of the device, hand the WAV blob
+      // to the shared pipeline, then restart. Checking the generation
+      // token keeps a stale loop from surviving a stop()/start() cycle.
+      const deviceSpeaker: Speaker = recordingDebug ? 'recording' : 'customer';
+      const runDeviceSegment = async () => {
+        if (!shouldCaptureRef.current || captureGenRef.current !== gen) {
+          return;
+        }
+        seqRef.current += 1;
+        // Wait out the window; break early if capture stops so the final
+        // partial segment flushes immediately.
+        const t0 = Date.now();
+        while (Date.now() - t0 < SEGMENT_MS && shouldCaptureRef.current) {
+          await sleep(100);
+        }
+        // Collect both sides of the window in parallel. The tail must still
+        // flow after a stop() (Hang Up drains it); it is only dropped if a
+        // NEW session has already reset the pending window map.
+        const [customerBlob, agentBlob] = await Promise.all([
+          tauriAudio.stopDeviceCapture().catch(() => null),
+          micOk
+            ? tauriAudio.stopMicCapture().catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        const sameSession = sessionEpochRef.current === epoch;
+        if (customerBlob && customerBlob.size > 44 && sameSession) {
+          handleSegmentData(deviceSpeaker, { data: customerBlob } as BlobEvent);
+        }
+        if (agentBlob && agentBlob.size > 44 && sameSession) {
+          handleSegmentData('agent', { data: agentBlob } as BlobEvent);
+        }
+        if (!shouldCaptureRef.current || captureGenRef.current !== gen) {
+          flushAllPending();
+          return;
+        }
+        // Reopen both sides for the next window.
+        try {
+          await Promise.all([
+            startCustomerCapture(),
+            micOk
+              ? tauriAudio.startMicCapture(agentMicDeviceName || undefined)
+              : Promise.resolve(),
+          ]);
+        } catch (err) {
+          setError(
+            `Lost the customer audio source: ${(err as Error).message || err}`
+          );
+          void stopRef.current?.();
+          return;
+        }
+        // Stopped (or a new session started) while Rust was reopening the
+        // devices — release them instead of scheduling a dead restart.
+        if (!shouldCaptureRef.current || captureGenRef.current !== gen) {
+          void tauriAudio.stopDeviceCapture().catch(() => undefined);
+          if (micOk) void tauriAudio.stopMicCapture().catch(() => undefined);
+          return;
+        }
+        restartTimerRef.current = window.setTimeout(
+          () => void runDeviceSegment(),
+          RESTART_DELAY_MS
+        );
+      };
+
+      setIsCapturing(true);
+      startLevelLoop();
+      void runDeviceSegment();
+      return;
+    }
+
+    // 1. Browser mode: capture the CCP tab — video: true is required for
+    //    tab audio, and the user must tick "Also share tab audio" in the
+    //    share dialog. In DEBUG RECORDING mode this is the ONLY source: the
+    //    user shares the tab PLAYING the recorded conversation (agent +
+    //    customer on one track) and the mic is never opened.
     let display: MediaStream;
     try {
       display = await navigator.mediaDevices.getDisplayMedia({
@@ -1209,7 +1390,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     setIsCapturing(true);
     startLevelLoop();
     beginSegment();
-  }, [isSupported, beginSegment, startLevelLoop, handleSegmentData, flushAllPending]);
+  }, [isSupported, customerAudioDeviceName, agentMicDeviceName, beginSegment, startLevelLoop, handleSegmentData, flushAllPending]);
 
   const stop = useCallback(() => {
     shouldCaptureRef.current = false;
@@ -1217,6 +1398,13 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     setIsCapturing(false);
     setIsRecordingDebug(false);
     setHasMic(false);
+
+    // Rust mode: kill the level subscriptions and invalidate the session so
+    // any in-flight device segment loop flushes its tail and never restarts.
+    captureGenRef.current += 1;
+    rustMicExpectedRef.current = false;
+    unlistenLevelRef.current.forEach((un) => un());
+    unlistenLevelRef.current = [];
 
     if (segmentTimerRef.current !== null) {
       window.clearTimeout(segmentTimerRef.current);
@@ -1441,6 +1629,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     queued,
     isTranscribing,
     error,
+    /** Set the capture error message directly (used by the UI to surface
+     *  pre-flight errors like "no customer-audio device selected"). */
+    setError,
     /** Whisper hallucination turns filtered this session (loops, artifact
      *  tags, filler words, duplicate families) — display counter */
     garbageFiltered,

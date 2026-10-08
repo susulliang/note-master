@@ -47,6 +47,7 @@ import {
   Loader2,
   Wand2,
   RotateCcw,
+  RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -62,9 +63,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
+import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
-import DragBar from '@/components/DragBar';
-import { useIsTauri } from '@/hooks/use-is-tauri';
 import OutputModal from '@/components/OutputModal';
 import GbuPopup from '@/components/GbuPopup';
 import TemplatePanel from '@/components/TemplatePanel';
@@ -893,8 +893,6 @@ export default function TicketNotesPage() {
    *  off a second (stale) pass. */
   const hangUpInFlightRef = useRef(false);
   const [hangUpRunning, setHangUpRunning] = useState(false);
-  /** True when running inside the Tauri desktop shell (enables drag bar) */
-  const isTauri = useIsTauri();
   /** DEBUG transcript editor — double-click the bottom-bar subtitle to open,
    *  paste an "AGENT:/CUSTOMER:" transcript, apply to test parse + QA scoring. */
   const [transcriptEditing, setTranscriptEditing] = useState(false);
@@ -1463,13 +1461,89 @@ Additional information (if needed): ${additional}`;
   //  CCP tab-audio capture → local Whisper → auto-fill.
   //  Mutually exclusive with the mic-only mode above.
   // ---------------------------------------------------------------------
+  // In the Tauri desktop build, WKWebView's getDisplayMedia (tab share) and
+  // enumerateDevices are unreliable — so the customer's voice is captured
+  // by the RUST side (cpal) from an OS input device the agent picks:
+  // typically a virtual loopback driver (BlackHole on macOS, VB-Cable on
+  // Windows) that the softphone app's audio is routed into. The device NAME
+  // is passed to useCallCapture; auto-selection prefers loopback-looking
+  // devices and the choice is persisted.
+  const isTauri = isTauriEnv();
+  const CUSTOMER_DEVICE_STORAGE_KEY = 'ecv.customerAudioDevice';
+  const [customerAudioDeviceName, setCustomerAudioDeviceName] = useState<string>(
+    () => localStorage.getItem(CUSTOMER_DEVICE_STORAGE_KEY) ?? ''
+  );
+  const [rustInputDevices, setRustInputDevices] = useState<string[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+
+  /** Re-scan OS audio input devices via the Rust bridge (cpal — sees every
+   *  device, including virtual loopback drivers the webview hides). */
+  const refreshAudioDevices = useCallback(async () => {
+    if (!isTauri) return;
+    setDevicesLoading(true);
+    try {
+      const { listRustAudioDevices, looksLikeLoopback } = await import(
+        '@/lib/tauri-audio'
+      );
+      const devices = await listRustAudioDevices();
+      // Loopback-looking devices first — they are the likely customer source.
+      const inputs = devices
+        .filter((d) => d.is_input)
+        .map((d) => d.name)
+        .sort((a, b) => Number(looksLikeLoopback(b)) - Number(looksLikeLoopback(a)));
+      setRustInputDevices(inputs);
+
+      const persisted = localStorage.getItem(CUSTOMER_DEVICE_STORAGE_KEY);
+      if (persisted && (persisted === SYSTEM_AUDIO_DEVICE || inputs.includes(persisted))) {
+        return;
+      }
+      // Auto-pick the first loopback-looking device (BlackHole / VB-Cable…)
+      const loopback = inputs.find((name) => looksLikeLoopback(name));
+      if (loopback) {
+        localStorage.setItem(CUSTOMER_DEVICE_STORAGE_KEY, loopback);
+        setCustomerAudioDeviceName(loopback);
+      } else if (persisted) {
+        localStorage.removeItem(CUSTOMER_DEVICE_STORAGE_KEY);
+        setCustomerAudioDeviceName('');
+      }
+    } catch {
+      /* device scan failed — keep the previous list */
+    } finally {
+      setDevicesLoading(false);
+    }
+  }, [isTauri]);
+
+  useEffect(() => {
+    void refreshAudioDevices();
+  }, [refreshAudioDevices]);
+
+  const handleSelectCustomerDevice = useCallback((name: string) => {
+    setCustomerAudioDeviceName(name);
+    if (name) localStorage.setItem(CUSTOMER_DEVICE_STORAGE_KEY, name);
+    else localStorage.removeItem(CUSTOMER_DEVICE_STORAGE_KEY);
+  }, []);
+
+  /** Agent mic — separate selection, persisted the same way. Empty = the
+   *  system default microphone. */
+  const AGENT_MIC_STORAGE_KEY = 'ecv.agentAudioDevice';
+  const [agentMicDeviceName, setAgentMicDeviceName] = useState<string>(
+    () => localStorage.getItem(AGENT_MIC_STORAGE_KEY) ?? ''
+  );
+  const handleSelectAgentMic = useCallback((name: string) => {
+    setAgentMicDeviceName(name);
+    if (name) localStorage.setItem(AGENT_MIC_STORAGE_KEY, name);
+    else localStorage.removeItem(AGENT_MIC_STORAGE_KEY);
+  }, []);
+
   const call = useCallCapture(
     handleAutoFill,
     localWhisper,
     llmParser,
     cloudParser,
     () => formDataRef.current as Record<string, string>,
-    (count) => setCustomerAddressCount(count)
+    (count) => setCustomerAddressCount(count),
+    isTauri && customerAudioDeviceName ? customerAudioDeviceName : undefined,
+    isTauri ? agentMicDeviceName || undefined : undefined
   );
 
   // ---------------------------------------------------------------------
@@ -1594,6 +1668,16 @@ Additional information (if needed): ${additional}`;
   }, [call, voice]);
 
   const handleToggleCall = useCallback(() => {
+    // In Tauri desktop mode, the agent must pick a customer-audio device
+    // before capture can start (the Rust side records that device).
+    if (isTauri && !customerAudioDeviceName && !call.isCapturing) {
+      call.setError(
+        rustInputDevices.length === 0
+          ? 'No audio input devices found — connect a loopback device (BlackHole) and hit ⟳.'
+          : 'Pick a customer-audio device in the capture bar first.'
+      );
+      return;
+    }
     if (localWhisper.isSupported && localWhisper.status !== 'ready') {
       // Warm the model while the user picks the CCP tab in the share dialog
       void localWhisper.load();
@@ -1604,7 +1688,7 @@ Additional information (if needed): ${additional}`;
       void llmParser.load();
     }
     call.toggle();
-  }, [call, localWhisper, llmParser]);
+  }, [call, localWhisper, llmParser, isTauri, customerAudioDeviceName, rustInputDevices]);
 
   /** Debug recording capture — ONE source (a tab playing a recorded
    *  agent+customer conversation) instead of tab + mic. Same model warm-up
@@ -1849,8 +1933,7 @@ Additional information (if needed): ${additional}`;
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
-    <div className={cn('relative h-full w-full overflow-hidden bg-background font-sans text-foreground', isTauri && 'pt-5')}>
-      {isTauri && <DragBar />}
+    <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
         {/* Main canvas area */}
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -2114,10 +2197,12 @@ Additional information (if needed): ${additional}`;
         <div
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
-            // Only the debug transcript editor expands the pill upward into
-            // a tall card. During live capture the bar stays a single
-            // compact row (mic + action buttons, no subtitle/status text).
-            transcriptEditing
+            // Capturing (or editing the debug transcript): the pill grows
+            // UPWARD into a taller card with the live customer subtitle
+            // stacked above the controls. Width stays content-driven by the
+            // controls row (never clipped), with a cap so the subtitle
+            // truncates on narrow viewports.
+            capturing || transcriptEditing
               ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
               : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
           )}
@@ -2163,10 +2248,9 @@ Additional information (if needed): ${additional}`;
             </div>
           )}
 
-          {/* Scrolling customer subtitle (capture on only). Hidden while
-              capturing so the bar shows only the mic — agents read the live
-              transcript in the side panel instead. */}
-          {!transcriptEditing && !capturing && customerLines.length > 0 && (
+          {/* Scrolling customer subtitle (capture on only) — the customer's
+              last 3 utterances, newest at the bottom, like a caption strip. */}
+          {!transcriptEditing && capturing && customerLines.length > 0 && (
             <div
               className="flex min-h-[3.2rem] flex-col justify-center gap-0.5 overflow-hidden px-1"
               title="Live customer transcription — double-click to paste a transcript (debug)"
@@ -2199,7 +2283,7 @@ Additional information (if needed): ${additional}`;
               ))}
             </div>
           )}
-          {!transcriptEditing && !capturing && customerLines.length === 0 && (
+          {!transcriptEditing && capturing && customerLines.length === 0 && (
             <p
               className="min-h-[1.2rem] px-1 text-[11px] italic text-muted-foreground/70"
               title="Double-click to paste a transcript (debug)"
@@ -2212,7 +2296,7 @@ Additional information (if needed): ${additional}`;
                 setTranscriptEditing(true);
               }}
             >
-              Listening for the customer's voice…
+              &nbsp;
             </p>
           )}
 
@@ -2236,10 +2320,14 @@ Additional information (if needed): ${additional}`;
                 ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25'
                 : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
             )}
-            aria-label={call.isCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
+            aria-label={call.isCapturing ? 'Stop call capture' : 'Capture call audio'}
             title={
               call.isCapturing
-                ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
+                ? 'Call capture: on — transcribing Customer (selected device) + Agent (mic)'
+                : isTauri
+                ? customerAudioDeviceName
+                  ? 'Capture call audio from the selected customer-audio device + your mic'
+                  : 'Pick a customer-audio device first, then click to capture'
                 : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
             }
           >
@@ -2254,6 +2342,67 @@ Additional information (if needed): ${additional}`;
               </span>
             )}
           </button>
+
+          {/* Customer audio source picker — Tauri desktop only. The Rust
+              side (cpal) records the selected OS input device; virtual
+              loopback devices (BlackHole / VB-Cable) carrying the
+              softphone app's audio are auto-picked and listed first. */}
+          {isTauri && (
+            <div className="flex items-center gap-1.5">
+              <select
+                value={customerAudioDeviceName}
+                onChange={(e) => handleSelectCustomerDevice(e.target.value)}
+                disabled={call.isCapturing}
+                className="h-8 max-w-[190px] truncate rounded-md border border-foreground/10 bg-background/60 px-2 text-[11px] text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+                title={
+                  "Customer audio source. 'System audio' captures everything the Mac plays (no BlackHole needed; macOS 13+ and a one-time permission prompt). Device entries record a single input — route your softphone's output into a loopback device (e.g. BlackHole) and pick it here."
+                }
+              >
+                <option value="">
+                  {devicesLoading
+                    ? 'Scanning devices…'
+                    : rustInputDevices.length === 0
+                    ? 'No input devices found'
+                    : '— customer audio source —'}
+                </option>
+                <option value={SYSTEM_AUDIO_DEVICE}>
+                  ♪ System audio — everything the Mac plays (no driver needed)
+                </option>
+                {rustInputDevices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={agentMicDeviceName}
+                onChange={(e) => handleSelectAgentMic(e.target.value)}
+                disabled={call.isCapturing}
+                className="h-8 max-w-[170px] truncate rounded-md border border-foreground/10 bg-background/60 px-2 text-[11px] text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Which microphone records YOUR voice. Default = the system default input device."
+              >
+                <option value="">🎤 Your mic — default</option>
+                {rustInputDevices
+                  .filter((name) => name !== customerAudioDeviceName)
+                  .map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => void refreshAudioDevices()}
+                disabled={devicesLoading || call.isCapturing}
+                className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                title="Re-scan audio devices"
+              >
+                <RefreshCw
+                  className={cn('size-3.5', devicesLoading && 'animate-spin')}
+                />
+              </button>
+            </div>
+          )}
 
           {/* Live capture status — hidden during capture (mic is enough).
               Double-click opens the debug transcript editor (works while

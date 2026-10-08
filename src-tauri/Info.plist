@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Required for the agent's microphone (getUserMedia in the webview) -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Ticket Notes records the agent's microphone during a call so both sides of the conversation can be transcribed into the ticket notes.</string>
+</dict>
+</plist>

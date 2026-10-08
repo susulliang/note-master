@@ -18,9 +18,7 @@
         "minWidth": 1024,
         "minHeight": 640,
         "resizable": true,
-        "fullscreen": false,
-        "decorations": false,
-        "transparent": false
+        "fullscreen": false
       }
     ],
     "security": {
@@ -39,6 +37,7 @@
     ],
     "macOS": {
       "entitlements": "entitlements.plist",
+      "infoPlist": "Info.plist",
       "signingIdentity": "-"
     },
     "windows": {
