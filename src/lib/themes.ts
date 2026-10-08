@@ -1,9 +1,10 @@
-import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem, Leaf, Wind } from 'lucide-react';
+import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem, Leaf, Wind, Terminal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
  * Theme scale — 8 total: 5 time-of-day (legacy) + 3 neutral grey shades
  * inserted at light / mid / dark stops so agents can pick low-color UI.
+ * Plus DOS — a brutalist flat terminal theme (khaki/ink, no glass).
  */
 export type ThemeId =
   | 'daylight'
@@ -16,7 +17,8 @@ export type ThemeId =
   | 'zinc-dark'
   | 'amethyst'
   | 'moss'
-  | 'breezy';
+  | 'breezy'
+  | 'dos';
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -38,6 +40,7 @@ export const THEMES: ThemeMeta[] = [
   { id: 'zinc-dark', label: 'Zinc (Dark)', icon: CloudMoon, toaster: 'dark' },
   { id: 'amethyst', label: 'Amethyst', icon: Gem, toaster: 'dark' },
   { id: 'moss', label: 'Moss', icon: Leaf, toaster: 'light' },
+  { id: 'dos', label: 'DOS', icon: Terminal, toaster: 'light' },
 ];
 
 /** Accepts raw persisted values (incl. legacy 'dark'/'light') and returns a valid ThemeId */

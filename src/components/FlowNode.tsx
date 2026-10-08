@@ -292,18 +292,20 @@ export interface FlowNodeProps {
 // iOS-26 liquid-glass node skins (see .glass-* utilities in tailwind-theme.css).
 // accentBorders = resting glass with a faint tinted edge; accentGlows = active
 // glass that lights up and protrudes further towards the user.
+// 'glass-node' marks the in-canvas gridbox cards (vs overlays that also use
+// glass-panel) so the DOS theme can dissolve them into the canvas.
 const accentBorders: Record<string, string> = {
-  green: 'glass-panel glass-accent-green',
-  blue: 'glass-panel glass-accent-blue',
-  red: 'glass-panel glass-accent-red',
-  default: 'glass-panel',
+  green: 'glass-panel glass-node glass-accent-green',
+  blue: 'glass-panel glass-node glass-accent-blue',
+  red: 'glass-panel glass-node glass-accent-red',
+  default: 'glass-panel glass-node',
 };
 
 const accentGlows: Record<string, string> = {
-  green: 'glass-panel glass-accent-green glass-active',
-  blue: 'glass-panel glass-accent-blue glass-active',
-  red: 'glass-panel glass-accent-red glass-active',
-  default: 'glass-panel glass-active',
+  green: 'glass-panel glass-node glass-accent-green glass-active',
+  blue: 'glass-panel glass-node glass-accent-blue glass-active',
+  red: 'glass-panel glass-node glass-accent-red glass-active',
+  default: 'glass-panel glass-node glass-active',
 };
 
 interface ComboboxFieldProps {

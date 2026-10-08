@@ -478,7 +478,8 @@
 :root[data-theme="slate-light"],
 :root[data-theme="neutral"],
 :root[data-theme="breezy"],
-:root[data-theme="moss"] {
+:root[data-theme="moss"],
+:root[data-theme="dos"] {
   --field-bg: color-mix(in oklab, var(--card) 90%, black 10%);
 }
 
@@ -1219,4 +1220,231 @@ body[data-ui-scale="small"] {
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  DOS — brutalist terminal theme. Olive/khaki phosphor palette with  */
+/*  ink-black text (exact colors from the reference board). Abandons   */
+/*  glassmorphism entirely: no backdrop blur, no glow, no rounding,    */
+/*  no shadows — flat solid surfaces separated by 1px rules, like a    */
+/*  rule-driven text document. Full-monospace typography.              */
+/* ------------------------------------------------------------------ */
+:root[data-theme="dos"] {
+  color-scheme: light;
+
+  /* Palette — brighter khaki base, darker ink text (readability pass) */
+  --background: hsl(56 32% 48%);
+  --foreground: hsl(50 42% 7%);
+  --card: hsl(56 27% 54%);
+  --card-foreground: hsl(50 42% 7%);
+  --popover: hsl(56 27% 46%);
+  --popover-foreground: hsl(50 42% 7%);
+  --primary: hsl(50 38% 9%);
+  --primary-foreground: hsl(56 36% 86%);
+  --secondary: hsl(65 40% 30%);
+  --secondary-foreground: hsl(56 36% 90%);
+  --muted: hsl(56 24% 44%);
+  --muted-foreground: hsl(52 18% 19%);
+  --accent: hsl(68 55% 24%);
+  --accent-foreground: hsl(56 34% 88%);
+  --info: hsl(200 30% 26%);
+  --info-foreground: hsl(56 34% 88%);
+  --destructive: hsl(8 45% 30%);
+  --destructive-foreground: hsl(40 40% 92%);
+  --success: hsl(120 30% 24%);
+  --success-foreground: hsl(56 34% 88%);
+  --warning: hsl(42 55% 26%);
+  --warning-foreground: hsl(56 34% 92%);
+  --border: hsl(52 30% 17%);
+  --input: hsl(56 26% 42%);
+  --ring: hsl(50 42% 7%);
+  --chart-1: hsl(50 32% 13%);
+  --chart-2: hsl(65 40% 30%);
+  --chart-3: hsl(68 55% 24%);
+  --chart-4: hsl(52 26% 22%);
+  --chart-5: hsl(42 55% 26%);
+  --sidebar: hsl(56 24% 47%);
+  --sidebar-foreground: hsl(50 32% 11%);
+  --sidebar-primary: hsl(50 32% 13%);
+  --sidebar-primary-foreground: hsl(56 34% 84%);
+  --sidebar-accent: hsl(56 24% 52%);
+  --sidebar-accent-foreground: hsl(50 32% 11%);
+  --sidebar-border: hsl(52 26% 22%);
+  --sidebar-ring: hsl(50 32% 13%);
+
+  /* DOS is a light-ish surface — dark ink elevations */
+  --elevate-1: rgba(0, 0, 0, 0.06);
+  --elevate-2: rgba(0, 0, 0, 0.12);
+  --button-outline: rgba(0, 0, 0, 0.35);
+  --badge-outline: rgba(0, 0, 0, 0.35);
+
+  /* Full monospace — every face falls back to the terminal stack */
+  --font-sans: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-serif: 'JetBrains Mono', 'Source Code Pro', ui-monospace, Menlo, Consolas, monospace;
+  --font-condensed: 'JetBrains Mono', 'Source Code Pro', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Square corners, zero shadow — flat ink-on-paper */
+  --radius: 0rem;
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+
+  /* Scrollbar — ink on khaki */
+  --scrollbar-track: hsl(56 28% 44%);
+  --scrollbar-thumb: hsl(52 30% 17%);
+  --scrollbar-thumb-hover: hsl(50 34% 10%);
+}
+
+/* ---- Global flattening: strip EVERY glass effect under DOS ---------- */
+
+/* Full monospace — force the terminal font on absolutely everything.
+ * Base weight 500: JetBrains Mono reads thin at 400 on khaki, so default
+ * text is nudged one weight bolder for readability. */
+:root[data-theme="dos"] body {
+  font-family: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-weight: 500;
+}
+:root[data-theme="dos"] *,
+:root[data-theme="dos"] *::before,
+:root[data-theme="dos"] *::after {
+  font-family: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+}
+
+/* Flat geometry: square corners, no shadows. Backdrop blur is NOT killed
+ * globally — pop-up panels, menu bars and floating bars keep their frosted
+ * readability; only the in-canvas gridbox surfaces are de-blurred below. */
+:root[data-theme="dos"] * {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* box-shadow utilities double as focus rings — restore keyboard focus as a
+ * hard 2px ink outline so accessibility survives the flattening. */
+:root[data-theme="dos"] *:focus-visible {
+  outline: 2px solid var(--foreground) !important;
+  outline-offset: 1px !important;
+}
+
+/* The drifting glass orbs are pure glassmorphism ambience — off. */
+:root[data-theme="dos"] .glass-orb {
+  display: none !important;
+}
+
+/* Selection — inverted ink block */
+:root[data-theme="dos"] ::selection {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+/* ---- Flat surface replacements for the glass classes ---------------- */
+
+/* Overlays that reuse .glass-panel (history, floating menus, settings
+ * dropdowns, dialogs) stay SOLID + frosted for readability over the busy
+ * canvas. */
+:root[data-theme="dos"] .glass-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(18px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.2) !important;
+}
+:root[data-theme="dos"] .pull-tab-panel,
+:root[data-theme="dos"] .glass-expanded {
+  background: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(18px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.2) !important;
+}
+
+/* Gridboxes (.glass-node = the in-canvas flow-node cards) dissolve into
+ * the canvas: no surface color, no border, no blur — the fields carry all
+ * the structure. Accent tints (parsed / SF-dom / active) still color the
+ * border so status survives the dissolve. */
+:root[data-theme="dos"] .glass-node {
+  background: transparent;
+  border: 1px solid var(--glass-border, transparent);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Active/focused node — ink border instead of glow */
+:root[data-theme="dos"] .glass-active {
+  --glass-border: var(--foreground);
+  background: transparent;
+}
+
+/* Inputs: recessed darker khaki field, ink rule; focus = solid ink border */
+:root[data-theme="dos"] .glass-field {
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-theme="dos"] .glass-field:hover {
+  border-color: color-mix(in oklab, var(--foreground) 55%, var(--border));
+}
+:root[data-theme="dos"] .glass-field:focus,
+:root[data-theme="dos"] .glass-field:focus-visible {
+  border-color: var(--foreground);
+}
+
+/* Chips: flat darker block, ink text, primary hover */
+:root[data-theme="dos"] .glass-chip {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-theme="dos"] .glass-chip:hover {
+  border-color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 14%, var(--card));
+  color: var(--primary);
+}
+:root[data-theme="dos"] .glass-chip-accent {
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+  background: color-mix(in oklab, var(--accent) 12%, var(--card));
+  color: var(--accent);
+}
+:root[data-theme="dos"] .glass-chip-accent:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 24%, var(--card));
+}
+
+/* Buttons: solid fills — default = card block, primary = ink block with
+ * khaki text, destructive = brick block. Inversion is the DOS CTA. */
+:root[data-theme="dos"] .glass-btn {
+  --glass-fill: var(--card);
+  --glass-border: var(--border);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-theme="dos"] .glass-btn:hover {
+  filter: none;
+  border-color: var(--foreground);
+}
+:root[data-theme="dos"] .glass-btn-primary {
+  --glass-fill: var(--primary);
+  --glass-border: var(--primary);
+}
+:root[data-theme="dos"] .glass-btn-destructive {
+  --glass-fill: var(--destructive);
+  --glass-border: var(--destructive);
+}
+:root[data-theme="dos"] .glass-btn-secondary {
+  --glass-fill: color-mix(in oklab, var(--secondary) 26%, var(--card));
+  --glass-border: color-mix(in oklab, var(--secondary) 55%, var(--border));
+}
+
+/* Pulse/glow animations are pointless without shadows — freeze them. */
+:root[data-theme="dos"] .glass-email-need,
+:root[data-theme="dos"] .glass-email-done,
+:root[data-theme="dos"] .glass-name-empty {
+  animation: none !important;
+  --glass-border: var(--foreground);
 }
