@@ -137,6 +137,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Needed for the "Get version" step below — package.json lives in the
+      # repo, not in the build artifacts.
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Download all artifacts
         uses: actions/download-artifact@v5
         with:
