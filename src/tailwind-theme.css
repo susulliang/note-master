@@ -833,6 +833,22 @@ body[data-ui-scale="small"] {
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
 
+  /* Slow breathing animation — used by the active mic capture button */
+  @keyframes mic-breathe {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.88); }
+  }
+  .animate-mic-breathe {
+    animation: mic-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes mic-pulse-ring {
+    0% { transform: scale(0.8); opacity: 0.7; }
+    100% { transform: scale(1.8); opacity: 0; }
+  }
+  .animate-mic-pulse-ring {
+    animation: mic-pulse-ring 2.4s ease-out infinite;
+  }
+
   /* Global scrollbar for the page */
   ::-webkit-scrollbar {
     width: 10px;

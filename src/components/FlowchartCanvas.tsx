@@ -684,14 +684,17 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     return out;
   }, [effectiveNodes, positions, defaultLayout]);
 
-  // Canvas extent grows to fit dragged nodes — no right/bottom drag limit
+  // Canvas extent grows to fit dragged nodes — no right/bottom drag limit.
+  // Width is capped at the layout container so the canvas never overflows
+  // the viewport horizontally (no horizontal scrollbar); nodes dragged past
+  // the right edge are clipped rather than forcing a scroll.
   const canvasWidth = useMemo(() => {
     let w = layoutContainerWidth;
     for (const n of effectiveNodes) {
       const p = effectivePositions[n.id];
       if (p) w = Math.max(w, p.x + n.width + 80);
     }
-    return w;
+    return Math.min(w, layoutContainerWidth);
   }, [effectiveNodes, effectivePositions, layoutContainerWidth]);
 
   const canvasHeight = useMemo(() => {
@@ -830,7 +833,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   return (
     <div
       ref={canvasRef}
-      className="custom-scrollbar relative h-full min-h-0 w-full overflow-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
+      className="custom-scrollbar relative h-full min-h-0 w-full overflow-x-hidden overflow-y-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
     >
       {/* Height anchor — wraps both views so `h-full` on each resolves
           against the canvas's full height even when Call Notes' own
@@ -1041,7 +1044,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             • rounded-full on a tall narrow bar = half-circle caps top and
               bottom; a right-biased layered shadow "casts" the pill onto
               the canvas for the protruded look. */}
-        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]" style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}>
+        <div className="group/rail fixed bottom-3 left-3 top-7 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]" style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}>
           {/* Glass background layer — carries all surface styling.
               Idle: subtle shadow only; hover (on the outer container, via
               group-hover/rail): a normal amount of shadow.

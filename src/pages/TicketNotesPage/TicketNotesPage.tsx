@@ -63,6 +63,8 @@ import {
 import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
+import DragBar from '@/components/DragBar';
+import { useIsTauri } from '@/hooks/use-is-tauri';
 import OutputModal from '@/components/OutputModal';
 import GbuPopup from '@/components/GbuPopup';
 import TemplatePanel from '@/components/TemplatePanel';
@@ -891,6 +893,8 @@ export default function TicketNotesPage() {
    *  off a second (stale) pass. */
   const hangUpInFlightRef = useRef(false);
   const [hangUpRunning, setHangUpRunning] = useState(false);
+  /** True when running inside the Tauri desktop shell (enables drag bar) */
+  const isTauri = useIsTauri();
   /** DEBUG transcript editor — double-click the bottom-bar subtitle to open,
    *  paste an "AGENT:/CUSTOMER:" transcript, apply to test parse + QA scoring. */
   const [transcriptEditing, setTranscriptEditing] = useState(false);
@@ -1845,7 +1849,8 @@ Additional information (if needed): ${additional}`;
   return (
     // h-full (not h-screen) so the viewport-filling layout stays correct
     // when the old-people-mode zoom is active on <body>
-    <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
+    <div className={cn('relative h-full w-full overflow-hidden bg-background font-sans text-foreground', isTauri && 'pt-5')}>
+      {isTauri && <DragBar />}
       <div className="flex h-full w-full">
         {/* Main canvas area */}
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -2109,11 +2114,10 @@ Additional information (if needed): ${additional}`;
         <div
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
-            // Capturing (or editing the debug transcript): the pill grows
-            // UPWARD — height expands for the subtitle, width stays
-            // content-driven by the controls row (never clipped), with a
-            // cap so the subtitle truncates on narrow viewports.
-            capturing || transcriptEditing
+            // Only the debug transcript editor expands the pill upward into
+            // a tall card. During live capture the bar stays a single
+            // compact row (mic + action buttons, no subtitle/status text).
+            transcriptEditing
               ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
               : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
           )}
@@ -2159,8 +2163,10 @@ Additional information (if needed): ${additional}`;
             </div>
           )}
 
-          {/* Scrolling customer subtitle (capture on only) */}
-          {!transcriptEditing && capturing && customerLines.length > 0 && (
+          {/* Scrolling customer subtitle (capture on only). Hidden while
+              capturing so the bar shows only the mic — agents read the live
+              transcript in the side panel instead. */}
+          {!transcriptEditing && !capturing && customerLines.length > 0 && (
             <div
               className="flex min-h-[3.2rem] flex-col justify-center gap-0.5 overflow-hidden px-1"
               title="Live customer transcription — double-click to paste a transcript (debug)"
@@ -2193,7 +2199,7 @@ Additional information (if needed): ${additional}`;
               ))}
             </div>
           )}
-          {!transcriptEditing && capturing && customerLines.length === 0 && (
+          {!transcriptEditing && !capturing && customerLines.length === 0 && (
             <p
               className="min-h-[1.2rem] px-1 text-[11px] italic text-muted-foreground/70"
               title="Double-click to paste a transcript (debug)"
@@ -2216,41 +2222,43 @@ Additional information (if needed): ${additional}`;
               capturing ? 'justify-center' : ''
             )}
           >
-          {/* Call capture toggle (moved from the left rail) */}
-          {call.isSupported && (
-            <button
-              type="button"
-              onClick={handleToggleCall}
-              className={cn(
-                'relative flex items-center justify-center rounded-full transition-all duration-200 hover:scale-110 active:scale-90',
-                capturing ? 'size-10' : 'size-9',
-                call.isCapturing
-                  ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
-                  : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
-              )}
-              aria-label={call.isCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
-              title={
-                call.isCapturing
-                  ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
-                  : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
-              }
-            >
-              {call.isCapturing ? (
-                <MicOff className={capturing ? 'size-5' : 'size-[18px]'} />
-              ) : (
-                <Mic className={capturing ? 'size-5' : 'size-[18px]'} />
-              )}
-              {call.isCapturing && (
-                <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                  <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
-                </span>
-              )}
-            </button>
-          )}
+          {/* Call capture toggle (moved from the left rail). Always visible —
+              the mic is the single most important control in the bar. During
+              capture it turns red and breathes slowly; no status text is
+              shown so the bar stays minimal. */}
+          <button
+            type="button"
+            onClick={handleToggleCall}
+            className={cn(
+              'relative flex items-center justify-center rounded-full transition-all duration-200 hover:scale-110 active:scale-90',
+              capturing ? 'size-11' : 'size-9',
+              call.isCapturing
+                ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25'
+                : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
+            )}
+            aria-label={call.isCapturing ? 'Stop call capture' : 'Capture CCP call audio'}
+            title={
+              call.isCapturing
+                ? 'Call capture: on — transcribing Customer (tab) + Agent (mic)'
+                : 'Call capture: off — share the CCP tab (tick "Also share tab audio") and allow the mic to transcribe both speakers'
+            }
+          >
+            {call.isCapturing ? (
+              <MicOff className={cn(capturing ? 'size-6' : 'size-[18px]', 'animate-mic-breathe')} />
+            ) : (
+              <Mic className={capturing ? 'size-6' : 'size-[18px]'} />
+            )}
+            {call.isCapturing && (
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="absolute size-11 animate-mic-pulse-ring rounded-full border border-red-500/40" />
+              </span>
+            )}
+          </button>
 
-          {/* Live capture status — double-click also opens the debug
-              transcript editor (works while idle, no capture needed). */}
+          {/* Live capture status — hidden during capture (mic is enough).
+              Double-click opens the debug transcript editor (works while
+              idle, no capture needed). */}
+          {!capturing && (
           <div
             className="flex items-center gap-2"
             title="Capture status — double-click to paste a transcript (debug)"
@@ -2282,6 +2290,7 @@ Additional information (if needed): ${additional}`;
               </>
             )}
           </div>
+          )}
           <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
           {/* Fill Notes — same engine as the green "Parse" button in the
               Live Call Transcript panel: sends the full transcript window

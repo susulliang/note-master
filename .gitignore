@@ -9,6 +9,7 @@ build/
 */build/
 
 # Environment files
+.env
 .env.local
 
 # Logs
@@ -78,3 +79,7 @@ SKU_202610/
 
 # App screenshot source material — rebuild via scripts/build-app-photos.mjs, output ships as public/app-photos
 App_Screenshots/
+
+# Tauri (Rust desktop) build artifacts + generated schemas
+src-tauri/target/
+src-tauri/gen/
