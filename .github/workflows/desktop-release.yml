@@ -34,12 +34,25 @@ jobs:
             label: windows-x64
 
     runs-on: ${{ matrix.os }}
+    env:
+      # Force Node 24 on all JS actions (runner is Node 24, but some
+      # action versions still target Node 20 which is now deprecated).
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        # Root-level file named 'nul' is an NTFS reserved device name —
+        # Windows runners can't materialize it. Non-cone sparse-checkout
+        # excludes only that one file; macOS/Linux runners also skip it
+        # (no build step needs it).
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            **
+            !nul
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -92,7 +105,7 @@ jobs:
           ls -lh release/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ecovacs-ticket-notes-${{ matrix.label }}
           path: release/
@@ -102,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
