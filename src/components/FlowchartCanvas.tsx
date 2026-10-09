@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, LayoutGrid, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -88,17 +88,23 @@ interface FlowchartCanvasProps {
   /** Email-prompt glow for the email address node */
   emailGlow?: 'need' | 'done';
   /** Top-level work view: the Call Notes flowchart canvas, the Case Trak
-   *  board, or the (hidden-by-default) Shifts roster workspace. */
-  activeView?: 'callNotes' | 'caseTrak' | 'shifts';
-  /** Switch between Call Notes, Case Trak and Shifts. */
-  onViewChange?: (view: 'callNotes' | 'caseTrak' | 'shifts') => void;
+   *  board, the KPI Dashboard, or the (hidden-by-default) Shifts roster. */
+  activeView?: WorkView;
+  /** Switch between Call Notes, Case Trak, Dashboard and Shifts. */
+  onViewChange?: (view: WorkView) => void;
   /** Content rendered in the canvas area when activeView === 'caseTrak'. */
   caseTrakContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'dash'
+   *  (AMR Contact Center monthly KPI dashboard). */
+  dashContent?: React.ReactNode;
   /** Content rendered in the canvas area when activeView === 'shifts'
    *  (agent roster workspace — rail pill hidden until unlocked via Shift+S). */
   shiftsContent?: React.ReactNode;
   /** Reveal the hidden Shifts work-view pill in the left rail. */
   shiftsEnabled?: boolean;
+  /** Reveal the hidden Case Trak + KPI Dashboard pills in the left rail
+   *  (both hidden by default; unlocked together via Shift+D). */
+  analyticsEnabled?: boolean;
   /** Portal target slot at the bottom of the left rail pill. The page
    *  passes a callback ref here and portals the global toolbar controls
    *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
@@ -112,7 +118,7 @@ interface FlowchartCanvasProps {
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
-export type WorkView = 'callNotes' | 'caseTrak' | 'shifts';
+export type WorkView = 'callNotes' | 'caseTrak' | 'dash' | 'shifts';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -409,8 +415,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   activeView = 'callNotes',
   onViewChange,
   caseTrakContent,
+  dashContent,
   shiftsContent,
   shiftsEnabled = false,
+  analyticsEnabled = false,
   railBottomSlotRef,
   collapsedNodes,
   onToggleNodeCollapsed,
@@ -418,12 +426,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const canvasRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
-  // Work-view pills shown in the rail — the Shifts roster workspace is a
-  // hidden view (activated with Shift+S via shiftsEnabled).
-  const railViews = useMemo<WorkView[]>(
-    () => (shiftsEnabled ? ['callNotes', 'caseTrak', 'shifts'] : ['callNotes', 'caseTrak']),
-    [shiftsEnabled]
-  );
+  // Work-view pills shown in the rail. Case Trak + KPI Dashboard are hidden
+  // analytics views (unlocked together with Shift+D via analyticsEnabled);
+  // the Shifts roster is a hidden view (activated with Shift+S).
+  const railViews = useMemo<WorkView[]>(() => {
+    const views: WorkView[] = ['callNotes'];
+    if (analyticsEnabled) views.push('caseTrak', 'dash');
+    if (shiftsEnabled) views.push('shifts');
+    return views;
+  }, [analyticsEnabled, shiftsEnabled]);
 
   // Pull-tab bookmark panels — NONE left: the 24H tracker moved into the
   // copilot drawer (v0.2.0), so the left-edge pull-tab layer is now empty.
@@ -1019,10 +1030,20 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       )}
 
       {/* Case Trak board — shares the canvas' dotted bg, fills full
-          canvas height/width via h-full on the min-h-full anchor. */}
-      {activeView === 'caseTrak' && (
+          canvas height/width via h-full on the min-h-full anchor.
+          Hidden analytics view: only rendered when unlocked (Shift+D). */}
+      {activeView === 'caseTrak' && analyticsEnabled && (
         <div className="h-full min-h-full w-full pl-[92px]">
           {caseTrakContent}
+        </div>
+      )}
+
+      {/* KPI Dashboard — AMR Contact Center metrics, rendered from a
+          Salesforce dashboard snapshot. Hidden analytics view: only rendered
+          when unlocked (Shift+D). Same full-canvas layout as Trak. */}
+      {activeView === 'dash' && analyticsEnabled && (
+        <div className="h-full min-h-full w-full pl-[92px]">
+          {dashContent}
         </div>
       )}
 
@@ -1078,9 +1099,25 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                     ? 'Call Notes — active call workspace'
                     : view === 'caseTrak'
                       ? 'Case Trak Board — case lifecycle stages'
-                      : 'Shifts — service agent roster (hidden workspace, Shift+S)';
-                const short = view === 'callNotes' ? 'Notes' : view === 'caseTrak' ? 'Trak' : 'Shifts';
-                const Icon = view === 'callNotes' ? FilePen : view === 'caseTrak' ? LayoutGrid : CalendarDays;
+                      : view === 'dash'
+                        ? 'KPI Dashboard — AMR Contact Center monthly metrics'
+                        : 'Shifts — service agent roster (hidden workspace, Shift+S)';
+                const short =
+                  view === 'callNotes'
+                    ? 'Notes'
+                    : view === 'caseTrak'
+                      ? 'Trak'
+                      : view === 'dash'
+                        ? 'Dash'
+                        : 'Shifts';
+                const Icon =
+                  view === 'callNotes'
+                    ? FilePen
+                    : view === 'caseTrak'
+                      ? LayoutGrid
+                      : view === 'dash'
+                        ? BarChart3
+                        : CalendarDays;
                 return (
                   <button
                     key={view}

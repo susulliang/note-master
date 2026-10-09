@@ -71,6 +71,7 @@ import TemplatePanel from '@/components/TemplatePanel';
 import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
 import ShiftsWorkspace from '@/components/ShiftsWorkspace';
+import Dash from '@/components/Dash';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
@@ -852,8 +853,9 @@ export default function TicketNotesPage() {
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  /** Top-level work view: Call Notes flowchart (default) or Case Trak board. */
-  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak' | 'shifts'>('callNotes');
+  /** Top-level work view: Call Notes flowchart (default), Case Trak board,
+   *  KPI Dashboard, or the hidden Shifts roster. */
+  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak' | 'dash' | 'shifts'>('callNotes');
   // The Shifts roster workspace is HIDDEN by default — pressing Shift+S
   // reveals its rail pill and switches to it (kept out of the default UI;
   // it's an internal GZ-OPS roster, not part of the agent-facing flow).
@@ -874,6 +876,37 @@ export default function TicketNotesPage() {
       e.preventDefault();
       setShiftsUnlocked(true);
       setWorkView((prev) => (prev === 'shifts' ? prev : 'shifts'));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  // The Case Trak board and KPI Dashboard are HIDDEN by default — pressing
+  // Shift+D toggles their rail pills on/off (power-user analytics views kept
+  // out of the default agent flow). Locking while one is active returns to
+  // the Call Notes canvas.
+  const [analyticsUnlocked, setAnalyticsUnlocked] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'KeyD' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return; // don't hijack typing / selection
+      }
+      e.preventDefault();
+      setAnalyticsUnlocked((unlocked) => {
+        if (unlocked) {
+          // Lock: hide the Trak/Dash pills; leave any active analytics view.
+          setWorkView((prev) => (prev === 'caseTrak' || prev === 'dash' ? 'callNotes' : prev));
+          return false;
+        }
+        return true;
+      });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2092,8 +2125,10 @@ Additional information (if needed): ${additional}`;
               activeView={workView}
               onViewChange={setWorkView}
               caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
+              dashContent={<Dash />}
               shiftsContent={<ShiftsWorkspace />}
               shiftsEnabled={shiftsUnlocked}
+              analyticsEnabled={analyticsUnlocked}
               railBottomSlotRef={setRailControlsSlot}
               collapsedNodes={collapsedNodes}
               onToggleNodeCollapsed={handleToggleNodeCollapsed}
