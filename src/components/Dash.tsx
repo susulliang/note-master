@@ -8,6 +8,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  ReferenceLine,
+  LabelList,
 } from 'recharts';
 import {
   AlertTriangle,
@@ -25,6 +27,7 @@ import {
   Zap,
   Clock,
   Smile,
+  ThumbsDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -58,6 +61,7 @@ interface MetricThreshold {
 
 const THRESHOLDS: Record<string, MetricThreshold> = {
   csat: { value: 85, direction: 'higher' }, // CSAT threshold 85%
+  csatMtd: { value: 95, direction: 'higher' }, // CSAT MTD (excluding DTC + OR) threshold 95%
   oneTouch: { value: 68, direction: 'higher' }, // One-touch threshold 68%
   chatResponse: { value: 26, direction: 'lower' }, // Chat avg response ≤ 26s
   emailFirstResponse: { value: 8, direction: 'lower' }, // Email first reply ≤ 8h
@@ -294,6 +298,34 @@ const WIDGETS: WidgetDef[] = [
     points: [{ label: 'Alan', value: 3.9, week: '9/6-9/12', share: '16.81% of 23 for Alan' }],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// CSAT MTD (month-to-date) — Salesforce report "CSAT excluding DTC + OR",
+// scraped from the report DOM snapshot. Overall summary + per-owner subtotals
+// that the snapshot actually rendered (the report virtualizes rows, so only
+// the first owners' subtotals are present; Boris Z.'s 25 cases were listed
+// but his subtotal was not loaded).
+// ---------------------------------------------------------------------------
+
+const CSAT_MTD_THRESHOLD = 95; // user-specified MTD threshold
+
+const CSAT_MTD = {
+  /** Summary widget totals, verbatim from the report's summary panel. */
+  summary: {
+    csat: 94.76, // "CSAT 94.76%"
+    totalRecords: 382, // "Total Records 382"
+    goodCases: 362, // "Total AMR Is Good Satisfaction Case 362"
+    badCases: 20, // "Total Is Bad Satisfaction Case 20"
+  },
+  /** Per-owner subtotals rendered by the snapshot, verbatim. */
+  agents: [
+    { name: 'Alan', cases: 6, good: 6, bad: 0, csat: 100.0 },
+    { name: 'Alex Wilson', cases: 3, good: 2, bad: 1, csat: 66.67 },
+    { name: 'Aurora', cases: 16, good: 16, bad: 0, csat: 100.0 },
+  ],
+  /** Group headers visible but whose subtotals were virtualized away. */
+  notLoaded: [{ name: 'Boris Z.', cases: 25 }],
+};
 
 // ---------------------------------------------------------------------------
 // Money Go High scoring matrix (Feishu "KPI Money Go High!" — Crazy New 2.0,
@@ -668,6 +700,236 @@ function MoneyGoHighWidget() {
 }
 
 // ---------------------------------------------------------------------------
+// CSAT MTD section — Salesforce report "CSAT excluding DTC + OR"
+// (bullet gauge for the month-to-date overall + per-agent bars vs the 95%
+// threshold; participates in the Show Abnormal filter).
+// ---------------------------------------------------------------------------
+
+function CsatMtdBullet({ csat, threshold }: { csat: number; threshold: number }) {
+  const abnormal = csat < threshold;
+  const delta = csat - threshold;
+  return (
+    <div>
+      <div className="flex items-end gap-3">
+        <span
+          className={cn(
+            'text-5xl font-black tabular-nums',
+            abnormal ? 'text-rose-300' : 'text-emerald-200'
+          )}
+        >
+          {csat.toFixed(2)}%
+        </span>
+        <span
+          className={cn(
+            'mb-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1',
+            abnormal
+              ? 'bg-rose-500/15 text-rose-300 ring-rose-500/40'
+              : 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
+          )}
+        >
+          {abnormal && <AlertTriangle className="size-3" />}
+          {delta >= 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)} pp vs {threshold}%
+        </span>
+      </div>
+      {/* Bullet bar: qualitative bands + value fill + threshold marker */}
+      <div className="relative mt-3 h-5 w-full overflow-visible rounded-full bg-border/30">
+        {/* bands: 85-90 amber (threshold floor from Money Go High), 90-95 sky
+            (target zone), 95-100 emerald (challenge/threshold zone) */}
+        <div className="absolute inset-y-0 left-[85%] w-[5%] rounded-l-full bg-amber-500/25" />
+        <div className="absolute inset-y-0 left-[90%] w-[5%] bg-sky-500/25" />
+        <div className="absolute inset-y-0 left-[95%] w-[5%] rounded-r-full bg-emerald-500/30" />
+        {/* value fill */}
+        <div
+          className={cn(
+            'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500',
+            abnormal ? 'bg-rose-500/70' : 'bg-emerald-500/70'
+          )}
+          style={{ width: `${csat}%` }}
+        />
+        {/* threshold marker */}
+        <div
+          className="absolute -top-1 -bottom-1 w-0.5 rounded bg-rose-400 shadow-[0_0_6px_rgba(248,81,73,0.8)]"
+          style={{ left: `${threshold}%` }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground/70">
+        <span>0%</span>
+        <span className="text-amber-300/80">85</span>
+        <span className="text-sky-300/80">90</span>
+        <span className="text-emerald-300/80">95%</span>
+        <span>100%</span>
+      </div>
+    </div>
+  );
+}
+
+function CsatMtdSection({ showAbnormal }: { showAbnormal: boolean }) {
+  const { summary, agents, notLoaded } = CSAT_MTD;
+  const overallAbnormal = isAbnormal('csatMtd', summary.csat);
+  const abnormalAgents = agents.filter((a) => isAbnormal('csatMtd', a.csat));
+  const visibleAgents = showAbnormal ? abnormalAgents : agents;
+  const maxCases = Math.max(...agents.map((a) => a.cases), 1);
+
+  const chartData = visibleAgents.map((a) => ({
+    name: a.name,
+    csat: a.csat,
+    cases: a.cases,
+    abnormal: isAbnormal('csatMtd', a.csat),
+  }));
+
+  return (
+    <section className="rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
+        <Smile className="size-4 text-accent" />
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-semibold text-foreground">
+            CSAT MTD — excluding DTC + OR
+          </h2>
+          <p className="truncate text-[11px] text-muted-foreground">
+            Month-to-date · Salesforce report · threshold {CSAT_MTD_THRESHOLD}%
+          </p>
+        </div>
+        {(overallAbnormal || abnormalAgents.length > 0) && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
+            <AlertTriangle className="size-2.5" />
+            {(overallAbnormal ? 1 : 0) + abnormalAgents.length} abnormal
+          </span>
+        )}
+      </header>
+
+      <div className="grid grid-cols-1 gap-5 p-4 lg:grid-cols-2">
+        {/* Left: overall bullet gauge + volume stats */}
+        <div className="flex flex-col justify-between gap-4">
+          <div>
+            <div className="mb-2 text-xs font-semibold text-foreground">Overall MTD</div>
+            <CsatMtdBullet csat={summary.csat} threshold={CSAT_MTD_THRESHOLD} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl border border-border/50 bg-background/30 p-3 text-center">
+              <div className="text-xl font-black tabular-nums text-foreground">
+                {summary.totalRecords}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Cases surveyed
+              </div>
+            </div>
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
+              <div className="text-xl font-black tabular-nums text-emerald-200">
+                {summary.goodCases}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-emerald-300/70">
+                Good cases
+              </div>
+            </div>
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-center">
+              <div className="flex items-center justify-center gap-1 text-xl font-black tabular-nums text-rose-200">
+                <ThumbsDown className="size-4" />
+                {summary.badCases}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-rose-300/70">
+                Bad cases
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: per-agent bars vs 95% threshold */}
+        <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+          <div className="mb-1 flex items-center justify-between">
+            <div className="text-xs font-semibold text-foreground">CSAT by agent (subtotals)</div>
+            <div className="font-mono text-[10px] text-muted-foreground/70">
+              bar width ∝ cases · max {maxCases}
+            </div>
+          </div>
+          {chartData.length === 0 ? (
+            <div className="flex h-32 items-center justify-center text-xs text-muted-foreground">
+              No abnormal agents — all loaded subtotals ≥ {CSAT_MTD_THRESHOLD}%.
+            </div>
+          ) : (
+            <div className="h-40 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={chartData}
+                  layout="vertical"
+                  margin={{ top: 8, right: 40, left: 8, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    domain={[0, 100]}
+                    ticks={[0, 25, 50, 75, 95, 100]}
+                    tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
+                    axisLine={{ stroke: 'var(--border)' }}
+                    tickLine={false}
+                    unit="%"
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={90}
+                    tick={{ fill: 'var(--foreground)', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 10,
+                      fontSize: 12,
+                    }}
+                    formatter={(v: number, _name, item) => {
+                      const d = item?.payload as { cases?: number } | undefined;
+                      return [`${v.toFixed(2)}% · ${d?.cases ?? '?'} cases`, 'CSAT'];
+                    }}
+                  />
+                  <ReferenceLine
+                    x={CSAT_MTD_THRESHOLD}
+                    stroke="var(--destructive, #f85149)"
+                    strokeDasharray="5 3"
+                    strokeWidth={1.5}
+                    label={{
+                      value: `thr ${CSAT_MTD_THRESHOLD}%`,
+                      fill: 'var(--muted-foreground)',
+                      fontSize: 10,
+                      position: 'top',
+                    }}
+                  />
+                  <Bar dataKey="csat" radius={[0, 6, 6, 0]} barSize={22}>
+                    {chartData.map((d, i) => (
+                      <Cell
+                        key={i}
+                        fill={d.abnormal ? 'var(--destructive, #f85149)' : 'var(--primary)'}
+                        fillOpacity={d.abnormal ? 0.85 : 0.65}
+                      />
+                    ))}
+                    <LabelList
+                      dataKey="csat"
+                      position="right"
+                      formatter={(v: number) => `${v.toFixed(2)}%`}
+                      style={{ fill: 'var(--foreground)', fontSize: 10, fontWeight: 700 }}
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/70">
+            {notLoaded.length > 0 && (
+              <>
+                {notLoaded.map((n) => `${n.name} (${n.cases} cases)`).join(', ')} listed in the
+                report but subtotal not rendered by the source snapshot.{' '}
+              </>
+            )}
+            Subtotals verbatim from the report — no interpolated values.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Dash component
 // ---------------------------------------------------------------------------
 
@@ -728,9 +990,15 @@ export default function Dash() {
     [order]
   );
 
+  const mtdAbnormalCount = useMemo(() => {
+    const overall = isAbnormal('csatMtd', CSAT_MTD.summary.csat) ? 1 : 0;
+    const agents = CSAT_MTD.agents.filter((a) => isAbnormal('csatMtd', a.csat)).length;
+    return overall + agents;
+  }, []);
+
   const totalAbnormal = useMemo(
-    () => WIDGETS.reduce((s, w) => s + abnormalPoints(w).length, 0),
-    []
+    () => WIDGETS.reduce((s, w) => s + abnormalPoints(w).length, 0) + mtdAbnormalCount,
+    [mtdAbnormalCount]
   );
 
   return (
@@ -773,6 +1041,11 @@ export default function Dash() {
             Refresh
           </button>
         </div>
+      </div>
+
+      {/* CSAT MTD (month-to-date, excluding DTC + OR) */}
+      <div className="mb-4">
+        <CsatMtdSection showAbnormal={showAbnormal} />
       </div>
 
       {/* Widget grid — 4 cols xl, 3 cols lg, 2 cols md, 1 col sm */}
