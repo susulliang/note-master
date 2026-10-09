@@ -1,0 +1,3 @@
+﻿Queue,Service level 20 seconds,Average after contact work time,Average agent interaction time,Average customer hold time,Average handle time,Average queue abandon time,Average queue answer time,Contacts abandoned,Contacts handled,Contacts handled incoming,Contacts handled outbound,Contacts hold agent disconnect,Contacts hold customer disconnect,Contacts hold disconnect,Contacts queued,Contacts transferred in from queue,Contacts transferred out from queue
+AMR Tier 1 French Support,30.77%,1,381,,383,176,166,8,8,5,3,,,,13,,
+AMR Tier 1 Support,96.61%,12,502,143,534,34,10,14,1255,1077,178,,1,4,1091,,

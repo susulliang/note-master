@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import {
   BarChart,
   Bar,
@@ -8,324 +8,43 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
-  ReferenceLine,
-  LabelList,
 } from 'recharts';
 import {
-  AlertTriangle,
   RefreshCw,
   Activity,
   Trophy,
   Wallet,
   Target,
-  GripVertical,
   Filter,
-  Mail,
-  MessageSquare,
-  Phone,
-  Users,
-  Zap,
-  Clock,
-  Smile,
-  ThumbsDown,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isAbnormal, type Direction } from '@/lib/kpi-thresholds';
+import { useCsatReport } from '@/hooks/use-csat-report';
+import { useOneTouchReport } from '@/hooks/use-one-touch-report';
+import { useDailiesReport } from '@/hooks/use-dailies-report';
+import { countMtdShifts } from '@/lib/roster-shifts';
+import type { CsatReportState } from '@/hooks/use-csat-report';
+import type { OneTouchReportState } from '@/hooks/use-one-touch-report';
+import type { DailiesState } from '@/hooks/use-dailies-report';
+import { CsatReportSection } from '@/components/CsatReportSection';
+import { OneTouchSection } from '@/components/OneTouchSection';
+import { DailiesSection } from '@/components/DailiesSection';
 
 /**
- * AMR Contact Center — 周度 KPI Dashboard.
+ * AMR Contact Center — KPI Dashboard.
  *
- * Re-visualises the Salesforce "周度KPI看板" dashboard (18 widgets in 9 metric
- * groups). ONLY data points actually exposed by the dashboard DOM snapshot
- * ("As of Oct 8, 2026, 9:18 PM") are rendered — the source canvas charts
- * publish one tooltip/anchor per widget, so each widget here shows exactly
- * those real points, never interpolated or invented values. Widgets are
- * draggable and positions persist to localStorage. The "Show Abnormal"
- * toggle filters by-agent / by-channel breakdowns to points that crossed
- * the KPI threshold (from the Money Go High matrix).
+ * Data sections:
+ *  - CSAT: live-parsed from the newest Salesforce CSAT export (*.xlsx) dropped
+ *    into the sf_reports/ folder by the automated report workflow.
+ *  - One Touch MTD: live-parsed from the newest One-touch monthly export.
+ *  - Dailies: MTD Call / Chat / Email volume from four Salesforce exports,
+ *    with team average per-shift dailies against the roster.
+ *  - KPI Money Go High: October 2026 scoring matrix (static).
+ * The "Show Abnormal" toggle filters the CSAT agent graph against the KPI
+ * threshold and dims the One-touch parliament seats below 72%.
  */
-
-const REFRESHED_AT = 'Oct 8, 2026, 9:18 PM';
-const POSITIONS_KEY = '__app_ecovacs_dash_widget_order';
-
-// ---------------------------------------------------------------------------
-// Thresholds — sourced from the KPI Money Go High matrix (threshold column).
-// direction: 'higher' means value must be >= threshold to be healthy.
-// ---------------------------------------------------------------------------
-
-type Direction = 'higher' | 'lower';
-
-interface MetricThreshold {
-  value: number;
-  direction: Direction;
-}
-
-const THRESHOLDS: Record<string, MetricThreshold> = {
-  csat: { value: 85, direction: 'higher' }, // CSAT threshold 85%
-  csatMtd: { value: 95, direction: 'higher' }, // CSAT MTD (excluding DTC + OR) threshold 95%
-  oneTouch: { value: 68, direction: 'higher' }, // One-touch threshold 68%
-  chatResponse: { value: 26, direction: 'lower' }, // Chat avg response ≤ 26s
-  emailFirstResponse: { value: 8, direction: 'lower' }, // Email first reply ≤ 8h
-  emailAvgResponse: { value: 10, direction: 'lower' }, // Email avg reply ≤ 10h
-};
-
-function isAbnormal(metric: string, value: number): boolean {
-  const t = THRESHOLDS[metric];
-  if (!t) return false;
-  return t.direction === 'higher' ? value < t.value : value > t.value;
-}
-
-// ---------------------------------------------------------------------------
-// Widget data model — every point below is verbatim from the dashboard DOM
-// (aria-label tooltip captured in the scrape, e.g.
-//  "Case Owner Alan, Date/Time Opened 9/6/2026 - 9/12/2026, Record Count 58,
-//   15.59% of 372 for Alan").
-// ---------------------------------------------------------------------------
-
-interface DataPoint {
-  /** Agent / channel / series label (e.g. "Alan", "Email", "Manual"). */
-  label: string;
-  value: number;
-  /** Source week range, e.g. "9/6-9/12". */
-  week: string;
-  /** Share context string from the tooltip, e.g. "15.59% of 372 for Alan". */
-  share?: string;
-}
-
-interface WidgetDef {
-  id: string;
-  title: string;
-  icon: typeof Activity;
-  /** Key into THRESHOLDS, or '' for pure-volume metrics (no threshold). */
-  metric: string;
-  unit: string;
-  kind: 'team' | 'breakdown';
-  /** Breakdown grouping description (e.g. "by agent", "by channel"). */
-  groupBy?: string;
-  decimals?: number;
-  points: DataPoint[];
-}
-
-const WIDGETS: WidgetDef[] = [
-  // -- Inquiry volume ------------------------------------------------------
-  {
-    id: 'inquiry-team',
-    title: 'AMR 咨询量趋势 - 周度',
-    icon: Activity,
-    metric: '',
-    unit: '',
-    kind: 'team',
-    points: [{ label: '总进线量', value: 549, week: '8/30-9/5', share: '15.36% of 3.6k' }],
-  },
-  {
-    id: 'inquiry-by-agent',
-    title: 'AMR 咨询量趋势 - 周度/人',
-    icon: Users,
-    metric: '',
-    unit: '',
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 58, week: '9/6-9/12', share: '15.59% of 372 for Alan' }],
-  },
-  {
-    id: 'inquiry-by-channel',
-    title: 'AMR 咨询量趋势 - 周度（分渠道）',
-    icon: Phone,
-    metric: '',
-    unit: '',
-    kind: 'breakdown',
-    groupBy: 'by channel',
-    points: [{ label: 'Email', value: 462, week: '8/30-9/5', share: '84.15% of 549' }],
-  },
-  // -- CSAT ----------------------------------------------------------------
-  {
-    id: 'csat-team',
-    title: 'AMR CSAT KPI report 周度',
-    icon: Smile,
-    metric: 'csat',
-    unit: '%',
-    decimals: 1,
-    kind: 'team',
-    points: [{ label: 'personal CSAT', value: 98.2, week: '8/9-8/15' }],
-  },
-  {
-    id: 'csat-by-agent',
-    title: 'AMR CSAT KPI report (by agent) - Weekly',
-    icon: Smile,
-    metric: 'csat',
-    unit: '%',
-    decimals: 0,
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 100, week: '9/6-9/12' }],
-  },
-  {
-    id: 'csat-by-channel',
-    title: 'AMR CSAT KPI report (by 渠道) - Weekly',
-    icon: Smile,
-    metric: 'csat',
-    unit: '%',
-    decimals: 0,
-    kind: 'breakdown',
-    groupBy: 'by channel',
-    points: [{ label: 'Manual', value: 50, week: '9/20-9/26' }],
-  },
-  // -- One touch -----------------------------------------------------------
-  {
-    id: 'one-touch-team',
-    title: 'AMR One Touch Rate 周度',
-    icon: Zap,
-    metric: 'oneTouch',
-    unit: '%',
-    decimals: 1,
-    kind: 'team',
-    points: [{ label: 'One-touch Closed Rate', value: 72.3, week: '8/9-8/15' }],
-  },
-  {
-    id: 'one-touch-by-agent',
-    title: 'AMR One touch rate (by agent) - Weekly',
-    icon: Zap,
-    metric: 'oneTouch',
-    unit: '%',
-    decimals: 1,
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 83.3, week: '9/6-9/12' }],
-  },
-  // -- Chat response time ---------------------------------------------------
-  {
-    id: 'chat-response-team',
-    title: 'AMR Chat平均回复时长监测 - 周度',
-    icon: MessageSquare,
-    metric: 'chatResponse',
-    unit: 's',
-    decimals: 1,
-    kind: 'team',
-    points: [{ label: 'Avg Response Time', value: 22.6, week: '8/9-8/15', share: '11.47% of 197.41' }],
-  },
-  {
-    id: 'chat-response-by-agent',
-    title: 'AMR Chat平均回复时长监测 - 周度/人',
-    icon: MessageSquare,
-    metric: 'chatResponse',
-    unit: 's',
-    decimals: 1,
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 13.3, week: '8/16-8/22', share: '100% of 13.3 for Alan' }],
-  },
-  // -- Chat volume -----------------------------------------------------------
-  {
-    id: 'chat-volume-team',
-    title: 'AMR 接Chat量 - 周度',
-    icon: MessageSquare,
-    metric: '',
-    unit: '',
-    kind: 'team',
-    points: [{ label: 'Record Count', value: 507, week: '8/9-8/15', share: '9.52% of 5.3k' }],
-  },
-  {
-    id: 'chat-volume-by-agent',
-    title: 'AMR Agent接Chat量 - 周度',
-    icon: Users,
-    metric: '',
-    unit: '',
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Steven', value: 2, week: '9/6-9/12', share: '100% of 2 for Steven' }],
-  },
-  // -- Email volume -----------------------------------------------------------
-  {
-    id: 'email-volume-team',
-    title: 'AMR Email处理量 - 周度',
-    icon: Mail,
-    metric: '',
-    unit: '',
-    kind: 'team',
-    points: [{ label: 'Record Count', value: 3005, week: '8/9-8/15', share: '10.02% of 30k' }],
-  },
-  {
-    id: 'email-volume-by-agent',
-    title: 'AMR Email处理量 (by agent) - Weekly',
-    icon: Users,
-    metric: '',
-    unit: '',
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 65, week: '9/6-9/12', share: '13.68% of 475 for Alan' }],
-  },
-  // -- Email first response ---------------------------------------------------
-  {
-    id: 'email-first-response-team',
-    title: 'AMR Email首回平均时长 - 周度',
-    icon: Clock,
-    metric: 'emailFirstResponse',
-    unit: 'h',
-    decimals: 1,
-    kind: 'team',
-    points: [{ label: 'Avg First Response Time', value: 5, week: '8/9-8/15', share: '20.53% of 24.4' }],
-  },
-  {
-    id: 'email-first-response-by-agent',
-    title: 'AMR Email首回平均时长监测 - 周度/人',
-    icon: Clock,
-    metric: 'emailFirstResponse',
-    unit: 'h',
-    decimals: 1,
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 1.5, week: '9/6-9/12', share: '9.92% of 15.4 for Alan' }],
-  },
-  // -- Email avg response ------------------------------------------------------
-  {
-    id: 'email-avg-response-team',
-    title: 'AMR Email平均回复时长 - 周度',
-    icon: Clock,
-    metric: 'emailAvgResponse',
-    unit: 'h',
-    decimals: 1,
-    kind: 'team',
-    points: [{ label: 'Avg Response Time', value: 5.9, week: '8/9-8/15', share: '19.26% of 30.7' }],
-  },
-  {
-    id: 'email-avg-response-by-agent',
-    title: 'AMR Email平均回复时长监测 - 周度/人',
-    icon: Clock,
-    metric: 'emailAvgResponse',
-    unit: 'h',
-    decimals: 1,
-    kind: 'breakdown',
-    groupBy: 'by agent',
-    points: [{ label: 'Alan', value: 3.9, week: '9/6-9/12', share: '16.81% of 23 for Alan' }],
-  },
-];
-
-// ---------------------------------------------------------------------------
-// CSAT MTD (month-to-date) — Salesforce report "CSAT excluding DTC + OR",
-// scraped from the report DOM snapshot. Overall summary + per-owner subtotals
-// that the snapshot actually rendered (the report virtualizes rows, so only
-// the first owners' subtotals are present; Boris Z.'s 25 cases were listed
-// but his subtotal was not loaded).
-// ---------------------------------------------------------------------------
-
-const CSAT_MTD_THRESHOLD = 95; // user-specified MTD threshold
-
-const CSAT_MTD = {
-  /** Summary widget totals, verbatim from the report's summary panel. */
-  summary: {
-    csat: 94.76, // "CSAT 94.76%"
-    totalRecords: 382, // "Total Records 382"
-    goodCases: 362, // "Total AMR Is Good Satisfaction Case 362"
-    badCases: 20, // "Total Is Bad Satisfaction Case 20"
-  },
-  /** Per-owner subtotals rendered by the snapshot, verbatim. */
-  agents: [
-    { name: 'Alan', cases: 6, good: 6, bad: 0, csat: 100.0 },
-    { name: 'Alex Wilson', cases: 3, good: 2, bad: 1, csat: 66.67 },
-    { name: 'Aurora', cases: 16, good: 16, bad: 0, csat: 100.0 },
-  ],
-  /** Group headers visible but whose subtotals were virtualized away. */
-  notLoaded: [{ name: 'Boris Z.', cases: 25 }],
-};
 
 // ---------------------------------------------------------------------------
 // Money Go High scoring matrix (Feishu "KPI Money Go High!" — Crazy New 2.0,
@@ -388,167 +107,6 @@ const BAND_META: Record<Band, { label: string; color: string; ring: string }> = 
   threshold: { label: 'Threshold', color: 'text-amber-300 bg-amber-500/15', ring: 'ring-amber-500/40' },
   below: { label: 'Below', color: 'text-rose-300 bg-rose-500/15', ring: 'ring-rose-500/40' },
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatValue(v: number, unit: string, decimals = 0): string {
-  const num = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toLocaleString();
-  return `${num}${unit}`;
-}
-
-function abnormalPoints(w: WidgetDef): DataPoint[] {
-  if (!w.metric) return [];
-  return w.points.filter((p) => isAbnormal(w.metric, p.value));
-}
-
-// ---------------------------------------------------------------------------
-// Widget card
-// ---------------------------------------------------------------------------
-
-interface WidgetCardProps {
-  widget: WidgetDef;
-  showAbnormal: boolean;
-  onDragStart: (id: string) => void;
-  onDragOver: (e: React.DragEvent, id: string) => void;
-  onDragEnd: () => void;
-  isDragging: boolean;
-}
-
-function WidgetCard({ widget, showAbnormal, onDragStart, onDragOver, onDragEnd, isDragging }: WidgetCardProps) {
-  const Icon = widget.icon;
-  const t = THRESHOLDS[widget.metric];
-  const abn = abnormalPoints(widget);
-
-  const visiblePoints = useMemo(() => {
-    if (widget.kind === 'team') return widget.points;
-    if (showAbnormal && widget.metric) return abn;
-    return widget.points;
-  }, [widget, showAbnormal, abn]);
-
-  return (
-    <div
-      draggable
-      onDragStart={() => onDragStart(widget.id)}
-      onDragOver={(e) => onDragOver(e, widget.id)}
-      onDragEnd={onDragEnd}
-      className={cn(
-        'group cursor-grab rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md transition-opacity active:cursor-grabbing',
-        isDragging && 'opacity-40'
-      )}
-    >
-      <header className="flex items-center gap-1.5 border-b border-border/40 px-2.5 py-2">
-        <GripVertical className="size-3.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
-        <Icon className="size-3.5 shrink-0 text-accent" />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[11px] font-semibold text-foreground" title={widget.title}>
-            {widget.title}
-          </h3>
-          {widget.groupBy && <p className="text-[10px] text-muted-foreground">{widget.groupBy}</p>}
-        </div>
-        {widget.metric && abn.length > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
-            <AlertTriangle className="size-2.5" />
-            {abn.length}
-          </span>
-        )}
-      </header>
-
-      <div className="p-3">
-        {widget.kind === 'team' ? (
-          /* Team anchor: big stat for the single real data point */
-          <div className="flex h-36 flex-col justify-center">
-            <div className="text-3xl font-black tabular-nums text-foreground">
-              {formatValue(widget.points[0].value, widget.unit, widget.decimals ?? 0)}
-            </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              {widget.points[0].label} · {widget.points[0].week}
-            </div>
-            {widget.points[0].share && (
-              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">{widget.points[0].share}</div>
-            )}
-            {t && (
-              <div className="mt-2">
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ring-1',
-                    isAbnormal(widget.metric, widget.points[0].value)
-                      ? 'bg-rose-500/15 text-rose-300 ring-rose-500/40'
-                      : 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
-                  )}
-                >
-                  {isAbnormal(widget.metric, widget.points[0].value) ? (
-                    <AlertTriangle className="size-2.5" />
-                  ) : null}
-                  {isAbnormal(widget.metric, widget.points[0].value) ? 'Abnormal' : 'On track'} · thr{' '}
-                  {t.value}
-                  {widget.unit} {t.direction === 'higher' ? 'min' : 'max'}
-                </span>
-              </div>
-            )}
-          </div>
-        ) : visiblePoints.length === 0 ? (
-          /* Filtered out everything — all points healthy */
-          <div className="flex h-36 items-center justify-center px-3 text-center text-[11px] text-muted-foreground">
-            All within threshold
-            <span className="ml-1 font-mono">
-              ({t ? `${t.value}${widget.unit} ${t.direction === 'higher' ? 'min' : 'max'}` : ''})
-            </span>
-          </div>
-        ) : (
-          /* Breakdown: bar chart of the REAL exposed points only */
-          <div className="h-36 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={visiblePoints} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
-                  axisLine={{ stroke: 'var(--border)' }}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 10,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number, _name, item) => {
-                    const p = item?.payload as DataPoint | undefined;
-                    return [formatValue(v, widget.unit, widget.decimals ?? 0), p?.week ?? widget.groupBy ?? ''];
-                  }}
-                />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={40}>
-                  {visiblePoints.map((p, i) => (
-                    <Cell
-                      key={i}
-                      fill={
-                        widget.metric && isAbnormal(widget.metric, p.value)
-                          ? 'var(--destructive, #f85149)'
-                          : 'var(--primary)'
-                      }
-                      fillOpacity={widget.metric && isAbnormal(widget.metric, p.value) ? 0.85 : 0.65}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="mt-0.5 truncate text-center font-mono text-[10px] text-muted-foreground/70">
-              {visiblePoints.map((p) => `${p.label} ${p.week}`).join(' · ')}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Money Go High widget
@@ -700,232 +258,203 @@ function MoneyGoHighWidget() {
 }
 
 // ---------------------------------------------------------------------------
-// CSAT MTD section — Salesforce report "CSAT excluding DTC + OR"
-// (bullet gauge for the month-to-date overall + per-agent bars vs the 95%
-// threshold; participates in the Show Abnormal filter).
+// Mini dashboard — compact numbers-only 720p (1280x720) layout
 // ---------------------------------------------------------------------------
 
-function CsatMtdBullet({ csat, threshold }: { csat: number; threshold: number }) {
-  const abnormal = csat < threshold;
-  const delta = csat - threshold;
+function MiniStatCard({
+  label,
+  children,
+  accent = 'text-foreground',
+}: {
+  label: string;
+  children: React.ReactNode;
+  accent?: string;
+}) {
   return (
-    <div>
-      <div className="flex items-end gap-3">
-        <span
-          className={cn(
-            'text-5xl font-black tabular-nums',
-            abnormal ? 'text-rose-300' : 'text-emerald-200'
-          )}
-        >
-          {csat.toFixed(2)}%
-        </span>
-        <span
-          className={cn(
-            'mb-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1',
-            abnormal
-              ? 'bg-rose-500/15 text-rose-300 ring-rose-500/40'
-              : 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
-          )}
-        >
-          {abnormal && <AlertTriangle className="size-3" />}
-          {delta >= 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)} pp vs {threshold}%
-        </span>
-      </div>
-      {/* Bullet bar: qualitative bands + value fill + threshold marker */}
-      <div className="relative mt-3 h-5 w-full overflow-visible rounded-full bg-border/30">
-        {/* bands: 85-90 amber (threshold floor from Money Go High), 90-95 sky
-            (target zone), 95-100 emerald (challenge/threshold zone) */}
-        <div className="absolute inset-y-0 left-[85%] w-[5%] rounded-l-full bg-amber-500/25" />
-        <div className="absolute inset-y-0 left-[90%] w-[5%] bg-sky-500/25" />
-        <div className="absolute inset-y-0 left-[95%] w-[5%] rounded-r-full bg-emerald-500/30" />
-        {/* value fill */}
-        <div
-          className={cn(
-            'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500',
-            abnormal ? 'bg-rose-500/70' : 'bg-emerald-500/70'
-          )}
-          style={{ width: `${csat}%` }}
-        />
-        {/* threshold marker */}
-        <div
-          className="absolute -top-1 -bottom-1 w-0.5 rounded bg-rose-400 shadow-[0_0_6px_rgba(248,81,73,0.8)]"
-          style={{ left: `${threshold}%` }}
-        />
-      </div>
-      <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground/70">
-        <span>0%</span>
-        <span className="text-amber-300/80">85</span>
-        <span className="text-sky-300/80">90</span>
-        <span className="text-emerald-300/80">95%</span>
-        <span>100%</span>
-      </div>
+    <div className="rounded-xl border border-border/50 bg-card/40 p-3 backdrop-blur-sm">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn('mt-1', accent)}>{children}</div>
     </div>
   );
 }
 
-function CsatMtdSection({ showAbnormal }: { showAbnormal: boolean }) {
-  const { summary, agents, notLoaded } = CSAT_MTD;
-  const overallAbnormal = isAbnormal('csatMtd', summary.csat);
-  const abnormalAgents = agents.filter((a) => isAbnormal('csatMtd', a.csat));
-  const visibleAgents = showAbnormal ? abnormalAgents : agents;
-  const maxCases = Math.max(...agents.map((a) => a.cases), 1);
+/** Compact semicircle parliament for the mini One Touch widget. */
+function MiniParliament({ agents, showAbnormal }: { agents: { owner: string; rate: number }[]; showAbnormal: boolean }) {
+  const sorted = [...agents].sort((a, b) => b.rate - a.rate);
+  const count = sorted.length;
+  const rings = 6;
+  const seats: { x: number; y: number; r: number }[] = [];
+  const W = 320;
+  const H = 150;
+  const CX = W / 2;
+  const maxR = Math.min(W / 2 - 12, H - 8);
+  for (let ring = 0; ring < rings; ring++) {
+    const ringR = maxR * (0.35 + (ring / (rings - 1)) * 0.65);
+    const arcAngle = Math.PI * (0.82 + ring * 0.03);
+    const segs = Math.max(1, Math.round((arcAngle / (2 * Math.PI)) * count * 1.6));
+    for (let s = 0; s < segs; s++) {
+      const t = segs === 1 ? 0.5 : s / (segs - 1);
+      const angle = Math.PI - (arcAngle * t) - (Math.PI - arcAngle) / 2;
+      seats.push({
+        x: CX + ringR * Math.cos(angle),
+        y: H - ringR * Math.sin(angle),
+        r: 5.5,
+      });
+    }
+  }
+  const seatColor = (rate: number) => {
+    if (rate >= 90) return '#34d399';
+    if (rate >= 80) return '#38bdf8';
+    if (rate >= 72) return '#fbbf24';
+    return '#fb7185';
+  };
+  return (
+    <svg width={W} height={H} className="mx-auto">
+      {seats.slice(0, count).map((s, i) => {
+        const a = sorted[i]!;
+        const low = a.rate < 72;
+        const dim = showAbnormal && !low;
+        return (
+          <circle
+            key={i}
+            cx={s.x}
+            cy={s.y}
+            r={s.r}
+            fill={seatColor(a.rate)}
+            fillOpacity={dim ? 0.12 : 0.92}
+            stroke={low ? '#fb7185' : 'transparent'}
+            strokeWidth={low ? 1 : 0}
+          >
+            <title>{`${a.owner}: ${a.rate.toFixed(1)}%`}</title>
+          </circle>
+        );
+      })}
+    </svg>
+  );
+}
 
-  const chartData = visibleAgents.map((a) => ({
-    name: a.name,
-    csat: a.csat,
-    cases: a.cases,
-    abnormal: isAbnormal('csatMtd', a.csat),
-  }));
+function MiniDashboard({
+  csatState,
+  touchState,
+  dailiesState,
+  showAbnormal,
+}: {
+  csatState: CsatReportState;
+  touchState: OneTouchReportState;
+  dailiesState: DailiesState;
+  showAbnormal: boolean;
+}) {
+  const shifts = countMtdShifts(undefined, undefined, undefined, ['Chat', 'Call', 'FR Call']);
+  const chatShifts = countMtdShifts(undefined, undefined, undefined, ['Chat']).total;
+  const callShifts = countMtdShifts(undefined, undefined, undefined, ['Call', 'FR Call']).total;
+
+  const csat = csatState.status === 'ready' ? csatState.report.total : null;
+  const touch = touchState.status === 'ready' ? touchState.report.total : null;
+  const dailies = dailiesState.status === 'ready' ? dailiesState.data : null;
 
   return (
-    <section className="rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
-        <Smile className="size-4 text-accent" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">
-            CSAT MTD — excluding DTC + OR
-          </h2>
-          <p className="truncate text-[11px] text-muted-foreground">
-            Month-to-date · Salesforce report · threshold {CSAT_MTD_THRESHOLD}%
-          </p>
-        </div>
-        {(overallAbnormal || abnormalAgents.length > 0) && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
-            <AlertTriangle className="size-2.5" />
-            {(overallAbnormal ? 1 : 0) + abnormalAgents.length} abnormal
-          </span>
+    <div className="grid grid-cols-2 gap-3">
+      {/* CSAT */}
+      <MiniStatCard label="CSAT MTD">
+        {csat ? (
+          <div className="flex items-end justify-between">
+            <div>
+              <div className={cn('text-5xl font-black tabular-nums', csat.csat >= 85 ? 'text-emerald-300' : 'text-rose-300')}>
+                {csat.csat.toFixed(1)}
+                <span className="text-2xl">%</span>
+              </div>
+              <div className="mt-1 flex gap-3 text-xs">
+                <span className="text-emerald-300">✓ {csat.good}</span>
+                <span className="text-rose-300">✗ {csat.bad}</span>
+              </div>
+            </div>
+            <div className="h-14 w-2 rounded-full bg-rose-500/30 overflow-hidden">
+              <div
+                className="w-full bg-emerald-400"
+                style={{ height: `${csat.csat}%`, marginTop: `${100 - csat.csat}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="text-2xl text-muted-foreground">—</div>
         )}
-      </header>
+      </MiniStatCard>
 
-      <div className="grid grid-cols-1 gap-5 p-4 lg:grid-cols-2">
-        {/* Left: overall bullet gauge + volume stats */}
-        <div className="flex flex-col justify-between gap-4">
+      {/* One Touch */}
+      <MiniStatCard label="One Touch MTD">
+        {touch ? (
+          <>
+            <div className="flex items-baseline gap-2">
+              <span className={cn('text-4xl font-black tabular-nums', touch.rate >= 72 ? 'text-emerald-300' : 'text-rose-300')}>
+                {touch.rate.toFixed(1)}
+                <span className="text-xl">%</span>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {touch.oneTime}/{touch.closed}
+              </span>
+            </div>
+            <div className="-mt-2">
+              <MiniParliament
+                agents={touchState.status === 'ready' ? touchState.report.agents.map((a) => ({ owner: a.owner, rate: a.rate })) : []}
+                showAbnormal={showAbnormal}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="text-2xl text-muted-foreground">—</div>
+        )}
+      </MiniStatCard>
+
+      {/* Dailies */}
+      <MiniStatCard label="Dailies (per shift)">
+        {dailies ? (
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs text-muted-foreground">Grand total</span>
+              <span className="font-mono text-2xl font-black tabular-nums text-fuchsia-200">
+                {(dailies.call.handled + dailies.chat.total + dailies.email.total).toLocaleString()}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="rounded-md bg-amber-500/10 px-2 py-1 text-center ring-1 ring-amber-500/25">
+                <div className="text-[9px] text-muted-foreground">Call</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-amber-200">
+                  {(dailies.call.handled / callShifts).toFixed(1)}
+                </div>
+              </div>
+              <div className="rounded-md bg-sky-500/10 px-2 py-1 text-center ring-1 ring-sky-500/25">
+                <div className="text-[9px] text-muted-foreground">Chat</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-sky-200">
+                  {(dailies.chat.total / chatShifts).toFixed(1)}
+                </div>
+              </div>
+              <div className="rounded-md bg-violet-500/10 px-2 py-1 text-center ring-1 ring-violet-500/25">
+                <div className="text-[9px] text-muted-foreground">Email</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-violet-200">
+                  {(dailies.email.total / shifts.total).toFixed(1)}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-2xl text-muted-foreground">—</div>
+        )}
+      </MiniStatCard>
+
+      {/* KPI */}
+      <MiniStatCard label="KPI Money Go High">
+        <div className="flex items-end justify-between">
           <div>
-            <div className="mb-2 text-xs font-semibold text-foreground">Overall MTD</div>
-            <CsatMtdBullet csat={summary.csat} threshold={CSAT_MTD_THRESHOLD} />
+            <div className="text-[10px] text-muted-foreground">Total score</div>
+            <div className="text-4xl font-black tabular-nums text-emerald-300">{MONEY_TOTAL_SCORE}</div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-border/50 bg-background/30 p-3 text-center">
-              <div className="text-xl font-black tabular-nums text-foreground">
-                {summary.totalRecords}
-              </div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Cases surveyed
-              </div>
-            </div>
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
-              <div className="text-xl font-black tabular-nums text-emerald-200">
-                {summary.goodCases}
-              </div>
-              <div className="text-[10px] uppercase tracking-wide text-emerald-300/70">
-                Good cases
-              </div>
-            </div>
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-center">
-              <div className="flex items-center justify-center gap-1 text-xl font-black tabular-nums text-rose-200">
-                <ThumbsDown className="size-4" />
-                {summary.badCases}
-              </div>
-              <div className="text-[10px] uppercase tracking-wide text-rose-300/70">
-                Bad cases
-              </div>
-            </div>
+          <div className="text-right">
+            <div className="text-[10px] text-muted-foreground">Settlement</div>
+            <div className="text-3xl font-black tabular-nums text-foreground">×{MONEY_SETTLEMENT_COEFFICIENT}</div>
           </div>
         </div>
-
-        {/* Right: per-agent bars vs 95% threshold */}
-        <div className="rounded-xl border border-border/50 bg-background/30 p-4">
-          <div className="mb-1 flex items-center justify-between">
-            <div className="text-xs font-semibold text-foreground">CSAT by agent (subtotals)</div>
-            <div className="font-mono text-[10px] text-muted-foreground/70">
-              bar width ∝ cases · max {maxCases}
-            </div>
-          </div>
-          {chartData.length === 0 ? (
-            <div className="flex h-32 items-center justify-center text-xs text-muted-foreground">
-              No abnormal agents — all loaded subtotals ≥ {CSAT_MTD_THRESHOLD}%.
-            </div>
-          ) : (
-            <div className="h-40 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={chartData}
-                  layout="vertical"
-                  margin={{ top: 8, right: 40, left: 8, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    domain={[0, 100]}
-                    ticks={[0, 25, 50, 75, 95, 100]}
-                    tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
-                    axisLine={{ stroke: 'var(--border)' }}
-                    tickLine={false}
-                    unit="%"
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={90}
-                    tick={{ fill: 'var(--foreground)', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'var(--card)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 10,
-                      fontSize: 12,
-                    }}
-                    formatter={(v: number, _name, item) => {
-                      const d = item?.payload as { cases?: number } | undefined;
-                      return [`${v.toFixed(2)}% · ${d?.cases ?? '?'} cases`, 'CSAT'];
-                    }}
-                  />
-                  <ReferenceLine
-                    x={CSAT_MTD_THRESHOLD}
-                    stroke="var(--destructive, #f85149)"
-                    strokeDasharray="5 3"
-                    strokeWidth={1.5}
-                    label={{
-                      value: `thr ${CSAT_MTD_THRESHOLD}%`,
-                      fill: 'var(--muted-foreground)',
-                      fontSize: 10,
-                      position: 'top',
-                    }}
-                  />
-                  <Bar dataKey="csat" radius={[0, 6, 6, 0]} barSize={22}>
-                    {chartData.map((d, i) => (
-                      <Cell
-                        key={i}
-                        fill={d.abnormal ? 'var(--destructive, #f85149)' : 'var(--primary)'}
-                        fillOpacity={d.abnormal ? 0.85 : 0.65}
-                      />
-                    ))}
-                    <LabelList
-                      dataKey="csat"
-                      position="right"
-                      formatter={(v: number) => `${v.toFixed(2)}%`}
-                      style={{ fill: 'var(--foreground)', fontSize: 10, fontWeight: 700 }}
-                    />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/70">
-            {notLoaded.length > 0 && (
-              <>
-                {notLoaded.map((n) => `${n.name} (${n.cases} cases)`).join(', ')} listed in the
-                report but subtotal not rendered by the source snapshot.{' '}
-              </>
-            )}
-            Subtotals verbatim from the report — no interpolated values.
-          </p>
-        </div>
-      </div>
-    </section>
+      </MiniStatCard>
+    </div>
   );
 }
 
@@ -935,71 +464,29 @@ function CsatMtdSection({ showAbnormal }: { showAbnormal: boolean }) {
 
 export default function Dash() {
   const [showAbnormal, setShowAbnormal] = useState(false);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [order, setOrder] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(POSITIONS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const valid = WIDGETS.map((w) => w.id);
-        if (Array.isArray(parsed) && parsed.length === valid.length && parsed.every((id) => valid.includes(id))) {
-          return parsed;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    return WIDGETS.map((w) => w.id);
-  });
+  const [miniMode, setMiniMode] = useState(false);
+  const { state: csatState, refreshing: csatRefreshing, reload: reloadCsat } = useCsatReport();
+  const { state: touchState, refreshing: touchRefreshing, reload: reloadTouch } = useOneTouchReport();
+  const { state: dailiesState, refreshing: dailiesRefreshing, reload: reloadDailies } = useDailiesReport();
 
-  const handleDragStart = useCallback((id: string) => {
-    setDraggingId(id);
-  }, []);
+  const reloadAll = useCallback(() => {
+    reloadCsat();
+    reloadTouch();
+    reloadDailies();
+  }, [reloadCsat, reloadTouch, reloadDailies]);
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent, targetId: string) => {
-      e.preventDefault();
-      if (!draggingId || draggingId === targetId) return;
-      setOrder((prev) => {
-        const next = [...prev];
-        const from = next.indexOf(draggingId);
-        const to = next.indexOf(targetId);
-        if (from === -1 || to === -1) return prev;
-        next.splice(from, 1);
-        next.splice(to, 0, draggingId);
-        return next;
-      });
-    },
-    [draggingId]
-  );
+  const totalAbnormal = useMemo(() => {
+    const csat = csatState.status === 'ready'
+      ? csatState.report.agents.filter((a) => isAbnormal('csat', a.csat)).length
+      : 0;
+    const touch = touchState.status === 'ready'
+      ? touchState.report.agents.filter((a) => isAbnormal('oneTouchMtd', a.rate)).length
+      : 0;
+    return csat + touch;
+  }, [csatState, touchState]);
 
-  const handleDragEnd = useCallback(() => {
-    setDraggingId(null);
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(POSITIONS_KEY, JSON.stringify(order));
-    } catch {
-      /* ignore */
-    }
-  }, [order]);
-
-  const orderedWidgets = useMemo(
-    () => order.map((id) => WIDGETS.find((w) => w.id === id)!).filter(Boolean),
-    [order]
-  );
-
-  const mtdAbnormalCount = useMemo(() => {
-    const overall = isAbnormal('csatMtd', CSAT_MTD.summary.csat) ? 1 : 0;
-    const agents = CSAT_MTD.agents.filter((a) => isAbnormal('csatMtd', a.csat)).length;
-    return overall + agents;
-  }, []);
-
-  const totalAbnormal = useMemo(
-    () => WIDGETS.reduce((s, w) => s + abnormalPoints(w).length, 0) + mtdAbnormalCount,
-    [mtdAbnormalCount]
-  );
+  const isLoading = csatState.status === 'loading' || touchState.status === 'loading' || dailiesState.status === 'loading';
+  const refreshing = csatRefreshing || touchRefreshing || dailiesRefreshing;
 
   return (
     <div className="min-h-full bg-background px-4 py-4">
@@ -1008,14 +495,28 @@ export default function Dash() {
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-foreground">
             <Activity className="size-5 text-accent" />
-            AMR 周度 KPI Dashboard
+            AMR KPI Dashboard
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Salesforce 周度KPI看板 · As of {REFRESHED_AT} · {WIDGETS.length} widgets · only source-exposed data
-            points shown
+            Salesforce reports auto-loaded from{' '}
+            <span className="font-mono text-muted-foreground/80">sf_reports/</span> · KPI thresholds from Money Go
+            High
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMiniMode((v) => !v)}
+            title={miniMode ? 'Switch to full dashboard' : 'Compact 720p view — numbers only'}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+              miniMode
+                ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                : 'border-border bg-card/50 text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {miniMode ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {miniMode ? 'Full View' : 'Mini View'}
+          </button>
           <button
             onClick={() => setShowAbnormal((v) => !v)}
             className={cn(
@@ -1034,33 +535,43 @@ export default function Dash() {
             )}
           </button>
           <button
-            title="Data refreshes when a new dashboard DOM snapshot is provided"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            onClick={reloadAll}
+            disabled={isLoading}
+            title="Re-scan sf_reports/ for the newest exports"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
           >
-            <RefreshCw className="size-3.5" />
+            <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
             Refresh
           </button>
         </div>
       </div>
 
-      {/* CSAT MTD (month-to-date, excluding DTC + OR) */}
+      {/* Mini view — compact numbers-only 720p layout */}
+      {miniMode && (
+        <MiniDashboard
+          csatState={csatState}
+          touchState={touchState}
+          dailiesState={dailiesState}
+          showAbnormal={showAbnormal}
+        />
+      )}
+
+      {/* Full view */}
+      {!miniMode && (
+        <>
+      {/* CSAT — live from the newest sf_reports export */}
       <div className="mb-4">
-        <CsatMtdSection showAbnormal={showAbnormal} />
+        <CsatReportSection state={csatState} showAbnormal={showAbnormal} onRetry={reloadCsat} />
       </div>
 
-      {/* Widget grid — 4 cols xl, 3 cols lg, 2 cols md, 1 col sm */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {orderedWidgets.map((w) => (
-          <WidgetCard
-            key={w.id}
-            widget={w}
-            showAbnormal={showAbnormal}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            isDragging={draggingId === w.id}
-          />
-        ))}
+      {/* One Touch MTD — live from the newest monthly export */}
+      <div className="mb-4">
+        <OneTouchSection state={touchState} showAbnormal={showAbnormal} onRetry={reloadTouch} />
+      </div>
+
+      {/* Dailies — MTD Call / Chat / Email volume + per-shift averages */}
+      <div className="mb-4">
+        <DailiesSection state={dailiesState} onRetry={reloadDailies} />
       </div>
 
       {/* Money Go High scoring matrix */}
@@ -1081,9 +592,11 @@ export default function Dash() {
           </div>
         </section>
       </div>
+        </>
+      )}
 
-      <footer className="mt-4 pb-4 text-center text-[11px] text-muted-foreground">
-        Data verbatim from the Salesforce dashboard DOM snapshot · drag widgets to reorder (positions saved locally)
+      <footer className={cn('mt-4 pb-4 text-center text-[11px] text-muted-foreground', miniMode && 'hidden')}>
+        CSAT parsed live from the newest Salesforce export in sf_reports/ · click Refresh to pick up new files
       </footer>
     </div>
   );

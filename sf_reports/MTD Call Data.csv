@@ -1,0 +1,7 @@
+﻿Agent performance summary
+Prior contacts handled,Contacts handled,Prior contacts handled outbound,Contacts handled outbound,Prior service level 20 seconds,Service level 20 seconds,Prior avg. handle time,Avg. handle time,Prior contacts abandoned,Contacts abandoned
+1487,1328,264,181,95.70247933884297%,95.83333333333335%,00:07:50,00:08:28,33,22
+
+Agent performance summary
+Prior service level 5 seconds,Service level 5 seconds,Prior service level 10 seconds,Service level 10 seconds,Prior service level 20 seconds,Service level 20 seconds,Prior service level 30 seconds,Service level 30 seconds,Prior service level 40 seconds,Service level 40 seconds
+5.950413223140496%,6.340579710144928%,72.97520661157024%,72.73550724637681%,95.70247933884297%,95.83333333333335%,96.36363636363636%,96.46739130434783%,96.69421487603306%,97.19202898550725%

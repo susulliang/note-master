@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronDown, RotateCcw, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ROSTER, ROSTER_MONTHS, SHIFT_CATALOG, type RosterAgent } from '@/data/rosterOct2026';
+import { ROSTER_202610 as ROSTER } from '@/data/roster-2026-10';
+import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
+import type { RosterAgent } from '@/data/roster';
 
 /**
  * Shifts workspace (v0.2.2) — 3rd work-view canvas beside Notes / Trak,

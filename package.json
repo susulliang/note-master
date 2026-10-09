@@ -13,6 +13,9 @@
     "prepare": "node scripts/setup-git-hooks.mjs",
     "ext:bump": "node scripts/bump-version.mjs",
     "bump": "node scripts/bump-version.mjs",
+    "sync:roster": "node scripts/sync-roster.mjs",
+    "sync:reports": "tsx scripts/sync-reports.ts",
+    "sync": "npm run sync:roster && npm run sync:reports",
     "bench:whisper": "node scripts/bench-whisper.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -84,6 +87,7 @@
     "tailwindcss": "^4.2.2",
     "tw-animate-css": "^1.2.0",
     "vaul": "^1.1.2",
+    "xlsx": "^0.18.5",
     "yauzl": "^3.4.0",
     "zod": "^4.3.6"
   },
@@ -103,8 +107,8 @@
     "mammoth": "^1.12.2",
     "pdf-parse": "^2.4.5",
     "playwright": "^1.63.0",
+    "tsx": "^4.23.15",
     "typescript": "~5.9",
-    "vite": "^8",
-    "xlsx": "^0.18.5"
+    "vite": "^8"
   }
 }

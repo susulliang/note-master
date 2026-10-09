@@ -1,0 +1,1863 @@
+{
+  "generatedAt": "2026-10-09T07:18:20.893Z",
+  "sources": {
+    "csat": "CSAT   DTC+    )-2026-10-08-23-29-27.xlsx",
+    "oneTouch": "One touch rate By Agent Monthly-2026-10-09-00-32-52.xlsx",
+    "chat": "MTD  Chat    Messaging-2026-10-09-01-23-50.xlsx",
+    "email": "AMR Email   -2026-10-09-01-23-17.xlsx",
+    "call": "MTD Call Data.csv",
+    "historical": "Historical Metrics Report.csv"
+  },
+  "csat": {
+    "fileName": "CSAT   DTC+    )-2026-10-08-23-29-27.xlsx",
+    "asOf": "2026-10-08 23:29:27 Eastern Standard Time/EST",
+    "agents": [
+      {
+        "owner": "Alan",
+        "good": 6,
+        "bad": 0,
+        "csat": 100,
+        "records": 6
+      },
+      {
+        "owner": "Alex Wilson",
+        "good": 2,
+        "bad": 1,
+        "csat": 66.67,
+        "records": 3
+      },
+      {
+        "owner": "Aurora",
+        "good": 16,
+        "bad": 0,
+        "csat": 100,
+        "records": 16
+      },
+      {
+        "owner": "Boris Z.",
+        "good": 24,
+        "bad": 1,
+        "csat": 96,
+        "records": 25
+      },
+      {
+        "owner": "Charsan",
+        "good": 10,
+        "bad": 0,
+        "csat": 100,
+        "records": 10
+      },
+      {
+        "owner": "Daniel. A",
+        "good": 17,
+        "bad": 0,
+        "csat": 100,
+        "records": 17
+      },
+      {
+        "owner": "Dezzy VII",
+        "good": 20,
+        "bad": 1,
+        "csat": 95.24,
+        "records": 21
+      },
+      {
+        "owner": "Ethan Z",
+        "good": 11,
+        "bad": 1,
+        "csat": 91.67,
+        "records": 12
+      },
+      {
+        "owner": "Gavin",
+        "good": 2,
+        "bad": 2,
+        "csat": 50,
+        "records": 4
+      },
+      {
+        "owner": "George Scheddi Plantagenet",
+        "good": 1,
+        "bad": 0,
+        "csat": 100,
+        "records": 1
+      },
+      {
+        "owner": "Ian",
+        "good": 35,
+        "bad": 2,
+        "csat": 94.59,
+        "records": 37
+      },
+      {
+        "owner": "Jacky L",
+        "good": 17,
+        "bad": 0,
+        "csat": 100,
+        "records": 17
+      },
+      {
+        "owner": "Jason Z.",
+        "good": 6,
+        "bad": 2,
+        "csat": 75,
+        "records": 8
+      },
+      {
+        "owner": "Jenson",
+        "good": 3,
+        "bad": 1,
+        "csat": 75,
+        "records": 4
+      },
+      {
+        "owner": "Jim",
+        "good": 13,
+        "bad": 0,
+        "csat": 100,
+        "records": 13
+      },
+      {
+        "owner": "Jing",
+        "good": 7,
+        "bad": 0,
+        "csat": 100,
+        "records": 7
+      },
+      {
+        "owner": "Jun",
+        "good": 6,
+        "bad": 0,
+        "csat": 100,
+        "records": 6
+      },
+      {
+        "owner": "Kevin Woods",
+        "good": 46,
+        "bad": 1,
+        "csat": 97.87,
+        "records": 47
+      },
+      {
+        "owner": "Kevin X",
+        "good": 9,
+        "bad": 1,
+        "csat": 90,
+        "records": 10
+      },
+      {
+        "owner": "Kira",
+        "good": 6,
+        "bad": 0,
+        "csat": 100,
+        "records": 6
+      },
+      {
+        "owner": "Laura T",
+        "good": 4,
+        "bad": 0,
+        "csat": 100,
+        "records": 4
+      },
+      {
+        "owner": "Lynnet.M",
+        "good": 29,
+        "bad": 5,
+        "csat": 85.29,
+        "records": 34
+      },
+      {
+        "owner": "Nick",
+        "good": 1,
+        "bad": 1,
+        "csat": 50,
+        "records": 2
+      },
+      {
+        "owner": "Patrick Z.",
+        "good": 21,
+        "bad": 0,
+        "csat": 100,
+        "records": 21
+      },
+      {
+        "owner": "Pyro",
+        "good": 6,
+        "bad": 0,
+        "csat": 100,
+        "records": 6
+      },
+      {
+        "owner": "Rachel",
+        "good": 3,
+        "bad": 0,
+        "csat": 100,
+        "records": 3
+      },
+      {
+        "owner": "Ronald.L",
+        "good": 5,
+        "bad": 0,
+        "csat": 100,
+        "records": 5
+      },
+      {
+        "owner": "Ruby York",
+        "good": 8,
+        "bad": 1,
+        "csat": 88.89,
+        "records": 9
+      },
+      {
+        "owner": "Stanley",
+        "good": 1,
+        "bad": 0,
+        "csat": 100,
+        "records": 1
+      },
+      {
+        "owner": "Steve",
+        "good": 2,
+        "bad": 0,
+        "csat": 100,
+        "records": 2
+      },
+      {
+        "owner": "Tony",
+        "good": 4,
+        "bad": 0,
+        "csat": 100,
+        "records": 4
+      },
+      {
+        "owner": "TQ Galvao",
+        "good": 16,
+        "bad": 0,
+        "csat": 100,
+        "records": 16
+      },
+      {
+        "owner": "Trent",
+        "good": 3,
+        "bad": 0,
+        "csat": 100,
+        "records": 3
+      },
+      {
+        "owner": "Troy",
+        "good": 2,
+        "bad": 0,
+        "csat": 100,
+        "records": 2
+      }
+    ],
+    "total": {
+      "owner": "Total",
+      "good": 362,
+      "bad": 20,
+      "csat": 94.76,
+      "records": 382
+    }
+  },
+  "oneTouch": {
+    "fileName": "One touch rate By Agent Monthly-2026-10-09-00-32-52.xlsx",
+    "asOf": "2026-10-09 00:32:52 Eastern Standard Time/EST",
+    "agents": [
+      {
+        "owner": "Alan",
+        "rate": 67.21,
+        "oneTime": 41,
+        "closed": 61,
+        "channels": [
+          {
+            "name": "Offline Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 25,
+            "oneTime": 3,
+            "closed": 12
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 82.61,
+            "oneTime": 38,
+            "closed": 46
+          }
+        ]
+      },
+      {
+        "owner": "Alex Wilson",
+        "rate": 66.67,
+        "oneTime": 12,
+        "closed": 18,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          },
+          {
+            "name": "Email",
+            "rate": 64.29,
+            "oneTime": 9,
+            "closed": 14
+          },
+          {
+            "name": "DTC Website",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "AMR Tier 1 Support",
+        "rate": 100,
+        "oneTime": 121,
+        "closed": 121,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 100,
+            "oneTime": 121,
+            "closed": 121
+          }
+        ]
+      },
+      {
+        "owner": "Aurora",
+        "rate": 62,
+        "oneTime": 31,
+        "closed": 50,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 66.67,
+            "oneTime": 8,
+            "closed": 12
+          },
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 63.64,
+            "oneTime": 21,
+            "closed": 33
+          }
+        ]
+      },
+      {
+        "owner": "Boris Z.",
+        "rate": 61.33,
+        "oneTime": 46,
+        "closed": 75,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 63.33,
+            "oneTime": 38,
+            "closed": 60
+          },
+          {
+            "name": "Email",
+            "rate": 50,
+            "oneTime": 4,
+            "closed": 8
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 80,
+            "oneTime": 4,
+            "closed": 5
+          }
+        ]
+      },
+      {
+        "owner": "Charlie Joi Gilbert",
+        "rate": 87.5,
+        "oneTime": 7,
+        "closed": 8,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 7,
+            "closed": 7
+          }
+        ]
+      },
+      {
+        "owner": "Charsan",
+        "rate": 72.58,
+        "oneTime": 45,
+        "closed": 62,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 71.43,
+            "oneTime": 5,
+            "closed": 7
+          },
+          {
+            "name": "Web Form",
+            "rate": 66.67,
+            "oneTime": 2,
+            "closed": 3
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 73.08,
+            "oneTime": 38,
+            "closed": 52
+          }
+        ]
+      },
+      {
+        "owner": "Damiana D.",
+        "rate": 100,
+        "oneTime": 1,
+        "closed": 1,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "Daniel. A",
+        "rate": 77.23,
+        "oneTime": 78,
+        "closed": 101,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 79.22,
+            "oneTime": 61,
+            "closed": 77
+          },
+          {
+            "name": "Email",
+            "rate": 66.67,
+            "oneTime": 6,
+            "closed": 9
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 78.57,
+            "oneTime": 11,
+            "closed": 14
+          }
+        ]
+      },
+      {
+        "owner": "Dezzy VII",
+        "rate": 70.45,
+        "oneTime": 31,
+        "closed": 44,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 22.22,
+            "oneTime": 2,
+            "closed": 9
+          },
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 82.35,
+            "oneTime": 28,
+            "closed": 34
+          }
+        ]
+      },
+      {
+        "owner": "Ethan Z",
+        "rate": 64,
+        "oneTime": 48,
+        "closed": 75,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 50,
+            "oneTime": 2,
+            "closed": 4
+          },
+          {
+            "name": "Email",
+            "rate": 50,
+            "oneTime": 5,
+            "closed": 10
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 4
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 71.43,
+            "oneTime": 40,
+            "closed": 56
+          }
+        ]
+      },
+      {
+        "owner": "Gavin",
+        "rate": 55.13,
+        "oneTime": 43,
+        "closed": 78,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 33.33,
+            "oneTime": 1,
+            "closed": 3
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 3
+          },
+          {
+            "name": "Email",
+            "rate": 63.64,
+            "oneTime": 14,
+            "closed": 22
+          },
+          {
+            "name": "Yeedi-US-Email",
+            "rate": 65.12,
+            "oneTime": 28,
+            "closed": 43
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 7
+          }
+        ]
+      },
+      {
+        "owner": "George. S",
+        "rate": 93.75,
+        "oneTime": 15,
+        "closed": 16,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 93.75,
+            "oneTime": 15,
+            "closed": 16
+          }
+        ]
+      },
+      {
+        "owner": "George Scheddi Plantagenet",
+        "rate": 0,
+        "oneTime": 0,
+        "closed": 8,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 4
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Ian",
+        "rate": 67.39,
+        "oneTime": 62,
+        "closed": 92,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 71.21,
+            "oneTime": 47,
+            "closed": 66
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 33.33,
+            "oneTime": 1,
+            "closed": 3
+          },
+          {
+            "name": "Email",
+            "rate": 50,
+            "oneTime": 5,
+            "closed": 10
+          },
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 66.67,
+            "oneTime": 8,
+            "closed": 12
+          }
+        ]
+      },
+      {
+        "owner": "Jacky L",
+        "rate": 67.9,
+        "oneTime": 55,
+        "closed": 81,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 69.84,
+            "oneTime": 44,
+            "closed": 63
+          },
+          {
+            "name": "Email",
+            "rate": 63.64,
+            "oneTime": 7,
+            "closed": 11
+          },
+          {
+            "name": "Web Form",
+            "rate": 50,
+            "oneTime": 2,
+            "closed": 4
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 66.67,
+            "oneTime": 2,
+            "closed": 3
+          }
+        ]
+      },
+      {
+        "owner": "Jason Z.",
+        "rate": 51.9,
+        "oneTime": 41,
+        "closed": 79,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 33.33,
+            "oneTime": 1,
+            "closed": 3
+          },
+          {
+            "name": "Email",
+            "rate": 11.76,
+            "oneTime": 2,
+            "closed": 17
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 70.37,
+            "oneTime": 38,
+            "closed": 54
+          }
+        ]
+      },
+      {
+        "owner": "Jenson",
+        "rate": 70.97,
+        "oneTime": 22,
+        "closed": 31,
+        "channels": [
+          {
+            "name": "Offline Chat",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 33.33,
+            "oneTime": 1,
+            "closed": 3
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 76,
+            "oneTime": 19,
+            "closed": 25
+          },
+          {
+            "name": "Mobile SDK",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "Jim",
+        "rate": 65.38,
+        "oneTime": 34,
+        "closed": 52,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 33.33,
+            "oneTime": 5,
+            "closed": 15
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 80,
+            "oneTime": 28,
+            "closed": 35
+          }
+        ]
+      },
+      {
+        "owner": "Jing",
+        "rate": 69.23,
+        "oneTime": 36,
+        "closed": 52,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 86.67,
+            "oneTime": 26,
+            "closed": 30
+          },
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 40,
+            "oneTime": 6,
+            "closed": 15
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 66.67,
+            "oneTime": 2,
+            "closed": 3
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Jun",
+        "rate": 93.33,
+        "oneTime": 14,
+        "closed": 15,
+        "channels": [
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 92.86,
+            "oneTime": 13,
+            "closed": 14
+          }
+        ]
+      },
+      {
+        "owner": "Kevin Cai",
+        "rate": 50,
+        "oneTime": 1,
+        "closed": 2,
+        "channels": [
+          {
+            "name": "APJ-TW-Email",
+            "rate": 50,
+            "oneTime": 1,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Kevin Woods",
+        "rate": 75.86,
+        "oneTime": 66,
+        "closed": 87,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 42.86,
+            "oneTime": 6,
+            "closed": 14
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 81.69,
+            "oneTime": 58,
+            "closed": 71
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Kevin X",
+        "rate": 64.29,
+        "oneTime": 45,
+        "closed": 70,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 42.86,
+            "oneTime": 6,
+            "closed": 14
+          },
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 69.09,
+            "oneTime": 38,
+            "closed": 55
+          }
+        ]
+      },
+      {
+        "owner": "Kira",
+        "rate": 81.61,
+        "oneTime": 71,
+        "closed": 87,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Chat",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          },
+          {
+            "name": "Email",
+            "rate": 68.75,
+            "oneTime": 11,
+            "closed": 16
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 77.5,
+            "oneTime": 31,
+            "closed": 40
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 24,
+            "closed": 24
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Laura T",
+        "rate": 69.39,
+        "oneTime": 34,
+        "closed": 49,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 100,
+            "oneTime": 3,
+            "closed": 3
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 55.56,
+            "oneTime": 5,
+            "closed": 9
+          },
+          {
+            "name": "Web Form",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 56.52,
+            "oneTime": 13,
+            "closed": 23
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 12,
+            "closed": 12
+          }
+        ]
+      },
+      {
+        "owner": "Lynnet.M",
+        "rate": 66.67,
+        "oneTime": 76,
+        "closed": 114,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 68.42,
+            "oneTime": 65,
+            "closed": 95
+          },
+          {
+            "name": "Email",
+            "rate": 58.33,
+            "oneTime": 7,
+            "closed": 12
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 66.67,
+            "oneTime": 4,
+            "closed": 6
+          }
+        ]
+      },
+      {
+        "owner": "Nick",
+        "rate": 56.63,
+        "oneTime": 47,
+        "closed": 83,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 80,
+            "oneTime": 4,
+            "closed": 5
+          },
+          {
+            "name": "Email",
+            "rate": 60,
+            "oneTime": 12,
+            "closed": 20
+          },
+          {
+            "name": "Yeedi-US-Email",
+            "rate": 55.77,
+            "oneTime": 29,
+            "closed": 52
+          },
+          {
+            "name": "Web Form",
+            "rate": 50,
+            "oneTime": 2,
+            "closed": 4
+          }
+        ]
+      },
+      {
+        "owner": "Patrick Z.",
+        "rate": 81.08,
+        "oneTime": 60,
+        "closed": 74,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 50,
+            "oneTime": 1,
+            "closed": 2
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 75,
+            "oneTime": 3,
+            "closed": 4
+          },
+          {
+            "name": "Email",
+            "rate": 66.67,
+            "oneTime": 6,
+            "closed": 9
+          },
+          {
+            "name": "Zendesk Chat",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 80.85,
+            "oneTime": 38,
+            "closed": 47
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 11,
+            "closed": 11
+          }
+        ]
+      },
+      {
+        "owner": "Pyro",
+        "rate": 62.71,
+        "oneTime": 37,
+        "closed": 59,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 14.29,
+            "oneTime": 2,
+            "closed": 14
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 79.55,
+            "oneTime": 35,
+            "closed": 44
+          }
+        ]
+      },
+      {
+        "owner": "Rachel",
+        "rate": 84.31,
+        "oneTime": 86,
+        "closed": 102,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 30,
+            "oneTime": 3,
+            "closed": 10
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 82.5,
+            "oneTime": 33,
+            "closed": 40
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 50,
+            "closed": 50
+          }
+        ]
+      },
+      {
+        "owner": "Rachel.Z",
+        "rate": 0,
+        "oneTime": 0,
+        "closed": 2,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "APJ-AU-Email",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "Ronald.L",
+        "rate": 62.5,
+        "oneTime": 25,
+        "closed": 40,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 63.33,
+            "oneTime": 19,
+            "closed": 30
+          },
+          {
+            "name": "Email",
+            "rate": 33.33,
+            "oneTime": 1,
+            "closed": 3
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 71.43,
+            "oneTime": 5,
+            "closed": 7
+          }
+        ]
+      },
+      {
+        "owner": "Ruby York",
+        "rate": 76.04,
+        "oneTime": 73,
+        "closed": 96,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 33.33,
+            "oneTime": 3,
+            "closed": 9
+          },
+          {
+            "name": "Email",
+            "rate": 55.56,
+            "oneTime": 5,
+            "closed": 9
+          },
+          {
+            "name": "Web Form",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 77.5,
+            "oneTime": 31,
+            "closed": 40
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 33,
+            "closed": 33
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 25,
+            "oneTime": 1,
+            "closed": 4
+          }
+        ]
+      },
+      {
+        "owner": "Stanley",
+        "rate": 100,
+        "oneTime": 12,
+        "closed": 12,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 100,
+            "oneTime": 11,
+            "closed": 11
+          }
+        ]
+      },
+      {
+        "owner": "Steve",
+        "rate": 90.53,
+        "oneTime": 172,
+        "closed": 190,
+        "channels": [
+          {
+            "name": "Manual",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 100,
+            "oneTime": 2,
+            "closed": 2
+          },
+          {
+            "name": "Email",
+            "rate": 91.8,
+            "oneTime": 168,
+            "closed": 183
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "Steven",
+        "rate": 50,
+        "oneTime": 1,
+        "closed": 2,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 100,
+            "oneTime": 1,
+            "closed": 1
+          }
+        ]
+      },
+      {
+        "owner": "Tony",
+        "rate": 92.86,
+        "oneTime": 13,
+        "closed": 14,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 66.67,
+            "oneTime": 2,
+            "closed": 3
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 100,
+            "oneTime": 11,
+            "closed": 11
+          }
+        ]
+      },
+      {
+        "owner": "TQ Galvao",
+        "rate": 73.53,
+        "oneTime": 50,
+        "closed": 68,
+        "channels": [
+          {
+            "name": "Chat",
+            "rate": 78.95,
+            "oneTime": 30,
+            "closed": 38
+          },
+          {
+            "name": "Offline Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Email",
+            "rate": 37.5,
+            "oneTime": 3,
+            "closed": 8
+          },
+          {
+            "name": "Web Form",
+            "rate": 50,
+            "oneTime": 1,
+            "closed": 2
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Outbound Call",
+            "rate": 100,
+            "oneTime": 16,
+            "closed": 16
+          },
+          {
+            "name": "Abandoned Chat",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 2
+          }
+        ]
+      },
+      {
+        "owner": "Trent",
+        "rate": 84.62,
+        "oneTime": 11,
+        "closed": 13,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 0,
+            "oneTime": 0,
+            "closed": 1
+          },
+          {
+            "name": "Inbound Call",
+            "rate": 91.67,
+            "oneTime": 11,
+            "closed": 12
+          }
+        ]
+      },
+      {
+        "owner": "Troy",
+        "rate": 45.83,
+        "oneTime": 33,
+        "closed": 72,
+        "channels": [
+          {
+            "name": "Email",
+            "rate": 50,
+            "oneTime": 5,
+            "closed": 10
+          },
+          {
+            "name": "Yeedi-US-Email",
+            "rate": 44.07,
+            "oneTime": 26,
+            "closed": 59
+          },
+          {
+            "name": "Web Form",
+            "rate": 66.67,
+            "oneTime": 2,
+            "closed": 3
+          }
+        ]
+      }
+    ],
+    "total": {
+      "owner": "Total",
+      "rate": 71.99,
+      "oneTime": 1696,
+      "closed": 2356,
+      "channels": [
+        {
+          "name": "Manual",
+          "rate": 77.14,
+          "oneTime": 27,
+          "closed": 35
+        },
+        {
+          "name": "Chat",
+          "rate": 68.83,
+          "oneTime": 318,
+          "closed": 462
+        },
+        {
+          "name": "Offline Chat",
+          "rate": 50,
+          "oneTime": 15,
+          "closed": 30
+        },
+        {
+          "name": "Email",
+          "rate": 70.64,
+          "oneTime": 462,
+          "closed": 654
+        },
+        {
+          "name": "DTC Website",
+          "rate": 100,
+          "oneTime": 1,
+          "closed": 1
+        },
+        {
+          "name": "APJ-AU-Email",
+          "rate": 0,
+          "oneTime": 0,
+          "closed": 1
+        },
+        {
+          "name": "APJ-TW-Email",
+          "rate": 50,
+          "oneTime": 1,
+          "closed": 2
+        },
+        {
+          "name": "Yeedi-US-Email",
+          "rate": 53.9,
+          "oneTime": 83,
+          "closed": 154
+        },
+        {
+          "name": "Zendesk Chat",
+          "rate": 100,
+          "oneTime": 1,
+          "closed": 1
+        },
+        {
+          "name": "Web Form",
+          "rate": 32,
+          "oneTime": 16,
+          "closed": 50
+        },
+        {
+          "name": "Inbound Call",
+          "rate": 76.6,
+          "oneTime": 576,
+          "closed": 752
+        },
+        {
+          "name": "Outbound Call",
+          "rate": 100,
+          "oneTime": 158,
+          "closed": 158
+        },
+        {
+          "name": "Mobile SDK",
+          "rate": 100,
+          "oneTime": 1,
+          "closed": 1
+        },
+        {
+          "name": "Abandoned Chat",
+          "rate": 67.27,
+          "oneTime": 37,
+          "closed": 55
+        }
+      ]
+    }
+  },
+  "chat": {
+    "fileName": "MTD  Chat    Messaging-2026-10-09-01-23-50.xlsx",
+    "asOf": "2026-10-09 01:23:50 Eastern Standard Time/EST",
+    "agents": [
+      {
+        "owner": "Alex Wilson",
+        "count": 3
+      },
+      {
+        "owner": "Boris Z.",
+        "count": 136
+      },
+      {
+        "owner": "Daniel. A",
+        "count": 111
+      },
+      {
+        "owner": "Ian",
+        "count": 104
+      },
+      {
+        "owner": "Jacky L",
+        "count": 69
+      },
+      {
+        "owner": "Kira",
+        "count": 3
+      },
+      {
+        "owner": "Lynnet.M",
+        "count": 148
+      },
+      {
+        "owner": "Ronald.L",
+        "count": 29
+      },
+      {
+        "owner": "TQ Galvao",
+        "count": 76
+      }
+    ],
+    "total": 679
+  },
+  "email": {
+    "fileName": "AMR Email   -2026-10-09-01-23-17.xlsx",
+    "asOf": "2026-10-09 01:23:17 Eastern Standard Time/EST",
+    "agents": [
+      {
+        "owner": "Alan",
+        "count": 100
+      },
+      {
+        "owner": "Alex Wilson",
+        "count": 32
+      },
+      {
+        "owner": "Aurora",
+        "count": 212
+      },
+      {
+        "owner": "Boris Z.",
+        "count": 375
+      },
+      {
+        "owner": "Charlie Gilbert",
+        "count": 13
+      },
+      {
+        "owner": "Charsan",
+        "count": 161
+      },
+      {
+        "owner": "Daniel. A",
+        "count": 180
+      },
+      {
+        "owner": "Dezzy VII",
+        "count": 115
+      },
+      {
+        "owner": "Ethan Z",
+        "count": 224
+      },
+      {
+        "owner": "Gavin",
+        "count": 264
+      },
+      {
+        "owner": "George. S",
+        "count": 45
+      },
+      {
+        "owner": "George Plantagenet",
+        "count": 2
+      },
+      {
+        "owner": "Ian",
+        "count": 254
+      },
+      {
+        "owner": "Jacky L",
+        "count": 153
+      },
+      {
+        "owner": "Jason Z.",
+        "count": 243
+      },
+      {
+        "owner": "Jenson",
+        "count": 62
+      },
+      {
+        "owner": "Jim",
+        "count": 113
+      },
+      {
+        "owner": "Jing",
+        "count": 153
+      },
+      {
+        "owner": "Jun",
+        "count": 43
+      },
+      {
+        "owner": "Kevin Woods",
+        "count": 188
+      },
+      {
+        "owner": "Kevin X",
+        "count": 165
+      },
+      {
+        "owner": "Kira",
+        "count": 143
+      },
+      {
+        "owner": "Laura T",
+        "count": 111
+      },
+      {
+        "owner": "Lynnet.M",
+        "count": 221
+      },
+      {
+        "owner": "Nick",
+        "count": 325
+      },
+      {
+        "owner": "Patrick Z.",
+        "count": 130
+      },
+      {
+        "owner": "Pyro",
+        "count": 112
+      },
+      {
+        "owner": "Rachel",
+        "count": 145
+      },
+      {
+        "owner": "Ronald.L",
+        "count": 50
+      },
+      {
+        "owner": "Ruby York",
+        "count": 163
+      },
+      {
+        "owner": "Stanley",
+        "count": 49
+      },
+      {
+        "owner": "Steve",
+        "count": 238
+      },
+      {
+        "owner": "Steven",
+        "count": 8
+      },
+      {
+        "owner": "Tony",
+        "count": 53
+      },
+      {
+        "owner": "Tony Liu",
+        "count": 118
+      },
+      {
+        "owner": "TQ Galvao",
+        "count": 141
+      },
+      {
+        "owner": "Trent",
+        "count": 38
+      },
+      {
+        "owner": "Troy",
+        "count": 225
+      }
+    ],
+    "total": 5367
+  },
+  "call": {
+    "fileName": "MTD Call Data.csv",
+    "handled": 1328,
+    "handledOutbound": 181,
+    "abandoned": 22,
+    "serviceLevel20": 95.83333333333336,
+    "avgHandleTimeSec": 508
+  },
+  "historical": {
+    "fileName": "Historical Metrics Report.csv",
+    "queues": [
+      {
+        "queue": "AMR Tier 1 French Support",
+        "handled": 8,
+        "handledIncoming": 5,
+        "handledOutbound": 3,
+        "abandoned": 8,
+        "serviceLevel20": 30.77,
+        "avgHandleTimeSec": 383
+      },
+      {
+        "queue": "AMR Tier 1 Support",
+        "handled": 1255,
+        "handledIncoming": 1077,
+        "handledOutbound": 178,
+        "abandoned": 14,
+        "serviceLevel20": 96.61,
+        "avgHandleTimeSec": 534
+      }
+    ]
+  }
+}

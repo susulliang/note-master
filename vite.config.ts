@@ -24,7 +24,11 @@ import tailwindcss from '@tailwindcss/vite';
  * best-effort safety net but build.sh owns the copy step.
  */
 function sopFolderPlugin(): Plugin {
-  const URL_SEGMENTS = ['SOP', 'news', 'software_updates', 'quick_reply'] as const;
+  // 'sf_reports' holds automated Salesforce report exports (xlsx). Unlike the
+  // plain static segments, its folder root also answers GET /sf_reports/ and
+  // /sf_reports/index.json with a machine-readable file listing (newest
+  // first), so the app can discover freshly dropped exports at runtime.
+  const URL_SEGMENTS = ['SOP', 'news', 'software_updates', 'quick_reply', 'sf_reports'] as const;
   let basePrefix = '/';
 
   return {
@@ -64,6 +68,25 @@ function sopFolderPlugin(): Plugin {
             }
           }
           if (rel !== null) {
+            // sf_reports directory index: GET /sf_reports/|/sf_reports/index.json
+            // → { generatedAt, files: [{ name, size, mtimeMs }] } (newest first)
+            if (seg === 'sf_reports' && (rel === '' || rel === 'index.json')) {
+              const fs = require('node:fs') as typeof import('node:fs');
+              if (existsSync(root) && fs.statSync(root).isDirectory()) {
+                const files = fs
+                  .readdirSync(root, { withFileTypes: true })
+                  .filter((e) => e.isFile() && !e.name.startsWith('.') && !e.name.endsWith('.tmp') && e.name !== 'dashboard-data.json')
+                  .map((e) => {
+                    const st = fs.statSync(path.join(root, e.name));
+                    return { name: e.name, size: st.size, mtimeMs: st.mtimeMs };
+                  })
+                  .sort((a, b) => b.mtimeMs - a.mtimeMs);
+                _res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                _res.setHeader('Cache-Control', 'no-store');
+                _res.end(JSON.stringify({ generatedAt: new Date().toISOString(), files }));
+                return;
+              }
+            }
             const target = path.normalize(path.join(root, rel));
             if (target.startsWith(root) && existsSync(target)) {
               const fs = require('node:fs');
@@ -136,6 +159,12 @@ function contentTypeFor(filePath: string): string {
       return 'text/plain; charset=utf-8';
     case '.pdf':
       return 'application/pdf';
+    case '.xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case '.xls':
+      return 'application/vnd.ms-excel';
+    case '.json':
+      return 'application/json; charset=utf-8';
     default:
       return 'application/octet-stream';
   }
