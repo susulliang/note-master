@@ -85,3 +85,6 @@ App_Screenshots/
 # Tauri (Rust desktop) build artifacts + generated schemas
 src-tauri/target/
 src-tauri/gen/
+
+# Wrangler local state
+.wrangler/

@@ -1,0 +1,15 @@
+{
+  // Cloudflare Workers deploy config — static-assets-only Worker serving the
+  // built SPA. Deploy with:  npm run deploy:workers   (builds standalone bundle
+  // to dist/client, then `wrangler deploy`). Preview locally: npm run preview:workers
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "note-master",
+  "compatibility_date": "2026-09-29",
+  "assets": {
+    "directory": "./dist/client",
+    // Serve index.html for unknown routes (SPA) — parity with Vercel rewrites.
+    "not_found_handling": "single-page-application",
+    // Default html_handling ("auto-trailing-slash") gives cleanUrls behaviour.
+    "html_handling": "auto-trailing-slash"
+  }
+}

@@ -1,0 +1,15 @@
+# Cloudflare Workers static-assets custom headers (mirrors vercel.json)
+/assets/*
+  Cache-Control: public, max-age=31536000, s-maxage=31536000, immutable
+
+/favicon.svg
+/icons.svg
+  Cache-Control: public, max-age=86400, s-maxage=604800
+
+/index.html
+  Cache-Control: public, max-age=0, s-maxage=300, must-revalidate
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net https://*.r2.dev https://*.r2.cloudflarestorage.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(self), geolocation=(), interest-cohort=()
