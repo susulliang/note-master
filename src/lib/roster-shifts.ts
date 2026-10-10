@@ -47,6 +47,28 @@ function pickRoster(start?: string): RosterAgent[] {
 export const ROSTER_MONTH_KEYS = [...ROSTER_MONTHS];
 
 /**
+ * Extracts the calendar date (YYYY-MM-DD) from a Salesforce "As of" timestamp
+ * such as "2026-10-09 19:51:51 Eastern Standard Time/EST".
+ *
+ * SF exports are stamped in New York time (EST/EDT, UTC-5/-4); the roster is
+ * kept in Beijing time (CST, UTC+8). Beijing is 12-13h ahead, so a NY calendar
+ * date D corresponds to roster dates up to and including D — the Beijing shift
+ * day D+1 starts at ~20:00 EST on day D, i.e. after the end-of-day SF cutoff,
+ * so it must NOT be counted. Using the NY asOf date directly as the roster
+ * cutoff therefore avoids over-including one shift day.
+ */
+export function asOfDate(asOf: string | null | undefined): string | null {
+  if (!asOf) return null;
+  const m = asOf.match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** The first day (YYYY-MM-01) of the month containing the given date. */
+export function monthStart(date: string): string {
+  return `${date.slice(0, 7)}-01`;
+}
+
+/**
  * Counts Month-To-Date worked shifts for the roster, between `start`
  * (inclusive) and `end` (inclusive). Defaults to the current calendar month
  * from the 1st through today.

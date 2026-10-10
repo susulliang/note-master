@@ -245,9 +245,11 @@ interface OneTouchSectionProps {
   state: OneTouchReportState;
   showAbnormal: boolean;
   onRetry: () => void;
+  /** Compact mode: hide parliament chart and channel breakdown, keep overall rate. */
+  mini?: boolean;
 }
 
-export function OneTouchSection({ state, showAbnormal, onRetry }: OneTouchSectionProps) {
+export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: OneTouchSectionProps) {
   const report = state.status === 'ready' ? state.report : null;
   const [hovered, setHovered] = useState<Seat | null>(null);
 
@@ -332,8 +334,9 @@ export function OneTouchSection({ state, showAbnormal, onRetry }: OneTouchSectio
       )}
 
       {report && (
-        <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          {/* Left — parliament */}
+        <div className={cn('grid gap-5 p-4', mini ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_340px]')}>
+          {/* Left — parliament (hidden in mini mode) */}
+          {!mini && (
           <div className="flex flex-col rounded-xl border border-border/50 bg-background/30 p-3">
             <div className="relative flex-1">
               <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" role="img" aria-label="One touch rate by agent, parliament chart">
@@ -470,6 +473,8 @@ export function OneTouchSection({ state, showAbnormal, onRetry }: OneTouchSectio
             </div>
           </div>
 
+          )}
+
           {/* Right — overall + channel groups */}
           <div className="space-y-3">
             {/* Overall */}
@@ -514,9 +519,10 @@ export function OneTouchSection({ state, showAbnormal, onRetry }: OneTouchSectio
               <RateBar rate={report.total.rate} className="mt-2.5 h-2" />
             </div>
 
-            {groups.map((g) => (
-              <GroupCard key={g.key} label={g.label} icon={g.icon} agg={g.agg} channels={g.channels} />
-            ))}
+            {!mini &&
+              groups.map((g) => (
+                <GroupCard key={g.key} label={g.label} icon={g.icon} agg={g.agg} channels={g.channels} />
+              ))}
           </div>
         </div>
       )}

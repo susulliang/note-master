@@ -39,6 +39,8 @@ interface CsatReportSectionProps {
   state: CsatReportState;
   showAbnormal: boolean;
   onRetry: () => void;
+  /** Compact mode: hide the per-agent chart and secondary stats, shrink layout. */
+  mini?: boolean;
 }
 
 const T = THRESHOLDS.csat; // { value: 85, direction: 'higher' }
@@ -115,7 +117,7 @@ function CsatTooltip({ active, payload }: TooltipProps<number, string>) {
 // Section
 // ---------------------------------------------------------------------------
 
-export function CsatReportSection({ state, showAbnormal, onRetry }: CsatReportSectionProps) {
+export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }: CsatReportSectionProps) {
   const report = state.status === 'ready' ? state.report : null;
 
   const abnormalAgents = useMemo(
@@ -198,22 +200,23 @@ export function CsatReportSection({ state, showAbnormal, onRetry }: CsatReportSe
       )}
 
       {report && (
-        <div className="grid gap-5 p-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className={cn('grid gap-5 p-4', mini ? 'grid-cols-1' : 'lg:grid-cols-[280px_minmax(0,1fr)]')}>
           {/* Left — overall summary */}
           <div className="flex flex-col gap-4">
-            <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+            <div className={cn('rounded-xl border border-border/50 bg-background/30', mini ? 'p-3' : 'p-4')}>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Overall CSAT · this month
               </div>
               <div className="mt-1 flex items-end gap-2">
                 <span
                   className={cn(
-                    'text-5xl font-black leading-none tabular-nums tracking-tight',
+                    'font-black leading-none tabular-nums tracking-tight',
+                    mini ? 'text-4xl' : 'text-5xl',
                     overallAbnormal ? 'text-rose-300' : 'text-emerald-300'
                   )}
                 >
                   {report.total.csat.toFixed(2)}
-                  <span className="text-xl">%</span>
+                  <span className={mini ? 'text-lg' : 'text-xl'}>%</span>
                 </span>
               </div>
               <div className="mt-2">
@@ -246,36 +249,49 @@ export function CsatReportSection({ state, showAbnormal, onRetry }: CsatReportSe
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-center">
-                <ThumbsUp className="mx-auto size-3.5 text-emerald-300/80" />
-                <div className="mt-1 text-lg font-black tabular-nums text-emerald-200">
-                  {report.total.good}
+            {!mini && (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-center">
+                  <ThumbsUp className="mx-auto size-3.5 text-emerald-300/80" />
+                  <div className="mt-1 text-lg font-black tabular-nums text-emerald-200">
+                    {report.total.good}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wide text-emerald-300/60">Good</div>
                 </div>
-                <div className="text-[9px] uppercase tracking-wide text-emerald-300/60">Good</div>
-              </div>
-              <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-center">
-                <ThumbsDown className="mx-auto size-3.5 text-rose-300/80" />
-                <div className="mt-1 text-lg font-black tabular-nums text-rose-200">
-                  {report.total.bad}
+                <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-center">
+                  <ThumbsDown className="mx-auto size-3.5 text-rose-300/80" />
+                  <div className="mt-1 text-lg font-black tabular-nums text-rose-200">
+                    {report.total.bad}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wide text-rose-300/60">Bad</div>
                 </div>
-                <div className="text-[9px] uppercase tracking-wide text-rose-300/60">Bad</div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-background/30 p-3 text-center">
-                <MessagesSquare className="mx-auto size-3.5 text-accent/80" />
-                <div className="mt-1 text-lg font-black tabular-nums text-foreground">
-                  {report.total.records}
+                <div className="rounded-xl border border-border/50 bg-background/30 p-3 text-center">
+                  <MessagesSquare className="mx-auto size-3.5 text-accent/80" />
+                  <div className="mt-1 text-lg font-black tabular-nums text-foreground">
+                    {report.total.records}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Surveys</div>
                 </div>
-                <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Surveys</div>
               </div>
-            </div>
+            )}
 
-            <div className="mt-auto rounded-xl border border-border/40 bg-background/20 px-3 py-2 text-[10px] text-muted-foreground">
-              {report.agents.length} agents in report · sorted by bad count
-            </div>
+            {mini && (
+              <div className="mt-1 flex gap-3 text-[10px]">
+                <span className="text-emerald-300">✓ {report.total.good}</span>
+                <span className="text-rose-300">✗ {report.total.bad}</span>
+                <span className="text-muted-foreground">{report.total.records} surveys</span>
+              </div>
+            )}
+
+            {!mini && (
+              <div className="mt-auto rounded-xl border border-border/40 bg-background/20 px-3 py-2 text-[10px] text-muted-foreground">
+                {report.agents.length} agents in report · sorted by bad count
+              </div>
+            )}
           </div>
 
-          {/* Right — per-agent vertical CSAT graph */}
+          {/* Right — per-agent vertical CSAT graph (hidden in mini mode) */}
+          {!mini && (
           <div className="rounded-xl border border-border/50 bg-background/30 p-3">
             <div className="mb-1 flex items-center justify-between px-1">
               <div className="text-[11px] font-semibold text-foreground">CSAT by agent</div>
@@ -385,6 +401,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry }: CsatReportSe
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </section>

@@ -15,8 +15,8 @@ export const THRESHOLDS: Record<string, MetricThreshold> = {
   oneTouch: { value: 68, direction: 'higher' }, // One-touch weekly threshold 68%
   oneTouchMtd: { value: 72, direction: 'higher' }, // One-touch MTD abnormality cutoff 72%
   chatResponse: { value: 26, direction: 'lower' }, // Chat avg response ≤ 26s
-  emailFirstResponse: { value: 8, direction: 'lower' }, // Email first reply ≤ 8h
-  emailAvgResponse: { value: 10, direction: 'lower' }, // Email avg reply ≤ 10h
+  emailFirstResponse: { value: 4, direction: 'lower' }, // Email first reply ≤ 4h
+  emailAvgResponse: { value: 4, direction: 'lower' }, // Email avg reply ≤ 4h
 };
 
 export function isAbnormal(metric: string, value: number): boolean {

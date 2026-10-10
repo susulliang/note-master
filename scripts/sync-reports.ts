@@ -18,6 +18,9 @@ import { fileURLToPath } from 'node:url';
 import {
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
+  parseChatResponseTimeWorkbook,
+  parseEmailAvgResponseWorkbook,
+  parseEmailFirstResponseWorkbook,
   parseHistoricalMetricsCsv,
   parseMtdCallDataCsv,
   parseOneTouchWorkbook,
@@ -88,7 +91,9 @@ if (chatFile) {
 } else console.warn('  Chat  : no matching .xlsx found');
 
 // --- Email ---
-const emailFile = pick(files, /(amr[\s_-]*email|email).*\.xlsx$/i);
+// Require the "AMR Email" prefix so the standalone "Avg Response Time...email"
+// exports aren't mistaken for the volume report (those feed a future widget).
+const emailFile = pick(files, /amr[\s_-]*email.*\.xlsx$/i);
 if (emailFile) {
   const r = parseCountByOwnerWorkbook(readBuf(emailFile.name), emailFile.name, /Created By/);
   out.email = r;
@@ -113,6 +118,46 @@ if (histFile) {
   (out.sources as Record<string, string>).historical = histFile.name;
   console.log(`  Hist  <- ${histFile.name} (${r.queues.length} queues)`);
 } else console.warn('  Hist  : no matching .csv found');
+
+// --- Response time: Chat avg response (seconds) ---
+// Match "Average response time ... Chat" but NOT the email files.
+// Match "Average response time ... Chat" — note "Average" (not "avg") so the
+// email "Avg Response Time" files don't collide.
+const chatRtFile = pick(files, /average[\s_-]*response.*chat|chat.*average[\s_-]*response/i);
+if (chatRtFile) {
+  const r = parseChatResponseTimeWorkbook(readBuf(chatRtFile.name), chatRtFile.name);
+  out.chatResponse = r;
+  (out.sources as Record<string, string>).chatResponse = chatRtFile.name;
+  console.log(
+    `  ChRT  <- ${chatRtFile.name} (team ${r.teamAvg.toFixed(1)}s, agent ${r.agentAvg.toFixed(1)}s, thr ${r.threshold}s)`,
+  );
+} else console.warn('  ChRT  : no matching Chat response-time .xlsx found');
+
+// --- Response time: Email first response (hours) ---
+const emailFirstRtFile = pick(files, /first[\s_-]*response.*email|email.*first[\s_-]*response/i);
+if (emailFirstRtFile) {
+  const r = parseEmailFirstResponseWorkbook(readBuf(emailFirstRtFile.name), emailFirstRtFile.name);
+  out.emailFirstResponse = r;
+  (out.sources as Record<string, string>).emailFirstResponse = emailFirstRtFile.name;
+  console.log(
+    `  E1RT  <- ${emailFirstRtFile.name} (team ${r.teamAvg.toFixed(2)}h, agent ${r.agentAvg.toFixed(2)}h, thr ${r.threshold}h)`,
+  );
+} else console.warn('  E1RT  : no matching Email first-response .xlsx found');
+
+// --- Response time: Email average response (hours) ---
+// Match "Avg Response Time ... email" but not "first".
+const emailAvgRtFile = pick(
+  files,
+  /^(?=.*email)(?=.*avg[\s_-]*response)(?!.*first).*\.xlsx$/i,
+);
+if (emailAvgRtFile) {
+  const r = parseEmailAvgResponseWorkbook(readBuf(emailAvgRtFile.name), emailAvgRtFile.name);
+  out.emailAvgResponse = r;
+  (out.sources as Record<string, string>).emailAvgResponse = emailAvgRtFile.name;
+  console.log(
+    `  EaRT  <- ${emailAvgRtFile.name} (team ${r.teamAvg.toFixed(2)}h, agent ${r.agentAvg.toFixed(2)}h, thr ${r.threshold}h)`,
+  );
+} else console.warn('  EaRT  : no matching Email avg-response .xlsx found');
 
 writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n', 'utf-8');
 console.log(`\nWrote ${OUT.replace(ROOT + '/', '')}`);

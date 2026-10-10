@@ -25,7 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { countMtdShifts } from '@/lib/roster-shifts';
+import { asOfDate, countMtdShifts, monthStart } from '@/lib/roster-shifts';
 import type { CountReport } from '@/lib/sf-reports';
 import type { DailiesState } from '@/hooks/use-dailies-report';
 
@@ -231,6 +231,8 @@ function AgentBars({
 interface DailiesSectionProps {
   state: DailiesState;
   onRetry: () => void;
+  /** Compact mode: hide per-agent charts and performance panel, keep grand total. */
+  mini?: boolean;
 }
 
 /* --------------------------- performer ranking ---------------------------- */
@@ -430,22 +432,36 @@ const DAILIES_SKILLS = ['Chat', 'Call', 'FR Call'] as const;
 const CHAT_SKILLS = ['Chat'] as const;
 const CALL_SKILLS = ['Call', 'FR Call'] as const;
 
-export function DailiesSection({ state, onRetry }: DailiesSectionProps) {
+export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionProps) {
+  // SF exports are stamped in New York time; the roster is in Beijing time.
+  // Use the report "As of" NY calendar date as the roster cutoff so we don't
+  // count the (not-yet-captured) Beijing shift day D+1 in the denominator.
+  const { rosterStart, rosterEnd, rosterLabel } = useMemo(() => {
+    const dates =
+      state.status === 'ready'
+        ? [state.data.chat.asOf, state.data.email.asOf].map(asOfDate).filter((d): d is string => !!d)
+        : [];
+    const end = dates.length ? dates.sort()[dates.length - 1]! : undefined;
+    const start = end ? monthStart(end) : undefined;
+    const label = end ? `${start} → ${end}` : 'month-to-date (local)';
+    return { rosterStart: start, rosterEnd: end, rosterLabel: label };
+  }, [state]);
+
   const shiftsByAgent = useMemo(
-    () => countMtdShifts(undefined, undefined, undefined, [...DAILIES_SKILLS]).byAgent,
-    [],
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).byAgent,
+    [rosterStart, rosterEnd],
   );
   const chatShifts = useMemo(
-    () => countMtdShifts(undefined, undefined, undefined, [...CHAT_SKILLS]).total,
-    [],
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CHAT_SKILLS]).total,
+    [rosterStart, rosterEnd],
   );
   const callShifts = useMemo(
-    () => countMtdShifts(undefined, undefined, undefined, [...CALL_SKILLS]).total,
-    [],
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CALL_SKILLS]).total,
+    [rosterStart, rosterEnd],
   );
   const allShifts = useMemo(
-    () => countMtdShifts(undefined, undefined, undefined, [...DAILIES_SKILLS]).total,
-    [],
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).total,
+    [rosterStart, rosterEnd],
   );
 
   const performers = useMemo(() => {
@@ -463,7 +479,9 @@ export function DailiesSection({ state, onRetry }: DailiesSectionProps) {
           <h2 className="truncate text-sm font-semibold text-foreground">Dailies — MTD</h2>
           <p className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-muted-foreground">
             <FileSpreadsheet className="size-3 shrink-0" />
-            Call · Chat · Email · denominator = {allShifts} shifts (Chat + Call + FR Call agents only, excl. SV/TL/T2/T3/DTC) · call ÷ {callShifts} · chat ÷ {chatShifts} · email ÷ {allShifts}
+            <span className="font-mono text-fuchsia-300/80">{rosterLabel}</span>
+            <span className="text-muted-foreground/50">·</span>
+            denominator = {allShifts} shifts (Chat + Call + FR Call agents only, excl. SV/TL/T2/T3/DTC) · call ÷ {callShifts} · chat ÷ {chatShifts} · email ÷ {allShifts}
           </p>
         </div>
       </header>
@@ -555,6 +573,7 @@ export function DailiesSection({ state, onRetry }: DailiesSectionProps) {
             );
           })()}
 
+          {!mini && (
           <div className="grid gap-4 md:grid-cols-3">
           {/* Call */}
           <ChannelPanel
@@ -610,9 +629,10 @@ export function DailiesSection({ state, onRetry }: DailiesSectionProps) {
             <AgentBars report={state.data.email} color={CHANNELS.email.bar} />
           </ChannelPanel>
           </div>
+          )}
           </div>
 
-          {performers && (
+          {!mini && performers && (
             <PerformancePanel performers={performers.performers} avgRate={performers.avgRate} />
           )}
         </div>

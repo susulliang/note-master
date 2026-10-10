@@ -24,13 +24,14 @@ import { isAbnormal, type Direction } from '@/lib/kpi-thresholds';
 import { useCsatReport } from '@/hooks/use-csat-report';
 import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
-import { countMtdShifts } from '@/lib/roster-shifts';
+import { useResponseTimeReport } from '@/hooks/use-response-time-report';
 import type { CsatReportState } from '@/hooks/use-csat-report';
 import type { OneTouchReportState } from '@/hooks/use-one-touch-report';
 import type { DailiesState } from '@/hooks/use-dailies-report';
 import { CsatReportSection } from '@/components/CsatReportSection';
 import { OneTouchSection } from '@/components/OneTouchSection';
 import { DailiesSection } from '@/components/DailiesSection';
+import { ResponseTimeSection } from '@/components/ResponseTimeSection';
 
 /**
  * AMR Contact Center — KPI Dashboard.
@@ -258,203 +259,36 @@ function MoneyGoHighWidget() {
 }
 
 // ---------------------------------------------------------------------------
-// Mini dashboard — compact numbers-only 720p (1280x720) layout
+// Mini Money Go High card (compact — the scoring matrix has no mini mode)
 // ---------------------------------------------------------------------------
 
-function MiniStatCard({
-  label,
-  children,
-  accent = 'text-foreground',
-}: {
-  label: string;
-  children: React.ReactNode;
-  accent?: string;
-}) {
+function MiniMoneyGoHigh() {
   return (
-    <div className="rounded-xl border border-border/50 bg-card/40 p-3 backdrop-blur-sm">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={cn('mt-1', accent)}>{children}</div>
-    </div>
-  );
-}
-
-/** Compact semicircle parliament for the mini One Touch widget. */
-function MiniParliament({ agents, showAbnormal }: { agents: { owner: string; rate: number }[]; showAbnormal: boolean }) {
-  const sorted = [...agents].sort((a, b) => b.rate - a.rate);
-  const count = sorted.length;
-  const rings = 6;
-  const seats: { x: number; y: number; r: number }[] = [];
-  const W = 320;
-  const H = 150;
-  const CX = W / 2;
-  const maxR = Math.min(W / 2 - 12, H - 8);
-  for (let ring = 0; ring < rings; ring++) {
-    const ringR = maxR * (0.35 + (ring / (rings - 1)) * 0.65);
-    const arcAngle = Math.PI * (0.82 + ring * 0.03);
-    const segs = Math.max(1, Math.round((arcAngle / (2 * Math.PI)) * count * 1.6));
-    for (let s = 0; s < segs; s++) {
-      const t = segs === 1 ? 0.5 : s / (segs - 1);
-      const angle = Math.PI - (arcAngle * t) - (Math.PI - arcAngle) / 2;
-      seats.push({
-        x: CX + ringR * Math.cos(angle),
-        y: H - ringR * Math.sin(angle),
-        r: 5.5,
-      });
-    }
-  }
-  const seatColor = (rate: number) => {
-    if (rate >= 90) return '#34d399';
-    if (rate >= 80) return '#38bdf8';
-    if (rate >= 72) return '#fbbf24';
-    return '#fb7185';
-  };
-  return (
-    <svg width={W} height={H} className="mx-auto">
-      {seats.slice(0, count).map((s, i) => {
-        const a = sorted[i]!;
-        const low = a.rate < 72;
-        const dim = showAbnormal && !low;
-        return (
-          <circle
-            key={i}
-            cx={s.x}
-            cy={s.y}
-            r={s.r}
-            fill={seatColor(a.rate)}
-            fillOpacity={dim ? 0.12 : 0.92}
-            stroke={low ? '#fb7185' : 'transparent'}
-            strokeWidth={low ? 1 : 0}
-          >
-            <title>{`${a.owner}: ${a.rate.toFixed(1)}%`}</title>
-          </circle>
-        );
-      })}
-    </svg>
-  );
-}
-
-function MiniDashboard({
-  csatState,
-  touchState,
-  dailiesState,
-  showAbnormal,
-}: {
-  csatState: CsatReportState;
-  touchState: OneTouchReportState;
-  dailiesState: DailiesState;
-  showAbnormal: boolean;
-}) {
-  const shifts = countMtdShifts(undefined, undefined, undefined, ['Chat', 'Call', 'FR Call']);
-  const chatShifts = countMtdShifts(undefined, undefined, undefined, ['Chat']).total;
-  const callShifts = countMtdShifts(undefined, undefined, undefined, ['Call', 'FR Call']).total;
-
-  const csat = csatState.status === 'ready' ? csatState.report.total : null;
-  const touch = touchState.status === 'ready' ? touchState.report.total : null;
-  const dailies = dailiesState.status === 'ready' ? dailiesState.data : null;
-
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {/* CSAT */}
-      <MiniStatCard label="CSAT MTD">
-        {csat ? (
-          <div className="flex items-end justify-between">
-            <div>
-              <div className={cn('text-5xl font-black tabular-nums', csat.csat >= 85 ? 'text-emerald-300' : 'text-rose-300')}>
-                {csat.csat.toFixed(1)}
-                <span className="text-2xl">%</span>
-              </div>
-              <div className="mt-1 flex gap-3 text-xs">
-                <span className="text-emerald-300">✓ {csat.good}</span>
-                <span className="text-rose-300">✗ {csat.bad}</span>
-              </div>
-            </div>
-            <div className="h-14 w-2 rounded-full bg-rose-500/30 overflow-hidden">
-              <div
-                className="w-full bg-emerald-400"
-                style={{ height: `${csat.csat}%`, marginTop: `${100 - csat.csat}%` }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="text-2xl text-muted-foreground">—</div>
-        )}
-      </MiniStatCard>
-
-      {/* One Touch */}
-      <MiniStatCard label="One Touch MTD">
-        {touch ? (
-          <>
-            <div className="flex items-baseline gap-2">
-              <span className={cn('text-4xl font-black tabular-nums', touch.rate >= 72 ? 'text-emerald-300' : 'text-rose-300')}>
-                {touch.rate.toFixed(1)}
-                <span className="text-xl">%</span>
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {touch.oneTime}/{touch.closed}
-              </span>
-            </div>
-            <div className="-mt-2">
-              <MiniParliament
-                agents={touchState.status === 'ready' ? touchState.report.agents.map((a) => ({ owner: a.owner, rate: a.rate })) : []}
-                showAbnormal={showAbnormal}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="text-2xl text-muted-foreground">—</div>
-        )}
-      </MiniStatCard>
-
-      {/* Dailies */}
-      <MiniStatCard label="Dailies (per shift)">
-        {dailies ? (
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs text-muted-foreground">Grand total</span>
-              <span className="font-mono text-2xl font-black tabular-nums text-fuchsia-200">
-                {(dailies.call.handled + dailies.chat.total + dailies.email.total).toLocaleString()}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              <div className="rounded-md bg-amber-500/10 px-2 py-1 text-center ring-1 ring-amber-500/25">
-                <div className="text-[9px] text-muted-foreground">Call</div>
-                <div className="font-mono text-lg font-bold tabular-nums text-amber-200">
-                  {(dailies.call.handled / callShifts).toFixed(1)}
-                </div>
-              </div>
-              <div className="rounded-md bg-sky-500/10 px-2 py-1 text-center ring-1 ring-sky-500/25">
-                <div className="text-[9px] text-muted-foreground">Chat</div>
-                <div className="font-mono text-lg font-bold tabular-nums text-sky-200">
-                  {(dailies.chat.total / chatShifts).toFixed(1)}
-                </div>
-              </div>
-              <div className="rounded-md bg-violet-500/10 px-2 py-1 text-center ring-1 ring-violet-500/25">
-                <div className="text-[9px] text-muted-foreground">Email</div>
-                <div className="font-mono text-lg font-bold tabular-nums text-violet-200">
-                  {(dailies.email.total / shifts.total).toFixed(1)}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-2xl text-muted-foreground">—</div>
-        )}
-      </MiniStatCard>
-
-      {/* KPI */}
-      <MiniStatCard label="KPI Money Go High">
+    <section className="overflow-hidden rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+      <header className="flex items-center gap-2 border-b border-border/40 px-4 py-3">
+        <Trophy className="size-4 text-accent" />
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-foreground">KPI Money Go High!</h2>
+          <p className="truncate text-[11px] text-muted-foreground">October 2026 scoring matrix</p>
+        </div>
+      </header>
+      <div className="p-4">
         <div className="flex items-end justify-between">
           <div>
-            <div className="text-[10px] text-muted-foreground">Total score</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Total score
+            </div>
             <div className="text-4xl font-black tabular-nums text-emerald-300">{MONEY_TOTAL_SCORE}</div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-muted-foreground">Settlement</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Settlement
+            </div>
             <div className="text-3xl font-black tabular-nums text-foreground">×{MONEY_SETTLEMENT_COEFFICIENT}</div>
           </div>
         </div>
-      </MiniStatCard>
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -468,12 +302,14 @@ export default function Dash() {
   const { state: csatState, refreshing: csatRefreshing, reload: reloadCsat } = useCsatReport();
   const { state: touchState, refreshing: touchRefreshing, reload: reloadTouch } = useOneTouchReport();
   const { state: dailiesState, refreshing: dailiesRefreshing, reload: reloadDailies } = useDailiesReport();
+  const { state: rtState, refreshing: rtRefreshing, reload: reloadRt } = useResponseTimeReport();
 
   const reloadAll = useCallback(() => {
     reloadCsat();
     reloadTouch();
     reloadDailies();
-  }, [reloadCsat, reloadTouch, reloadDailies]);
+    reloadRt();
+  }, [reloadCsat, reloadTouch, reloadDailies, reloadRt]);
 
   const totalAbnormal = useMemo(() => {
     const csat = csatState.status === 'ready'
@@ -482,11 +318,20 @@ export default function Dash() {
     const touch = touchState.status === 'ready'
       ? touchState.report.agents.filter((a) => isAbnormal('oneTouchMtd', a.rate)).length
       : 0;
-    return csat + touch;
-  }, [csatState, touchState]);
+    const rt = rtState.status === 'ready'
+      ? (rtState.data.chat.agents.filter((a) => a.value > rtState.data.chat.threshold).length +
+          rtState.data.emailFirst.agents.filter((a) => a.value > rtState.data.emailFirst.threshold).length +
+          rtState.data.emailAvg.agents.filter((a) => a.value > rtState.data.emailAvg.threshold).length)
+      : 0;
+    return csat + touch + rt;
+  }, [csatState, touchState, rtState]);
 
-  const isLoading = csatState.status === 'loading' || touchState.status === 'loading' || dailiesState.status === 'loading';
-  const refreshing = csatRefreshing || touchRefreshing || dailiesRefreshing;
+  const isLoading =
+    csatState.status === 'loading' ||
+    touchState.status === 'loading' ||
+    dailiesState.status === 'loading' ||
+    rtState.status === 'loading';
+  const refreshing = csatRefreshing || touchRefreshing || dailiesRefreshing || rtRefreshing;
 
   return (
     <div className="min-h-full bg-background px-4 py-4">
@@ -546,14 +391,15 @@ export default function Dash() {
         </div>
       </div>
 
-      {/* Mini view — compact numbers-only 720p layout */}
+      {/* Mini view — reuses the full widgets with charts/secondary metrics hidden */}
       {miniMode && (
-        <MiniDashboard
-          csatState={csatState}
-          touchState={touchState}
-          dailiesState={dailiesState}
-          showAbnormal={showAbnormal}
-        />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <CsatReportSection state={csatState} showAbnormal={showAbnormal} onRetry={reloadCsat} mini />
+          <OneTouchSection state={touchState} showAbnormal={showAbnormal} onRetry={reloadTouch} mini />
+          <DailiesSection state={dailiesState} onRetry={reloadDailies} mini />
+          <ResponseTimeSection state={rtState} showAbnormal={showAbnormal} onRetry={reloadRt} mini />
+          <MiniMoneyGoHigh />
+        </div>
       )}
 
       {/* Full view */}
@@ -572,6 +418,11 @@ export default function Dash() {
       {/* Dailies — MTD Call / Chat / Email volume + per-shift averages */}
       <div className="mb-4">
         <DailiesSection state={dailiesState} onRetry={reloadDailies} />
+      </div>
+
+      {/* Response times — Chat avg / Email first / Email avg, team vs agent avg */}
+      <div className="mb-4">
+        <ResponseTimeSection state={rtState} showAbnormal={showAbnormal} onRetry={reloadRt} />
       </div>
 
       {/* Money Go High scoring matrix */}

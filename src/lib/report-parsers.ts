@@ -6,6 +6,7 @@
  * returns a typed report object. The only runtime dependency is `xlsx`.
  */
 import * as XLSX from 'xlsx';
+import { THRESHOLDS } from './kpi-thresholds';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -317,4 +318,140 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
     });
   }
   return { fileName, queues };
+}
+
+// ---------------------------------------------------------------------------
+// Average response time (Chat + Email first / Email avg)
+// ---------------------------------------------------------------------------
+
+export interface ResponseTimeAgent {
+  owner: string;
+  /** Response time in the report's native unit (seconds for chat, hours for email). */
+  value: number;
+  /** Record / chat count for weighting (0 when the export doesn't expose it). */
+  count: number;
+}
+
+export interface ResponseTimeReport {
+  fileName: string;
+  asOf: string | null;
+  metric: 'chat' | 'emailFirst' | 'emailAvg';
+  unit: 'seconds' | 'hours';
+  threshold: number;
+  agents: ResponseTimeAgent[];
+  /** Weighted team average (Total row, or count-weighted mean of agents). */
+  teamAvg: number;
+  /** Unweighted mean of per-agent averages — the typical agent's performance. */
+  agentAvg: number;
+}
+
+interface RtConfig {
+  metric: ResponseTimeReport['metric'];
+  unit: ResponseTimeReport['unit'];
+  threshold: number;
+  valueHeaderRe: RegExp;
+  countHeaderRe?: RegExp;
+}
+
+/**
+ * Generic parser for the three "average response time" exports. Each is a
+ * simple Case Owner → numeric average pivot, optionally with a record-count
+ * column and a Total row. The Total row's value is used as `teamAvg`; the
+ * mean of agent rows is `agentAvg`.
+ */
+export function parseResponseTimeWorkbook(
+  data: ArrayBuffer,
+  fileName: string,
+  config: RtConfig,
+): ResponseTimeReport {
+  const { rows } = sheetRows(data, /.*/);
+  const asOf = extractAsOf(rows);
+
+  const headerIdx = rows.findIndex(
+    (r) =>
+      r.some((c) => /^Case Owner/i.test(String(c ?? '').trim())) &&
+      r.some((c) => config.valueHeaderRe.test(String(c ?? '').trim())),
+  );
+  if (headerIdx === -1) throw new Error(`Response-time header not found in ${fileName}`);
+  const header = rows[headerIdx];
+  const ownerCol = header.findIndex((c) => /^Case Owner/i.test(String(c ?? '').trim()));
+  const valueCol = header.findIndex((c) => config.valueHeaderRe.test(String(c ?? '').trim()));
+  const countCol = config.countHeaderRe
+    ? header.findIndex((c) => config.countHeaderRe.test(String(c ?? '').trim()))
+    : -1;
+
+  const agents: ResponseTimeAgent[] = [];
+  let teamAvg = 0;
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const owner = String(row[ownerCol] ?? '').trim();
+    if (!owner) continue;
+    const value = toNumber(row[valueCol]);
+    if (/^total$/i.test(owner)) {
+      teamAvg = value;
+    } else {
+      agents.push({
+        owner,
+        value,
+        count: countCol !== -1 ? toNumber(row[countCol]) : 0,
+      });
+    }
+  }
+  if (agents.length === 0) throw new Error(`No agent rows found in ${fileName}`);
+
+  // Fallback: count-weighted team average if the export lacks a Total row.
+  if (!teamAvg) {
+    const weighted = agents.filter((a) => a.count > 0);
+    if (weighted.length) {
+      const v = weighted.reduce((s, a) => s + a.value * a.count, 0);
+      const c = weighted.reduce((s, a) => s + a.count, 0);
+      teamAvg = c > 0 ? v / c : 0;
+    } else {
+      teamAvg = agents.reduce((s, a) => s + a.value, 0) / agents.length;
+    }
+  }
+
+  const agentAvg = agents.reduce((s, a) => s + a.value, 0) / agents.length;
+  return {
+    fileName,
+    asOf,
+    metric: config.metric,
+    unit: config.unit,
+    threshold: config.threshold,
+    agents,
+    teamAvg,
+    agentAvg,
+  };
+}
+
+/** Chat average response time (seconds). */
+export function parseChatResponseTimeWorkbook(data: ArrayBuffer, fileName: string): ResponseTimeReport {
+  return parseResponseTimeWorkbook(data, fileName, {
+    metric: 'chat',
+    unit: 'seconds',
+    threshold: THRESHOLDS.chatResponse.value,
+    valueHeaderRe: /Average Response Total Avg Time/i,
+    countHeaderRe: /Avg Chat Total Count/i,
+  });
+}
+
+/** Email first response time (hours). */
+export function parseEmailFirstResponseWorkbook(data: ArrayBuffer, fileName: string): ResponseTimeReport {
+  return parseResponseTimeWorkbook(data, fileName, {
+    metric: 'emailFirst',
+    unit: 'hours',
+    threshold: THRESHOLDS.emailFirstResponse.value,
+    valueHeaderRe: /Average First Response Time/i,
+  });
+}
+
+/** Email average (overall) response time (hours). */
+export function parseEmailAvgResponseWorkbook(data: ArrayBuffer, fileName: string): ResponseTimeReport {
+  return parseResponseTimeWorkbook(data, fileName, {
+    metric: 'emailAvg',
+    unit: 'hours',
+    threshold: THRESHOLDS.emailAvgResponse.value,
+    valueHeaderRe: /Average Average Response Time/i,
+    countHeaderRe: /Record Count/i,
+  });
 }
