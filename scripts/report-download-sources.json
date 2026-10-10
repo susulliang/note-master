@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "description": "Authenticated report export entry points. This registry contains URLs only, not credentials or session data.",
+  "reports": [
+    {
+      "key": "call_historical_metrics",
+      "label": "Call Historical Metrics",
+      "requires_authenticated_session": true,
+      "url": "https://amr-callcenter-sso.my.connect.aws/10e64733-e042-493e-b6ae-b1cd3f81a851"
+    },
+    {
+      "key": "csat",
+      "label": "CSAT",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz00000AbmHdEAJ"
+    },
+    {
+      "key": "amr_email",
+      "label": "AMR Email",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz00000Abn41EAB"
+    },
+    {
+      "key": "onetouch_mtd",
+      "label": "One-Touch MTD",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz000006ANXlEAO"
+    },
+    {
+      "key": "average_response_chat",
+      "label": "Average Response Chat",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz0000067x7xEAA"
+    },
+    {
+      "key": "average_response_email",
+      "label": "Average Response Email",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz00000ATN8LEAX"
+    },
+    {
+      "key": "first_response_email",
+      "label": "First Response Email",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz0000067p1DEAQ"
+    },
+    {
+      "key": "mtd_chat",
+      "label": "MTD Chat",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz000007crYjEAI"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
 import type { KeywordAlert } from '@/hooks/use-cat-assistant';
+import type { CatId } from '@/lib/cat-sprites';
 
 interface RailControlsProps {
   theme: ThemeId;
@@ -24,15 +25,17 @@ interface RailControlsProps {
   onClearHistory: () => void;
   uiScale: UiScale;
   onToggleUiScale: () => void;
-  /** CCP tab-audio + mic capture state — only used by the engine settings
+  /** CCP tab-audio + mic capture state — only used by the Settings
    *  panel (the standalone mic rail button moved to the sticky bottom
    *  call bar in v0.2.0). */
   callSupported?: boolean;
   callCapturing?: boolean;
   onToggleCall?: () => void;
-  /** Engine settings panel (gear): whisper/LLM state + handlers */
+  /** Settings panel (gear): cat selection plus whisper/LLM state and handlers */
   engine?: EngineState;
   parser?: ParserState;
+  selectedCat: CatId;
+  onSelectCat: (catId: CatId) => void;
   /** On-demand DeepSeek cloud parser state (the Cloud parse button) */
   cloud?: CloudState;
   transcript?: TranscriptEntry[];
@@ -58,9 +61,9 @@ const RAIL_BTN =
 /**
  * Vertical control stack docked at the BOTTOM of the left rail pill
  * (portaled in by the page). Replaces the old draggable corner toolbar:
- * History / Reset / Boxes / Mic / UI-scale / Engine settings / Theme.
+ * History / Reset / Boxes / Mic / UI-scale / Settings / Theme.
  *
- * Panels (History, Engine settings, Boxes) are viewport-fixed and slide in
+ * Panels (History, Settings, Boxes) are viewport-fixed and slide in
  * from the rail's right edge — the rail's glass background is a sibling
  * layer, not an ancestor, so these `fixed` elements are never trapped by a
  * backdrop-filter containing block.
@@ -80,6 +83,8 @@ export default function RailControls({
   onToggleCall,
   engine,
   parser,
+  selectedCat,
+  onSelectCat,
   cloud,
   transcript,
   isTranscribing,
@@ -183,7 +188,7 @@ export default function RailControls({
           <Type className="size-[18px]" />
         </Button>
 
-        {/* Engine settings — the gear opens the Whisper/LLM/downloads/
+        {/* Settings — the gear opens the Whisper/LLM/downloads/
             resources/debug panel (like the History button opens history) */}
         {engine && parser && (
           <Button
@@ -194,8 +199,8 @@ export default function RailControls({
               if (boxesOpen) setBoxesOpen(false);
             }}
             className={cn(RAIL_BTN, engineOpen && 'bg-foreground/10 text-foreground')}
-            aria-label="Engine settings"
-            title="Engine settings — Whisper & LLM models, downloads, resources, debug"
+            aria-label="Settings"
+            title="Settings — cat, Whisper & LLM models, downloads, resources, debug"
           >
             <Settings className="size-[18px] transition-transform duration-500 hover:rotate-90" />
             {(engine.status === 'error' || parser.status === 'error') && (
@@ -233,7 +238,7 @@ export default function RailControls({
 
       {/* BOXES gridbox visibility panel — small glass card anchored to the
           right of the rail with 7 switches. Same geometry convention as
-          Engine settings: fixed outside-click catcher at z-40, panel at
+          Settings: fixed outside-click catcher at z-40, panel at
           z-50. */}
       {boxesOpen && gridboxVisibility && (
         <>
@@ -298,7 +303,7 @@ export default function RailControls({
         </>
       )}
 
-      {/* Engine settings panel — opens from the gear, sliding in from the
+      {/* Settings panel — opens from the gear, sliding in from the
           rail's right edge; vertically centered. The click-outside catcher
           sits UNDER the panel (z-40 vs z-50). */}
       {engineOpen && engine && parser && (
@@ -307,6 +312,8 @@ export default function RailControls({
           <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
             <EngineSettingsPanel
               engine={engine}
+              selectedCat={selectedCat}
+              onSelectCat={onSelectCat}
               parser={parser}
               cloud={cloud}
               transcript={transcript ?? []}

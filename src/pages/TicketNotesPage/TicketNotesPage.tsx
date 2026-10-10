@@ -93,6 +93,7 @@ import { useCcpExtensionBridge, type PendingExtensionPush } from '@/hooks/use-cc
 import { generateWithDeepseek } from '@/lib/cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
+import { CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import {
   normalizeTheme,
   nextTheme,
@@ -1643,6 +1644,8 @@ Additional information (if needed): ${additional}`;
   //  Cat assistant — the Clippy-style workspace sprite. Pops up tips,
   //  ambient thoughts and greetings (live-transcript advice is paused).
   // -------------------------------------------------------------------------
+  const [storedCatId, setStoredCatId] = useScopedState<CatId>(CAT_SELECTION_STORAGE_KEY, 'hunao');
+  const selectedCat = normalizeCatId(storedCatId);
   const cat = useCatAssistant({
     isCapturing: call.isCapturing,
     transcript: call.transcript,
@@ -2156,6 +2159,8 @@ Additional information (if needed): ${additional}`;
             onClearHistory={handleClearHistory}
             uiScale={uiScale}
             onToggleUiScale={handleToggleUiScale}
+            selectedCat={selectedCat}
+            onSelectCat={setStoredCatId}
             callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}
@@ -2657,6 +2662,7 @@ Additional information (if needed): ${additional}`;
 
       {/* Clippy-style cat assistant — floats above everything */}
       <CatAssistant
+        catId={selectedCat}
         currentThought={cat.currentThought}
         isCapturing={call.isCapturing}
         isThinking={cat.isThinking}

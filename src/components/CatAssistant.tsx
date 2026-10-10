@@ -2,53 +2,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { CatThought } from '@/hooks/use-cat-assistant';
 import { useScopedState } from '@/hooks/use-scoped-state';
+import { getCatSprite, type CatId } from '@/lib/cat-sprites';
 
 /**
- * Cat Assistant sprite — a draggable cat that sits on the workspace and
- * pops up thought bubbles (tips / advice / idle musings).
- *
- * Visual model:
- *  - The sprite is a 128px pixel-art cat at top-left by default, draggable
- *    anywhere on the viewport. Position is persisted to localStorage.
- *  - Six states (resting / standby / side / thinking / alert / dragged),
- *    each with 3 variant frames (128×128 alpha-transparent PNGs in
- *    /assets/cat/). One variant is picked at random on every state change,
- *    so the same cat appears in a slightly different moment of that pose.
- *    No frame cycling within a state; the state change itself (pop
- *    animation) is the only movement.
- *  - A thought bubble renders above the sprite when `currentThought` is set.
- *  - After 20s of inactivity the cat dozes into "resting"; a click wakes it.
- *
- * State mapping (priority order):
- *  - dragged   → pointer is down and the cat is being moved
- *  - thinking  → LLM advice request in flight
- *  - alert     → live call capture running (ears perked, listening)
- *  - side      → showing a thought bubble (glancing sideways at the agent)
- *  - resting   → dozed off after 20s idle
- *  - standby   → idle default (sitting, calm)
+ * Draggable pixel cat with occasional sprite animation and thought bubbles.
  */
-
-const DEFAULT_POSITION = { x: 24, y: 24 };
+const DEFAULT_POSITION = { x: 16, y: 24 };
 const SPRITE_SIZE = 128;
 
-/** Sprite states. Each has 3 variant frames (128×128 alpha-transparent PNGs
- *  in /assets/cat/); one is picked at random on every state change so the cat
- *  looks like the same animal in a slightly different moment of that pose. */
-type CatState = 'resting' | 'standby' | 'side' | 'thinking' | 'alert' | 'dragged';
-
-const CAT_FRAMES: Record<CatState, string[]> = {
-  resting: [1, 2, 3].map((n) => `/assets/cat/resting-${n}.png`),
-  standby: [1, 2, 3].map((n) => `/assets/cat/standby-${n}.png`),
-  side: [1, 2, 3].map((n) => `/assets/cat/side-${n}.png`),
-  thinking: [1, 2, 3].map((n) => `/assets/cat/thinking-${n}.png`),
-  alert: [1, 2, 3].map((n) => `/assets/cat/alert-${n}.png`),
-  dragged: [1, 2, 3].map((n) => `/assets/cat/dragged-${n}.png`),
-};
-
-/** How long the cat waits before dozing off into "resting" (ms). */
-const RESTING_DELAY_MS = 20_000;
+function clampPosition(position: { x: number; y: number }) {
+  return {
+    x: Math.max(0, Math.min(position.x, window.innerWidth - SPRITE_SIZE)),
+    y: Math.max(0, Math.min(position.y, window.innerHeight - SPRITE_SIZE)),
+  };
+}
 
 interface CatAssistantProps {
+  catId: CatId;
   currentThought: CatThought | null;
   isCapturing: boolean;
   isThinking: boolean;
@@ -57,6 +27,7 @@ interface CatAssistantProps {
 }
 
 export function CatAssistant({
+  catId,
   currentThought,
   isCapturing,
   isThinking,
@@ -67,56 +38,64 @@ export function CatAssistant({
     '__app_ecovacs_cat_position',
     DEFAULT_POSITION
   );
-  const [imgError, setImgError] = useState(false);
   const [dragging, setDragging] = useState(false);
-
-  // Current sprite state, derived from call / thought / LLM activity.
-  // After RESTING_DELAY_MS of total inactivity the cat dozes off into
-  // "resting"; clicking the cat wakes it back up.
-  const [dozing, setDozing] = useState(false);
-  useEffect(() => {
-    if (isCapturing || currentThought || isThinking || dragging) {
-      setDozing(false);
-      return;
-    }
-    const id = window.setTimeout(() => setDozing(true), RESTING_DELAY_MS);
-    return () => window.clearTimeout(id);
-  }, [isCapturing, currentThought, isThinking, dragging]);
-
-  // State priority: dragged (being moved) > thinking (LLM working) >
-  // alert (live call) > side (thought bubble showing) > resting (dozed
-  // off) > standby (idle default).
-  const state: CatState = dragging
-    ? 'dragged'
-    : isThinking
-      ? 'thinking'
-      : isCapturing
-        ? 'alert'
-        : currentThought
-          ? 'side'
-          : dozing
-            ? 'resting'
-            : 'standby';
-
-  // Pick a random variant frame for the new state. The effect keys on
-  // `state` so it only re-rolls when the state actually changes, not on
-  // every render — the cat keeps the same pose while it stays put.
-  const [frameIndex, setFrameIndex] = useState(0);
-  useEffect(() => {
-    setFrameIndex(Math.floor(Math.random() * CAT_FRAMES[state].length));
-  }, [state]);
-
-  // `key={state}` remounts the img on every state change so the pop
-  // animation replays — that swap is the sprite's only animation.
-  const spriteSrc = CAT_FRAMES[state][frameIndex];
-
-  // Wake the cat from resting when clicked (only matters when dozing;
-  // other states already reset the timer).
-  const wakeUp = useCallback(() => {
-    if (dozing) setDozing(false);
-  }, [dozing]);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const catName = `${catId.slice(0, 1).toUpperCase()}${catId.slice(1)}`;
 
   const dragOffset = useRef({ x: 0, y: 0 });
+  const spriteRef = useRef<HTMLSpanElement>(null);
+  const visiblePosition = clampPosition(position);
+
+  useEffect(() => {
+    const keepPositionInViewport = () => setPosition((previous) => clampPosition(previous));
+    keepPositionInViewport();
+    window.addEventListener('resize', keepPositionInViewport);
+    return () => window.removeEventListener('resize', keepPositionInViewport);
+  }, [setPosition]);
+
+  useEffect(() => {
+    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let timeoutId: number | undefined;
+    let cancelled = false;
+
+    const scheduleAnimation = () => {
+      window.clearTimeout(timeoutId);
+      timeoutId = undefined;
+      if (cancelled || motionPreference.matches) return;
+
+      timeoutId = window.setTimeout(() => {
+        timeoutId = undefined;
+        if (!cancelled && !motionPreference.matches) setIsAnimating(true);
+      }, 2000 + Math.random() * 28000);
+    };
+
+    const handleAnimationEnd = () => {
+      setIsAnimating(false);
+      scheduleAnimation();
+    };
+
+    const handleMotionPreferenceChange = () => {
+      if (motionPreference.matches) {
+        window.clearTimeout(timeoutId);
+        timeoutId = undefined;
+        setIsAnimating(false);
+      } else {
+        scheduleAnimation();
+      }
+    };
+
+    scheduleAnimation();
+    const sprite = spriteRef.current;
+    sprite?.addEventListener('animationend', handleAnimationEnd);
+    motionPreference.addEventListener('change', handleMotionPreferenceChange);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      sprite?.removeEventListener('animationend', handleAnimationEnd);
+      motionPreference.removeEventListener('change', handleMotionPreferenceChange);
+    };
+  }, []);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -125,12 +104,12 @@ export function CatAssistant({
       e.preventDefault();
       setDragging(true);
       dragOffset.current = {
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
+        x: e.clientX - visiblePosition.x,
+        y: e.clientY - visiblePosition.y,
       };
       (e.target as Element).setPointerCapture?.(e.pointerId);
     },
-    [position]
+    [visiblePosition.x, visiblePosition.y]
   );
 
   const onPointerMove = useCallback(
@@ -138,13 +117,7 @@ export function CatAssistant({
       if (!dragging) return;
       const x = e.clientX - dragOffset.current.x;
       const y = e.clientY - dragOffset.current.y;
-      // Clamp so the sprite stays on screen
-      const maxX = window.innerWidth - SPRITE_SIZE;
-      const maxY = window.innerHeight - SPRITE_SIZE;
-      setPosition({
-        x: Math.max(0, Math.min(x, maxX)),
-        y: Math.max(0, Math.min(y, maxY)),
-      });
+      setPosition(clampPosition({ x, y }));
     },
     [dragging, setPosition]
   );
@@ -153,14 +126,10 @@ export function CatAssistant({
     setDragging(false);
   }, []);
 
-  // Emoji fallback only if the frames are missing entirely. Never resets
-  // per frame — a cycling src must not retrigger a failed load every 450ms.
-  const showEmojiFallback = imgError;
-
   return (
     <div
       className={cn('pointer-events-none fixed z-50 select-none', className)}
-      style={{ left: position.x, top: position.y }}
+      style={{ left: visiblePosition.x, top: visiblePosition.y }}
     >
       {/* Thought bubble — anchored above the sprite */}
       {currentThought && (
@@ -196,40 +165,35 @@ export function CatAssistant({
         </div>
       )}
 
-      {/* Sprite */}
+      {/* Rest on frame zero, with occasional one-shot animation. */}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={wakeUp}
         role="img"
-        aria-label="Cat assistant — drag to move, click to wake"
+        aria-label={`${catName} cat assistant${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move`}
         className={cn(
           'pointer-events-auto relative flex h-32 w-32 cursor-grab items-center justify-center',
           dragging && 'cursor-grabbing'
         )}
       >
-        {showEmojiFallback ? (
-          <span className="text-4xl" aria-hidden>
-            🐱
-          </span>
-        ) : (
-          <img
-            key={state}
-            src={spriteSrc}
-            alt={`Cat assistant (${state})`}
-            draggable={false}
-            onError={() => setImgError(true)}
-            style={{ imageRendering: 'pixelated' }}
-            className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)] animate-cat-pop"
-          />
-        )}
+        <span
+          ref={spriteRef}
+          aria-hidden="true"
+          className={cn(
+            'cat-sprite-frame h-32 w-32 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]',
+            isAnimating && 'cat-sprite-animate'
+          )}
+          style={{ backgroundImage: `url("${getCatSprite(catId)}")` }}
+        />
 
-        {/* Listening indicator — pulsing dot while a call is live.
-            (thinking state is conveyed by the sprite frames themselves) */}
+        {/* Keep call and generation activity legible without swapping poses. */}
         {isCapturing && !isThinking && (
           <span className="absolute right-0 top-0 h-3 w-3 rounded-full bg-primary shadow-[0_0_8px_var(--primary)] animate-pulse" />
+        )}
+        {isThinking && (
+          <span className="absolute right-0 top-0 h-3 w-3 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)] animate-pulse" />
         )}
       </div>
     </div>

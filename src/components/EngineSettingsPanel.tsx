@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'reac
 import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
 import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
@@ -88,6 +89,8 @@ export interface CloudState {
 
 interface EngineSettingsPanelProps {
   engine: EngineState;
+  selectedCat: CatId;
+  onSelectCat: (catId: CatId) => void;
   parser?: ParserState;
   /** DeepSeek cloud parser (API-key management on its Model selection row) */
   cloud?: CloudState;
@@ -227,7 +230,7 @@ function useDutyCycle(active: boolean, windowMs = 15_000): number {
 }
 
 /**
- * ENGINE SETTINGS PANEL — opened by the gear icon in the floating toolbar.
+ * SETTINGS PANEL — opened by the gear icon in the floating toolbar.
  * Everything engine-related lives here: Whisper & LLM model selectors,
  * download management (CPU/GPU builds), start/stop transcription, resource
  * indicators, and the parse debug view. The live caption panel stays just
@@ -235,6 +238,8 @@ function useDutyCycle(active: boolean, windowMs = 15_000): number {
  */
 export default function EngineSettingsPanel({
   engine,
+  selectedCat,
+  onSelectCat,
   parser,
   cloud,
   transcript,
@@ -334,12 +339,12 @@ export default function EngineSettingsPanel({
     <div
       className="glass-panel custom-scrollbar max-h-[70vh] w-[min(440px,calc(100vw-24px))] overflow-y-auto rounded-xl p-3"
       role="dialog"
-      aria-label="Engine settings"
+      aria-label="Settings"
     >
       {/* Header */}
       <div className="mb-2 flex items-center gap-2">
         <p className="flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Engine settings
+          Settings
         </p>
         <button
           type="button"
@@ -352,6 +357,44 @@ export default function EngineSettingsPanel({
       </div>
 
       <div className="space-y-2">
+        <section aria-labelledby="cat-choice-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p id="cat-choice-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Cat companion
+            </p>
+            <span className="text-[9px] text-muted-foreground/70">Pick your workspace cat</span>
+          </div>
+          <div role="group" aria-labelledby="cat-choice-label" className="grid grid-cols-2 gap-1.5">
+            {CAT_CHOICES.map((choice) => {
+              const selected = selectedCat === choice.id;
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onSelectCat(choice.id)}
+                  className={cn(
+                    'flex min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                    selected
+                      ? 'border-accent/60 bg-accent/10'
+                      : 'border-border/40 bg-background/35 hover:border-border hover:bg-foreground/[0.04]'
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="cat-sprite-frame size-8 shrink-0"
+                    style={{ backgroundImage: `url("${choice.sprite}")` }}
+                  />
+                  <span className="min-w-0">
+                    <span className={cn('block truncate text-[10px] font-semibold', choice.tint)}>{choice.name}</span>
+                    <span className="block truncate text-[9px] text-muted-foreground">{choice.coat}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         {/* ---- Whisper engine ---- */}
         {engine.isSupported && (
           <div>
@@ -1052,7 +1095,7 @@ function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number)
       lines.push(`  Last error: ${dp.lastError}`);
       if (/does not exist|receiving end/i.test(dp.lastError)) {
         lines.push(`  → None of the tried ids responded. Copy the REAL id from ${extMgrUrl} → Ecovacs Note Helper → ID`);
-        lines.push(`    and paste it into the "Direct channel" box in Engine Settings, then click Save & Probe.`);
+        lines.push(`    and paste it into the "Direct channel" box in Settings, then click Save & Probe.`);
       }
     }
   }
@@ -1069,7 +1112,7 @@ function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number)
   if (!d.bridgeInjected) {
     lines.push('');
     lines.push(`Fix checklist (${browserTag}):`);
-    lines.push(`  1. Engine Settings → "Direct channel" box → paste the id from ${extMgrUrl} → Save & Probe (fastest — no reload needed).`);
+    lines.push(`  1. Settings → "Direct channel" box → paste the id from ${extMgrUrl} → Save & Probe (fastest — no reload needed).`);
     lines.push(`  2. Or: ${extMgrUrl} → Developer mode → find Ecovacs Note Helper → 🔄 Reload (do it TWICE on Edge — cache is sticky).`);
     lines.push(`  3. Hard refresh (Ctrl+Shift+R) THIS Ticket Notes tab.`);
     lines.push(`  4. If popup was open during reload: close it and re-open it (popup context invalidated too).`);

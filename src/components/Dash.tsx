@@ -808,15 +808,17 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     if (!end) return null;
     const start = monthStart(end);
     const chatShifts = countMtdShifts(start, end, undefined, ['Chat']).total;
-    const emailShifts = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).total;
+    const allShifts = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).total;
+    const totalProcessed = data.call.handled + data.email.total + data.chat.total;
     return {
-      email: { shifts: emailShifts, average: emailShifts > 0 ? data.email.total / emailShifts : null },
+      total: { shifts: allShifts, average: allShifts > 0 ? totalProcessed / allShifts : null },
+      email: { shifts: allShifts, average: allShifts > 0 ? data.email.total / allShifts : null },
       chat: { shifts: chatShifts, average: chatShifts > 0 ? data.chat.total / chatShifts : null },
       through: end,
     };
   }, [data]);
   const volumes = [
-    { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: null, shifts: null, color: 'text-foreground', accent: 'bg-accent' },
+    { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, color: 'text-foreground', accent: 'bg-accent' },
     { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
     { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
@@ -832,22 +834,22 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
         </button>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {volumes.map((volume, index) => (
-          <div key={volume.name} className={cn('min-w-0 rounded-lg p-3', index === 0 ? 'border border-accent/25 bg-accent/5' : 'bg-background/35')}>
+        {volumes.map((volume) => (
+          <div key={volume.name} className={cn('min-w-0 rounded-lg p-3', volume.name === 'Total processed' ? 'border border-accent/25 bg-accent/5' : 'bg-background/35')}>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className={cn('size-2 rounded-full', volume.accent)} />
               {volume.name}
             </div>
             <div className={cn('mt-1 truncate font-mono text-xl font-semibold tabular-nums', volume.color)}>{volume.value === null ? '—' : formatNumber(volume.value)}</div>
             <div className="mt-1 text-[10px] text-muted-foreground">{volume.detail}</div>
-            {index > 0 && <div className="mt-2 text-[11px] text-muted-foreground">AVG / shift <span className="font-mono tabular-nums text-foreground">{volume.average === null ? '—' : volume.average.toFixed(1)}</span></div>}
-            {index > 0 && <div className="text-[10px] text-muted-foreground">{volume.shifts === null ? 'Roster shifts unavailable' : `${formatNumber(volume.shifts)} roster shifts`}</div>}
+            <div className="mt-2 text-[11px] text-muted-foreground">AVG / shift <span className="font-mono tabular-nums text-foreground">{volume.average === null ? '—' : volume.average.toFixed(1)}</span></div>
+            <div className="text-[10px] text-muted-foreground">{volume.shifts === null ? 'Roster shifts unavailable' : `${formatNumber(volume.shifts)} roster shifts`}</div>
           </div>
         ))}
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground">
         {refreshError ? 'Showing previous report data. ' : ''}
-        {shiftStats ? `Roster averages through ${shiftStats.through}; Chat uses Chat shifts and Email uses both Chat + Call groups.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
+        {shiftStats ? `Roster averages through ${shiftStats.through}; Total and Email use Chat + Call + FR Call shifts, while Chat uses Chat shifts only.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
         {' '}Call volume and Call + FR Call shift average are shown in Call performance. Total processed sums independent source counts.
         {!data && state.status === 'loading' && ' Loading report volumes…'}
         {!data && state.status === 'error' && ` ${state.message}`}
@@ -1271,26 +1273,47 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
   const [perShift, setPerShift] = useState(false);
   const workload = useMemo(() => {
     if (state.status !== 'ready') return null;
-    const { chat, email } = state.data;
-    const names = new Map<string, { name: string; chat: number; email: number }>();
-    for (const row of chat.agents) names.set(normalizeAgentName(row.owner), { name: row.owner, chat: row.count, email: 0 });
-    for (const row of email.agents) {
-      const key = normalizeAgentName(row.owner);
-      const current = names.get(key) ?? { name: row.owner, chat: 0, email: 0 };
-      current.email = row.count;
-      if (row.owner.length > current.name.length) current.name = row.owner;
-      names.set(key, current);
-    }
+    const { chat, email, historical } = state.data;
     const dateChat = asOfDate(chat.asOf);
     const dateEmail = asOfDate(email.asOf);
     const compatible = !!dateChat && dateChat === dateEmail;
     const end = compatible ? dateChat : null;
-    const shifts = end ? countMtdShifts(monthStart(end), end, undefined, ['Chat', 'Call', 'FR Call']).byAgent : {};
+    const identityEnd = [dateChat, dateEmail].filter((date): date is string => !!date).sort().at(-1) ?? null;
+    const identityShifts = identityEnd
+      ? countMtdShifts(monthStart(identityEnd), identityEnd, undefined, ['Chat', 'Call', 'FR Call']).byAgent
+      : {};
+    const shifts = end ? identityShifts : {};
+    const names = new Map<string, { name: string; call: number; chat: number; email: number }>();
+    const addVolume = (owner: string, channel: 'call' | 'chat' | 'email', count: number) => {
+      const rosterMatch = matchRosterShift(owner, identityShifts);
+      const key = rosterMatch
+        ? `roster:${normalizeAgentName(rosterMatch.name)}`
+        : `owner:${normalizeAgentName(owner)}`;
+      const current = names.get(key) ?? {
+        name: rosterMatch?.name ?? owner,
+        call: 0,
+        chat: 0,
+        email: 0,
+      };
+      current[channel] += count;
+      if (rosterMatch) current.name = rosterMatch.name;
+      else if (owner.length > current.name.length) current.name = owner;
+      names.set(key, current);
+    };
+    for (const row of chat.agents) addVolume(row.owner, 'chat', row.count);
+    for (const row of email.agents) addVolume(row.owner, 'email', row.count);
+    for (const row of historical.agents) addVolume(row.owner, 'call', row.handled);
     const all = [...names.values()].map((row) => {
       const rosterMatch = matchRosterShift(row.name, shifts);
       const rosterMatched = rosterMatch !== null;
       const shiftCount = rosterMatch?.shifts ?? 0;
-      return { ...row, total: row.chat + row.email, rosterMatched, shifts: shiftCount, rate: compatible && shiftCount > 0 ? (row.chat + row.email) / shiftCount : null };
+      return {
+        ...row,
+        total: row.call + row.chat + row.email,
+        rosterMatched,
+        shifts: shiftCount,
+        rate: compatible && shiftCount > 0 ? (row.call + row.chat + row.email) / shiftCount : null,
+      };
     });
     return {
       all,
@@ -1302,6 +1325,7 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
       dateEmail,
       shifts,
       max: Math.max(1, ...all.map((row) => perShift ? row.rate ?? 0 : row.total)),
+      maxCall: Math.max(1, ...all.map((row) => row.call)),
       maxChat: Math.max(1, ...all.map((row) => row.chat)),
       maxEmail: Math.max(1, ...all.map((row) => row.email)),
       total: compatible ? all.reduce((sum, row) => sum + row.total, 0) : null,
@@ -1318,7 +1342,7 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
     { label: 'Email cases', value: state.data.email.total, color: 'bg-violet-400' },
   ];
   const showPerShift = perShift && workload.compatible;
-  const rows = showPerShift ? workload.verified : [...workload.verified, ...workload.unmatched].sort((a, b) => b.total - a.total);
+  const rows = showPerShift ? workload.verified : [...workload.all].sort((a, b) => b.total - a.total);
   return (
     <div className="space-y-4">
       {!workload.compatible && <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">Chat and Email report periods do not match. Team totals are shown independently; per-shift rates are hidden to avoid a misleading comparison.</div>}
@@ -1326,7 +1350,7 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">MTD channel volume</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Call totals are team-level; agent bars show Chat + Email only.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Agent bars include Call, Chat, and Email. Per-agent calls come from Historical Metrics.</p>
           </div>
           <div className="inline-flex rounded-lg border border-border/60 bg-background/40 p-1">
             <button type="button" onClick={() => setPerShift(false)} className={cn('rounded-md px-3 py-1.5 text-xs', !showPerShift ? 'bg-accent/15 text-foreground' : 'text-muted-foreground')}>Total contacts</button>
@@ -1347,31 +1371,51 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
           <span>Abandoned <strong className="font-mono text-foreground">{formatNumber(call.abandoned)}</strong></span>
           <span>Outbound handled <strong className="font-mono text-foreground">{formatNumber(call.handledOutbound)}</strong></span>
         </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">The Call handled team total uses MTD Call Data; agent-level call counts use Historical Metrics and may not reconcile exactly.</p>
       </section>
       <section className={cn(PANEL, 'overflow-hidden')}>
         <header className="border-b border-border/50 px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">{showPerShift ? 'Contacts per verified roster shift' : workload.compatible ? 'Chat + Email contacts by report identity' : 'Independent agent source counts'}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{showPerShift ? 'Contacts per verified roster shift' : workload.compatible ? 'MTD contacts by agent' : 'Independent agent source counts'}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {showPerShift ? 'Unambiguous roster-name matches · ratio is not a performance rating' : workload.total !== null ? `${formatNumber(workload.total)} combined Chat + Email contacts · source periods match` : 'Chat and Email counts are kept separate because report periods differ'}
+            {showPerShift ? 'Unambiguous roster-name matches · Call / Chat / Email · ratio is not a performance rating' : workload.total !== null ? `${formatNumber(workload.total)} contacts across all channels · Chat and Email report dates match` : 'Per-channel counts stay separate because Chat and Email report dates differ'}
           </p>
         </header>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-[10px] text-muted-foreground">
+          {showPerShift ? (
+            <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-accent" />Total contacts / shift</span>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-amber-400" />Call</span>
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-sky-400" />Chat</span>
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-violet-400" />Email</span>
+            </>
+          )}
+        </div>
         <div className="space-y-1 p-4">
           {rows.slice(0, 30).map((row) => (
             <div key={normalizeAgentName(row.name)} className="grid grid-cols-[minmax(90px,160px)_minmax(80px,1fr)_auto] items-center gap-3 py-2">
               <span className="truncate text-xs text-foreground" title={row.name}>{row.name}</span>
               {workload.compatible ? (
-                <span className="flex h-2 overflow-hidden rounded-full bg-border/40" title={`Chat ${row.chat}, Email ${row.email}`}>
-                  <span className="bg-sky-400" style={{ width: `${((showPerShift ? row.rate ?? 0 : row.chat) / workload.max) * 100}%` }} />
-                  {!showPerShift && <span className="bg-violet-400" style={{ width: `${(row.email / workload.max) * 100}%` }} />}
+                <span className="flex h-2 overflow-hidden rounded-full bg-border/40" title={`Call ${row.call}, Chat ${row.chat}, Email ${row.email}`}>
+                  {showPerShift ? (
+                    <span className="bg-accent" style={{ width: `${((row.rate ?? 0) / workload.max) * 100}%` }} />
+                  ) : (
+                    <>
+                      <span className="bg-amber-400" style={{ width: `${(row.call / workload.max) * 100}%` }} />
+                      <span className="bg-sky-400" style={{ width: `${(row.chat / workload.max) * 100}%` }} />
+                      <span className="bg-violet-400" style={{ width: `${(row.email / workload.max) * 100}%` }} />
+                    </>
+                  )}
                 </span>
               ) : (
-                <span className="flex flex-col gap-1" title={`Independent reports: Chat ${row.chat}, Email ${row.email}`}>
+                <span className="flex flex-col gap-1" title={`Call ${row.call}, Chat ${row.chat}, Email ${row.email}`}>
+                  <span className="h-1 overflow-hidden rounded-full bg-border/40"><span className="block h-full rounded-full bg-amber-400" style={{ width: `${(row.call / workload.maxCall) * 100}%` }} /></span>
                   <span className="h-1 overflow-hidden rounded-full bg-border/40"><span className="block h-full rounded-full bg-sky-400" style={{ width: `${(row.chat / workload.maxChat) * 100}%` }} /></span>
                   <span className="h-1 overflow-hidden rounded-full bg-border/40"><span className="block h-full rounded-full bg-violet-400" style={{ width: `${(row.email / workload.maxEmail) * 100}%` }} /></span>
                 </span>
               )}
               <span className="min-w-20 text-right font-mono text-xs tabular-nums text-foreground">
-                {showPerShift ? `${row.rate?.toFixed(1) ?? '—'} / shift` : workload.compatible ? `${formatNumber(row.total)} · ${formatNumber(row.chat)}c/${formatNumber(row.email)}e` : `C ${formatNumber(row.chat)} · E ${formatNumber(row.email)}`}
+                {showPerShift ? `${row.rate?.toFixed(1) ?? '—'} / shift` : workload.compatible ? `${formatNumber(row.total)} · ${formatNumber(row.call)}/${formatNumber(row.chat)}/${formatNumber(row.email)}` : `C ${formatNumber(row.call)} · Ch ${formatNumber(row.chat)} · E ${formatNumber(row.email)}`}
               </span>
             </div>
           ))}
@@ -1380,8 +1424,8 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
           <details className="border-t border-border/40 px-4 py-3">
             <summary className="cursor-pointer text-xs text-muted-foreground">Not ranked: no roster match or no worked shifts ({workload.unmatched.length + workload.noWorkedShifts.length})</summary>
             <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-              {workload.unmatched.map((row) => <li key={row.name}>{row.name} · no confident roster-name match · Chat {formatNumber(row.chat)} / Email {formatNumber(row.email)}</li>)}
-              {workload.noWorkedShifts.map((row) => <li key={row.name}>{row.name} · 0 worked shifts · Chat {formatNumber(row.chat)} / Email {formatNumber(row.email)}</li>)}
+              {workload.unmatched.map((row) => <li key={row.name}>{row.name} · no confident roster-name match · Call {formatNumber(row.call)} / Chat {formatNumber(row.chat)} / Email {formatNumber(row.email)}</li>)}
+              {workload.noWorkedShifts.map((row) => <li key={row.name}>{row.name} · 0 worked shifts · Call {formatNumber(row.call)} / Chat {formatNumber(row.chat)} / Email {formatNumber(row.email)}</li>)}
             </ul>
           </details>
         )}

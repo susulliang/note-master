@@ -232,7 +232,7 @@ export default function OutputModal({
       if (dp.lastError) {
         lines.push(`  Last error: ${dp.lastError}`);
         if (/does not exist|receiving end/i.test(String(dp.lastError))) {
-          lines.push(`  → NONE of the tried ids responded. Fastest fix: ${extMgrUrl} → Ecovacs Note Helper → copy the ID → Engine Settings → paste into the "Direct channel" box → Save & Probe.`);
+          lines.push(`  → NONE of the tried ids responded. Fastest fix: ${extMgrUrl} → Ecovacs Note Helper → copy the ID → Settings → paste into the "Direct channel" box → Save & Probe.`);
         }
       }
     }
