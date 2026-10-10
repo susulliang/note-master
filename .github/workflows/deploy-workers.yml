@@ -1,0 +1,49 @@
+name: Deploy to Cloudflare Workers
+
+# Auto-deploys the SPA to the `note-master` Worker (static assets) on every
+# push to main. Needs repo secret CLOUDFLARE_API_TOKEN (template
+# "Edit Cloudflare Workers"); while the secret is absent, runs pass with a
+# warning instead of failing.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-workers-main
+  # The version pre-push hook pushes twice in quick succession (feature
+  # commit + auto-bump) — cancel the first deploy, only the final tip matters.
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - id: token
+        name: Check for Cloudflare API token
+        run: echo "present=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build standalone bundle
+        if: steps.token.outputs.present == 'true'
+        run: npm run build:standalone
+
+      - name: Deploy to Cloudflare Workers
+        if: steps.token.outputs.present == 'true'
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Secret missing — deploy skipped
+        if: steps.token.outputs.present != 'true'
+        run: |
+          echo "::warning::Secret CLOUDFLARE_API_TOKEN is not set — Cloudflare deploy skipped. Add it under repo Settings → Secrets and variables → Actions."
