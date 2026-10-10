@@ -31,6 +31,8 @@ import {
 } from './report-parsers';
 
 const BASE = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
+const DASHBOARD_DATA_URL = import.meta.env.VITE_DASHBOARD_DATA_URL?.trim()
+  || (!import.meta.env.DEV ? 'https://pub-4f2a0555b3314f2b83bb90e44ea586f3.r2.dev/dashboard-data.json' : null);
 
 export interface SfReportFile {
   name: string;
@@ -87,7 +89,7 @@ export function pickChatExport(files: SfReportFile[]): SfReportFile | undefined 
 /** Newest AMR Email *.xlsx export. */
 export function pickEmailExport(files: SfReportFile[]): SfReportFile | undefined {
   return files
-    .filter((f) => /\.xlsx$/i.test(f.name) && /amr[\s_-]*email|email/i.test(f.name))
+    .filter((f) => /\.xlsx$/i.test(f.name) && /amr[\s_-]*email/i.test(f.name))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
 }
 
@@ -226,17 +228,41 @@ export interface DashboardData {
   emailAvgResponse?: ResponseTimeReport;
 }
 
+let dashboardDataCache: DashboardData | null | undefined;
+let dashboardDataRequest: Promise<DashboardData | null> | null = null;
+
 /**
- * Fetches the pre-parsed dashboard-data.json produced by `sync:reports`.
- * Returns null if the file is absent (the caller then falls back to runtime
- * parsing of the raw exports).
+ * Loads the published snapshot in deployed builds, or the local snapshot in
+ * development. Runtime parsing remains a development-only fallback.
  */
-export async function fetchDashboardData(signal?: AbortSignal): Promise<DashboardData | null> {
-  try {
-    const res = await fetch(`${BASE}sf_reports/dashboard-data.json`, { signal, cache: 'no-store' });
-    if (!res.ok) return null;
-    return (await res.json()) as DashboardData;
-  } catch {
-    return null;
-  }
+export function requiresDashboardSnapshot(): boolean {
+  return Boolean(DASHBOARD_DATA_URL) || !import.meta.env.DEV;
+}
+
+export function dashboardSnapshotError(): string {
+  return DASHBOARD_DATA_URL
+    ? 'The published dashboard JSON could not be loaded. Check its URL, availability, and CORS settings.'
+    : 'Dashboard data is not configured. Set VITE_DASHBOARD_DATA_URL to the published JSON URL and rebuild.';
+}
+
+export async function fetchDashboardData(_signal?: AbortSignal, force = false): Promise<DashboardData | null> {
+  const url = DASHBOARD_DATA_URL || (import.meta.env.DEV ? `${BASE}sf_reports/dashboard-data.json` : null);
+  if (!url) return null;
+  if (!force && dashboardDataCache !== undefined) return dashboardDataCache;
+  if (dashboardDataRequest) return dashboardDataRequest;
+
+  dashboardDataRequest = (async () => {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      return (await res.json()) as DashboardData;
+    } catch {
+      return null;
+    }
+  })();
+  const request = dashboardDataRequest;
+  const result = await request;
+  dashboardDataCache = result;
+  if (dashboardDataRequest === request) dashboardDataRequest = null;
+  return result;
 }

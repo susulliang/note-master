@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  dashboardSnapshotError,
   fetchCallReport,
   fetchChatReport,
   fetchDashboardData,
@@ -10,6 +11,7 @@ import {
   pickChatExport,
   pickEmailExport,
   pickHistoricalMetricsExport,
+  requiresDashboardSnapshot,
   type CallMetrics,
   type CountReport,
   type HistoricalMetricsReport,
@@ -25,7 +27,7 @@ export interface DailiesData {
 export type DailiesState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: DailiesData };
+  | { status: 'ready'; data: DailiesData; refreshError?: string };
 
 export interface DailiesController {
   state: DailiesState;
@@ -51,8 +53,8 @@ export function useDailiesReport(): DailiesController {
 
     (async () => {
       try {
-        const pre = await fetchDashboardData(controller.signal);
-        if (pre?.chat && pre?.email && pre?.call && pre?.historical) {
+        const pre = await fetchDashboardData(controller.signal, nonce > 0);
+        if ((nonce === 0 || requiresDashboardSnapshot()) && pre?.chat && pre?.email && pre?.call && pre?.historical) {
           if (cancelled) return;
           setState({
             status: 'ready',
@@ -61,6 +63,7 @@ export function useDailiesReport(): DailiesController {
           hasLoadedOnce.current = true;
           return;
         }
+        if (requiresDashboardSnapshot()) throw new Error(dashboardSnapshotError());
         const files = await fetchSfReportIndex(controller.signal);
         const chatFile = pickChatExport(files);
         const emailFile = pickEmailExport(files);
@@ -83,7 +86,10 @@ export function useDailiesReport(): DailiesController {
         hasLoadedOnce.current = true;
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        setState((current) => current.status === 'ready'
+          ? { ...current, refreshError: message }
+          : { status: 'error', message });
         hasLoadedOnce.current = true;
       } finally {
         if (!cancelled) setRefreshing(false);

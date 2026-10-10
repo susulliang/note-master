@@ -25,7 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { asOfDate, countMtdShifts, monthStart } from '@/lib/roster-shifts';
+import { asOfDate, countMtdShifts, matchRosterShift, monthStart } from '@/lib/roster-shifts';
 import type { CountReport } from '@/lib/sf-reports';
 import type { DailiesState } from '@/hooks/use-dailies-report';
 
@@ -253,28 +253,6 @@ interface Performer {
 const OVERWORKED_RATIO = 1.25;
 const UNDERWORKED_RATIO = 0.7;
 
-/**
- * Matches a report owner name to a roster English name by first-token
- * equality, disambiguating duplicates (e.g. Kevin W. vs Kevin X.) by the
- * last-name initial appearing in the owner string.
- */
-function matchRosterShifts(owner: string, byAgent: Record<string, number>): number {
-  const norm = owner.toLowerCase().replace(/[.]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const first = norm.split(' ')[0];
-  if (!first) return 0;
-  const candidates = Object.keys(byAgent).filter((en) => {
-    const e = en.toLowerCase().replace(/\s+/g, ' ').trim();
-    return e.split(' ')[0] === first;
-  });
-  if (candidates.length === 0) return 0;
-  if (candidates.length === 1) return byAgent[candidates[0]]!;
-  for (const c of candidates) {
-    const lastInitial = c.toLowerCase().split(' ').pop()![0];
-    if (lastInitial && norm.includes(lastInitial)) return byAgent[c]!;
-  }
-  return byAgent[candidates[0]]!;
-}
-
 function computePerformers(
   chat: CountReport,
   email: CountReport,
@@ -295,7 +273,7 @@ function computePerformers(
   let matchedCount = 0;
   for (const [owner, v] of map) {
     const total = v.chat + v.email;
-    const shifts = matchRosterShifts(owner, shiftsByAgent);
+    const shifts = matchRosterShift(owner, shiftsByAgent)?.shifts ?? 0;
     raw.push({ owner, chat: v.chat, email: v.email, total, shifts });
     if (shifts > 0) {
       matchedShifts += shifts;

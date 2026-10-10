@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  dashboardSnapshotError,
   fetchChatResponseReport,
   fetchDashboardData,
   fetchEmailAvgResponseReport,
@@ -8,6 +9,7 @@ import {
   pickChatResponseExport,
   pickEmailAvgResponseExport,
   pickEmailFirstResponseExport,
+  requiresDashboardSnapshot,
   type ResponseTimeReport,
 } from '@/lib/sf-reports';
 
@@ -20,7 +22,7 @@ export interface ResponseTimeData {
 export type ResponseTimeState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: ResponseTimeData };
+  | { status: 'ready'; data: ResponseTimeData; refreshError?: string };
 
 export interface ResponseTimeController {
   state: ResponseTimeState;
@@ -50,8 +52,8 @@ export function useResponseTimeReport(): ResponseTimeController {
 
     (async () => {
       try {
-        const pre = await fetchDashboardData(controller.signal);
-        if (pre?.chatResponse && pre?.emailFirstResponse && pre?.emailAvgResponse) {
+        const pre = await fetchDashboardData(controller.signal, nonce > 0);
+        if ((nonce === 0 || requiresDashboardSnapshot()) && pre?.chatResponse && pre?.emailFirstResponse && pre?.emailAvgResponse) {
           if (cancelled) return;
           setState({
             status: 'ready',
@@ -64,6 +66,7 @@ export function useResponseTimeReport(): ResponseTimeController {
           hasLoadedOnce.current = true;
           return;
         }
+        if (requiresDashboardSnapshot()) throw new Error(dashboardSnapshotError());
         const files = await fetchSfReportIndex(controller.signal);
         const chatFile = pickChatResponseExport(files);
         const emailFirstFile = pickEmailFirstResponseExport(files);
@@ -83,7 +86,10 @@ export function useResponseTimeReport(): ResponseTimeController {
         hasLoadedOnce.current = true;
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        setState((current) => current.status === 'ready'
+          ? { ...current, refreshError: message }
+          : { status: 'error', message });
         hasLoadedOnce.current = true;
       } finally {
         if (!cancelled) setRefreshing(false);

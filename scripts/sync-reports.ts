@@ -6,14 +6,14 @@
  *   npm run sync:reports          # all report types
  *   npx tsx scripts/sync-reports.ts
  *
- * Output: sf_reports/dashboard-data.json with sections: csat, oneTouch,
+ * Output: dashboard_publish/dashboard-data.json with sections: csat, oneTouch,
  * chat, email, call, historical. The dashboard hooks fetch this JSON for
- * instant load; if it's missing they fall back to client-side parsing.
+ * instant load after publishing; local development can still parse exports.
  *
  * Parsing functions are shared with the browser (src/lib/report-parsers.ts).
  */
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   parseCountByOwnerWorkbook,
@@ -29,12 +29,21 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const REPORTS_DIR = resolve(ROOT, 'sf_reports');
-const OUT = resolve(REPORTS_DIR, 'dashboard-data.json');
+const OUT = process.env.DASHBOARD_DATA_OUTPUT
+  ? resolve(ROOT, process.env.DASHBOARD_DATA_OUTPUT)
+  : resolve(ROOT, 'dashboard_publish/dashboard-data.json');
 
 interface ReportFile {
   name: string;
   size: number;
   mtimeMs: number;
+  exportTimeMs: number | null;
+}
+
+function filenameTimestamp(name: string): number | null {
+  const match = name.match(/(\d{4}-\d{2}-\d{2})[-_ ](\d{2})[-:](\d{2})[-:](\d{2})/);
+  if (!match) return null;
+  return Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`);
 }
 
 /** Files in sf_reports/ sorted newest-first. */
@@ -43,9 +52,14 @@ function listReports(): ReportFile[] {
     .filter((e) => e.isFile() && !e.name.startsWith('.') && e.name !== 'dashboard-data.json')
     .map((e) => {
       const st = statSync(resolve(REPORTS_DIR, e.name));
-      return { name: e.name, size: st.size, mtimeMs: st.mtimeMs };
+      return { name: e.name, size: st.size, mtimeMs: st.mtimeMs, exportTimeMs: filenameTimestamp(e.name) };
     })
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    .sort((a, b) => {
+      if (a.exportTimeMs !== null && b.exportTimeMs !== null) return b.exportTimeMs - a.exportTimeMs;
+      if (a.exportTimeMs !== null) return -1;
+      if (b.exportTimeMs !== null) return 1;
+      return b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name);
+    });
 }
 
 const pick = (files: ReportFile[], re: RegExp) => files.find((f) => re.test(f.name));
@@ -56,6 +70,7 @@ const readBuf = (name: string): ArrayBuffer => {
 const readText = (name: string) => readFileSync(resolve(REPORTS_DIR, name), 'utf-8');
 
 const files = listReports();
+mkdirSync(dirname(OUT), { recursive: true });
 console.log(`Found ${files.length} report file(s) in sf_reports/`);
 
 const out: Record<string, unknown> = {
@@ -159,5 +174,13 @@ if (emailAvgRtFile) {
   );
 } else console.warn('  EaRT  : no matching Email avg-response .xlsx found');
 
+if (process.env.REQUIRE_COMPLETE_DASHBOARD_DATA === '1') {
+  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse'];
+  const missing = required.filter((key) => !(key in out));
+  if (missing.length) {
+    throw new Error(`Refusing to publish an incomplete dashboard snapshot. Missing: ${missing.join(', ')}`);
+  }
+}
+
 writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n', 'utf-8');
-console.log(`\nWrote ${OUT.replace(ROOT + '/', '')}`);
+console.log(`\nWrote ${relative(ROOT, OUT)}`);

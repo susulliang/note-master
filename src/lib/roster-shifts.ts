@@ -68,6 +68,96 @@ export function monthStart(date: string): string {
   return `${date.slice(0, 7)}-01`;
 }
 
+function rosterNameParts(name: string): string[] {
+  return name
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[._-]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function editDistanceAtMostOne(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else {
+      i++;
+      j++;
+    }
+  }
+  if (i < a.length || j < b.length) edits++;
+  return edits <= 1;
+}
+
+function firstNameScore(owner: string, roster: string): number {
+  if (owner === roster) return 100;
+  const shorter = owner.length <= roster.length ? owner : roster;
+  const longer = owner.length <= roster.length ? roster : owner;
+  if (shorter.length >= 4 && longer.startsWith(shorter) && longer.length - shorter.length <= 2) return 80;
+  if (shorter.length >= 4 && editDistanceAtMostOne(owner, roster)) return 70;
+  return 0;
+}
+
+export interface RosterShiftMatch {
+  name: string;
+  shifts: number;
+}
+
+/**
+ * Match report owner identities to roster names conservatively. Handles
+ * first-name truncations/typos and full surname-to-roster-initial matches,
+ * but returns null when the best roster candidate is ambiguous.
+ */
+export function matchRosterShift(
+  owner: string,
+  shiftsByAgent: Record<string, number>,
+): RosterShiftMatch | null {
+  const ownerParts = rosterNameParts(owner);
+  const ownerFirst = ownerParts[0];
+  if (!ownerFirst) return null;
+  const ownerLast = ownerParts[ownerParts.length - 1]!;
+  const candidates: { name: string; shifts: number; score: number }[] = [];
+
+  for (const [name, shifts] of Object.entries(shiftsByAgent)) {
+    const rosterParts = rosterNameParts(name);
+    const rosterFirst = rosterParts[0];
+    if (!rosterFirst) continue;
+    const firstScore = firstNameScore(ownerFirst, rosterFirst);
+    if (!firstScore) continue;
+
+    let score = firstScore;
+    const rosterLast = rosterParts[rosterParts.length - 1]!;
+    if (rosterParts.length === 1) {
+      score += 10;
+    } else if (ownerParts.length === 1) {
+      score -= 10;
+    } else if (ownerLast[0] === rosterLast[0]) {
+      score += 30;
+    } else {
+      score -= 20;
+    }
+    candidates.push({ name, shifts, score });
+  }
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates.length > 1 && candidates[0]!.score === candidates[1]!.score) return null;
+  return { name: candidates[0]!.name, shifts: candidates[0]!.shifts };
+}
+
 /**
  * Counts Month-To-Date worked shifts for the roster, between `start`
  * (inclusive) and `end` (inclusive). Defaults to the current calendar month

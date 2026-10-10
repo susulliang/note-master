@@ -15,6 +15,7 @@
     "bump": "node scripts/bump-version.mjs",
     "sync:roster": "node scripts/sync-roster.mjs",
     "sync:reports": "tsx scripts/sync-reports.ts",
+    "publish:dashboard-data": "bash scripts/publish-dashboard-data.sh",
     "sync": "npm run sync:roster && npm run sync:reports",
     "bench:whisper": "node scripts/bench-whisper.mjs",
     "tauri": "tauri",

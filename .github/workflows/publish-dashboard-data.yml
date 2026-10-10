@@ -1,0 +1,33 @@
+name: Publish DASH data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_publish:
+        description: Generate and publish the latest Salesforce dashboard snapshot
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: inputs.confirm_publish
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Wrangler CLI
+        run: npm install --global wrangler@4
+      - name: Build and upload snapshot
+        run: npm run publish:dashboard-data

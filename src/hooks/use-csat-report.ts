@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  dashboardSnapshotError,
   fetchCsatReport,
   fetchDashboardData,
   fetchSfReportIndex,
   pickCsatExport,
+  requiresDashboardSnapshot,
   type CsatReport,
 } from '@/lib/sf-reports';
 
 export type CsatReportState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; report: CsatReport };
+  | { status: 'ready'; report: CsatReport; refreshError?: string };
 
 export interface CsatReportController {
   state: CsatReportState;
@@ -41,13 +43,14 @@ export function useCsatReport(): CsatReportController {
     (async () => {
       try {
         // Fast path: pre-computed JSON.
-        const pre = await fetchDashboardData(controller.signal);
-        if (pre?.csat) {
+        const pre = await fetchDashboardData(controller.signal, nonce > 0);
+        if ((nonce === 0 || requiresDashboardSnapshot()) && pre?.csat) {
           if (cancelled) return;
           setState({ status: 'ready', report: pre.csat });
           hasLoadedOnce.current = true;
           return;
         }
+        if (requiresDashboardSnapshot()) throw new Error(dashboardSnapshotError());
         // Fallback: parse the newest export at runtime.
         const files = await fetchSfReportIndex(controller.signal);
         const file = pickCsatExport(files);
@@ -58,7 +61,10 @@ export function useCsatReport(): CsatReportController {
         hasLoadedOnce.current = true;
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        setState((current) => current.status === 'ready'
+          ? { ...current, refreshError: message }
+          : { status: 'error', message });
         hasLoadedOnce.current = true;
       } finally {
         if (!cancelled) setRefreshing(false);

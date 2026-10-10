@@ -29,6 +29,7 @@ function sopFolderPlugin(): Plugin {
   // /sf_reports/index.json with a machine-readable file listing (newest
   // first), so the app can discover freshly dropped exports at runtime.
   const URL_SEGMENTS = ['SOP', 'news', 'software_updates', 'quick_reply', 'sf_reports'] as const;
+  const BUILD_COPY_SEGMENTS = URL_SEGMENTS.filter((seg) => seg !== 'sf_reports');
   let basePrefix = '/';
 
   return {
@@ -111,7 +112,9 @@ function sopFolderPlugin(): Plugin {
       // already produced the same folder.
       const outDirRel = 'dist/client';
       try {
-        for (const seg of URL_SEGMENTS) {
+        // Salesforce exports are served only in local development. Production
+        // DASH clients load the independently published JSON snapshot instead.
+        for (const seg of BUILD_COPY_SEGMENTS) {
           const src = path.join(process.cwd(), seg);
           await stat(src);
           const bases = ['/', basePrefix];

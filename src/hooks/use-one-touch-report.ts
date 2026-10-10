@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  dashboardSnapshotError,
   fetchDashboardData,
   fetchOneTouchReport,
   fetchSfReportIndex,
   pickOneTouchExport,
+  requiresDashboardSnapshot,
   type OneTouchReport,
 } from '@/lib/sf-reports';
 
 export type OneTouchReportState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; report: OneTouchReport };
+  | { status: 'ready'; report: OneTouchReport; refreshError?: string };
 
 export interface OneTouchReportController {
   state: OneTouchReportState;
@@ -36,13 +38,14 @@ export function useOneTouchReport(): OneTouchReportController {
 
     (async () => {
       try {
-        const pre = await fetchDashboardData(controller.signal);
-        if (pre?.oneTouch) {
+        const pre = await fetchDashboardData(controller.signal, nonce > 0);
+        if ((nonce === 0 || requiresDashboardSnapshot()) && pre?.oneTouch) {
           if (cancelled) return;
           setState({ status: 'ready', report: pre.oneTouch });
           hasLoadedOnce.current = true;
           return;
         }
+        if (requiresDashboardSnapshot()) throw new Error(dashboardSnapshotError());
         const files = await fetchSfReportIndex(controller.signal);
         const file = pickOneTouchExport(files);
         if (!file) throw new Error('No One-touch .xlsx export found in sf_reports/');
@@ -52,7 +55,10 @@ export function useOneTouchReport(): OneTouchReportController {
         hasLoadedOnce.current = true;
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        setState((current) => current.status === 'ready'
+          ? { ...current, refreshError: message }
+          : { status: 'error', message });
         hasLoadedOnce.current = true;
       } finally {
         if (!cancelled) setRefreshing(false);
