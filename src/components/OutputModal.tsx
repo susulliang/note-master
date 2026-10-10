@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { TicketPanelsContext } from './FlowNode';
 import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
+import { openExternal } from '@/lib/open-external';
+import { isTauriEnv } from '@/lib/tauri-env';
 
 interface OutputModalProps {
   open: boolean;
@@ -134,7 +136,10 @@ export default function OutputModal({
   const openCaseFallback: NonNullable<ReturnType<typeof useCcpExtensionBridge>['openCase']> = async ({ caseNumber, directUrl, newTab }) => {
     if (hookBridge.connected) { try { return await hookBridge.openCase({ caseNumber, directUrl, newTab }); } catch (e: any) { return { ok: false, url: null, navigated: null, error: String(e?.message || e) }; } }
     if (directUrl) {
-      if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
+      // Tauri shell: WKWebView blocks window.open, and location.assign would
+      // navigate the whole app away — hand the URL to the system browser.
+      if (isTauriEnv()) void openExternal(directUrl);
+      else if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
       else window.location.assign(directUrl);
       return { ok: true, url: directUrl, navigated: 'new' as const };
     }
@@ -778,7 +783,13 @@ export default function OutputModal({
                   </strong>
                 ),
                 a: ({ href, children }) => (
-                  <a href={href} className="text-accent underline underline-offset-2" target="_blank" rel="noreferrer">
+                  <a
+                    href={href}
+                    className="text-accent underline underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => { e.preventDefault(); if (href) void openExternal(href); }}
+                  >
                     {children}
                   </a>
                 ),

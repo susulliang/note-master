@@ -1,3 +1,34 @@
-﻿Queue,Service level 20 seconds,Average after contact work time,Average agent interaction time,Average customer hold time,Average handle time,Average queue abandon time,Average queue answer time,Contacts abandoned,Contacts handled,Contacts handled incoming,Contacts handled outbound,Contacts hold agent disconnect,Contacts hold customer disconnect,Contacts hold disconnect,Contacts queued,Contacts transferred in from queue,Contacts transferred out from queue
-AMR Tier 1 French Support,30.77%,1,381,,383,176,166,8,8,5,3,,,,13,,
-AMR Tier 1 Support,96.61%,12,502,143,534,34,10,14,1255,1077,178,,1,4,1091,,
+﻿Agent,Queue,Agent Name,Agent answer rate,Agent api connecting time,Agent incoming connecting time,Contacts missed,Average agent incoming connecting time,Service level 20 seconds,Agent interaction and hold time,API contacts,API contacts handled,Average after contact work time,Average agent interaction time,Average customer hold time,Average handle time,Callback contacts,Callback contacts handled,Contacts handled,Contacts handled incoming,Contacts handled outbound,Contacts hold agent disconnect,Contacts hold customer disconnect,Contacts hold disconnect,Contacts put on hold,Contacts transferred out,Contacts transferred out external,Contacts transferred out internal,Agent non-response without customer abandons,Average agent greeting time,Average agent interruptions,Average agent interruption time,Average agent talk time,Agent talk time percent,Contacts handled on connected to agent timestamp
+"",AMR Tier 1 French Support,,,,,,,0.00%,,,,,,,,,,,,,,,,,,,,,,,,,,
+"",AMR Tier 1 Support,,,,,,,71.43%,,,,,,,,,,,,,,,,,,,,,,,,,,
+bin2.liu@vxichina.com,AMR Tier 1 Support,"Ruby, Ruby",98.59%,,545,1,7,92.86%,41603,,,14,381,83,403,,,107,70,37,,,,10,,,,1,,1,3,167,29.52%,107
+chengcong.zhang@vxichina.com,AMR Tier 1 Support,"Patrick, Patrick",100.00%,,571,,7,97.33%,46116,,,14,436,117,480,,,99,75,24,,1,2,25,4,,4,,,1,3,242,41.35%,99
+dayao1.luo@vxichina.com,AMR Tier 1 Support,"Jenson, Jenson",97.56%,,467,1,11,100.00%,30977,,,14,754,156,808,,,39,39,,,,,10,,,,,,1,4,428,54.03%,40
+haoxiang.yang@vxichina.com,,"S, George",,,,,,,122,,,1,6,,8,,,18,,,,,,,16,16,,,,,,,,18
+haoxiang.yang@vxichina.com,AMR Tier 1 Support,"S, George",100.00%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+jing5.huang@vxichina.com,AMR Tier 1 French Support,"Jing, Jing",88.89%,,70,1,7,75.00%,4993,,,3,416,,419,,,12,8,4,,,,,,,,,,1,3,175,31.78%,12
+jingtong.huo@vxichina.com,AMR Tier 1 Support,"Hawks, Hawks",100.00%,,478,,5,98.85%,53138,,,14,596,9,611,,,89,87,2,,,1,2,2,,2,,,1,4,247,40.68%,89
+junjie2.luo@vxichina.com,AMR Tier 1 Support,"Jun, Jun",98.25%,,608,1,10,98.21%,35513,,,13,496,160,636,,,57,56,1,,,,45,,,,1,,1,2,200,31.82%,57
+junkun.peng@vxichina.com,AMR Tier 1 Support,"Jim, Jim",100.00%,,353,,6,100.00%,30153,,,13,579,,593,,,52,52,,,,,,,,,,,1,2,206,35.82%,52
+kailun.huang@vxichina.com,,"G, Charlie",,,,,,,13,,,1,6,,8,,,2,,,,,,,1,1,,,,,,,,2
+kailun.huang@vxichina.com,AMR Tier 1 Support,"G, Charlie",100.00%,,,,,,4361,,,5,335,,341,,,13,,13,,,,,,,,,,,,,,13
+renda.wang@vxichina.com,AMR Tier 1 Support,"Wang, Kevin",97.80%,,596,2,6,94.38%,61700,,,2,657,55,665,,,93,89,4,,,,10,,,,1,,2,6,324,47.86%,93
+shaokun.xu@vxichina.com,AMR Tier 1 Support,"Kevin, Kevin",98.99%,,688,1,6,94.90%,45810,,,14,459,81,477,,,99,98,1,,,1,4,1,,1,1,,1,3,202,43.74%,99
+shumeng2.li@vxichina.com,,"Steve, Steve",,,,,,,434,,,2,13,56,18,,,27,,,,,,1,22,22,,,,,,,,27
+shumeng2.li@vxichina.com,AMR Tier 1 Support,"Steve, Steve",100.00%,,,,,,44,,,2,44,,46,,,1,,1,,,,,,,,,,,,,,1
+sihao.huang@vxichina.com,AMR Tier 1 Support,"Trent, Trent",94.74%,,454,2,11,100.00%,40578,,,14,995,155,1110,,,37,36,1,,,,24,,,,2,,2,5,400,35.67%,37
+tianqi.hu@vxichina.com,AMR Tier 1 Support,"TQ, TQ",,,,,,,711,,,1,44,,46,,,16,,16,,,,,,,,,,,,,,16
+tianrui.xiao@vxichina.com,AMR Tier 1 Support,"Tony, Tony",100.00%,,520,,10,95.83%,37205,,,14,624,147,730,,,52,48,4,,,1,32,5,,5,,,2,5,279,36.70%,52
+tingwei2.shi@vxichina.com,AMR Tier 1 Support,"Stanley, Stanley",97.22%,,344,1,9,97.14%,13173,,,14,376,,391,,,35,35,,,,,,,,,,,1,3,130,34.73%,35
+xiaohui.hu@vxichina.com,AMR Tier 1 Support,"Pyro, Pyro",100.00%,,511,,7,95.52%,33459,,,2,492,,494,,,68,67,1,,,,,,,,,,1,3,172,34.75%,69
+yixiang.zhang@vxichina.com,AMR Tier 1 Support,"Rachel, Rachel",90.91%,,344,4,7,100.00%,30239,,,10,314,243,393,,,79,40,39,,,,22,,,,2,,2,7,247,35.08%,79
+yixin.zhu@vxichina.com,AMR Tier 1 Support,"Yison, Yison",100.00%,,594,,6,97.94%,64950,,,14,636,1,651,,,102,97,5,,,,9,,,,,,1,4,281,43.93%,102
+yongtao.zheng@vxichina.com,AMR Tier 1 Support,"Jason, Jason",98.81%,,991,1,11,96.39%,58162,,,14,692,,707,,,84,83,1,,,,,,,,,,1,2,224,32.45%,84
+yufeng.liang@vxichina.com,AMR Tier 1 Support,"Dezzy, Dezzy",100.00%,,541,,10,96.08%,42146,,,14,780,,795,,,54,51,3,,,,,,,,,,2,5,320,38.97%,54
+yujun.wu@vxichina.com,,"W, Alex",,,,,,,551,,,1,27,,28,,,20,,,,,,,17,17,,,,,,,,20
+yujun.wu@vxichina.com,AMR Tier 1 Support,"W, Alex",95.24%,,,1,,,337,,,1,168,,170,,,2,,2,,,,,,,,,,,,,,2
+zebiao.yu@vxichina.com,AMR Tier 1 Support,"Charsan, Charsan",100.00%,,400,,5,100.00%,23417,,,12,344,,356,,,68,67,1,,,,,,,,,,1,3,156,45.39%,68
+zhicong.jiang@vxichina.com,AMR Tier 1 Support,"Steven, Steven",,,,,,,371,,,2,185,,188,,,2,,2,,,,,,,,,,,,,,2
+zhifeng.tang@vxichina.com,AMR Tier 1 Support,"Alan, Alan",96.92%,,440,2,6,98.41%,24881,,,14,387,157,409,,,63,63,,,,,3,,,,,,1,2,132,33.65%,63
+zhiming2.rao@vxichina.com,AMR Tier 1 Support,"Kira, Kira",100.00%,,421,,6,98.39%,20766,,,12,230,8,243,,,90,62,28,,,,1,1,,1,,,1,6,129,41.17%,90
+zifan.tian@vxichina.com,AMR Tier 1 Support,"Laura, Laura",100.00%,,160,,8,100.00%,10889,,,14,224,70,256,,,45,18,27,,,,11,,,,,,1,4,215,39.83%,45

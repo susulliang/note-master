@@ -131,7 +131,7 @@ if (histFile) {
   const r = parseHistoricalMetricsCsv(readText(histFile.name), histFile.name);
   out.historical = r;
   (out.sources as Record<string, string>).historical = histFile.name;
-  console.log(`  Hist  <- ${histFile.name} (${r.queues.length} queues)`);
+  console.log(`  Hist  <- ${histFile.name} (${r.agents.length} agents, ${r.queues.length} queues)`);
 } else console.warn('  Hist  : no matching .csv found');
 
 // --- Response time: Chat avg response (seconds) ---

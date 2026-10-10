@@ -63,6 +63,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
+import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import OutputModal from '@/components/OutputModal';
@@ -1984,8 +1985,10 @@ Additional information (if needed): ${additional}`;
                   return { ok: !!r.ok, url: r.url ?? null, navigated: r.navigated ?? null, error: r.error ?? null };
                 }
                 if (directUrl) {
-                  try { window.open(directUrl, newTab ? '_blank' : '_self', 'noopener,noreferrer'); }
-                  catch { /* ignore */ }
+                  // Tauri shell: WKWebView blocks window.open and '_self'
+                  // would navigate the app away — use the system browser.
+                  if (isTauriEnv()) { void openExternal(directUrl); }
+                  else { try { window.open(directUrl, newTab ? '_blank' : '_self', 'noopener,noreferrer'); } catch { /* ignore */ } }
                   return { ok: true, url: directUrl, navigated: 'new' as const };
                 }
                 return { ok: false, url: null, navigated: null, error: 'Extension not connected. Paste a full Lightning Case URL to open it directly, or reload the Ecovacs Note Helper extension.' };
@@ -2592,7 +2595,10 @@ Additional information (if needed): ${additional}`;
               }
             }
             if (directUrl) {
-              if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
+              // Tauri shell: WKWebView blocks window.open, and location.assign
+              // would navigate the whole app away — use the system browser.
+              if (isTauriEnv()) void openExternal(directUrl);
+              else if (newTab) window.open(directUrl, '_blank', 'noopener,noreferrer');
               else window.location.assign(directUrl);
               return { ok: true, url: directUrl, navigated: 'new' as const };
             }

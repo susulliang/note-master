@@ -25,6 +25,16 @@ function toPercent(v: unknown): number {
   return typeof v === 'string' && !v.includes('%') && n <= 1 ? n * 100 : n;
 }
 
+function toOptionalNumber(v: unknown): number | null {
+  if (v == null || String(v).trim() === '') return null;
+  return toNumber(v);
+}
+
+function toOptionalPercent(v: unknown): number | null {
+  if (v == null || String(v).trim() === '') return null;
+  return toPercent(v);
+}
+
 function extractAsOf(rows: unknown[][], scanRows = 24): string | null {
   for (const row of rows.slice(0, scanRows)) {
     for (const cell of row) {
@@ -264,13 +274,27 @@ export interface HistoricalQueue {
   handledIncoming: number;
   handledOutbound: number;
   abandoned: number;
-  serviceLevel20: number;
-  avgHandleTimeSec: number;
+  serviceLevel20: number | null;
+  avgHandleTimeSec: number | null;
+}
+
+export interface HistoricalAgent {
+  owner: string;
+  queues: string[];
+  handled: number;
+  handledIncoming: number;
+  handledOutbound: number;
+  missed: number;
+  answerRate: number | null;
+  serviceLevel20: number | null;
+  avgIncomingConnectSec: number | null;
+  avgHandleTimeSec: number | null;
 }
 
 export interface HistoricalMetricsReport {
   fileName: string;
   queues: HistoricalQueue[];
+  agents: HistoricalAgent[];
 }
 
 export function parseMtdCallDataCsv(text: string, fileName: string): CallMetrics {
@@ -294,30 +318,138 @@ export function parseMtdCallDataCsv(text: string, fileName: string): CallMetrics
 }
 
 export function parseHistoricalMetricsCsv(text: string, fileName: string): HistoricalMetricsReport {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const headerIdx = lines.findIndex((l) => /^Queue,/.test(l));
+  const workbook = XLSX.read(text, { type: 'string', raw: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]!];
+  if (!sheet) throw new Error(`Historical Metrics sheet not found in ${fileName}`);
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' });
+  const headerIdx = rows.findIndex((row) => row.some((cell) => /^Agent$/i.test(String(cell ?? '').trim())));
   if (headerIdx === -1) throw new Error(`Historical Metrics header not found in ${fileName}`);
-  const headers = lines[headerIdx]!.split(',');
-  const get = (row: string[], re: RegExp) => {
-    const i = headers.findIndex((h) => re.test(h.trim()));
-    return i !== -1 ? row[i] : '';
+  const headers = rows[headerIdx]!.map((cell) => String(cell ?? '').trim().replace(/^\uFEFF/, ''));
+  const col = (re: RegExp) => headers.findIndex((header) => re.test(header));
+  const cols = {
+    agent: col(/^Agent$/i),
+    queue: col(/^Queue$/i),
+    name: col(/^Agent Name$/i),
+    answerRate: col(/^Agent answer rate$/i),
+    incomingConnect: col(/^Average agent incoming connecting time$/i),
+    missed: col(/^Contacts missed$/i),
+    serviceLevel20: col(/^Service level 20 seconds$/i),
+    handled: col(/^Contacts handled$/i),
+    handledIncoming: col(/^Contacts handled incoming$/i),
+    handledOutbound: col(/^Contacts handled outbound$/i),
+    avgHandleTime: col(/^Average handle time$/i),
   };
-  const queues: HistoricalQueue[] = [];
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const row = lines[i]!.split(',');
-    const queue = row[0]?.trim();
-    if (!queue) continue;
-    queues.push({
-      queue,
-      handled: toNumber(get(row, /^Contacts handled$/)),
-      handledIncoming: toNumber(get(row, /Contacts handled incoming/)),
-      handledOutbound: toNumber(get(row, /Contacts handled outbound/)),
-      abandoned: toNumber(get(row, /Contacts abandoned/)),
-      serviceLevel20: toPercent(get(row, /Service level 20 seconds/)),
-      avgHandleTimeSec: toNumber(get(row, /Average handle time/)),
-    });
+  if (cols.agent === -1 || cols.queue === -1 || cols.name === -1) {
+    throw new Error(`Historical Metrics agent columns not found in ${fileName}`);
   }
-  return { fileName, queues };
+  const value = (row: unknown[], index: number) => index === -1 ? null : row[index];
+  const displayName = (nameValue: unknown, login: string) => {
+    const name = String(nameValue ?? '').trim();
+    if (!name) {
+      return login.split('@')[0]!.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    const comma = name.indexOf(',');
+    if (comma === -1) return name;
+    const last = name.slice(0, comma).trim();
+    const first = name.slice(comma + 1).trim();
+    if (!first) return last;
+    if (!last || last.toLocaleLowerCase() === first.toLocaleLowerCase()) return first;
+    return `${first} ${last}`;
+  };
+  type WeightedMetric = { total: number; weight: number };
+  type AgentAccumulator = {
+    owner: string;
+    queues: Set<string>;
+    handled: number;
+    handledIncoming: number;
+    handledOutbound: number;
+    missed: number;
+    answerRate: WeightedMetric;
+    serviceLevel20: WeightedMetric;
+    avgIncomingConnectSec: WeightedMetric;
+    avgHandleTimeSec: WeightedMetric;
+  };
+  const addWeighted = (target: WeightedMetric, metric: number | null, weight: number) => {
+    if (metric === null) return;
+    const safeWeight = weight > 0 ? weight : 1;
+    target.total += metric * safeWeight;
+    target.weight += safeWeight;
+  };
+  const mean = (metric: WeightedMetric) => metric.weight > 0 ? metric.total / metric.weight : null;
+  const queues: HistoricalQueue[] = [];
+  const agents = new Map<string, AgentAccumulator>();
+  for (const row of rows.slice(headerIdx + 1)) {
+    const login = String(value(row, cols.agent) ?? '').trim();
+    const queue = String(value(row, cols.queue) ?? '').trim();
+    if (!login && !queue) continue;
+    const handled = toNumber(value(row, cols.handled));
+    const handledIncoming = toNumber(value(row, cols.handledIncoming));
+    const handledOutbound = toNumber(value(row, cols.handledOutbound));
+    const missed = toNumber(value(row, cols.missed));
+    const answerRate = toOptionalPercent(value(row, cols.answerRate));
+    const serviceLevel20 = toOptionalPercent(value(row, cols.serviceLevel20));
+    const avgIncomingConnectSec = toOptionalNumber(value(row, cols.incomingConnect));
+    const avgHandleTimeSec = toOptionalNumber(value(row, cols.avgHandleTime));
+
+    if (!login) {
+      queues.push({
+        queue,
+        handled,
+        handledIncoming,
+        handledOutbound,
+        abandoned: toNumber(value(row, col(/^Contacts abandoned$/i))),
+        serviceLevel20,
+        avgHandleTimeSec,
+      });
+      continue;
+    }
+
+    const key = login.toLocaleLowerCase();
+    let agent = agents.get(key);
+    if (!agent) {
+      agent = {
+        owner: displayName(value(row, cols.name), login),
+        queues: new Set<string>(),
+        handled: 0,
+        handledIncoming: 0,
+        handledOutbound: 0,
+        missed: 0,
+        answerRate: { total: 0, weight: 0 },
+        serviceLevel20: { total: 0, weight: 0 },
+        avgIncomingConnectSec: { total: 0, weight: 0 },
+        avgHandleTimeSec: { total: 0, weight: 0 },
+      };
+      agents.set(key, agent);
+    }
+    if (queue) agent.queues.add(queue);
+    agent.handled += handled;
+    agent.handledIncoming += handledIncoming;
+    agent.handledOutbound += handledOutbound;
+    agent.missed += missed;
+    addWeighted(agent.answerRate, answerRate, handledIncoming + missed || handled + missed);
+    addWeighted(agent.serviceLevel20, serviceLevel20, handledIncoming);
+    addWeighted(agent.avgIncomingConnectSec, avgIncomingConnectSec, handledIncoming);
+    addWeighted(agent.avgHandleTimeSec, avgHandleTimeSec, handled);
+  }
+
+  const parsedAgents = [...agents.values()]
+    .filter((agent) => agent.handled + agent.missed > 0 || agent.answerRate.weight > 0 || agent.serviceLevel20.weight > 0)
+    .map((agent) => ({
+      owner: agent.owner,
+      queues: [...agent.queues].sort((a, b) => a.localeCompare(b)),
+      handled: agent.handled,
+      handledIncoming: agent.handledIncoming,
+      handledOutbound: agent.handledOutbound,
+      missed: agent.missed,
+      answerRate: mean(agent.answerRate),
+      serviceLevel20: mean(agent.serviceLevel20),
+      avgIncomingConnectSec: mean(agent.avgIncomingConnectSec),
+      avgHandleTimeSec: mean(agent.avgHandleTimeSec),
+    }))
+    .sort((a, b) => a.owner.localeCompare(b.owner));
+
+  if (parsedAgents.length === 0) throw new Error(`No agent metrics found in ${fileName}`);
+  return { fileName, queues, agents: parsedAgents };
 }
 
 // ---------------------------------------------------------------------------

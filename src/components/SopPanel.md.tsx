@@ -1,4 +1,5 @@
 import React from 'react';
+import { openExternal } from '@/lib/open-external';
 import { cn } from '@/lib/utils';
 
 /* --------------------------- Image path resolver --------------------------- */
@@ -390,6 +391,7 @@ export function renderBodyMarkdown(
               href={t.href}
               target="_blank"
               rel="noreferrer noopener"
+              onClick={(e) => { e.preventDefault(); void openExternal(t.href); }}
               className="text-accent hover:underline"
             >
               {inline(t.label)}

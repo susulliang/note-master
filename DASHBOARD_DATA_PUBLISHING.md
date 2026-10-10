@@ -4,6 +4,15 @@ DASH production builds load a separately published `dashboard-data.json`; the
 Salesforce report folder and its generated snapshot are not copied into the app
 bundle. Local development can still parse reports from `sf_reports/`.
 
+## Authenticated report sources
+
+The report entry-point URLs are cataloged in
+[`scripts/report-download-sources.json`](scripts/report-download-sources.json)
+for future download automation. Each source requires an authenticated session;
+the registry stores no credentials or session data. See the
+[report refresh runbook](REPORT_REFRESH_RUNBOOK.md) for the browser download,
+parse, review, and publish routine.
+
 ## Cloudflare R2 setup
 
 The `eco-dash` bucket is configured with public `r2.dev` reads and browser
@@ -35,9 +44,12 @@ The `eco-dash` bucket is configured with public `r2.dev` reads and browser
    `CLOUDFLARE_ACCOUNT_ID=<account-id> R2_BUCKET=eco-dash npm run publish:dashboard-data`.
 
 The publisher writes its intermediate file to the Git-ignored
-`dashboard_publish/dashboard-data.json`. `npm run sync:reports` only generates
-that file; it does not upload it. The publish workflow is manual and is
-independent from app deployment.
+`dashboard_publish/dashboard-data.json`. The Historical Metrics parser
+preserves queue summaries and aggregates multi-queue rows into agent-level call
+metrics for the Overview; Salesforce login emails are used only as local join
+keys and are omitted from the published JSON. `npm run sync:reports` only
+generates that file; it does not upload it. The publish workflow is manual and
+is independent from app deployment.
 
 The Vercel Content Security Policy permits `*.r2.dev` and
 `*.r2.cloudflarestorage.com`. If using a custom R2 domain, add that exact
@@ -46,6 +58,6 @@ origin to the `connect-src` policy in `vercel.json`.
 ## Data visibility
 
 The browser fetches this JSON directly, so its read URL is public. The snapshot
-contains agent names and performance metrics; anyone with the URL can read it.
-For restricted data, use an authenticated backend/proxy rather than a public
-R2 URL.
+contains agent display names and performance metrics; anyone with the URL can
+read it. For restricted data, use an authenticated backend/proxy rather than a
+public R2 URL.

@@ -16,12 +16,25 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import {
+  CartesianGrid,
+  Cell,
+  ReferenceLine,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+  ZAxis,
+  type TooltipProps,
+} from 'recharts';
 import { countMtdShifts, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
 import { useCsatReport } from '@/hooks/use-csat-report';
 import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
 import { useResponseTimeReport } from '@/hooks/use-response-time-report';
-import type { OneTouchChannel, ResponseTimeReport } from '@/lib/sf-reports';
+import type { HistoricalAgent, OneTouchChannel, ResponseTimeReport } from '@/lib/sf-reports';
 import {
   Dialog,
   DialogContent,
@@ -115,6 +128,55 @@ function formatNumber(value: number): string {
 
 function pct(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function formatCallTime(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const seconds = Math.max(0, Math.round(value));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function weightedAgentMean(
+  agents: HistoricalAgent[],
+  getValue: (agent: HistoricalAgent) => number | null,
+  getWeight: (agent: HistoricalAgent) => number,
+): number | null {
+  let weightedTotal = 0;
+  let weightTotal = 0;
+  for (const agent of agents) {
+    const value = getValue(agent);
+    if (value === null || !Number.isFinite(value)) continue;
+    const weight = Math.max(1, getWeight(agent));
+    weightedTotal += value * weight;
+    weightTotal += weight;
+  }
+  return weightTotal > 0 ? weightedTotal / weightTotal : null;
+}
+
+function callAttentionReasons(agent: HistoricalAgent, averageAnswerRate: number | null): string[] {
+  const reasons: string[] = [];
+  if (agent.serviceLevel20 !== null && agent.serviceLevel20 < 84) reasons.push('20s SLA below 84%');
+  if (agent.missed >= 2) reasons.push(`${agent.missed} missed`);
+  if (agent.answerRate !== null && averageAnswerRate !== null && agent.answerRate <= averageAnswerRate - 5) {
+    reasons.push(`${(averageAnswerRate - agent.answerRate).toFixed(1)} pp below avg answer`);
+  }
+  return reasons;
+}
+
+function CallAgentTooltip({ active, payload }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  const agent = payload[0]!.payload as HistoricalAgent;
+  return (
+    <div className="rounded-lg border border-border/80 bg-[#0d1117]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+      <div className="font-semibold text-foreground">{agent.owner}</div>
+      <div className="mt-1 space-y-0.5 font-mono tabular-nums text-muted-foreground">
+        <div>Answer rate <span className="text-foreground">{agent.answerRate === null ? '—' : pct(agent.answerRate)}</span></div>
+        <div>20s SLA <span className="text-foreground">{agent.serviceLevel20 === null ? '—' : pct(agent.serviceLevel20)}</span></div>
+        <div>Inbound handled <span className="text-foreground">{formatNumber(agent.handledIncoming)}</span></div>
+        <div>Missed <span className="text-foreground">{formatNumber(agent.missed)}</span> · AHT <span className="text-foreground">{formatCallTime(agent.avgHandleTimeSec)}</span></div>
+      </div>
+    </div>
+  );
 }
 
 type LoadInfo = { status: 'loading' | 'error' | 'ready' | 'stale'; error: string };
@@ -745,11 +807,9 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     const end = dates[dates.length - 1];
     if (!end) return null;
     const start = monthStart(end);
-    const callShifts = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).total;
     const chatShifts = countMtdShifts(start, end, undefined, ['Chat']).total;
     const emailShifts = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).total;
     return {
-      call: { shifts: callShifts, average: callShifts > 0 ? data.call.handled / callShifts : null },
       email: { shifts: emailShifts, average: emailShifts > 0 ? data.email.total / emailShifts : null },
       chat: { shifts: chatShifts, average: chatShifts > 0 ? data.chat.total / chatShifts : null },
       through: end,
@@ -757,7 +817,6 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
   }, [data]);
   const volumes = [
     { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: null, shifts: null, color: 'text-foreground', accent: 'bg-accent' },
-    { name: 'Call handled', value: data?.call.handled ?? null, detail: 'MTD contacts', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
     { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
     { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
@@ -766,13 +825,13 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">MTD dailies</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Current call, email and chat volumes</p>
+          <p className="mt-1 text-xs text-muted-foreground">Total processed, email and chat volumes</p>
         </div>
         <button type="button" onClick={onExplore} className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
           Explore <ChevronRight className="size-3.5" />
         </button>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
         {volumes.map((volume, index) => (
           <div key={volume.name} className={cn('min-w-0 rounded-lg p-3', index === 0 ? 'border border-accent/25 bg-accent/5' : 'bg-background/35')}>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -788,11 +847,210 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground">
         {refreshError ? 'Showing previous report data. ' : ''}
-        {shiftStats ? `Roster averages through ${shiftStats.through}; Call uses Call + FR Call shifts, Chat uses Chat shifts, Email uses both groups.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
-        {' '}Total processed is the sum of independent source counts; Call period dates are not supplied.
+        {shiftStats ? `Roster averages through ${shiftStats.through}; Chat uses Chat shifts and Email uses both Chat + Call groups.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
+        {' '}Call volume and Call + FR Call shift average are shown in Call performance. Total processed sums independent source counts.
         {!data && state.status === 'loading' && ' Loading report volumes…'}
         {!data && state.status === 'error' && ` ${state.message}`}
       </p>
+    </section>
+  );
+}
+
+function CallPerformanceCard({
+  state,
+  onExplore,
+}: {
+  state: ReturnType<typeof useDashData>['dailies']['state'];
+  onExplore: () => void;
+}) {
+  const data = state.status === 'ready' ? state.data : null;
+  const reportAgents = data?.historical.agents ?? [];
+  const averageAnswerRate = useMemo(
+    () => weightedAgentMean(reportAgents, (agent) => agent.answerRate, (agent) => agent.handledIncoming + agent.missed || agent.handled),
+    [reportAgents],
+  );
+  const plotAgents = useMemo(
+    () => reportAgents.filter((agent) => agent.handledIncoming >= 5 && agent.answerRate !== null && agent.serviceLevel20 !== null),
+    [reportAgents],
+  );
+  const watchlist = useMemo(
+    () => reportAgents
+      .filter((agent) => agent.handled >= 10 && callAttentionReasons(agent, averageAnswerRate).length > 0)
+      .sort((a, b) => {
+        const aReasons = callAttentionReasons(a, averageAnswerRate).length;
+        const bReasons = callAttentionReasons(b, averageAnswerRate).length;
+        return bReasons - aReasons
+          || b.missed - a.missed
+          || (a.serviceLevel20 ?? 100) - (b.serviceLevel20 ?? 100)
+          || (a.answerRate ?? 100) - (b.answerRate ?? 100);
+      })
+      .slice(0, 3),
+    [reportAgents, averageAnswerRate],
+  );
+  const shiftAverage = useMemo(() => {
+    if (!data) return null;
+    const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
+    const end = dates[dates.length - 1];
+    if (!end) return null;
+    const shifts = countMtdShifts(monthStart(end), end, undefined, ['Call', 'FR Call']).total;
+    return { average: shifts > 0 ? data.call.handled / shifts : null, shifts };
+  }, [data]);
+  const answerValues = plotAgents.map((agent) => agent.answerRate ?? 0);
+  const serviceValues = plotAgents.map((agent) => agent.serviceLevel20 ?? 0);
+  const xMin = answerValues.length ? Math.max(0, Math.floor((Math.min(...answerValues) - 5) / 5) * 5) : 70;
+  const yMin = serviceValues.length ? Math.max(0, Math.floor((Math.min(...serviceValues) - 5) / 5) * 5) : 60;
+  const agentsReady = reportAgents.length > 0;
+
+  return (
+    <section className={cn(PANEL, 'p-4 sm:p-5')}>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><Activity className="size-4 text-amber-300" />Call performance</h2>
+          <p className="mt-1 text-xs text-muted-foreground">MTD team results with agent-level service patterns</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {data && <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-[10px] text-amber-200">MTD</span>}
+          <button type="button" onClick={onExplore} className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
+            Explore <ChevronRight className="size-3.5" />
+          </button>
+        </div>
+      </header>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
+        {[
+          {
+            label: 'Calls handled',
+            value: data ? formatNumber(data.call.handled) : '—',
+            note: shiftAverage?.average === null || shiftAverage === null ? 'Roster shift average unavailable' : `${shiftAverage.average.toFixed(1)} per shift · ${formatNumber(shiftAverage.shifts)} shifts`,
+            color: 'text-amber-300',
+          },
+          {
+            label: 'Team 20s SLA',
+            value: data ? pct(data.call.serviceLevel20) : '—',
+            note: 'Actual MTD service level',
+            color: data && data.call.serviceLevel20 < 84 ? 'text-rose-300' : data && data.call.serviceLevel20 < 88 ? 'text-amber-300' : 'text-emerald-300',
+          },
+          {
+            label: 'Agent answer rate',
+            value: averageAnswerRate === null ? '—' : pct(averageAnswerRate),
+            note: 'Weighted by inbound handled + missed',
+            color: 'text-sky-300',
+          },
+          {
+            label: 'Team avg handle',
+            value: data ? formatCallTime(data.call.avgHandleTimeSec) : '—',
+            note: data ? `${formatNumber(data.call.abandoned)} abandoned contacts` : 'From MTD call report',
+            color: 'text-violet-300',
+          },
+        ].map((metric) => (
+          <div key={metric.label} className="min-w-0 rounded-lg border border-border/40 bg-background/40 px-3 py-2.5">
+            <div className="text-[10px] font-medium text-muted-foreground">{metric.label}</div>
+            <div className={cn('mt-1 truncate font-mono text-xl font-semibold tabular-nums', metric.color)}>{metric.value}</div>
+            <div className="mt-1 min-h-7 text-[10px] leading-relaxed text-muted-foreground">{metric.note}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)]">
+        <div className="min-w-0 rounded-lg border border-border/40 bg-background/25 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-foreground">Agent answer vs. 20s SLA</h3>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Each bubble is an agent; size reflects inbound calls handled.</p>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><span className="h-0 w-4 border-t border-dashed border-sky-400" />Agent answer avg</span>
+              <span className="inline-flex items-center gap-1"><span className="h-0 w-4 border-t border-dashed border-emerald-400" />Team SLA</span>
+            </div>
+          </div>
+          {plotAgents.length > 0 && data ? (
+            <div className="mt-1 h-52 w-full" role="img" aria-label="Bubble chart comparing agent answer rate and 20-second service level">
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ top: 10, right: 12, bottom: 4, left: -16 }}>
+                  <CartesianGrid stroke="rgba(139,148,158,0.16)" strokeDasharray="3 3" />
+                  <XAxis
+                    type="number"
+                    dataKey="answerRate"
+                    domain={[xMin, 100]}
+                    tick={{ fill: '#8b949e', fontSize: 9 }}
+                    tickFormatter={(value: number) => `${value}%`}
+                    tickLine={false}
+                    axisLine={{ stroke: 'rgba(139,148,158,0.35)' }}
+                    name="Answer rate"
+                    unit="%"
+                  />
+                  <YAxis
+                    type="number"
+                    dataKey="serviceLevel20"
+                    domain={[yMin, 100]}
+                    tick={{ fill: '#8b949e', fontSize: 9 }}
+                    tickFormatter={(value: number) => `${value}%`}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                    name="20s SLA"
+                    unit="%"
+                  />
+                  <ZAxis type="number" dataKey="handledIncoming" range={[44, 210]} name="Inbound handled" />
+                  {averageAnswerRate !== null && <ReferenceLine x={averageAnswerRate} stroke="#58a6ff" strokeDasharray="4 4" />}
+                  <ReferenceLine y={data.call.serviceLevel20} stroke="#3fb950" strokeDasharray="4 4" />
+                  <Tooltip content={<CallAgentTooltip />} cursor={{ stroke: '#8b949e', strokeDasharray: '3 3' }} />
+                  <Scatter data={plotAgents} dataKey="serviceLevel20" name="Agents">
+                    {plotAgents.map((agent, index) => (
+                      <Cell
+                        key={`${agent.owner}-${index}`}
+                        fill={callAttentionReasons(agent, averageAnswerRate).length > 0 ? '#fb7185' : '#58a6ff'}
+                        fillOpacity={0.82}
+                        stroke="#0d1117"
+                        strokeWidth={1}
+                      />
+                    ))}
+                  </Scatter>
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="mt-3 flex h-52 items-center justify-center rounded-md border border-dashed border-border/50 px-4 text-center text-xs text-muted-foreground">
+              {state.status === 'loading' ? 'Loading agent call metrics…' : agentsReady ? 'Not enough agent data to draw the call chart.' : 'Published snapshot has no agent-level historical metrics yet.'}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 rounded-lg border border-border/40 bg-background/25 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-foreground">Call watchlist</h3>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Agents with the clearest service signals</p>
+            </div>
+            <span className="rounded-full bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-rose-200">{watchlist.length} flagged</span>
+          </div>
+          <div className="mt-2 space-y-2">
+            {watchlist.length > 0 ? watchlist.map((agent, index) => {
+              const reasons = callAttentionReasons(agent, averageAnswerRate);
+              return (
+                <div key={`${agent.owner}-${index}`} className="rounded-md border border-rose-500/15 bg-rose-500/[0.04] px-2.5 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-foreground">{agent.owner}</span>
+                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{formatNumber(agent.handled)} handled</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {reasons.map((reason) => <span key={reason} className="rounded bg-rose-500/10 px-1.5 py-0.5 text-[9px] text-rose-200">{reason}</span>)}
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-border/50 px-3 text-center text-xs text-muted-foreground">
+                {agentsReady ? 'No agents meet the watchlist criteria.' : 'Agent details will appear after the updated snapshot is published.'}
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-[9px] leading-relaxed text-muted-foreground">
+            Watchlist: 10+ handled and SLA under 84%, 2+ missed, or answer rate at least 5 pp under the weighted agent average.
+          </p>
+        </div>
+      </div>
+      {state.status === 'ready' && state.refreshError && <p className="mt-2 text-[10px] text-amber-200">Showing the previous call snapshot after a refresh error.</p>}
+      {state.status === 'error' && <p className="mt-2 text-[10px] text-rose-300">{state.message}</p>}
     </section>
   );
 }
@@ -1551,6 +1809,7 @@ export default function Dash() {
             </div>
           </section>
           <MtdVolumeSummary state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
+          <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.8fr)]">
             <ParliamentChart agents={filteredAgents} selectedKey={selected?.key ?? null} onSelect={setSelected} />
             <div className="hidden xl:block">

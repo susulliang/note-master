@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { BookOpen, ExternalLink, FileText, Search, X } from 'lucide-react';
 import { MANUAL_COUNT, MANUAL_GROUPS } from '@/data/manuals';
+import { openExternal } from '@/lib/open-external';
 import { cn } from '@/lib/utils';
 
 interface ManualsPanelProps {
@@ -109,6 +110,7 @@ export default function ManualsPanel({ onClose }: ManualsPanelProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`Open "${m.title}" PDF in a new window`}
+                      onClick={(e) => { e.preventDefault(); void openExternal(m.url); }}
                       className="group/link flex items-center gap-2 px-3 py-1.5 transition-colors hover:bg-accent/10"
                     >
                       <FileText className="size-3.5 shrink-0 text-muted-foreground group-hover/link:text-accent" />

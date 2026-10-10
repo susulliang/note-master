@@ -718,6 +718,9 @@ fn write_wav(pcm: &[f32], channels: u16, sample_rate: u32) -> Vec<u8> {
 pub fn run() {
   tauri::Builder::default()
     .manage(AppState::default())
+    // Opens external http(s) links (manuals, SOP docs, SF cases) in the
+    // system default browser — WKWebView blocks window.open/target=_blank.
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

@@ -12,6 +12,7 @@ import {
 import { Plus, X, ChevronDown, Check, PhoneOff, Loader2, ChevronLeft } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { openExternal } from '@/lib/open-external';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -347,7 +348,7 @@ function HeaderTagPill({
         target="_blank"
         rel="noopener noreferrer"
         title={`${headerTag.label} — ${headerTag.href}`}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openExternal(headerTag.href); }}
         onMouseDown={(e) => e.stopPropagation()}
         className={pillClass}
       >
