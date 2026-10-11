@@ -88,3 +88,5 @@ src-tauri/gen/
 
 # Wrangler local state
 .wrangler/
+.vercel
+.env*

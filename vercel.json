@@ -7,6 +7,10 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
+    {
+      "source": "/api/test-results",
+      "destination": "https://note-master.susulliang.workers.dev/api/test-results"
+    },
     { "source": "/((?!assets/|favicon\\.svg|icons\\.svg).*)", "destination": "/index.html" }
   ],
   "headers": [

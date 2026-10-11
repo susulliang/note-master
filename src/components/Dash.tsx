@@ -56,6 +56,7 @@ import {
   type DashMetricId,
 } from '@/lib/dash-model';
 import { cn } from '@/lib/utils';
+import TestScoreSubmissions, { useTestScoreData } from '@/components/TestScoreSubmissions';
 
 type View = 'overview' | 'explore' | 'scorecard';
 type ExploreView = 'quality' | 'workload' | 'response';
@@ -1726,6 +1727,7 @@ function Briefing({ data, agents }: { data: ReturnType<typeof useDashData>; agen
 
 export default function Dash() {
   const data = useDashData();
+  const testScores = useTestScoreData();
   const [preferences] = useState(readDashPreferences);
   const [view, setView] = useState<View>(preferences.view);
   const [explore, setExplore] = useState<ExploreView>(preferences.explore);
@@ -1853,6 +1855,7 @@ export default function Dash() {
             </div>
           </section>
           <MtdVolumeSummary state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
+          <TestScoreSubmissions state={testScores} />
           <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.8fr)]">
             <ParliamentChart agents={filteredAgents} selectedKey={selected?.key ?? null} onSelect={setSelected} />

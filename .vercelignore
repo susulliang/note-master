@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.git
+.vercel
+node_modules
+dist
+worker
+src-tauri
+/FAQ/
+.uploads
+AppIcons
+ppt-build
+SOP_ZH_20260930
+sf_reports
