@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -94,6 +94,9 @@ interface FlowchartCanvasProps {
   onViewChange?: (view: WorkView) => void;
   /** Content rendered in the canvas area when activeView === 'caseTrak'. */
   caseTrakContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'selfTest'
+   *  (weekly news knowledge quizzes). */
+  selfTestContent?: React.ReactNode;
   /** Content rendered in the canvas area when activeView === 'dash'
    *  (AMR Contact Center monthly KPI dashboard). */
   dashContent?: React.ReactNode;
@@ -118,7 +121,7 @@ interface FlowchartCanvasProps {
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
-export type WorkView = 'callNotes' | 'caseTrak' | 'dash' | 'shifts';
+export type WorkView = 'callNotes' | 'selfTest' | 'caseTrak' | 'dash' | 'shifts';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -416,6 +419,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   onViewChange,
   caseTrakContent,
   dashContent,
+  selfTestContent,
   shiftsContent,
   shiftsEnabled = false,
   analyticsEnabled = false,
@@ -430,7 +434,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // analytics views (unlocked together with Shift+D via analyticsEnabled);
   // the Shifts roster is a hidden view (activated with Shift+S).
   const railViews = useMemo<WorkView[]>(() => {
-    const views: WorkView[] = ['callNotes'];
+    const views: WorkView[] = ['callNotes', 'selfTest'];
     if (analyticsEnabled) views.push('caseTrak', 'dash');
     if (shiftsEnabled) views.push('shifts');
     return views;
@@ -1038,6 +1042,14 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         </div>
       )}
 
+      {/* Self Test workspace — weekly news knowledge quizzes. Always
+          available from the left rail, directly under Notes. */}
+      {activeView === 'selfTest' && (
+        <div className="h-full min-h-full w-full pl-[92px]">
+          {selfTestContent}
+        </div>
+      )}
+
       {/* KPI Dashboard — AMR Contact Center metrics, rendered from a
           Salesforce dashboard snapshot. Hidden analytics view: only rendered
           when unlocked (Shift+D). Same full-canvas layout as Trak. */}
@@ -1097,27 +1109,33 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                 const label =
                   view === 'callNotes'
                     ? 'Call Notes — active call workspace'
-                    : view === 'caseTrak'
-                      ? 'Case Trak Board — case lifecycle stages'
-                      : view === 'dash'
-                        ? 'KPI Dashboard — AMR Contact Center monthly metrics'
-                        : 'Shifts — service agent roster (hidden workspace, Shift+S)';
+                    : view === 'selfTest'
+                      ? 'Self Test — weekly news knowledge quizzes'
+                      : view === 'caseTrak'
+                        ? 'Case Trak Board — case lifecycle stages'
+                        : view === 'dash'
+                          ? 'KPI Dashboard — AMR Contact Center monthly metrics'
+                          : 'Shifts — service agent roster (hidden workspace, Shift+S)';
                 const short =
                   view === 'callNotes'
                     ? 'Notes'
-                    : view === 'caseTrak'
-                      ? 'Trak'
-                      : view === 'dash'
-                        ? 'Dash'
-                        : 'Shifts';
+                    : view === 'selfTest'
+                      ? 'Test'
+                      : view === 'caseTrak'
+                        ? 'Trak'
+                        : view === 'dash'
+                          ? 'Dash'
+                          : 'Shifts';
                 const Icon =
                   view === 'callNotes'
                     ? FilePen
-                    : view === 'caseTrak'
-                      ? LayoutGrid
-                      : view === 'dash'
-                        ? BarChart3
-                        : CalendarDays;
+                    : view === 'selfTest'
+                      ? GraduationCap
+                      : view === 'caseTrak'
+                        ? LayoutGrid
+                        : view === 'dash'
+                          ? BarChart3
+                          : CalendarDays;
                 return (
                   <button
                     key={view}

@@ -73,6 +73,7 @@ import TicketTrackerPanel from '@/components/TicketTrackerPanel';
 import CaseTrakBoard from '@/components/CaseTrakBoard';
 import ShiftsWorkspace from '@/components/ShiftsWorkspace';
 import Dash from '@/components/Dash';
+import SelfTestWorkspace from '@/components/SelfTestWorkspace';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
@@ -857,7 +858,7 @@ export default function TicketNotesPage() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** Top-level work view: Call Notes flowchart (default), Case Trak board,
    *  KPI Dashboard, or the hidden Shifts roster. */
-  const [workView, setWorkView] = useState<'callNotes' | 'caseTrak' | 'dash' | 'shifts'>('callNotes');
+  const [workView, setWorkView] = useState<'callNotes' | 'selfTest' | 'caseTrak' | 'dash' | 'shifts'>('callNotes');
   // The Shifts roster workspace is HIDDEN by default — pressing Shift+S
   // reveals its rail pill and switches to it (kept out of the default UI;
   // it's an internal GZ-OPS roster, not part of the agent-facing flow).
@@ -2132,6 +2133,7 @@ Additional information (if needed): ${additional}`;
               onViewChange={setWorkView}
               caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
               dashContent={<Dash />}
+              selfTestContent={<SelfTestWorkspace />}
               shiftsContent={<ShiftsWorkspace />}
               shiftsEnabled={shiftsUnlocked}
               analyticsEnabled={analyticsUnlocked}
