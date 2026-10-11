@@ -63,7 +63,7 @@ function CsatTooltip({ active, payload }: TooltipProps<number, string>) {
   const d = payload[0]!.payload as CsatAgentRow;
   const abnormal = isAbnormal('csat', d.csat);
   return (
-    <div className="min-w-[180px] rounded-xl border border-border/80 bg-[#0d1117]/95 px-3.5 py-3 shadow-2xl shadow-black/50 backdrop-blur-md">
+    <div className="glass-panel min-w-[180px] rounded-xl px-3.5 py-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-bold text-foreground">{d.owner}</span>
         <span
@@ -134,7 +134,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
   const surveyed = report ? report.total.good + report.total.bad : 0;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+    <section className="glass-panel overflow-hidden rounded-xl">
       {/* Header */}
       <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
         <div className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/15 ring-1 ring-emerald-500/30">
@@ -157,7 +157,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
           </p>
         </div>
         {report && abnormalAgents.length > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
+          <span className="glass-chip inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
             <AlertTriangle className="size-2.5" />
             {abnormalAgents.length} below {T.value}%
           </span>
@@ -172,11 +172,11 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
             <div className="h-4 w-48 rounded bg-muted-foreground/10" />
             <div className="grid grid-cols-3 gap-2 pt-2">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="h-16 rounded-xl bg-muted-foreground/10" />
+            <div key={i} className="glass-panel h-16 rounded-xl opacity-50" />
               ))}
             </div>
           </div>
-          <div className="h-[380px] rounded-xl bg-muted-foreground/10" />
+          <div className="glass-panel h-[380px] rounded-xl opacity-50" />
         </div>
       )}
 
@@ -191,7 +191,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
           </div>
           <button
             onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-emerald-500/50 hover:text-emerald-200"
+            className="glass-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-foreground hover:text-emerald-200"
           >
             <RefreshCw className="size-3.5" />
             Retry
@@ -203,7 +203,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
         <div className={cn('grid gap-5 p-4', mini ? 'grid-cols-1' : 'lg:grid-cols-[280px_minmax(0,1fr)]')}>
           {/* Left — overall summary */}
           <div className="flex flex-col gap-4">
-            <div className={cn('rounded-xl border border-border/50 bg-background/30', mini ? 'p-3' : 'p-4')}>
+            <div className={cn('glass-panel rounded-xl', mini ? 'p-3' : 'p-4')}>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Overall CSAT · this month
               </div>
@@ -251,21 +251,21 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
 
             {!mini && (
               <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-center">
+                <div className="glass-panel rounded-xl border-emerald-500/35 p-3 text-center">
                   <ThumbsUp className="mx-auto size-3.5 text-emerald-300/80" />
                   <div className="mt-1 text-lg font-black tabular-nums text-emerald-200">
                     {report.total.good}
                   </div>
                   <div className="text-[9px] uppercase tracking-wide text-emerald-300/60">Good</div>
                 </div>
-                <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-center">
+                <div className="glass-panel rounded-xl border-rose-500/35 p-3 text-center">
                   <ThumbsDown className="mx-auto size-3.5 text-rose-300/80" />
                   <div className="mt-1 text-lg font-black tabular-nums text-rose-200">
                     {report.total.bad}
                   </div>
                   <div className="text-[9px] uppercase tracking-wide text-rose-300/60">Bad</div>
                 </div>
-                <div className="rounded-xl border border-border/50 bg-background/30 p-3 text-center">
+                <div className="glass-panel rounded-xl p-3 text-center">
                   <MessagesSquare className="mx-auto size-3.5 text-accent/80" />
                   <div className="mt-1 text-lg font-black tabular-nums text-foreground">
                     {report.total.records}
@@ -284,7 +284,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
             )}
 
             {!mini && (
-              <div className="mt-auto rounded-xl border border-border/40 bg-background/20 px-3 py-2 text-[10px] text-muted-foreground">
+              <div className="glass-panel mt-auto rounded-xl px-3 py-2 text-[10px] text-muted-foreground">
                 {report.agents.length} agents in report · sorted by bad count
               </div>
             )}
@@ -292,7 +292,7 @@ export function CsatReportSection({ state, showAbnormal, onRetry, mini = false }
 
           {/* Right — per-agent vertical CSAT graph (hidden in mini mode) */}
           {!mini && (
-          <div className="rounded-xl border border-border/50 bg-background/30 p-3">
+          <div className="glass-panel rounded-xl p-3">
             <div className="mb-1 flex items-center justify-between px-1">
               <div className="text-[11px] font-semibold text-foreground">CSAT by agent</div>
               <div className="flex items-center gap-3 text-[9px] text-muted-foreground">

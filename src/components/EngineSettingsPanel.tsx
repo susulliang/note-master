@@ -261,6 +261,7 @@ export default function EngineSettingsPanel({
   keywordAlerts,
   keywordAlertSource,
 }: EngineSettingsPanelProps) {
+  const aiParserAvailable = Boolean(parser?.enabled || cloud?.hasKey);
   const panelsCtx = useContext(TicketPanelsContext);
   // Fallback: EngineSettingsPanel may render outside TicketPanelsContext.Provider
   // in some layout paths (same regression OutputModal had earlier). Use the
@@ -564,9 +565,22 @@ export default function EngineSettingsPanel({
         {/* ---- LLM parser ---- */}
         {parser && (
           <div>
-            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              AI parser (LLM)
-            </p>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                AI parser status
+              </p>
+              <span
+                role="status"
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide',
+                  aiParserAvailable
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'bg-foreground/10 text-muted-foreground'
+                )}
+              >
+                {aiParserAvailable ? 'On' : 'Off'}
+              </span>
+            </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
@@ -577,10 +591,10 @@ export default function EngineSettingsPanel({
                     ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                     : 'bg-foreground/10 text-muted-foreground'
                 )}
-                title="The on-device LLM reads the whole conversation and fills the ticket — pattern matches are only provisional until then"
+                title="Toggle the on-device LLM. Cloud parsing also counts as available when an API key is present."
               >
                 <BrainCircuit className="size-2.5" />
-                {parser.enabled ? 'AI parser on' : 'AI parser off'}
+                {parser.enabled ? 'Local parser on' : 'Local parser off'}
               </button>
               {parser.enabled && (
                 <span className="inline-flex overflow-hidden rounded-full border border-border/40">

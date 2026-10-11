@@ -5,9 +5,9 @@ import { useKeywordAlerts, KEYWORD_ALERTS_UPDATED_EVENT } from '@/hooks/use-keyw
 import type { KeywordAlert } from '@/lib/keyword-alerts';
 import { cn } from '@/lib/utils';
 
-const PANEL = 'rounded-xl border border-border/60 bg-card/45 backdrop-blur-md';
+const PANEL = 'glass-panel rounded-xl';
 const INPUT =
-  'w-full rounded-lg border border-border/70 bg-background/55 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70';
+  'glass-field w-full rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70';
 
 function newAlert(): KeywordAlert {
   return {
@@ -77,7 +77,7 @@ export default function KeywordAlertsManager() {
             </div>
           </div>
           <span className={cn(
-            'rounded-full border px-2.5 py-1 text-[10px] font-medium',
+            'glass-chip rounded-full px-2.5 py-1 text-[10px] font-medium',
             source === 'database'
               ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
               : source === 'loading'
@@ -88,7 +88,7 @@ export default function KeywordAlertsManager() {
           </span>
         </div>
         {source === 'defaults' && (
-          <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-100">
+          <p className="glass-panel mt-3 rounded-lg border-amber-400/25 bg-amber-400/[0.04] px-3 py-2 text-xs text-amber-100">
             D1 is empty or unavailable, so these are the current built-in defaults. Saving will create the database list.
           </p>
         )}
@@ -104,20 +104,20 @@ export default function KeywordAlertsManager() {
             type="button"
             onClick={() => { setDrafts((current) => [...current, newAlert()]); setMessage(null); }}
             disabled={source === 'loading'}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs font-semibold text-foreground transition hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            className="glass-btn inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
             <Plus className="size-3.5" /> Add alert
           </button>
         </div>
 
         {drafts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
+          <div className="glass-panel rounded-lg border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
             No alerts in this draft. Saving an empty list restores the built-in defaults for agents.
           </div>
         ) : (
           <div className="space-y-3">
             {drafts.map((alert, index) => (
-              <article key={alert.id} className="rounded-lg border border-border/50 bg-background/25 p-3 sm:p-4">
+              <article key={alert.id} className="glass-panel rounded-lg p-3 sm:p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Alert {String(index + 1).padStart(2, '0')}</span>
                   <button
@@ -128,7 +128,7 @@ export default function KeywordAlertsManager() {
                     }}
                     aria-label={`Delete ${alert.keyword || `alert ${index + 1}`}`}
                     disabled={source === 'loading'}
-                    className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-rose-500/10 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                    className="glass-btn inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                   >
                     <Trash2 className="size-4" />
                   </button>
@@ -173,7 +173,7 @@ export default function KeywordAlertsManager() {
                   />
                 </label>
 
-                <div className="mt-3 rounded-md border border-border/40 bg-background/40 p-3">
+                <div className="glass-panel mt-3 rounded-md p-3">
                   <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Safe preview</p>
                   {alert.alert.trim()
                     ? <KeywordAlertContent alert={alert} />
@@ -206,13 +206,13 @@ export default function KeywordAlertsManager() {
             type="button"
             onClick={() => void save()}
             disabled={saving || source === 'loading'}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-wait disabled:opacity-60"
+            className="glass-btn glass-btn-primary inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-xs font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-wait disabled:opacity-60"
           >
             <Save className="size-4" /> {saving ? 'Saving…' : 'Save to D1'}
           </button>
         </div>
         {message && (
-          <p role="status" className={cn('mt-3 rounded-md border px-3 py-2 text-xs', message.kind === 'success' ? 'border-emerald-400/20 bg-emerald-400/5 text-emerald-200' : 'border-rose-400/20 bg-rose-400/5 text-rose-200')}>
+          <p role="status" className={cn('glass-panel mt-3 rounded-md px-3 py-2 text-xs', message.kind === 'success' ? 'border-emerald-400/20 bg-emerald-400/[0.04] text-emerald-200' : 'border-rose-400/20 bg-rose-400/[0.04] text-rose-200')}>
             {message.text}
           </p>
         )}

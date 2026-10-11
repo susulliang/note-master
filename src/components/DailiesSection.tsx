@@ -98,7 +98,7 @@ function BarTooltip({ active, payload, label }: TooltipProps<number, string>) {
   if (!active || !payload || payload.length === 0) return null;
   const d = payload[0]!;
   return (
-    <div className="rounded-lg border border-border/80 bg-[#0d1117]/95 px-2.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+    <div className="glass-panel rounded-lg px-2.5 py-1.5 text-xs">
       <div className="font-semibold text-foreground">{label}</div>
       <div className="font-mono tabular-nums text-muted-foreground">
         {typeof d.value === 'number' ? d.value.toLocaleString() : d.value}
@@ -122,7 +122,7 @@ function ChannelPanel({ channel, total, shifts, subtitle, asOf, children }: Chan
   const daily = shifts > 0 ? total / shifts : 0;
   const Icon = channel.icon;
   return (
-    <div className={cn('flex flex-col rounded-xl border bg-background/30 p-3', channel.border)}>
+    <div className={cn('glass-panel flex flex-col rounded-xl p-3', channel.border)}>
       <div className="flex items-center gap-2">
         <div className={cn('flex size-7 items-center justify-center rounded-lg ring-1', channel.bg, channel.ring)}>
           <Icon className={cn('size-4', channel.text)} />
@@ -134,7 +134,7 @@ function ChannelPanel({ channel, total, shifts, subtitle, asOf, children }: Chan
       </div>
 
       {/* Daily average card */}
-      <div className="mt-3 rounded-lg border border-border/50 bg-card/40 p-3">
+      <div className="glass-panel mt-3 rounded-lg p-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Avg / shift
@@ -258,25 +258,37 @@ function computePerformers(
   email: CountReport,
   shiftsByAgent: Record<string, number>,
 ): { performers: Performer[]; avgRate: number } {
-  const map = new Map<string, { chat: number; email: number }>();
+  const map = new Map<string, { owner: string; chat: number; email: number; shifts: number }>();
+  const identityFor = (owner: string) => {
+    const rosterMatch = matchRosterShift(owner, shiftsByAgent);
+    const normalizedOwner = owner.normalize('NFKC').toLocaleLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return {
+      key: rosterMatch ? `roster:${rosterMatch.name.toLocaleLowerCase()}` : `owner:${normalizedOwner}`,
+      owner: rosterMatch?.name ?? owner,
+      shifts: rosterMatch?.shifts ?? 0,
+    };
+  };
   for (const a of chat.agents) {
-    map.set(a.owner, { chat: a.count, email: 0 });
+    const identity = identityFor(a.owner);
+    const current = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, shifts: identity.shifts };
+    current.chat += a.count;
+    map.set(identity.key, current);
   }
   for (const a of email.agents) {
-    const e = map.get(a.owner) ?? { chat: 0, email: 0 };
-    e.email = a.count;
-    map.set(a.owner, e);
+    const identity = identityFor(a.owner);
+    const e = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, shifts: identity.shifts };
+    e.email += a.count;
+    map.set(identity.key, e);
   }
   const performers: Performer[] = [];
   const raw: { owner: string; chat: number; email: number; total: number; shifts: number }[] = [];
   let matchedShifts = 0;
   let matchedCount = 0;
-  for (const [owner, v] of map) {
+  for (const v of map.values()) {
     const total = v.chat + v.email;
-    const shifts = matchRosterShift(owner, shiftsByAgent)?.shifts ?? 0;
-    raw.push({ owner, chat: v.chat, email: v.email, total, shifts });
-    if (shifts > 0) {
-      matchedShifts += shifts;
+    raw.push({ owner: v.owner, chat: v.chat, email: v.email, total, shifts: v.shifts });
+    if (v.shifts > 0) {
+      matchedShifts += v.shifts;
       matchedCount++;
     }
   }
@@ -307,7 +319,7 @@ function FlagBadge({ flag }: { flag: Performer['flag'] }) {
     return (
       <span
         title="Handling well above team average — consider more rest"
-        className="inline-flex items-center gap-0.5 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[8px] font-bold uppercase text-rose-300 ring-1 ring-rose-500/40"
+        className="glass-chip inline-flex items-center gap-0.5 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[8px] font-bold uppercase text-rose-300 ring-1 ring-rose-500/40"
       >
         <Coffee className="size-2.5" /> needs rest
       </span>
@@ -316,7 +328,7 @@ function FlagBadge({ flag }: { flag: Performer['flag'] }) {
   return (
     <span
       title="Handling well below team average"
-      className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-300 ring-1 ring-amber-500/40"
+      className="glass-chip inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-300 ring-1 ring-amber-500/40"
     >
       <TrendingDown className="size-2.5" /> low
     </span>
@@ -331,7 +343,7 @@ function PerformancePanel({ performers, avgRate }: { performers: Performer[]; av
   const underworked = performers.filter((p) => p.flag === 'underworked').length;
 
   const Row = ({ p }: { p: Performer }) => (
-    <div className="flex items-center gap-2 rounded-lg bg-background/30 px-2 py-1.5">
+    <div className="glass-panel flex items-center gap-2 rounded-lg px-2 py-1.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-[11px] font-semibold text-foreground">{p.owner}</span>
@@ -349,7 +361,7 @@ function PerformancePanel({ performers, avgRate }: { performers: Performer[]; av
   );
 
   return (
-    <div className="flex flex-col rounded-xl border border-fuchsia-500/30 bg-background/30 p-3">
+    <div className="glass-panel flex flex-col rounded-xl border-fuchsia-500/30 p-3">
       <div className="flex items-center gap-2">
         <div className="flex size-7 items-center justify-center rounded-lg bg-fuchsia-500/15 ring-1 ring-fuchsia-500/40">
           <Award className="size-4 text-fuchsia-300" />
@@ -426,7 +438,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
   }, [state]);
 
   const shiftsByAgent = useMemo(
-    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).byAgent,
+    () => countMtdShifts(rosterStart, rosterEnd).byAgent,
     [rosterStart, rosterEnd],
   );
   const chatShifts = useMemo(
@@ -448,7 +460,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
   }, [state, shiftsByAgent]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+    <section className="glass-panel overflow-hidden rounded-xl">
       <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
         <div className="flex size-7 items-center justify-center rounded-lg bg-fuchsia-500/15 ring-1 ring-fuchsia-500/30">
           <Timer className="size-4 text-fuchsia-300" />
@@ -468,10 +480,10 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
         <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="grid gap-4 md:grid-cols-3">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="h-[340px] rounded-xl bg-muted-foreground/10" />
+              <div key={i} className="glass-panel h-[340px] rounded-xl opacity-50" />
             ))}
           </div>
-          <div className="h-[340px] rounded-xl bg-muted-foreground/10" />
+          <div className="glass-panel h-[340px] rounded-xl opacity-50" />
         </div>
       )}
 
@@ -486,7 +498,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           </div>
           <button
             onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-fuchsia-500/50 hover:text-fuchsia-200"
+            className="glass-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-fuchsia-500/50 hover:text-fuchsia-200"
           >
             <RefreshCw className="size-3.5" />
             Retry
@@ -505,7 +517,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
             const grand = chatT + emailT + callT;
             const grandDaily = allShifts > 0 ? grand / allShifts : 0;
             return (
-              <div className="flex flex-wrap items-center gap-4 rounded-xl border border-fuchsia-500/30 bg-gradient-to-r from-fuchsia-500/10 via-background/40 to-background/40 p-4">
+              <div className="glass-panel flex flex-wrap items-center gap-4 rounded-xl border-fuchsia-500/30 p-4">
                 <div className="flex size-10 items-center justify-center rounded-lg bg-fuchsia-500/20 ring-1 ring-fuchsia-500/40">
                   <Timer className="size-5 text-fuchsia-300" />
                 </div>
@@ -521,25 +533,25 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
                   </div>
                 </div>
                 <div className="ml-auto flex flex-wrap items-center gap-3">
-                  <div className="rounded-lg border border-border/50 bg-background/40 px-3 py-1.5">
+                  <div className="glass-panel rounded-lg px-3 py-1.5">
                     <div className="text-[9px] uppercase text-muted-foreground">Call</div>
                     <div className="font-mono text-sm font-bold tabular-nums text-amber-200">
                       {callT.toLocaleString()}
                     </div>
                   </div>
-                  <div className="rounded-lg border border-border/50 bg-background/40 px-3 py-1.5">
+                  <div className="glass-panel rounded-lg px-3 py-1.5">
                     <div className="text-[9px] uppercase text-muted-foreground">Chat</div>
                     <div className="font-mono text-sm font-bold tabular-nums text-sky-200">
                       {chatT.toLocaleString()}
                     </div>
                   </div>
-                  <div className="rounded-lg border border-border/50 bg-background/40 px-3 py-1.5">
+                  <div className="glass-panel rounded-lg px-3 py-1.5">
                     <div className="text-[9px] uppercase text-muted-foreground">Email</div>
                     <div className="font-mono text-sm font-bold tabular-nums text-violet-200">
                       {emailT.toLocaleString()}
                     </div>
                   </div>
-                  <div className="rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/15 px-3 py-1.5 ring-1 ring-fuchsia-500/30">
+                  <div className="glass-panel rounded-lg border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-1.5">
                     <div className="text-[9px] uppercase text-fuchsia-300/80">Grand dailies</div>
                     <div className="font-mono text-lg font-black tabular-nums text-fuchsia-100">
                       {grandDaily.toFixed(2)}
@@ -570,13 +582,13 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
               ]}
             />
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-border/50 bg-background/30 px-2.5 py-1.5">
+              <div className="glass-panel rounded-lg px-2.5 py-1.5">
                 <div className="text-[9px] uppercase tracking-wide text-muted-foreground">SL 20s</div>
                 <div className="font-mono text-sm font-bold tabular-nums text-amber-200">
                   {state.data.call.serviceLevel20.toFixed(1)}%
                 </div>
               </div>
-              <div className="rounded-lg border border-border/50 bg-background/30 px-2.5 py-1.5">
+              <div className="glass-panel rounded-lg px-2.5 py-1.5">
                 <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Avg handle</div>
                 <div className="font-mono text-sm font-bold tabular-nums text-amber-200">
                   {fmtSec(state.data.call.avgHandleTimeSec)}

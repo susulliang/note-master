@@ -83,10 +83,10 @@ function readDashPreferences(): { view: View; explore: ExploreView; qualityMetri
   }
 }
 
-const PANEL = 'rounded-xl border border-border/60 bg-card/45 backdrop-blur-md';
+const PANEL = 'glass-panel rounded-xl';
 const CONTROL =
-  'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background/45 px-3 text-xs font-semibold text-muted-foreground transition-colors hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70';
-const ACTIVE_CONTROL = 'border-accent/50 bg-accent/10 text-foreground';
+  'glass-btn inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70';
+const ACTIVE_CONTROL = 'glass-chip-accent text-foreground';
 const ALERT_CONTROL = 'border-rose-500/40 bg-rose-500/10 text-rose-200';
 
 const MONEY_KPIS = [
@@ -169,7 +169,7 @@ function CallAgentTooltip({ active, payload }: TooltipProps<number, string>) {
   if (!active || !payload?.length) return null;
   const agent = payload[0]!.payload as HistoricalAgent;
   return (
-    <div className="rounded-lg border border-border/80 bg-[#0d1117]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+    <div className="glass-panel rounded-lg px-3 py-2 text-xs">
       <div className="font-semibold text-foreground">{agent.owner}</div>
       <div className="mt-1 space-y-0.5 font-mono tabular-nums text-muted-foreground">
         <div>Answer rate <span className="text-foreground">{agent.answerRate === null ? '—' : pct(agent.answerRate)}</span></div>
@@ -296,23 +296,23 @@ function ReportSources({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={cn(CONTROL, unavailable > 0 && 'border-amber-500/40 text-amber-200')}
+        className={cn(CONTROL, unavailable > 0 && 'glass-chip border-amber-500/40 text-amber-200')}
       >
         {unavailable > 0 ? <CircleAlert className="size-4" /> : <FileSpreadsheet className="size-4" />}
         Data sources
         {unavailable > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5">{unavailable}</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-11 z-30 w-[min(28rem,calc(100vw-7rem))] rounded-xl border border-border bg-popover p-3 shadow-2xl">
+        <div className="glass-panel absolute right-0 top-11 z-30 w-[min(28rem,calc(100vw-7rem))] rounded-xl p-3">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Report coverage</h2>
-            <button type="button" onClick={onToggle} aria-label="Close data sources" className="rounded p-1 text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={onToggle} aria-label="Close data sources" className="glass-btn rounded-md p-1 text-muted-foreground hover:text-foreground">
               <X className="size-4" />
             </button>
           </div>
           <div className="max-h-[min(70vh,32rem)] space-y-2 overflow-y-auto">
             {sources.map((source) => (
-              <div key={source.label} className="rounded-lg bg-background/60 px-3 py-2">
+              <div key={source.label} className="glass-panel rounded-lg px-3 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xs font-semibold text-foreground">{source.label}</span>
                   <span className={cn('text-[11px]', source.status === 'ready' ? 'text-emerald-300' : source.status === 'stale' ? 'text-amber-200' : source.status === 'error' ? 'text-rose-300' : 'text-muted-foreground')}>
@@ -415,7 +415,7 @@ function ResponseSummaryTile({
         <span>Response times</span>
         <span className="shrink-0">{totalBreaches} metric breaches</span>
       </span>
-      <span className="mt-3 grid grid-cols-3 divide-x divide-border/50">
+          <span className="mt-3 grid grid-cols-3 divide-x divide-border/50">
         {metrics.map((metric) => {
           const meta = metricMeta(metric);
           const value = values[metric];
@@ -501,7 +501,7 @@ function AgentMatrix({
           <select
             value={pageSize}
             onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }}
-            className="h-8 rounded-md border border-border bg-background px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            className="glass-field h-8 rounded-md px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
             <option value={10}>10</option>
             <option value={20}>20</option>
@@ -517,7 +517,7 @@ function AgentMatrix({
             <table className="w-full min-w-[760px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-border/40 text-[11px] text-muted-foreground">
-                  <th className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">Agent</th>
+                  <th className="sticky left-0 z-10 bg-card/90 px-4 py-3 font-medium backdrop-blur-md">Agent</th>
                   {DASH_METRICS.map((metric) => (
                     <th key={metric.id} className="px-2 py-3 text-center font-medium">
                       <button
@@ -539,7 +539,7 @@ function AgentMatrix({
                   const breaches = agentBreachCount(agent);
                   return (
                     <tr key={agent.key} className="border-b border-border/30 transition-colors hover:bg-accent/5">
-                      <th scope="row" className="sticky left-0 z-10 bg-card px-4 py-2 text-left">
+                      <th scope="row" className="sticky left-0 z-10 bg-card/90 px-4 py-2 text-left backdrop-blur-md">
                         <button type="button" onClick={() => onAgent(agent)} className="max-w-52 truncate text-sm font-medium text-foreground hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
                           {agent.name}
                         </button>
@@ -557,7 +557,7 @@ function AgentMatrix({
                                 onClick={() => onMetric(agent, metric.id)}
                                 aria-label={`${agent.name}, ${metric.label}: ${formatMetric(metric.id, value)}${abnormal ? ', outside limit' : ', within limit'}`}
                                 className={cn(
-                                  'rounded-md px-2 py-1 font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                                  'glass-chip rounded-md px-2 py-1 font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
                                   abnormal ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20' : 'text-foreground hover:bg-accent/10',
                                 )}
                               >
@@ -697,13 +697,13 @@ function ParliamentChart({
           <h2 className="text-sm font-semibold text-foreground">Agent parliament</h2>
           <p className="mt-1 text-xs text-muted-foreground">Seat color shows the share of reported operational cutoffs met · select a seat for details</p>
         </div>
-        <span className="rounded-full bg-background/60 px-2.5 py-1 font-mono text-xs tabular-nums text-muted-foreground">{seats.length} agents</span>
+        <span className="glass-chip rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">{seats.length} agents</span>
       </header>
       {seats.length === 0 ? (
         <div className="px-4 py-12 text-center text-sm text-muted-foreground">No agents match the current filters, or report data is unavailable.</div>
       ) : (
         <div className="p-3 sm:p-4">
-          <div className="relative rounded-xl border border-border/40 bg-background/30 p-2">
+          <div className="glass-panel relative rounded-xl p-2">
             <svg viewBox="0 0 720 380" className="h-auto w-full" role="group" aria-label="Agent performance parliament chart">
               {seats.map((seat, seatIndex) => {
                 const meta = OVERALL_BANDS[seat.band];
@@ -761,13 +761,13 @@ function ParliamentChart({
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">reported agents</span>
             </div>
             {hovered && (
-              <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-[min(22rem,calc(100%-1rem))] -translate-x-1/2 rounded-xl border border-border bg-popover/95 p-3 shadow-2xl backdrop-blur-md sm:left-auto sm:right-3 sm:top-3 sm:translate-x-0">
+              <div className="glass-panel pointer-events-none absolute left-1/2 top-2 z-10 w-[min(22rem,calc(100%-1rem))] -translate-x-1/2 rounded-xl p-3 sm:left-auto sm:right-3 sm:top-3 sm:translate-x-0">
                 <div className="flex items-center justify-between gap-3">
                   <span className="truncate text-xs font-semibold text-foreground">{hovered.agent.name}</span>
                   <span className={cn('shrink-0 text-[10px] font-semibold', OVERALL_BANDS[hovered.band].className)}>{OVERALL_BANDS[hovered.band].label}</span>
                 </div>
                 <p className="mt-1 text-[10px] text-muted-foreground">{overallPerformance(hovered.agent).met}/{overallPerformance(hovered.agent).available} reported cutoffs met</p>
-                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border/50 pt-2">
+          <div className="glass-panel mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg p-2">
                   {DASH_METRICS.map((metric) => {
                     const value = metricValue(hovered.agent, metric.id);
                     return (
@@ -840,7 +840,7 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       </div>
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {volumes.map((volume) => (
-          <div key={volume.name} className={cn('min-w-0 rounded-lg p-3', volume.name === 'Total processed' ? 'border border-accent/25 bg-accent/5' : 'bg-background/35')}>
+          <div key={volume.name} className={cn('glass-panel min-w-0 rounded-lg p-3', volume.name === 'Total processed' && 'border-accent/40')}>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className={cn('size-2 rounded-full', volume.accent)} />
               {volume.name}
@@ -950,7 +950,7 @@ function CallPerformanceCard({
             color: 'text-violet-300',
           },
         ].map((metric) => (
-          <div key={metric.label} className="min-w-0 rounded-lg border border-border/40 bg-background/40 px-3 py-2.5">
+          <div key={metric.label} className="glass-panel min-w-0 rounded-lg px-3 py-2.5">
             <div className="text-[10px] font-medium text-muted-foreground">{metric.label}</div>
             <div className={cn('mt-1 truncate font-mono text-xl font-semibold tabular-nums', metric.color)}>{metric.value}</div>
             <div className="mt-1 min-h-7 text-[10px] leading-relaxed text-muted-foreground">{metric.note}</div>
@@ -959,7 +959,7 @@ function CallPerformanceCard({
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)]">
-        <div className="min-w-0 rounded-lg border border-border/40 bg-background/25 p-3">
+      <div className="glass-panel min-w-0 rounded-lg p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-foreground">Agent answer vs. 20s SLA</h3>
@@ -1017,13 +1017,13 @@ function CallPerformanceCard({
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="mt-3 flex h-52 items-center justify-center rounded-md border border-dashed border-border/50 px-4 text-center text-xs text-muted-foreground">
+            <div className="glass-panel mt-3 flex h-52 items-center justify-center rounded-md border-dashed px-4 text-center text-xs text-muted-foreground">
               {state.status === 'loading' ? 'Loading agent call metrics…' : agentsReady ? 'Not enough agent data to draw the call chart.' : 'Published snapshot has no agent-level historical metrics yet.'}
             </div>
           )}
         </div>
 
-        <div className="min-w-0 rounded-lg border border-border/40 bg-background/25 p-3">
+        <div className="glass-panel min-w-0 rounded-lg p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-foreground">Call watchlist</h3>
@@ -1035,7 +1035,7 @@ function CallPerformanceCard({
             {watchlist.length > 0 ? watchlist.map((agent, index) => {
               const reasons = callAttentionReasons(agent, averageAnswerRate);
               return (
-                <div key={`${agent.owner}-${index}`} className="rounded-md border border-rose-500/15 bg-rose-500/[0.04] px-2.5 py-2">
+                <div key={`${agent.owner}-${index}`} className="glass-panel rounded-md border-rose-500/25 bg-rose-500/[0.04] px-2.5 py-2">
                   <div className="flex items-start justify-between gap-2">
                     <span className="truncate text-xs font-medium text-foreground">{agent.owner}</span>
                     <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{formatNumber(agent.handled)} handled</span>
@@ -1046,7 +1046,7 @@ function CallPerformanceCard({
                 </div>
               );
             }) : (
-              <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-border/50 px-3 text-center text-xs text-muted-foreground">
+              <div className="glass-panel flex min-h-28 items-center justify-center rounded-md border-dashed px-3 text-center text-xs text-muted-foreground">
                 {agentsReady ? 'No agents meet the watchlist criteria.' : 'Agent details will appear after the updated snapshot is published.'}
               </div>
             )}
@@ -1096,7 +1096,7 @@ function DotRows({
         </div>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Sort
-          <select value={sort} onChange={(event) => { setSort(event.target.value as typeof sort); setPage(0); }} className="h-8 rounded-md border border-border bg-background px-2 text-foreground">
+          <select value={sort} onChange={(event) => { setSort(event.target.value as typeof sort); setPage(0); }} className="glass-field h-8 rounded-md px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
             <option value="value">{metric === 'csat' ? 'Lowest CSAT' : 'Value'}</option>
             {metric === 'csat' && <option value="surveys">Most surveys</option>}
             <option value="name">Name</option>
@@ -1253,7 +1253,7 @@ function OneTouchMatrix({ agents, report, onSelect }: { agents: DashAgent[]; rep
           </tbody>
           {totalGroups && (
             <tfoot>
-              <tr className="border-t border-border/60 bg-background/30 font-semibold">
+              <tr className="glass-panel border-t border-border/60 font-semibold">
                 <th scope="row" className="sticky left-0 bg-card px-4 py-3 text-left text-foreground">Team</th>
                 {presentColumns.map((column) => {
                   const item = column === 'overall' && report
@@ -1285,7 +1285,7 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
     const end = compatible ? dateChat : null;
     const identityEnd = [dateChat, dateEmail].filter((date): date is string => !!date).sort().at(-1) ?? null;
     const identityShifts = identityEnd
-      ? countMtdShifts(monthStart(identityEnd), identityEnd, undefined, ['Chat', 'Call', 'FR Call']).byAgent
+      ? countMtdShifts(monthStart(identityEnd), identityEnd).byAgent
       : {};
     const shifts = end ? identityShifts : {};
     const names = new Map<string, { name: string; call: number; chat: number; email: number }>();
@@ -1350,21 +1350,21 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
   const rows = showPerShift ? workload.verified : [...workload.all].sort((a, b) => b.total - a.total);
   return (
     <div className="space-y-4">
-      {!workload.compatible && <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">Chat and Email report periods do not match. Team totals are shown independently; per-shift rates are hidden to avoid a misleading comparison.</div>}
+      {!workload.compatible && <div className="glass-panel rounded-lg border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-200">Chat and Email report periods do not match. Team totals are shown independently; per-shift rates are hidden to avoid a misleading comparison.</div>}
       <section className={cn(PANEL, 'p-4')}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">MTD channel volume</h2>
             <p className="mt-1 text-xs text-muted-foreground">Agent bars include Call, Chat, and Email. Per-agent calls come from Historical Metrics.</p>
           </div>
-          <div className="inline-flex rounded-lg border border-border/60 bg-background/40 p-1">
-            <button type="button" onClick={() => setPerShift(false)} className={cn('rounded-md px-3 py-1.5 text-xs', !showPerShift ? 'bg-accent/15 text-foreground' : 'text-muted-foreground')}>Total contacts</button>
-            <button type="button" onClick={() => setPerShift(true)} disabled={!workload.compatible} className={cn('rounded-md px-3 py-1.5 text-xs disabled:opacity-40', showPerShift ? 'bg-accent/15 text-foreground' : 'text-muted-foreground')}>Per roster shift</button>
+          <div className="glass-panel inline-flex rounded-lg p-1">
+            <button type="button" onClick={() => setPerShift(false)} className={cn('glass-btn rounded-md px-3 py-1.5 text-xs', !showPerShift ? ACTIVE_CONTROL : 'text-muted-foreground')}>Total contacts</button>
+            <button type="button" onClick={() => setPerShift(true)} disabled={!workload.compatible} className={cn('glass-btn rounded-md px-3 py-1.5 text-xs disabled:opacity-40', showPerShift ? ACTIVE_CONTROL : 'text-muted-foreground')}>Per roster shift</button>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {channels.map((channel) => (
-            <div key={channel.label} className="rounded-lg bg-background/45 px-3 py-3">
+            <div key={channel.label} className="glass-panel rounded-lg px-3 py-3">
               <div className="text-xs text-muted-foreground">{channel.label}</div>
               <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-foreground">{formatNumber(channel.value)}</div>
             </div>
@@ -1462,7 +1462,7 @@ function ResponseExplore({ reports, agents }: { reports: ResponseTimeReport[] | 
           const teamX = (report.teamAvg / max) * 100;
           const agentX = (report.agentAvg / max) * 100;
           return (
-            <div key={id} className="rounded-lg bg-background/40 p-3">
+            <div key={id} className="glass-panel rounded-lg p-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-semibold text-foreground">{meta.label}</h3>
                 <span className="text-[11px] text-muted-foreground">limit {formatMetric(id, meta.threshold)}</span>
@@ -1550,7 +1550,7 @@ function Scorecard() {
             <div className="text-right"><div className="text-[11px] text-muted-foreground">Settlement</div><div className="font-mono text-2xl font-semibold text-foreground">×1</div></div>
           </div>
         </div>
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/90">
+        <div className="glass-panel mt-4 flex items-start gap-2 rounded-lg border-amber-500/30 bg-amber-500/[0.04] px-3 py-2 text-xs text-amber-100/90">
           <Info className="mt-0.5 size-4 shrink-0" />
           Listed KPI weights total {listedWeight}%. The remaining {100 - listedWeight}% is not represented in this snapshot; values and scores are shown as supplied and are not normalized.
         </div>
@@ -1594,7 +1594,7 @@ function Scorecard() {
         <div className="flex justify-end px-4 py-3 font-mono text-sm font-bold tabular-nums text-foreground">Supplied score sum&nbsp; {SCORE_TOTAL.toFixed(2)}</div>
       </section>
       <section className={cn(PANEL, 'overflow-hidden')}>
-        <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((open) => !open)} className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold text-foreground">
+        <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((open) => !open)} className="glass-btn flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-semibold text-foreground">
           View scoring details <span className="text-muted-foreground">{showDetails ? 'Hide' : 'Show'}</span>
         </button>
         {showDetails && <div className="overflow-x-auto border-t border-border/40"><table className="w-full min-w-[760px] text-left text-xs"><thead><tr className="text-muted-foreground">{['Category', 'KPI', 'Direction', 'Challenge', 'Target', 'Threshold', 'Weight', 'Achievement', 'Band', 'Score'].map((label) => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr></thead><tbody>{MONEY_KPIS.map((row) => <tr key={row.name} className="border-t border-border/30"><td className="px-3 py-2 text-muted-foreground">{row.category}</td><td className="px-3 py-2 text-foreground">{row.name}</td><td className="px-3 py-2 text-muted-foreground">{row.direction === 'higher' ? 'Higher' : 'Lower'}</td><td className="px-3 py-2 font-mono text-emerald-200">{row.challenge}</td><td className="px-3 py-2 font-mono text-sky-200">{row.target}</td><td className="px-3 py-2 font-mono text-amber-200">{row.threshold}</td><td className="px-3 py-2 font-mono">{row.weight}%</td><td className="px-3 py-2 font-mono text-foreground">{row.achievement}</td><td className="px-3 py-2">{scoreBand(row)}</td><td className="px-3 py-2 font-mono">{row.score.toFixed(2)}</td></tr>)}</tbody></table></div>}
@@ -1616,7 +1616,7 @@ function AgentDetailContent({ agent, compare, onCompare }: { agent: DashAgent; c
           {overallPerformance(agent).met}/{overallPerformance(agent).available} cutoffs met
         </span>
       </div>
-      <div className="mt-3 divide-y divide-border/30 rounded-lg border border-border/50">
+      <div className="glass-panel mt-3 divide-y divide-border/30 rounded-lg">
         {DASH_METRICS.map((metric) => {
           const value = metricValue(agent, metric.id);
           const abnormal = value !== null && isMetricAbnormal(metric.id, value);
@@ -1629,7 +1629,7 @@ function AgentDetailContent({ agent, compare, onCompare }: { agent: DashAgent; c
           <p>One-Touch: {formatNumber(agent.oneTouch.oneTime)} one-touch / {formatNumber(agent.oneTouch.closed)} closed cases.</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {agent.oneTouch.channels.map((channel) => (
-              <span key={channel.name} className="rounded-md bg-background/60 px-2 py-1">
+              <span key={channel.name} className="glass-chip rounded-md px-2 py-1">
                 {channel.name}: {pct(channel.rate)} ({formatNumber(channel.oneTime)}/{formatNumber(channel.closed)})
               </span>
             ))}
@@ -1719,10 +1719,10 @@ function Briefing({ data, agents }: { data: ReturnType<typeof useDashData>; agen
     <section className={cn(PANEL, 'p-4 sm:p-5')}>
       <div className="flex flex-wrap items-baseline justify-between gap-3"><div><h2 className="text-base font-semibold text-foreground">AMR KPI Briefing</h2><p className="mt-1 text-xs text-muted-foreground">{agents.length} report identities · counts below are metric breaches, not unique people</p></div><span className={cn('text-xs', problems.length ? 'text-amber-200' : 'text-muted-foreground')}>{problems.length ? `Previous data: ${problems.map(([name]) => name).join(', ')}` : loading ? 'Loading source coverage' : 'All report groups loaded'} · MTD snapshot</span></div>
       <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-        {DASH_METRICS.map((metric) => { const value = teamValues[metric.id]; const bad = agents.filter((agent) => { const item = metricValue(agent, metric.id); return item !== null && isMetricAbnormal(metric.id, item); }).length; return <div key={metric.id} className="rounded-lg bg-background/45 p-3"><div className="text-xs text-muted-foreground">{metric.shortLabel}</div><div className="mt-1 font-mono text-xl font-semibold tabular-nums text-foreground">{value === null ? '—' : formatMetric(metric.id, value)}</div><div className="mt-1 text-[11px] text-muted-foreground">{bad} outside limit</div></div>; })}
+        {DASH_METRICS.map((metric) => { const value = teamValues[metric.id]; const bad = agents.filter((agent) => { const item = metricValue(agent, metric.id); return item !== null && isMetricAbnormal(metric.id, item); }).length; return <div key={metric.id} className="glass-panel rounded-lg p-3"><div className="text-xs text-muted-foreground">{metric.shortLabel}</div><div className="mt-1 font-mono text-xl font-semibold tabular-nums text-foreground">{value === null ? '—' : formatMetric(metric.id, value)}</div><div className="mt-1 text-[11px] text-muted-foreground">{bad} outside limit</div></div>; })}
       </div>
       <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-5">
-        {DASH_METRICS.map((metric) => { const values = agents.map((agent) => metricValue(agent, metric.id)).filter((value): value is number => value !== null).sort((a, b) => a - b); const max = metric.id === 'csat' || metric.id === 'oneTouch' ? 100 : Math.max(metric.threshold * 1.3, values.at(-1) ?? 0, 1); return <div key={metric.id} className="rounded-lg bg-background/30 p-3"><div className="mb-2 text-[11px] font-medium text-muted-foreground">{metric.label} · {metric.unit}</div><div className="relative h-7 rounded-md bg-border/25">{values.map((value, index) => <span key={`${value}-${index}`} className={cn('absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full', isMetricAbnormal(metric.id, value) ? 'bg-rose-400' : 'bg-accent')} style={{ left: `${(value / max) * 100}%`, top: `${25 + (index % 4) * 17}%` }} />)}<span className="absolute inset-y-0 w-px bg-foreground/60" style={{ left: `${(metric.threshold / max) * 100}%` }} /></div><div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground"><span>0{metric.unit}</span><span>limit {formatMetric(metric.id, metric.threshold)}</span></div></div>; })}
+        {DASH_METRICS.map((metric) => { const values = agents.map((agent) => metricValue(agent, metric.id)).filter((value): value is number => value !== null).sort((a, b) => a - b); const max = metric.id === 'csat' || metric.id === 'oneTouch' ? 100 : Math.max(metric.threshold * 1.3, values.at(-1) ?? 0, 1); return <div key={metric.id} className="glass-panel rounded-lg p-3"><div className="mb-2 text-[11px] font-medium text-muted-foreground">{metric.label} · {metric.unit}</div><div className="relative h-7 rounded-md bg-border/25">{values.map((value, index) => <span key={`${value}-${index}`} className={cn('absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full', isMetricAbnormal(metric.id, value) ? 'bg-rose-400' : 'bg-accent')} style={{ left: `${(value / max) * 100}%`, top: `${25 + (index % 4) * 17}%` }} />)}<span className="absolute inset-y-0 w-px bg-foreground/60" style={{ left: `${(metric.threshold / max) * 100}%` }} /></div><div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground"><span>0{metric.unit}</span><span>limit {formatMetric(metric.id, metric.threshold)}</span></div></div>; })}
       </div>
       {data.dailies.state.status === 'ready' && <div className="mt-4 border-t border-border/40 pt-3"><p className="mb-2 text-[11px] text-muted-foreground">Independent source totals · Call period unavailable</p><div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span>Call {formatNumber(data.dailies.state.data.call.handled)}</span><span>Chat {formatNumber(data.dailies.state.data.chat.total)}</span><span>Email {formatNumber(data.dailies.state.data.email.total)}</span></div></div>}
     </section>
@@ -1819,7 +1819,7 @@ export default function Dash() {
 
   return (
     <div className="min-h-full bg-background px-3 py-3 text-foreground sm:px-5 sm:py-4">
-      <header className="sticky top-0 z-30 -mx-3 mb-4 border-b border-border/50 bg-background/90 px-3 py-3 backdrop-blur-xl sm:-mx-5 sm:px-5">
+      <header className="glass-panel sticky top-0 z-30 -mx-3 mb-4 rounded-xl px-3 py-3 sm:-mx-5 sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground sm:text-xl"><Activity className="size-5 text-accent" />AMR Dashboard</h1>
@@ -1834,7 +1834,7 @@ export default function Dash() {
         </div>
         {!briefing && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {showAgentControls && <label className="relative min-w-[190px] flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search agents" aria-label="Search agents" className="h-9 w-full rounded-lg border border-border/70 bg-card/45 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70" /></label>}
+            {showAgentControls && <label className="relative min-w-[190px] flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search agents" aria-label="Search agents" className="glass-field h-9 w-full rounded-lg pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70" /></label>}
             {showAgentControls && <button type="button" onClick={() => setNeedsAttention((current) => !current)} aria-pressed={needsAttention} className={cn(CONTROL, needsAttention && ALERT_CONTROL)}><CircleAlert className="size-4" />{needsAttention ? 'Needs attention' : 'All agents'}<span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-200">{reportsReady ? `${agentsWithBreaches} with breaches · ${totalMetricBreaches} metric breaches` : reportsLoading ? 'Loading report counts' : 'Partial report coverage'}</span></button>}
             {showAgentControls && (query || needsAttention) && <button type="button" onClick={() => { setQuery(''); setNeedsAttention(false); }} className={cn(CONTROL, 'min-h-8')}><X className="size-3.5" />Clear filters</button>}
           </div>
@@ -1893,15 +1893,15 @@ export default function Dash() {
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex flex-wrap rounded-lg border border-border/60 bg-card/40 p-1">
-              {(['quality', 'workload', 'response'] as ExploreView[]).map((item) => <button key={item} type="button" onClick={() => setExplore(item)} className={cn('rounded-md px-3 py-2 text-xs font-medium capitalize transition-colors', explore === item ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:text-foreground')}>{item === 'response' ? 'Response times' : item}</button>)}
+              <div className="glass-panel inline-flex flex-wrap rounded-lg p-1">
+              {(['quality', 'workload', 'response'] as ExploreView[]).map((item) => <button key={item} type="button" onClick={() => setExplore(item)} className={cn('glass-btn rounded-md px-3 py-2 text-xs font-medium capitalize transition-colors', explore === item ? ACTIVE_CONTROL : 'text-muted-foreground hover:text-foreground')}>{item === 'response' ? 'Response times' : item}</button>)}
             </div>
             {focusMetric && <span className="text-xs text-muted-foreground">Focused metric: {metricMeta(focusMetric).label}<button type="button" onClick={() => setFocusMetric(null)} className="ml-2 text-accent">Clear</button></span>}
           </div>
           {explore === 'quality' && (
             <div className="space-y-3">
-              <div className="inline-flex rounded-lg border border-border/60 bg-card/40 p-1">
-                {(['csat', 'oneTouch'] as QualityMetric[]).map((metric) => <button key={metric} type="button" onClick={() => setQualityMetric(metric)} className={cn('rounded-md px-3 py-2 text-xs font-medium transition-colors', qualityMetric === metric ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:text-foreground')}>{metric === 'csat' ? 'CSAT' : 'One-Touch channels'}</button>)}
+              <div className="glass-panel inline-flex rounded-lg p-1">
+                {(['csat', 'oneTouch'] as QualityMetric[]).map((metric) => <button key={metric} type="button" onClick={() => setQualityMetric(metric)} className={cn('glass-btn rounded-md px-3 py-2 text-xs font-medium transition-colors', qualityMetric === metric ? ACTIVE_CONTROL : 'text-muted-foreground hover:text-foreground')}>{metric === 'csat' ? 'CSAT' : 'One-Touch channels'}</button>)}
               </div>
               {qualityMetric === 'csat' ? <DotRows agents={filteredAgents} metric="csat" onSelect={setSelected} /> : <OneTouchMatrix agents={filteredAgents} report={data.touch.state.status === 'ready' ? data.touch.state.report.total : null} onSelect={setSelected} />}
             </div>

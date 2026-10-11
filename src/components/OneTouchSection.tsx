@@ -212,7 +212,7 @@ function GroupCard({
   const abnormal = agg.rate < CUTOFF;
   const present = channels.filter((c) => c.closed > 0).sort((a, b) => b.closed - a.closed);
   return (
-    <div className="rounded-xl border border-border/50 bg-background/30 p-3">
+    <div className="glass-panel rounded-xl p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[11px] font-bold text-foreground">
           <Icon className={cn('size-3.5', abnormal ? 'text-rose-300' : 'text-emerald-300')} />
@@ -275,7 +275,7 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
   }, [report]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+    <section className="glass-panel overflow-hidden rounded-xl">
       {/* Header */}
       <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
         <div className="flex size-7 items-center justify-center rounded-lg bg-amber-500/15 ring-1 ring-amber-500/30">
@@ -296,7 +296,7 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
           </p>
         </div>
         {report && belowCount > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
+          <span className="glass-chip inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
             <AlertTriangle className="size-2.5" />
             {belowCount} below {CUTOFF}%
           </span>
@@ -305,10 +305,10 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
 
       {state.status === 'loading' && (
         <div className="grid animate-pulse gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="h-[400px] rounded-xl bg-muted-foreground/10" />
+          <div className="glass-panel h-[400px] rounded-xl opacity-50" />
           <div className="space-y-3">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-20 rounded-xl bg-muted-foreground/10" />
+              <div key={i} className="glass-panel h-20 rounded-xl opacity-50" />
             ))}
           </div>
         </div>
@@ -325,7 +325,7 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
           </div>
           <button
             onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-amber-500/50 hover:text-amber-200"
+            className="glass-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-foreground hover:text-amber-200"
           >
             <RefreshCw className="size-3.5" />
             Retry
@@ -337,7 +337,7 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
         <div className={cn('grid gap-5 p-4', mini ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_340px]')}>
           {/* Left — parliament (hidden in mini mode) */}
           {!mini && (
-          <div className="flex flex-col rounded-xl border border-border/50 bg-background/30 p-3">
+          <div className="glass-panel flex flex-col rounded-xl p-3">
             <div className="relative flex-1">
               <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" role="img" aria-label="One touch rate by agent, parliament chart">
                 {seats.map((s, i) => {
@@ -399,7 +399,7 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
               {/* Hover panel */}
               {hovered && (
                 <div
-                  className="pointer-events-none absolute z-10 w-[210px] -translate-x-1/2 -translate-y-full rounded-xl border border-border/80 bg-[#0d1117]/95 px-3.5 py-3 shadow-2xl shadow-black/50 backdrop-blur-md"
+                  className="glass-panel pointer-events-none absolute z-10 w-[210px] -translate-x-1/2 -translate-y-full rounded-xl px-3.5 py-3"
                   style={{
                     left: `${Math.min(86, Math.max(14, (hovered.x / VB_W) * 100))}%`,
                     top: `${(hovered.y / VB_H) * 100}%`,
@@ -480,10 +480,10 @@ export function OneTouchSection({ state, showAbnormal, onRetry, mini = false }: 
             {/* Overall */}
             <div
               className={cn(
-                'rounded-xl border p-3.5',
+                'glass-panel rounded-xl p-3.5',
                 report.total.rate < CUTOFF
-                  ? 'border-rose-500/30 bg-rose-500/10'
-                  : 'border-emerald-500/30 bg-emerald-500/10'
+                  ? 'border-rose-500/45'
+                  : 'border-emerald-500/45'
               )}
             >
               <div className="flex items-center justify-between">

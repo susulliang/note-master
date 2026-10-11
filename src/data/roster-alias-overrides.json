@@ -1,0 +1,41 @@
+{
+  "description": "Manual Salesforce owner aliases keyed to their roster identity. Update this file when Salesforce and roster aliases diverge.",
+  "overrides": [
+    {
+      "roster": { "en": "Hawks", "skill": "Call", "zh": "霍婧彤" },
+      "sfAliases": ["Aurora"]
+    },
+    {
+      "roster": { "en": "Yison", "skill": "Call", "zh": "朱奕信" },
+      "sfAliases": ["Ethan Z"]
+    },
+    {
+      "roster": { "en": "Kevin X", "skill": "Call", "zh": "许少锟" },
+      "sfAliases": ["Kevin"]
+    },
+    {
+      "roster": { "en": "George", "skill": "T2", "zh": "凌键杨" },
+      "sfAliases": ["George Plantagenet"]
+    },
+    {
+      "roster": { "en": "Hoi", "skill": "SV", "zh": "黄铠伦" },
+      "sfAliases": ["Charlie Gilbert", "Charlie G"]
+    },
+    {
+      "roster": { "en": "Alexia", "skill": "TL", "zh": "吴宇君" },
+      "sfAliases": ["Alex W", "Alex Wilson"]
+    },
+    {
+      "roster": { "en": "Dagen", "skill": "Chat", "zh": "钟明毅" },
+      "sfAliases": ["Daniel"]
+    },
+    {
+      "roster": { "en": "Steven", "skill": "T2", "zh": "蒋志聪" },
+      "sfAliases": ["Steven"]
+    },
+    {
+      "roster": { "en": "Steve", "skill": "T2", "zh": "李书蒙" },
+      "sfAliases": ["Steve"]
+    }
+  ]
+}

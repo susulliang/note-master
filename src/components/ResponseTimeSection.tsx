@@ -109,7 +109,7 @@ function RtTooltip({ active, payload, label }: TooltipProps<number, string>) {
   const d = payload[0]!;
   const unit = (d.payload as { unit?: string }).unit ?? '';
   return (
-    <div className="rounded-lg border border-border/80 bg-[#0d1117]/95 px-2.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+    <div className="glass-panel rounded-lg px-2.5 py-1.5 text-xs">
       <div className="font-semibold text-foreground">{label}</div>
       <div className="font-mono tabular-nums text-muted-foreground">
         {typeof d.value === 'number' ? d.value.toFixed(2) : d.value}
@@ -144,7 +144,7 @@ function MetricColumn({ metric, report, showAbnormal, mini = false }: MetricColu
   const xMax = Math.ceil((maxVal * 1.15 * 10) / 10) / 10;
 
   return (
-    <div className={cn('flex flex-col rounded-xl border bg-background/30 p-3', meta.border)}>
+    <div className={cn('glass-panel flex flex-col rounded-xl p-3', meta.border)}>
       {/* Header */}
       <div className="flex items-center gap-2">
         <div className={cn('flex size-7 items-center justify-center rounded-lg ring-1', meta.bg, meta.ring)}>
@@ -161,7 +161,7 @@ function MetricColumn({ metric, report, showAbnormal, mini = false }: MetricColu
 
       {/* Team avg + Agent avg tiles */}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-lg border border-border/50 bg-card/40 p-2">
+        <div className="glass-panel rounded-lg p-2">
           <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
             <Gauge className="size-2.5" /> Team avg
           </div>
@@ -178,7 +178,7 @@ function MetricColumn({ metric, report, showAbnormal, mini = false }: MetricColu
             {teamAbnormal ? `▲ ${(report.teamAvg - report.threshold).toFixed(2)} over` : 'within threshold'}
           </div>
         </div>
-        <div className="rounded-lg border border-border/50 bg-card/40 p-2">
+        <div className="glass-panel rounded-lg p-2">
           <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
             <Users className="size-2.5" /> Agent avg
           </div>
@@ -284,7 +284,7 @@ export function ResponseTimeSection({ state, showAbnormal, onRetry, mini = false
   }, [state]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/60 bg-card/40 backdrop-blur-md">
+    <section className="glass-panel overflow-hidden rounded-xl">
       <header className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-3">
         <div className="flex size-7 items-center justify-center rounded-lg bg-cyan-500/15 ring-1 ring-cyan-500/30">
           <Clock className="size-4 text-cyan-300" />
@@ -296,7 +296,7 @@ export function ResponseTimeSection({ state, showAbnormal, onRetry, mini = false
           </p>
         </div>
         {abnormalCount > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
+          <span className="glass-chip inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
             <AlertTriangle className="size-2.5" />
             {abnormalCount} agent-metrics over threshold
           </span>
@@ -306,7 +306,7 @@ export function ResponseTimeSection({ state, showAbnormal, onRetry, mini = false
       {state.status === 'loading' && (
         <div className="grid gap-4 p-4 md:grid-cols-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[400px] rounded-xl bg-muted-foreground/10" />
+            <div key={i} className="glass-panel h-[400px] rounded-xl opacity-50" />
           ))}
         </div>
       )}
@@ -322,7 +322,7 @@ export function ResponseTimeSection({ state, showAbnormal, onRetry, mini = false
           </div>
           <button
             onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-cyan-500/50 hover:text-cyan-200"
+            className="glass-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-foreground hover:text-cyan-200"
           >
             <RefreshCw className="size-3.5" />
             Retry

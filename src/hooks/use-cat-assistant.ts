@@ -69,7 +69,6 @@ export interface CatAssistantProps {
 const NUDGE_FIELDS: Array<{ id: string; label: string }> = [
   { id: 'customerName', label: 'Customer name' },
   { id: 'contactNumber', label: 'Contact number' },
-  { id: 'shippingAddress', label: 'Shipping address' },
 ];
 
 /** Cat-themed idle thoughts. Keep them short — the bubble is small. */

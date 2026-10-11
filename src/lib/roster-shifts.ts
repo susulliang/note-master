@@ -1,4 +1,5 @@
 import { getRoster, ROSTER_MONTHS } from '@/data/roster-index';
+import rosterAliasOverrides from '@/data/roster-alias-overrides.json';
 import type { RosterAgent } from '@/data/roster';
 
 /**
@@ -79,6 +80,27 @@ function rosterNameParts(name: string): string[] {
     .filter(Boolean);
 }
 
+function startsWithParts(source: string[], prefix: string[]): boolean {
+  return prefix.length > 0 && prefix.every((part, index) => source[index] === part);
+}
+
+function matchRosterAliasOverride(
+  owner: string,
+  shiftsByAgent: Record<string, number>,
+): RosterShiftMatch | null {
+  const ownerParts = rosterNameParts(owner);
+  for (const override of rosterAliasOverrides.overrides) {
+    const matchesAlias = override.sfAliases.some((alias) =>
+      startsWithParts(ownerParts, rosterNameParts(alias))
+    );
+    const shifts = shiftsByAgent[override.roster.en];
+    if (matchesAlias && typeof shifts === 'number') {
+      return { name: override.roster.en, shifts };
+    }
+  }
+  return null;
+}
+
 function editDistanceAtMostOne(a: string, b: string): boolean {
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0;
@@ -152,9 +174,11 @@ export function matchRosterShift(
     candidates.push({ name, shifts, score });
   }
 
-  if (!candidates.length) return null;
+  if (!candidates.length) return matchRosterAliasOverride(owner, shiftsByAgent);
   candidates.sort((a, b) => b.score - a.score);
-  if (candidates.length > 1 && candidates[0]!.score === candidates[1]!.score) return null;
+  if (candidates.length > 1 && candidates[0]!.score === candidates[1]!.score) {
+    return matchRosterAliasOverride(owner, shiftsByAgent);
+  }
   return { name: candidates[0]!.name, shifts: candidates[0]!.shifts };
 }
 

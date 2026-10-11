@@ -28,8 +28,8 @@ interface TestScoreData {
   averageScorePct: number | null;
   bestScorePct: number | null;
   uniqueAgents: number;
-  totalCorrect: number;
-  totalQuestionsAnswered: number;
+  totalCorrect: number | null;
+  totalQuestionsAnswered: number | null;
   overallAccuracyPct: number | null;
   scoreBands: Array<{ label: string; count: number }>;
   recent: RecentTestResult[];
@@ -40,8 +40,12 @@ type ScoreState =
   | { status: 'error' }
   | { status: 'ready'; data: TestScoreData };
 
-const PANEL = 'rounded-xl border border-border/60 bg-card/45 backdrop-blur-md';
+const PANEL = 'glass-panel rounded-xl';
 const BAND_COLORS = ['#f85149', '#d29922', '#58a6ff', '#3fb950'];
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
 
 function parseSubmittedAt(value: string): Date | null {
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
@@ -86,7 +90,7 @@ function ScoreTooltip({ active, payload }: TooltipProps<number, string>) {
   const result = payload[0]!.payload as RecentTestResult;
   const date = parseSubmittedAt(result.submittedAt);
   return (
-    <div className="rounded-lg border border-border/80 bg-[#0d1117]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+    <div className="glass-panel rounded-lg px-3 py-2 text-xs">
       <div className="font-semibold text-foreground">{result.agentName}</div>
       <div className="mt-1 text-muted-foreground">{result.suiteLabel}</div>
       <div className="mt-2 flex items-center gap-3 font-mono tabular-nums">
@@ -109,7 +113,23 @@ export function useTestScoreData(): ScoreState {
     })
       .then(async (response) => {
         if (!response.ok) throw new Error('Score data unavailable');
-        return (await response.json()) as TestScoreData;
+        const payload = (await response.json()) as Partial<TestScoreData>;
+        const totalCorrect = finiteNumber(payload.totalCorrect);
+        const totalQuestionsAnswered = finiteNumber(payload.totalQuestionsAnswered);
+        return {
+          totalSubmissions: finiteNumber(payload.totalSubmissions) ?? 0,
+          averageScorePct: finiteNumber(payload.averageScorePct),
+          bestScorePct: finiteNumber(payload.bestScorePct),
+          uniqueAgents: finiteNumber(payload.uniqueAgents) ?? 0,
+          totalCorrect,
+          totalQuestionsAnswered,
+          overallAccuracyPct: finiteNumber(payload.overallAccuracyPct)
+            ?? (totalCorrect !== null && totalQuestionsAnswered !== null && totalQuestionsAnswered > 0
+              ? (totalCorrect / totalQuestionsAnswered) * 100
+              : null),
+          scoreBands: Array.isArray(payload.scoreBands) ? payload.scoreBands : [],
+          recent: Array.isArray(payload.recent) ? payload.recent : [],
+        } satisfies TestScoreData;
       })
       .then((data) => {
         if (!controller.signal.aborted) setState({ status: 'ready', data });
@@ -156,32 +176,32 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
             All-time results and the latest attempts · fetched when DASH opens
           </p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-medium text-emerald-200">
+        <span className="glass-chip inline-flex items-center gap-1.5 rounded-full border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-medium text-emerald-200">
           <span className="size-1.5 animate-pulse rounded-full bg-emerald-300" />
           Cloudflare D1
         </span>
       </div>
 
       {state.status === 'error' ? (
-        <div className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-4 text-sm text-amber-100">
+        <div className="glass-panel mt-4 rounded-lg border-amber-400/25 bg-amber-400/[0.05] px-3 py-4 text-sm text-amber-100">
           Score submissions are unavailable right now.
         </div>
       ) : (
         <>
           {state.status === 'loading' ? (
             <div className="mt-4 grid gap-3 xl:grid-cols-3">
-              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
-              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
-              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
+              <div className="glass-panel h-[26rem] animate-pulse rounded-lg" />
+              <div className="glass-panel h-[26rem] animate-pulse rounded-lg" />
+              <div className="glass-panel h-[26rem] animate-pulse rounded-lg" />
             </div>
           ) : data && data.totalSubmissions === 0 ? (
-            <div className="mt-4 rounded-lg border border-dashed border-border/70 bg-background/20 px-4 py-8 text-center">
+            <div className="glass-panel mt-4 rounded-lg border-dashed px-4 py-8 text-center">
               <p className="text-sm font-medium text-foreground">No scores submitted yet</p>
               <p className="mt-1 text-xs text-muted-foreground">Completed self-tests will appear here.</p>
             </div>
           ) : data ? (
             <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,1fr)_minmax(240px,0.82fr)]">
-              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+              <div className="glass-panel rounded-lg p-3">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <div>
                     <h3 className="text-xs font-semibold text-foreground">Recent score trail</h3>
@@ -227,25 +247,25 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+              <div className="glass-panel rounded-lg p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div>
                     <h3 className="text-xs font-semibold text-foreground">Latest submissions</h3>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">Newest first · 10 latest attempts</p>
                   </div>
-                  <span className="rounded-full bg-accent/10 px-2 py-1 font-mono text-[10px] text-accent">{Math.min(data.recent.length, 10)}</span>
+                  <span className="glass-chip rounded-full px-2 py-1 font-mono text-[10px] text-accent">{Math.min(data.recent.length, 10)}</span>
                 </div>
                 {data.recent.length ? (
                   <div className="max-h-[326px] space-y-0.5 overflow-y-auto pr-1">
                     {data.recent.slice(0, 10).map((result) => (
                       <article
                         key={result.id}
-                        className="grid h-8 grid-cols-[minmax(0,1fr)_36px_42px_auto] items-center gap-1.5 rounded-md px-1.5 text-[10px] transition-colors hover:bg-card/70"
+                        className="glass-btn grid h-8 grid-cols-[minmax(0,1fr)_36px_42px_auto] items-center gap-1.5 rounded-md px-1.5 text-[10px] transition-colors hover:bg-card/70"
                         title={`${result.agentName} · ${result.suiteLabel} · ${result.correct}/${result.total} correct · ${relativeTime(result.submittedAt)}`}
                       >
                         <div className="flex min-w-0 items-center gap-1.5">
                           <span
-                            className="flex size-5 shrink-0 items-center justify-center rounded-full border text-[8px] font-semibold"
+                            className="glass-chip flex size-5 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold"
                             style={{ color: scoreColor(result.scorePct), borderColor: `${scoreColor(result.scorePct)}55`, backgroundColor: `${scoreColor(result.scorePct)}15` }}
                             aria-hidden="true"
                           >
@@ -272,10 +292,12 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
                 )}
               </div>
 
-              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+              <div className="glass-panel rounded-lg p-3">
                 <div className="mb-2">
                   <h3 className="text-xs font-semibold text-foreground">Test-taker Chart</h3>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">Aggregate performance across all attempts</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {weightedAccuracy === null ? 'Aggregate question totals unavailable' : 'Aggregate performance across all attempts'}
+                  </p>
                 </div>
                 <div className="flex items-center justify-center py-2">
                   <div
@@ -286,7 +308,7 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
                     role="img"
                     aria-label={`Weighted question accuracy ${weightedAccuracy == null ? 'unavailable' : `${weightedAccuracy.toFixed(1)} percent`}`}
                   >
-                    <div className="grid size-[6.5rem] place-content-center rounded-full bg-[#0d1117] text-center">
+                    <div className="glass-panel grid size-[6.5rem] place-content-center rounded-full text-center">
                       <span className="font-mono text-2xl font-semibold tabular-nums" style={{ color: scoreColor(weightedAccuracy ?? 0) }}>
                         {weightedAccuracy == null ? '—' : `${weightedAccuracy.toFixed(1)}%`}
                       </span>
@@ -303,13 +325,13 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
                   />
                   <StatTile
                     label="Questions answered"
-                    value={data.totalQuestionsAnswered.toLocaleString()}
+                    value={data.totalQuestionsAnswered?.toLocaleString() ?? '—'}
                     icon={<UsersRound className="size-3.5 text-violet-300" />}
                     loading={false}
                   />
                   <StatTile
                     label="Correct answers"
-                    value={data.totalCorrect.toLocaleString()}
+                    value={data.totalCorrect?.toLocaleString() ?? '—'}
                     icon={<Medal className="size-3.5 text-emerald-300" />}
                     loading={false}
                   />
@@ -361,7 +383,7 @@ function StatTile({
   loading: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border/35 bg-background/25 p-3">
+    <div className="glass-panel rounded-lg p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">{label}</span>
         {icon}

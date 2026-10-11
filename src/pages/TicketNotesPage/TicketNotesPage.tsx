@@ -687,18 +687,19 @@ export default function TicketNotesPage() {
     {}
   );
   /**
-   * Canvas gridboxes the agent has intentionally HIDDEN from view via the
-   * BOXES toolbar toggle. Hidden nodes are still:
+   * Canvas gridboxes hidden from view via the BOXES toolbar toggle. Hidden
+   * nodes are still:
    *  • Stored in formData + localStorage (values preserved)
    *  • Included in the Hang Up final note (their data is part of the ticket)
    * But they are simply not rendered in the flowchart canvas nor their
-   * bezier connections drawn, to let the agent focus on the flow.
+   * bezier connections drawn, to let the agent focus on the flow. Shipping
+   * Address starts hidden and can be enabled from Settings when needed.
    *
    * Persisted key: `ecovacs_ticket_hidden_nodes` (string[] of node ids).
    */
   const [hiddenNodeIds, setHiddenNodeIds] = useScopedState<string[]>(
     'ecovacs_ticket_hidden_nodes',
-    []
+    [NODE_IDS.SHIPPING_ADDRESS]
   );
   // Gridboxes whose panel toggles were removed — always visible. Any stale
   // hidden ids from earlier sessions are purged so they can't get stuck.

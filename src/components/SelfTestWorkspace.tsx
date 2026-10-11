@@ -147,18 +147,18 @@ function findArticleExcerpt(title: string, items: NewsItem[]): string {
 
 /** Rotating candy palette for the suite cards + option buttons. */
 const SUITE_COLORS = [
-  { ring: 'hover:border-violet-400', badge: 'border-violet-400/50 bg-violet-400/15 text-violet-200', glow: 'group-hover:shadow-[0_0_20px_-6px_rgba(167,139,250,0.6)]' },
-  { ring: 'hover:border-sky-400', badge: 'border-sky-400/50 bg-sky-400/15 text-sky-200', glow: 'group-hover:shadow-[0_0_20px_-6px_rgba(56,189,248,0.6)]' },
-  { ring: 'hover:border-emerald-400', badge: 'border-emerald-400/50 bg-emerald-400/15 text-emerald-200', glow: 'group-hover:shadow-[0_0_20px_-6px_rgba(52,211,153,0.6)]' },
-  { ring: 'hover:border-amber-400', badge: 'border-amber-400/50 bg-amber-400/15 text-amber-200', glow: 'group-hover:shadow-[0_0_20px_-6px_rgba(251,191,36,0.6)]' },
-  { ring: 'hover:border-rose-400', badge: 'border-rose-400/50 bg-rose-400/15 text-rose-200', glow: 'group-hover:shadow-[0_0_20px_-6px_rgba(251,113,133,0.6)]' },
+  { ring: 'hover:border-violet-400/70', badge: 'border-white/45 text-white shadow-lg shadow-fuchsia-500/25', gradient: 'linear-gradient(135deg, #a78bfa 0%, #d946ef 52%, #ec4899 100%)', glow: 'group-hover:shadow-[0_8px_28px_-18px_rgba(167,139,250,0.75)]' },
+  { ring: 'hover:border-sky-400/70', badge: 'border-white/45 text-white shadow-lg shadow-cyan-500/25', gradient: 'linear-gradient(135deg, #38bdf8 0%, #06b6d4 52%, #2563eb 100%)', glow: 'group-hover:shadow-[0_8px_28px_-18px_rgba(56,189,248,0.75)]' },
+  { ring: 'hover:border-emerald-400/70', badge: 'border-white/45 text-white shadow-lg shadow-emerald-500/25', gradient: 'linear-gradient(135deg, #34d399 0%, #14b8a6 52%, #84cc16 100%)', glow: 'group-hover:shadow-[0_8px_28px_-18px_rgba(52,211,153,0.75)]' },
+  { ring: 'hover:border-amber-400/70', badge: 'border-white/45 text-white shadow-lg shadow-amber-500/25', gradient: 'linear-gradient(135deg, #fde047 0%, #f59e0b 52%, #ea580c 100%)', glow: 'group-hover:shadow-[0_8px_28px_-18px_rgba(251,191,36,0.75)]' },
+  { ring: 'hover:border-rose-400/70', badge: 'border-white/45 text-white shadow-lg shadow-rose-500/25', gradient: 'linear-gradient(135deg, #fb7185 0%, #ec4899 52%, #f97316 100%)', glow: 'group-hover:shadow-[0_8px_28px_-18px_rgba(251,113,133,0.75)]' },
 ];
 
 const OPTION_COLORS = [
-  'border-violet-400/40 bg-violet-400/10 hover:border-violet-300 hover:bg-violet-400/20',
-  'border-sky-400/40 bg-sky-400/10 hover:border-sky-300 hover:bg-sky-400/20',
-  'border-amber-400/40 bg-amber-400/10 hover:border-amber-300 hover:bg-amber-400/20',
-  'border-emerald-400/40 bg-emerald-400/10 hover:border-emerald-300 hover:bg-emerald-400/20',
+  'glass-panel border-violet-400/30 bg-violet-400/[0.06] hover:border-violet-300/70 hover:bg-violet-400/10',
+  'glass-panel border-sky-400/30 bg-sky-400/[0.06] hover:border-sky-300/70 hover:bg-sky-400/10',
+  'glass-panel border-amber-400/30 bg-amber-400/[0.06] hover:border-amber-300/70 hover:bg-amber-400/10',
+  'glass-panel border-emerald-400/30 bg-emerald-400/[0.06] hover:border-emerald-300/70 hover:bg-emerald-400/10',
 ];
 
 const OPTION_LETTER_COLORS = [
@@ -248,6 +248,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
   const [phase, setPhase] = useState<Phase>('menu');
   const [activeSuite, setActiveSuite] = useState<TestSuite | null>(null);
   const [agentName, setAgentName] = useState('');
+  const [nameInvalidAttempt, setNameInvalidAttempt] = useState(false);
   const [currentArticleExcerpt, setCurrentArticleExcerpt] = useState('');
   const [qIndex, setQIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -259,6 +260,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
   const [copied, setCopied] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nameValidationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const moveCatTo = useCallback((target: Element | null) => {
     if (!target || !onCatMoveTo) return;
@@ -309,6 +311,13 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
   }, []);
 
   useEffect(() => clearAdvanceTimer, [clearAdvanceTimer]);
+
+  useEffect(
+    () => () => {
+      if (nameValidationTimer.current) clearTimeout(nameValidationTimer.current);
+    },
+    []
+  );
 
   /** 15s reading timer — the shared cat assistant offers one hint per test. */
   useEffect(() => {
@@ -447,7 +456,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
           <>
             <header className="mb-8">
               <div className="flex items-center gap-3">
-                <div className="flex size-12 items-center justify-center rounded-xl border-2 border-violet-400/40 bg-violet-400/10 shadow-[0_0_18px_-6px_rgba(167,139,250,0.7)]">
+                <div className="glass-panel flex size-12 items-center justify-center rounded-xl border-violet-400/40 bg-violet-400/10">
                   <GraduationCap className="size-7 text-violet-300" />
                 </div>
                 <div>
@@ -475,7 +484,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                     disabled={done}
                     onClick={() => openNameEntry(suite)}
                     className={cn(
-                      'group flex w-full items-center gap-4 rounded-xl border-2 bg-card/60 px-4 py-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+                      'glass-panel group flex w-full items-center gap-4 rounded-xl px-4 py-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
                       done
                         ? 'border-border opacity-55'
                         : cn('border-border/80 hover:-translate-y-0.5 hover:bg-card', color.ring, color.glow)
@@ -483,9 +492,10 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                   >
                     <div
                       className={cn(
-                        'flex size-14 shrink-0 items-center justify-center rounded-xl border-2 font-mono text-base font-extrabold',
+                        'flex size-14 shrink-0 items-center justify-center rounded-xl border font-mono text-base font-extrabold transition-transform duration-200 group-hover:rotate-2 group-hover:scale-105',
                         done ? 'border-border text-muted-foreground' : color.badge
                       )}
+                      style={done ? undefined : { backgroundImage: color.gradient }}
                     >
                       {done ? <Lock className="size-5" /> : suite.label.replace('Week ', 'W')}
                     </div>
@@ -502,7 +512,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                     {latest !== null && (
                       <div
                         className={cn(
-                          'shrink-0 rounded-lg border-2 px-3 py-1 font-mono text-base font-extrabold',
+                          'glass-chip shrink-0 rounded-lg px-3 py-1 font-mono text-base font-extrabold',
                           latest >= 80
                             ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-300'
                             : latest >= 60
@@ -523,11 +533,11 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
 
         {/* ── Name entry ──────────────────────────────────────────────── */}
         {phase === 'name' && activeSuite && (
-          <div data-selftest-name-card className="relative mx-auto mt-16 max-w-md overflow-visible rounded-2xl border-2 border-violet-400/40 bg-card/70 p-7 shadow-xl">
+          <div data-selftest-name-card className="glass-panel relative mx-auto mt-16 max-w-md overflow-visible rounded-2xl border-violet-400/30 p-7">
             <button
               type="button"
               onClick={backToMenu}
-              className="mb-4 inline-flex items-center gap-1.5 rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              className="glass-btn mb-4 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
             >
               <ArrowLeft className="size-4" /> All suites
             </button>
@@ -545,22 +555,37 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
               type="text"
               value={agentName}
               autoFocus
-              onChange={(e) => setAgentName(e.target.value)}
+              onChange={(e) => {
+                const raw = e.currentTarget.value;
+                const invalid = /[^a-zA-Z .]/.test(raw) || raw.length > 20;
+                setAgentName(raw.replace(/[^a-zA-Z .]/g, '').slice(0, 20));
+                if (nameValidationTimer.current) clearTimeout(nameValidationTimer.current);
+                setNameInvalidAttempt(invalid);
+                if (invalid) {
+                  nameValidationTimer.current = setTimeout(() => {
+                    setNameInvalidAttempt(false);
+                    nameValidationTimer.current = null;
+                  }, 900);
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && agentName.trim()) startQuiz();
               }}
               placeholder="Type your name…"
-              className="mt-5 w-full rounded-xl border-2 border-border bg-background/80 px-4 py-3 text-lg font-semibold text-foreground placeholder:text-muted-foreground/70 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-400/20"
+              className={cn(
+                'glass-field mt-5 w-full rounded-xl px-4 py-3 text-lg font-semibold text-foreground placeholder:text-muted-foreground/70 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30',
+                nameInvalidAttempt && '!border-amber-400 !ring-2 !ring-amber-400/35'
+              )}
             />
             <button
               type="button"
               disabled={!agentName.trim()}
               onClick={startQuiz}
               className={cn(
-                'mt-4 w-full rounded-xl border-b-4 px-4 py-3.5 font-mono text-lg font-extrabold uppercase tracking-wide transition-all duration-200',
+                'glass-btn mt-4 w-full rounded-xl px-4 py-3.5 font-mono text-lg font-extrabold uppercase tracking-wide transition-all duration-200',
                 agentName.trim()
-                  ? 'border-emerald-600 bg-emerald-500 text-white shadow-[0_0_20px_-4px_rgba(52,211,153,0.7)] hover:brightness-110 active:translate-y-0.5 active:border-b-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400'
-                  : 'cursor-not-allowed border-border bg-muted text-muted-foreground'
+                  ? 'glass-chip border-emerald-400/50 bg-emerald-500/80 text-white shadow-[0_0_18px_-10px_rgba(52,211,153,0.7)] hover:brightness-110 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400'
+                  : 'cursor-not-allowed border-border/60 bg-muted/60 text-muted-foreground'
               )}
             >
               Start Test ▶
@@ -576,12 +601,12 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
               <button
                 type="button"
                 onClick={backToMenu}
-                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                className="glass-btn rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
                 title="Abandon attempt"
               >
                 <ArrowLeft className="size-4" />
               </button>
-              <div className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
+              <div className="glass-panel h-3 flex-1 overflow-hidden rounded-full bg-background/70">
                 <div
                   className={cn(
                     'h-full rounded-full transition-[width] duration-300 ease-out',
@@ -597,7 +622,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
 
             <div
               key={current.id}
-              className="relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-2xl border-2 border-border bg-card/70 p-7 shadow-xl"
+              className="glass-panel relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-2xl p-7"
             >
               {locked && answers[answers.length - 1]?.correct && <FireworkBurst key={fireworkKey} />}
 
@@ -623,18 +648,18 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                       onClick={() => handleSelect(i)}
                       data-selftest-correct={isAnswer ? 'true' : 'false'}
                       className={cn(
-                        'relative flex w-full items-start gap-3 rounded-xl border-2 border-b-4 px-4 py-4 text-left text-base font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+                        'relative flex w-full items-start gap-3 rounded-xl border px-4 py-4 text-left text-base font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
                         hintActive && isAnswer && 'ring-2 ring-amber-300/90',
                         !locked && OPTION_COLORS[i % OPTION_COLORS.length],
-                        !locked && 'text-foreground hover:-translate-y-0.5 active:translate-y-0.5 active:border-b-2',
-                        locked && isAnswer && 'border-emerald-400 bg-emerald-400/20 text-emerald-100 shadow-[0_0_18px_-4px_rgba(52,211,153,0.8)]',
-                        locked && isSelected && !isAnswer && 'border-rose-400 bg-rose-400/20 text-rose-100',
-                        locked && !isAnswer && !isSelected && 'border-border/50 bg-background/40 text-muted-foreground opacity-70'
+                        !locked && 'text-foreground hover:-translate-y-0.5',
+                        locked && isAnswer && 'glass-panel border-emerald-400/70 bg-emerald-400/15 text-emerald-100 shadow-[0_0_18px_-8px_rgba(52,211,153,0.7)]',
+                        locked && isSelected && !isAnswer && 'glass-panel border-rose-400/70 bg-rose-400/15 text-rose-100',
+                        locked && !isAnswer && !isSelected && 'glass-panel border-border/50 bg-background/35 text-muted-foreground opacity-70'
                       )}
                     >
                       <span
                         className={cn(
-                          'flex size-8 shrink-0 items-center justify-center rounded-lg border-2 font-mono text-sm font-extrabold',
+                          'glass-chip flex size-8 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-extrabold',
                           locked && isAnswer
                             ? 'border-emerald-400 bg-emerald-400 text-white'
                             : locked && isSelected
@@ -655,7 +680,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                 <div
                   data-selftest-verdict
                   className={cn(
-                    'mt-5 rounded-xl border-2 px-4 py-3 text-base font-bold animate-in fade-in slide-in-from-bottom-1 duration-200',
+                    'glass-panel mt-5 rounded-xl px-4 py-3 text-base font-bold animate-in fade-in slide-in-from-bottom-1 duration-200',
                     answers[answers.length - 1]?.correct
                       ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200'
                       : 'border-rose-400/60 bg-rose-400/10 text-rose-200'
@@ -672,7 +697,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
         {/* ── Result ──────────────────────────────────────────────────── */}
         {phase === 'result' && activeSuite && (
           <div className="relative mx-auto mt-6 max-w-2xl">
-            <div className="rounded-2xl border-2 border-border bg-card/70 p-7 shadow-xl">
+            <div className="glass-panel rounded-2xl p-7">
               <div className="flex flex-col items-center">
                 <div
                   className={cn(
@@ -695,7 +720,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                 {/* D1 submission status */}
                 <p
                   className={cn(
-                    'mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-xs font-bold',
+                    'glass-chip mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-xs font-bold',
                     submitState === 'submitting' && 'border-sky-400/50 bg-sky-400/10 text-sky-300',
                     submitState === 'ok' && 'border-emerald-400/50 bg-emerald-400/10 text-emerald-300',
                     submitState === 'error' && 'border-rose-400/50 bg-rose-400/10 text-rose-300',
@@ -717,7 +742,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                   readOnly
                   value={buildReport(activeSuite, agentName.trim(), answers, scorePct)}
                   rows={12}
-                  className="w-full resize-y rounded-xl border-2 border-border bg-background/80 px-4 py-3 font-mono text-xs leading-relaxed text-foreground focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-400/20"
+                  className="glass-field w-full resize-y rounded-xl px-4 py-3 font-mono text-xs leading-relaxed text-foreground focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/30"
                 />
               </div>
 
@@ -725,7 +750,7 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                 <button
                   type="button"
                   onClick={backToMenu}
-                  className="inline-flex items-center gap-1.5 rounded-xl border-2 border-border px-4 py-2.5 font-mono text-sm font-bold text-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                  className="glass-btn inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 font-mono text-sm font-bold text-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
                 >
                   <ArrowLeft className="size-4" /> All suites
                 </button>
@@ -733,10 +758,10 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                   type="button"
                   onClick={handleCopy}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-xl border-b-4 px-4 py-2.5 font-mono text-sm font-extrabold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+                    'glass-btn inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 font-mono text-sm font-extrabold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
                     copied
-                      ? 'border-emerald-600 bg-emerald-500/20 text-emerald-300'
-                      : 'border-sky-600 bg-sky-500 text-white hover:brightness-110 active:translate-y-0.5 active:border-b-2'
+                      ? 'glass-chip border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                      : 'glass-chip border-sky-400/50 bg-sky-500/80 text-white hover:brightness-110 active:scale-[0.99]'
                   )}
                 >
                   {copied ? <Check className="size-4" /> : <ClipboardCopy className="size-4" />}
