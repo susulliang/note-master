@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { CatThought } from '@/hooks/use-cat-assistant';
 import { useScopedState } from '@/hooks/use-scoped-state';
@@ -11,9 +11,13 @@ const DEFAULT_POSITION = { x: 16, y: 24 };
 const SPRITE_SIZE = 128;
 
 function clampPosition(position: { x: number; y: number }) {
+  const maxX = Math.max(0, window.innerWidth - SPRITE_SIZE);
+  const maxY = Math.max(0, window.innerHeight - SPRITE_SIZE);
+  const x = Number.isFinite(position.x) ? position.x : DEFAULT_POSITION.x;
+  const y = Number.isFinite(position.y) ? position.y : DEFAULT_POSITION.y;
   return {
-    x: Math.max(0, Math.min(position.x, window.innerWidth - SPRITE_SIZE)),
-    y: Math.max(0, Math.min(position.y, window.innerHeight - SPRITE_SIZE)),
+    x: Math.round(Math.max(0, Math.min(x, maxX))),
+    y: Math.round(Math.max(0, Math.min(y, maxY))),
   };
 }
 
@@ -48,11 +52,18 @@ export function CatAssistant({
   const spriteRef = useRef<HTMLSpanElement>(null);
   const visiblePosition = clampPosition(position);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const keepPositionInViewport = () => setPosition((previous) => clampPosition(previous));
     keepPositionInViewport();
     window.addEventListener('resize', keepPositionInViewport);
-    return () => window.removeEventListener('resize', keepPositionInViewport);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', keepPositionInViewport);
+    viewport?.addEventListener('scroll', keepPositionInViewport);
+    return () => {
+      window.removeEventListener('resize', keepPositionInViewport);
+      viewport?.removeEventListener('resize', keepPositionInViewport);
+      viewport?.removeEventListener('scroll', keepPositionInViewport);
+    };
   }, [setPosition]);
 
   useEffect(() => {
@@ -114,7 +125,11 @@ export function CatAssistant({
         x: e.clientX - visiblePosition.x,
         y: e.clientY - visiblePosition.y,
       };
-      (e.target as Element).setPointerCapture?.(e.pointerId);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture may be unavailable after a browser cancellation.
+      }
     },
     [visiblePosition.x, visiblePosition.y]
   );
@@ -185,9 +200,10 @@ export function CatAssistant({
         role="img"
         aria-label={`${catName} cat assistant${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move`}
         className={cn(
-          'pointer-events-auto relative flex h-32 w-32 cursor-grab items-center justify-center',
+          'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center',
           dragging && 'cursor-grabbing'
         )}
+        onLostPointerCapture={onPointerUp}
       >
         <span
           ref={spriteRef}

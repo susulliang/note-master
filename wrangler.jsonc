@@ -1,6 +1,6 @@
 {
   // Cloudflare Workers deploy config — Worker serving the built SPA (static
-  // assets) plus a small API for self-test score submissions (D1).
+  // assets) plus tool APIs backed by the shared eco-data D1 database.
   // Deploy with:  npm run deploy:workers   (builds standalone bundle
   // to dist/client, then `wrangler deploy`). Preview locally: npm run preview:workers
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -8,12 +8,13 @@
   "compatibility_date": "2026-09-29",
   // Worker entry — handles the self-test result API; everything else is served from assets.
   "main": "worker/index.ts",
-  // Self-test score submissions (eco-test database).
+  // Tool data (keyword alerts, self-test scores, and future tools).
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "eco-test",
-      "database_id": "046382b4-8134-46f8-a6ed-6316ed422f09"
+      "database_name": "eco-data",
+      "database_id": "3a58e825-e384-44ae-9b7b-7d8466d3f460",
+      "migrations_dir": "migrations"
     }
   ],
   "assets": {

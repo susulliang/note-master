@@ -28,6 +28,9 @@ interface TestScoreData {
   averageScorePct: number | null;
   bestScorePct: number | null;
   uniqueAgents: number;
+  totalCorrect: number;
+  totalQuestionsAnswered: number;
+  overallAccuracyPct: number | null;
   scoreBands: Array<{ label: string; count: number }>;
   recent: RecentTestResult[];
 }
@@ -125,6 +128,7 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
   const trend = useMemo(() => {
     if (state.status !== 'ready') return [];
     return [...state.data.recent]
+      .slice(0, 10)
       .reverse()
       .map((result) => ({
         ...result,
@@ -134,6 +138,8 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
 
   const data = state.status === 'ready' ? state.data : null;
   const maxBandCount = Math.max(1, ...(data?.scoreBands.map((band) => band.count) ?? []));
+  const weightedAccuracy = data?.overallAccuracyPct ?? null;
+  const accuracyFill = Math.max(0, Math.min(100, weightedAccuracy ?? 0));
 
   return (
     <section className={cn(PANEL, 'overflow-hidden p-4 sm:p-5')} aria-labelledby="test-score-title">
@@ -162,37 +168,11 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
         </div>
       ) : (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
-            <StatTile
-              label="Total attempts"
-              value={data ? data.totalSubmissions.toLocaleString() : '—'}
-              icon={<Activity className="size-4 text-accent" />}
-              loading={state.status === 'loading'}
-            />
-            <StatTile
-              label="Average score"
-              value={data?.averageScorePct == null ? '—' : `${data.averageScorePct.toFixed(1)}%`}
-              icon={<span className="font-mono text-sm text-sky-300">AVG</span>}
-              loading={state.status === 'loading'}
-            />
-            <StatTile
-              label="Best score"
-              value={data?.bestScorePct == null ? '—' : `${data.bestScorePct.toFixed(0)}%`}
-              icon={<Medal className="size-4 text-emerald-300" />}
-              loading={state.status === 'loading'}
-            />
-            <StatTile
-              label="Agents"
-              value={data ? data.uniqueAgents.toLocaleString() : '—'}
-              icon={<UsersRound className="size-4 text-violet-300" />}
-              loading={state.status === 'loading'}
-            />
-          </div>
-
           {state.status === 'loading' ? (
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              <div className="h-56 animate-pulse rounded-lg bg-background/40" />
-              <div className="h-56 animate-pulse rounded-lg bg-background/40" />
+            <div className="mt-4 grid gap-3 xl:grid-cols-3">
+              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
+              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
+              <div className="h-[26rem] animate-pulse rounded-lg bg-background/40" />
             </div>
           ) : data && data.totalSubmissions === 0 ? (
             <div className="mt-4 rounded-lg border border-dashed border-border/70 bg-background/20 px-4 py-8 text-center">
@@ -200,64 +180,156 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
               <p className="mt-1 text-xs text-muted-foreground">Completed self-tests will appear here.</p>
             </div>
           ) : data ? (
-            <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
-              <div className="space-y-3">
-                <div className="rounded-lg border border-border/40 bg-background/25 p-3">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-xs font-semibold text-foreground">Recent score trail</h3>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">Hover a point for the agent and test</p>
-                    </div>
-                    <span className="font-mono text-[10px] text-muted-foreground">{trend.length} latest</span>
+            <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,1fr)_minmax(240px,0.82fr)]">
+              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-foreground">Recent score trail</h3>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">Hover a point for the agent and test</p>
                   </div>
-                  <div className="h-40 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 12, right: 12, bottom: 4, left: 2 }}>
-                        <CartesianGrid stroke="#30363d" strokeDasharray="3 5" vertical={false} />
-                        <XAxis
-                          type="number"
-                          dataKey="timestamp"
-                          name="Submitted"
-                          domain={['dataMin', 'dataMax']}
-                          tickFormatter={(value: number) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                          tick={{ fill: '#8b949e', fontSize: 10 }}
-                          tickLine={false}
-                          axisLine={false}
-                          minTickGap={24}
-                        />
-                        <YAxis
-                          type="number"
-                          dataKey="scorePct"
-                          name="Score"
-                          domain={[0, 100]}
-                          ticks={[0, 50, 100]}
-                          tickFormatter={(value: number) => `${value}%`}
-                          tick={{ fill: '#8b949e', fontSize: 10 }}
-                          tickLine={false}
-                          axisLine={false}
-                          width={34}
-                        />
-                        <Tooltip content={<ScoreTooltip />} cursor={{ stroke: '#8b949e', strokeDasharray: '3 3' }} />
-                        <Scatter data={trend} dataKey="scorePct" isAnimationActive={false}>
-                          {trend.map((result) => (
-                            <Cell key={result.id} fill={scoreColor(result.scorePct)} stroke="#0d1117" strokeWidth={2} />
-                          ))}
-                        </Scatter>
-                      </ScatterChart>
-                    </ResponsiveContainer>
+                  <span className="font-mono text-[10px] text-muted-foreground">{trend.length} latest</span>
+                </div>
+                <div className="h-48 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 12, right: 12, bottom: 4, left: 2 }}>
+                      <CartesianGrid stroke="#30363d" strokeDasharray="3 5" vertical={false} />
+                      <XAxis
+                        type="number"
+                        dataKey="timestamp"
+                        name="Submitted"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={(value: number) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        tick={{ fill: '#8b949e', fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        minTickGap={24}
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="scorePct"
+                        name="Score"
+                        domain={[0, 100]}
+                        ticks={[0, 50, 100]}
+                        tickFormatter={(value: number) => `${value}%`}
+                        tick={{ fill: '#8b949e', fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        width={34}
+                      />
+                      <Tooltip content={<ScoreTooltip />} cursor={{ stroke: '#8b949e', strokeDasharray: '3 3' }} />
+                      <Scatter data={trend} dataKey="scorePct" isAnimationActive={false}>
+                        {trend.map((result) => (
+                          <Cell key={result.id} fill={scoreColor(result.scorePct)} stroke="#0d1117" strokeWidth={2} />
+                        ))}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-foreground">Latest submissions</h3>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">Newest first · 10 latest attempts</p>
+                  </div>
+                  <span className="rounded-full bg-accent/10 px-2 py-1 font-mono text-[10px] text-accent">{Math.min(data.recent.length, 10)}</span>
+                </div>
+                {data.recent.length ? (
+                  <div className="max-h-[326px] space-y-0.5 overflow-y-auto pr-1">
+                    {data.recent.slice(0, 10).map((result) => (
+                      <article
+                        key={result.id}
+                        className="grid h-8 grid-cols-[minmax(0,1fr)_36px_42px_auto] items-center gap-1.5 rounded-md px-1.5 text-[10px] transition-colors hover:bg-card/70"
+                        title={`${result.agentName} · ${result.suiteLabel} · ${result.correct}/${result.total} correct · ${relativeTime(result.submittedAt)}`}
+                      >
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="flex size-5 shrink-0 items-center justify-center rounded-full border text-[8px] font-semibold"
+                            style={{ color: scoreColor(result.scorePct), borderColor: `${scoreColor(result.scorePct)}55`, backgroundColor: `${scoreColor(result.scorePct)}15` }}
+                            aria-hidden="true"
+                          >
+                            {initials(result.agentName)}
+                          </span>
+                          <span className="shrink-0 max-w-[74px] truncate font-semibold text-foreground">{result.agentName}</span>
+                          <span className="hidden text-muted-foreground sm:inline">·</span>
+                          <span className="min-w-0 truncate text-muted-foreground">{result.suiteLabel}</span>
+                        </div>
+                        <span className="text-right font-mono font-semibold tabular-nums" style={{ color: scoreColor(result.scorePct) }}>
+                          {result.scorePct}%
+                        </span>
+                        <span className="text-right font-mono tabular-nums text-muted-foreground">
+                          {result.correct}/{result.total}
+                        </span>
+                        <time className="hidden min-w-[42px] text-right text-muted-foreground sm:block">
+                          {relativeTime(result.submittedAt)}
+                        </time>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-xs text-muted-foreground">No recent attempts.</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
+                <div className="mb-2">
+                  <h3 className="text-xs font-semibold text-foreground">Test-taker Chart</h3>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">Aggregate performance across all attempts</p>
+                </div>
+                <div className="flex items-center justify-center py-2">
+                  <div
+                    className="grid size-32 place-items-center rounded-full"
+                    style={{
+                      background: `conic-gradient(${scoreColor(weightedAccuracy ?? 0)} ${accuracyFill}%, rgb(48 54 61 / 0.55) ${accuracyFill}% 100%)`,
+                    }}
+                    role="img"
+                    aria-label={`Weighted question accuracy ${weightedAccuracy == null ? 'unavailable' : `${weightedAccuracy.toFixed(1)} percent`}`}
+                  >
+                    <div className="grid size-[6.5rem] place-content-center rounded-full bg-[#0d1117] text-center">
+                      <span className="font-mono text-2xl font-semibold tabular-nums" style={{ color: scoreColor(weightedAccuracy ?? 0) }}>
+                        {weightedAccuracy == null ? '—' : `${weightedAccuracy.toFixed(1)}%`}
+                      </span>
+                      <span className="mt-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Weighted score</span>
+                    </div>
                   </div>
                 </div>
-
-                <div className="rounded-lg border border-border/40 bg-background/25 p-3">
-                  <div className="mb-3 flex items-baseline justify-between gap-2">
-                    <h3 className="text-xs font-semibold text-foreground">All-time score spread</h3>
-                    <span className="text-[10px] text-muted-foreground">attempts by score band</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <StatTile
+                    label="Tests done"
+                    value={data.totalSubmissions.toLocaleString()}
+                    icon={<Activity className="size-3.5 text-accent" />}
+                    loading={false}
+                  />
+                  <StatTile
+                    label="Questions answered"
+                    value={data.totalQuestionsAnswered.toLocaleString()}
+                    icon={<UsersRound className="size-3.5 text-violet-300" />}
+                    loading={false}
+                  />
+                  <StatTile
+                    label="Correct answers"
+                    value={data.totalCorrect.toLocaleString()}
+                    icon={<Medal className="size-3.5 text-emerald-300" />}
+                    loading={false}
+                  />
+                  <StatTile
+                    label="Test-takers"
+                    value={data.uniqueAgents.toLocaleString()}
+                    icon={<UsersRound className="size-3.5 text-sky-300" />}
+                    loading={false}
+                  />
+                </div>
+                <div className="mt-3 border-t border-border/30 pt-2.5">
+                  <div className="mb-2 flex items-baseline justify-between gap-2">
+                    <span className="text-[10px] font-semibold text-foreground">Score bands</span>
+                    <span className="text-[9px] text-muted-foreground">attempts</span>
                   </div>
-                  <div className="space-y-2.5">
+                  <div className="space-y-1.5">
                     {data.scoreBands.map((band, index) => (
-                      <div key={band.label} className="grid grid-cols-[64px_minmax(0,1fr)_36px] items-center gap-2 text-[10px]">
+                      <div key={band.label} className="grid grid-cols-[48px_minmax(0,1fr)_24px] items-center gap-1.5 text-[9px]">
                         <span className="font-mono text-muted-foreground">{band.label}</span>
-                        <div className="h-2 overflow-hidden rounded-full bg-border/35">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-border/35">
                           <div
                             className="h-full rounded-full transition-[width] duration-500"
                             style={{ width: `${(band.count / maxBandCount) * 100}%`, backgroundColor: BAND_COLORS[index % BAND_COLORS.length] }}
@@ -268,50 +340,6 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
                     ))}
                   </div>
                 </div>
-              </div>
-
-              <div className="rounded-lg border border-border/40 bg-background/25 p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-xs font-semibold text-foreground">Latest submissions</h3>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">Newest first · up to 12 attempts</p>
-                  </div>
-                  <span className="rounded-full bg-accent/10 px-2 py-1 font-mono text-[10px] text-accent">{data.recent.length}</span>
-                </div>
-                {data.recent.length ? (
-                  <div className="max-h-[382px] space-y-1 overflow-y-auto pr-1">
-                    {data.recent.map((result) => (
-                      <article key={result.id} className="group rounded-lg px-2 py-2 transition-colors hover:bg-card/70">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="flex size-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold"
-                            style={{ color: scoreColor(result.scorePct), borderColor: `${scoreColor(result.scorePct)}55`, backgroundColor: `${scoreColor(result.scorePct)}15` }}
-                            aria-hidden="true"
-                          >
-                            {initials(result.agentName)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="truncate text-xs font-semibold text-foreground">{result.agentName}</p>
-                              <span className="shrink-0 font-mono text-xs font-semibold tabular-nums" style={{ color: scoreColor(result.scorePct) }}>
-                                {result.scorePct}%
-                              </span>
-                            </div>
-                            <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                              <span className="truncate">{result.suiteLabel} · {result.correct}/{result.total} correct</span>
-                              <time className="shrink-0">{relativeTime(result.submittedAt)}</time>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="ml-[42px] mt-1.5 h-1 overflow-hidden rounded-full bg-border/35">
-                          <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, result.scorePct))}%`, backgroundColor: scoreColor(result.scorePct) }} />
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="py-8 text-center text-xs text-muted-foreground">No recent attempts.</p>
-                )}
               </div>
             </div>
           ) : null}

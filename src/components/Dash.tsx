@@ -810,17 +810,20 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     if (!end) return null;
     const start = monthStart(end);
     const chatShifts = countMtdShifts(start, end, undefined, ['Chat']).total;
+    const callShifts = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).total;
     const allShifts = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).total;
     const totalProcessed = data.call.handled + data.email.total + data.chat.total;
     return {
       total: { shifts: allShifts, average: allShifts > 0 ? totalProcessed / allShifts : null },
       email: { shifts: allShifts, average: allShifts > 0 ? data.email.total / allShifts : null },
       chat: { shifts: chatShifts, average: chatShifts > 0 ? data.chat.total / chatShifts : null },
+      call: { shifts: callShifts, average: callShifts > 0 ? data.call.handled / callShifts : null },
       through: end,
     };
   }, [data]);
   const volumes = [
     { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, color: 'text-foreground', accent: 'bg-accent' },
+    { name: 'Call', value: data?.call.handled ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
     { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
     { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
@@ -829,13 +832,13 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">MTD dailies</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Total processed, email and chat volumes</p>
+          <p className="mt-1 text-xs text-muted-foreground">Total processed and call, email, and chat volumes</p>
         </div>
         <button type="button" onClick={onExplore} className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
           Explore <ChevronRight className="size-3.5" />
         </button>
       </div>
-      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {volumes.map((volume) => (
           <div key={volume.name} className={cn('min-w-0 rounded-lg p-3', volume.name === 'Total processed' ? 'border border-accent/25 bg-accent/5' : 'bg-background/35')}>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -851,8 +854,8 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground">
         {refreshError ? 'Showing previous report data. ' : ''}
-        {shiftStats ? `Roster averages through ${shiftStats.through}; Total and Email use Chat + Call + FR Call shifts, while Chat uses Chat shifts only.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
-        {' '}Call volume and Call + FR Call shift average are shown in Call performance. Total processed sums independent source counts.
+        {shiftStats ? `Roster averages through ${shiftStats.through}; Total and Email use Chat + Call + FR Call shifts, Call uses Call + FR Call shifts, and Chat uses Chat shifts only.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
+        {' '}Total processed sums independent source counts.
         {!data && state.status === 'loading' && ' Loading report volumes…'}
         {!data && state.status === 'error' && ` ${state.message}`}
       </p>

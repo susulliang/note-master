@@ -2,8 +2,8 @@
  * Worker entry for the Cloudflare Workers deploy (see wrangler.jsonc).
  *
  * Static assets are served for the SPA; this handler only receives requests
- * routed via `run_worker_first` (currently the self-test result API), and
- * writes submissions straight into the D1 `eco-test` database through the
+ * routed via `run_worker_first` (tool APIs), and
+ * reads and writes tool data through the D1 `eco-data` database via the
  * bound `DB` binding — no API token is needed client-side.
  */
 
@@ -14,6 +14,8 @@ interface TestResultSummary {
   averageScorePct: number | null;
   bestScorePct: number | null;
   uniqueAgents: number;
+  totalCorrect: number | null;
+  totalQuestionsAnswered: number | null;
 }
 
 interface TestScoreBand {
@@ -271,7 +273,9 @@ export default {
               COUNT(*) AS totalSubmissions,
               AVG(score_pct) AS averageScorePct,
               MAX(score_pct) AS bestScorePct,
-              COUNT(DISTINCT agent_name) AS uniqueAgents
+              COUNT(DISTINCT agent_name) AS uniqueAgents,
+              SUM(correct) AS totalCorrect,
+              SUM(total) AS totalQuestionsAnswered
             FROM test_results`
           ).first<TestResultSummary>(),
           env.DB.prepare(
@@ -299,7 +303,7 @@ export default {
               submitted_at AS submittedAt
             FROM test_results
             ORDER BY datetime(submitted_at) DESC, id DESC
-            LIMIT 12`
+            LIMIT 10`
           ).all<RecentTestResult>(),
         ]);
 
@@ -308,6 +312,11 @@ export default {
           averageScorePct: summary?.averageScorePct == null ? null : Number(summary.averageScorePct),
           bestScorePct: summary?.bestScorePct == null ? null : Number(summary.bestScorePct),
           uniqueAgents: Number(summary?.uniqueAgents ?? 0),
+          totalCorrect: Number(summary?.totalCorrect ?? 0),
+          totalQuestionsAnswered: Number(summary?.totalQuestionsAnswered ?? 0),
+          overallAccuracyPct: summary?.totalQuestionsAnswered
+            ? Number(summary.totalCorrect ?? 0) / Number(summary.totalQuestionsAnswered) * 100
+            : null,
           scoreBands: bands.results.map((band) => ({
             label: band.label,
             count: Number(band.count),
