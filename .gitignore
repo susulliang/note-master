@@ -25,7 +25,9 @@ pids
 *.seed
 *.pid.lock
 /dashboard_publish/
-/sf_reports/dashboard-data.json
+# Local Salesforce and Connect exports; retain only the folder marker in Git.
+/sf_reports/*
+!/sf_reports/.gitkeep
 /public/faq-content/
 
 # Coverage directory used by tools like istanbul

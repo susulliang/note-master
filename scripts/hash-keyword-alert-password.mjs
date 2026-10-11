@@ -1,7 +1,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import { emitKeypressEvents } from 'node:readline';
 
-const iterations = 250_000;
+const iterations = 100_000;
 const salt = randomBytes(16);
 const input = process.stdin;
 if (!input.isTTY || typeof input.setRawMode !== 'function') {

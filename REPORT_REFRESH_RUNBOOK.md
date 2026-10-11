@@ -13,9 +13,9 @@ authenticated browser and Wrangler session.
   cookies, tokens, or browser profile data in the repository.
 - The existing scripts parse files already in `sf_reports/`; they do not log in
   to Salesforce or Connect and do not download reports.
-- The GitHub Action only parses the files in its checkout. It does not use a
-  user's browser session. Unattended downloads require an approved authentication
-  method and are not implemented yet.
+- Dashboard report publishing is a local, human-in-the-loop process. Raw
+  exports are intentionally excluded from Git, and unattended downloads are
+  not implemented.
 - The R2 JSON is publicly readable. It contains agent display names and metrics.
   Never upload raw report files or publish if the generated snapshot contains
   unexpected personal or confidential data.
@@ -107,9 +107,8 @@ npm run publish:dashboard-data
 ```
 
 This command regenerates the complete snapshot and overwrites
-`eco-dash/dashboard-data.json`. For GitHub Actions, the corresponding secrets
-are `CLOUDFLARE_ACCOUNT_ID`, `R2_BUCKET`, and `CLOUDFLARE_API_TOKEN`; never put
-the token in a `VITE_` variable, the report registry, or a committed file.
+`eco-dash/dashboard-data.json`. Never put the Cloudflare token in a `VITE_`
+variable, the report registry, or a committed file.
 
 ## Verify The Published Snapshot
 

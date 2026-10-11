@@ -88,7 +88,7 @@ function parsePasswordVerifier(value: string | undefined): PasswordVerifier | nu
   const hash = hashText ? decodeBase64(hashText) : null;
   if (
     scheme !== 'pbkdf2-sha256' ||
-    !Number.isInteger(iterations) || iterations < 100_000 || iterations > 1_000_000 ||
+    !Number.isInteger(iterations) || iterations !== 100_000 ||
     !salt || salt.length < 16 ||
     !hash || hash.length !== 32
   ) return null;
@@ -247,11 +247,22 @@ async function handleKeywordAlerts(
       ),
     ];
     const results = await env.DB.batch(statements);
-    if (results.some((result) => !result.success)) {
+    const failedResults = results.filter((result) => !result.success);
+    if (failedResults.length > 0) {
+      console.error(JSON.stringify({
+        event: 'keyword_alert_batch_failed',
+        failedCount: failedResults.length,
+        metadata: failedResults.map((result) => result.meta),
+      }));
       return json({ error: 'Could not save keyword alerts' }, 500);
     }
     return json({ success: true, count: alerts.length });
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'keyword_alert_save_failed',
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }));
     return json({ error: 'Could not save keyword alerts' }, 500);
   }
 }
