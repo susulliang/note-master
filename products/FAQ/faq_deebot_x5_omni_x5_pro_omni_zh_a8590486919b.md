@@ -1,0 +1,22 @@
+---
+category: "DEEBOT"
+model: "X5 OMNI/X5 PRO OMNI"
+model_slug: "x5_omni_x5_pro_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/X5系列常见问题1.0（纯文字版）中英文(1).xlsx"
+source_sheet: "IT"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# Come si usa la funzione Gestione Wi-Fi del robot?
+
+## Question
+
+Come si usa la funzione Gestione Wi-Fi del robot?
+
+## Answer
+
+1. Assicurarsi che DEEBOT sia connesso all'app e online.
+2. Aprire l'app e selezionare Pulizia intelligente > Impostazioni (nell'angolo in alto a destra) > Informazioni su DEEBOT > Gestione Wi-Fi e toccare "+" per aggiungere più connessioni Wi-Fi.

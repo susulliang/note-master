@@ -1,0 +1,24 @@
+---
+category: "DEEBOT"
+model: "X5 OMNI/X5 PRO OMNI"
+model_slug: "x5_omni_x5_pro_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/X5系列常见问题1.0（纯文字版）中英文(1).xlsx"
+source_sheet: "常见问题"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# 地宝驱动轮被缠绕或表面有脏污，如何清理？
+
+## Question
+
+地宝驱动轮被缠绕或表面有脏污，如何清理？
+
+## Answer
+
+一：地宝驱动轮被缠绕或表面有脏污清理
+1.关闭主机电源开关，将机器翻转后，底部朝上放置；
+2.按压并转动驱动轮清理缠绕物；
+3.按压转动驱动轮，并使用半干湿的抹布擦拭表面污渍。

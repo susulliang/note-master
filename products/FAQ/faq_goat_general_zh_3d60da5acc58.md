@@ -1,0 +1,24 @@
+---
+category: "GOAT"
+model: "General"
+model_slug: "general"
+lang: "zh"
+source: "FAQ/GOAT/GOAT A & O 2026/【FAQ 2.0 User Side】O600 RTK & O800 RTK（O1000 RTK NA）25.12.31.xlsx"
+source_sheet: "用户端"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# 通道设置注意事项
+
+## Question
+
+通道设置注意事项
+
+## Answer
+
+1. A maximum of 15 paths can be created within a single area;
+ 2. Two paths may intersect during creation;
+ 3. Paths cannot span over existing lawn areas on the map. If a path crosses over an existing lawn area during creation, the path creation will automatically terminate, retaining only the established portion of the path;
+ 4. When adding a new area that overlaps an existing path, the path will not be retained. The system will attempt to preserve path sections connecting areas outside the lawn based on the new area's configuration.

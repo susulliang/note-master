@@ -23,6 +23,7 @@ interface CatAssistantProps {
   isCapturing: boolean;
   isThinking: boolean;
   onDismiss: () => void;
+  moveRequest?: { id: number; x: number; y: number } | null;
   className?: string;
 }
 
@@ -32,6 +33,7 @@ export function CatAssistant({
   isCapturing,
   isThinking,
   onDismiss,
+  moveRequest,
   className,
 }: CatAssistantProps) {
   const [position, setPosition] = useScopedState(
@@ -52,6 +54,11 @@ export function CatAssistant({
     window.addEventListener('resize', keepPositionInViewport);
     return () => window.removeEventListener('resize', keepPositionInViewport);
   }, [setPosition]);
+
+  useEffect(() => {
+    if (!moveRequest) return;
+    setPosition(clampPosition({ x: moveRequest.x, y: moveRequest.y }));
+  }, [moveRequest, setPosition]);
 
   useEffect(() => {
     const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -129,7 +136,11 @@ export function CatAssistant({
   return (
     <div
       className={cn('pointer-events-none fixed z-50 select-none', className)}
-      style={{ left: visiblePosition.x, top: visiblePosition.y }}
+      style={{
+        left: visiblePosition.x,
+        top: visiblePosition.y,
+        transition: dragging ? undefined : 'left 550ms cubic-bezier(0.2, 0.8, 0.2, 1), top 550ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+      }}
     >
       {/* Thought bubble — anchored above the sprite */}
       {currentThought && (

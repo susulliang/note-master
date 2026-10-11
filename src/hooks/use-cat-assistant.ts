@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TranscriptEntry } from '@/lib/field-extraction';
+import { alertContentAsPlainText, type KeywordAlert } from '@/lib/keyword-alerts';
+
+export type { KeywordAlert } from '@/lib/keyword-alerts';
 
 /** Shape of the ticket form data as stored by TicketNotesPage — a flat map
  *  of node-id → string (or string[] for the dynamic troubleshooting list). */
@@ -33,15 +36,6 @@ export type CatFormData = Record<string, string | string[]>;
  */
 
 export type CatThoughtKind = 'ambient' | 'tip' | 'advice' | 'greeting' | 'alert';
-
-/** A live-transcript keyword alert. When the keyword (case-insensitive)
- *  appears in any new transcript line, the cat pops an amber thought bubble
- *  showing `alert`. Editable by the agent from the toolbar's alert menu. */
-export interface KeywordAlert {
-  id: string;
-  keyword: string;
-  alert: string;
-}
 
 export interface CatThought {
   id: number;
@@ -181,6 +175,10 @@ export function useCatAssistant({
     };
     setThoughts((prev) => [...prev.slice(-4), thought]);
   }, []);
+  const pushTip = useCallback(
+    (text: string, ttl?: number) => pushThought('tip', text, ttl),
+    [pushThought]
+  );
 
   /** Dismiss the current thought (agent clicked the bubble / X). */
   const dismiss = useCallback(() => {
@@ -318,7 +316,7 @@ export function useCatAssistant({
         const last = lastAlertAtRef.current.get(rule.id) ?? 0;
         if (now - last < ALERT_KEYWORD_COOLDOWN_MS) continue;
         lastAlertAtRef.current.set(rule.id, now);
-        pushThought('alert', rule.alert, ALERT_TTL_MS);
+        pushThought('alert', alertContentAsPlainText(rule), ALERT_TTL_MS);
         break; // one alert per line max — avoid stacking multiple bubbles
       }
     }
@@ -338,7 +336,7 @@ export function useCatAssistant({
     currentThought,
     dismiss,
     /** Push a custom tip thought (e.g. from external events). */
-    pushTip: (text: string, ttl?: number) => pushThought('tip', text, ttl),
+    pushTip,
     /** True while an LLM advice request is in flight (for the "thinking" state). */
     isThinking,
   };

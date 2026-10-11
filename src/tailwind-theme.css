@@ -689,7 +689,7 @@ body[data-ui-scale="small"] {
     background-position: 0% 0%;
   }
   .cat-sprite-animate {
-    animation: cat-sprite-loop 1.6s steps(1, end) 1;
+    animation: cat-sprite-loop 3.2s steps(1, end) 1;
   }
 
   /* Amber pulsing glow for keyword-alert thought bubbles. */

@@ -141,7 +141,7 @@ export default function TestScoreSubmissions({ state }: { state: ScoreState }) {
         <div>
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-accent">
             <Database className="size-3.5" />
-            D1 score stream
+            Test Result Database
           </div>
           <h2 id="test-score-title" className="mt-1 text-base font-semibold text-foreground sm:text-lg">
             Self-test submissions

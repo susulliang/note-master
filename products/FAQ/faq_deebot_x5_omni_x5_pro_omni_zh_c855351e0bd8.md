@@ -1,0 +1,24 @@
+---
+category: "DEEBOT"
+model: "X5 OMNI/X5 PRO OMNI"
+model_slug: "x5_omni_x5_pro_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/X5系列常见问题1.0（纯文字版）中英文(1).xlsx"
+source_sheet: "常见问题"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# 运行困难，请检查驱动轮如何处理？
+
+## Question
+
+运行困难，请检查驱动轮如何处理？
+
+## Answer
+
+一：运行困难，请检查驱动轮
+1.检查主机防撞保护条，是否移除，若未移除，请移除后使用。
+2.将机器关机后翻转，底部朝上轻放；
+3.按压并转动驱动轮清理缠绕物；

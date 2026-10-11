@@ -1,0 +1,23 @@
+---
+category: "DEEBOT"
+model: "DEEBOT X2 OMNI"
+model_slug: "deebot_x2_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/FAQ basic data - DEEBOT X2 OMNI.XLSX"
+source_sheet: "JP"
+source_row_id: "D20325"
+kind: faq
+version: 1
+---
+
+# ロボットの駆動ホイールに絡まりや表面の汚れがある場合の、駆動ホイールの清掃方法を教えてください。
+
+## Question
+
+ロボットの駆動ホイールに絡まりや表面の汚れがある場合の、駆動ホイールの清掃方法を教えてください。
+
+## Answer
+
+1. ロボットの電源を切ってから、ロボットを裏返して、底面を上に向けて置きます。
+2. 駆動ホイールを押して回し、絡まった異物を取り除きます。
+3. 駆動ホイールを押して回し、少し湿らせた布で表面を拭き取ります。

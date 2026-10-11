@@ -1,0 +1,23 @@
+---
+category: "DEEBOT"
+model: "X5 OMNI/X5 PRO OMNI"
+model_slug: "x5_omni_x5_pro_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/X5系列常见问题1.0（纯文字版）中英文(1).xlsx"
+source_sheet: "KO"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT이 청소 중일 때 가끔 물걸레 패드 판이 올라가거나 올라가지 않는 이유는 무엇입니까?
+
+## Question
+
+DEEBOT이 청소 중일 때 가끔 물걸레 패드 판이 올라가거나 올라가지 않는 이유는 무엇입니까?
+
+## Answer
+
+1. DEEBOT은 청소 중에 구역을 탐색하는 경우 물걸레 패드를 들어 올리고 다시 세척 및 재충전하여 2차 오염을 방지합니다.
+2. DEEBOT은 카펫 위를 지날 경우, 장애물을 넘을 경우, 또는 문제에서 벗어나는 경우 기본적으로 물걸레 패드를 들어 올립니다.
+3. DEEBOT은 지도를 만들 때 물걸레 패드를 들어 올립니다.

@@ -23,6 +23,7 @@ if [ -n "${VERCEL}" ] || [ "${DEPLOY_TARGET:-}" = "standalone" ]; then
   echo "🚀 Standalone/Vercel build mode — producing plain dist/client/"
 
   rm -rf "$ROOT/dist"
+  node "$ROOT/scripts/build-faq-content.mjs"
 
   npx vite build --outDir "$ROOT/dist/client" --emptyOutDir
 
@@ -42,6 +43,7 @@ OUTPUT_RESOURCE="$ROOT/dist/output_resource"
 OUTPUT_STATIC="$ROOT/dist/output_static"
 
 rm -rf "$ROOT/dist"
+node "$ROOT/scripts/build-faq-content.mjs"
 
 # 1. Vite build → dist/client/
 npx vite build --outDir "$ROOT/dist/client" --emptyOutDir

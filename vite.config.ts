@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { cpSync, existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -256,6 +256,22 @@ function mdRawStaticImportResolverPlugin(): Plugin {
   };
 }
 
+function omitUnusedCatOriginalsPlugin(): Plugin {
+  let outputDir = '';
+  const sourcePhotos = ['Hunao.jpg', 'Siam.jpg', 'Heyhey.jpg', 'heyheyhey.jpg'];
+  return {
+    name: 'omit-unused-cat-originals',
+    configResolved(config) {
+      outputDir = path.resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      for (const photo of sourcePhotos) {
+        rmSync(path.join(outputDir, 'assets', 'cat', photo), { force: true });
+      }
+    },
+  };
+}
+
 /**
  * Canonical Vite config — used by both `vite` (dev) and `vite build` (prod).
  *
@@ -284,6 +300,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       react(),
       sopFolderPlugin(),
+      omitUnusedCatOriginalsPlugin(),
       // whisper.cpp WASM (P0 spike) is a pthread build: SharedArrayBuffer
       // requires crossOriginIsolated, so cross-origin-isolate ONLY the
       // dev-only bench document (COEP: credentialless keeps Google Fonts

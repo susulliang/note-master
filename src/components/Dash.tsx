@@ -57,8 +57,9 @@ import {
 } from '@/lib/dash-model';
 import { cn } from '@/lib/utils';
 import TestScoreSubmissions, { useTestScoreData } from '@/components/TestScoreSubmissions';
+import KeywordAlertsManager from '@/components/KeywordAlertsManager';
 
-type View = 'overview' | 'explore' | 'scorecard';
+type View = 'overview' | 'explore' | 'scorecard' | 'alerts';
 type ExploreView = 'quality' | 'workload' | 'response';
 type QualityMetric = 'csat' | 'oneTouch';
 type SortDirection = 'ascending' | 'descending';
@@ -72,7 +73,7 @@ function readDashPreferences(): { view: View; explore: ExploreView; qualityMetri
     if (!raw) return fallback;
     const value = JSON.parse(raw) as Record<string, unknown>;
     return {
-      view: value.view === 'explore' || value.view === 'scorecard' ? value.view : 'overview',
+      view: value.view === 'explore' || value.view === 'scorecard' || value.view === 'alerts' ? value.view : 'overview',
       explore: value.explore === 'workload' || value.explore === 'response' ? value.explore : 'quality',
       qualityMetric: value.qualityMetric === 'oneTouch' ? 'oneTouch' : 'csat',
       briefing: value.briefing === true,
@@ -1793,7 +1794,7 @@ export default function Dash() {
       return value !== null && isMetricAbnormal(metric.id, value);
     }).length];
   })) as Record<DashMetricId, number | null>;
-  const showAgentControls = view !== 'scorecard' && !(view === 'explore' && explore === 'workload');
+  const showAgentControls = view !== 'scorecard' && view !== 'alerts' && !(view === 'explore' && explore === 'workload');
 
   const openMetric = (metric: DashMetricId) => {
     setFocusMetric(metric);
@@ -1822,7 +1823,7 @@ export default function Dash() {
             <p className="mt-0.5 text-xs text-muted-foreground">Month to date · Salesforce report snapshot</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {(['overview', 'explore', 'scorecard'] as View[]).map((item) => <button key={item} type="button" onClick={() => { setView(item); setBriefing(false); }} aria-current={view === item && !briefing ? 'page' : undefined} className={cn(CONTROL, 'capitalize', view === item && !briefing && ACTIVE_CONTROL)}>{item === 'scorecard' ? 'Scorecard' : item[0]!.toUpperCase() + item.slice(1)}</button>)}
+            {(['overview', 'explore', 'scorecard', 'alerts'] as View[]).map((item) => <button key={item} type="button" onClick={() => { setView(item); setBriefing(false); }} aria-current={view === item && !briefing ? 'page' : undefined} className={cn(CONTROL, 'capitalize', view === item && !briefing && ACTIVE_CONTROL)}>{item === 'scorecard' ? 'Scorecard' : item === 'alerts' ? 'Keyword alerts' : item[0]!.toUpperCase() + item.slice(1)}</button>)}
             <button type="button" onClick={() => setBriefing((current) => !current)} className={cn(CONTROL, briefing && ACTIVE_CONTROL)}>{briefing ? 'Exit briefing' : 'Briefing'}</button>
             <ReportSources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen((open) => !open)} />
             <button type="button" onClick={data.reload} disabled={data.refreshing} className={CONTROL}><RefreshCw className={cn('size-4', data.refreshing && 'animate-spin')} />{data.refreshing ? 'Updating' : 'Refresh'}</button>
@@ -1841,6 +1842,8 @@ export default function Dash() {
         <Briefing data={data} agents={data.agents} />
       ) : view === 'scorecard' ? (
         <Scorecard />
+      ) : view === 'alerts' ? (
+        <KeywordAlertsManager />
       ) : view === 'overview' ? (
         <div className="space-y-4">
           <section>

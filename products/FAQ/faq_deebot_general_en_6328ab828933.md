@@ -1,0 +1,26 @@
+---
+category: "DEEBOT"
+model: "General"
+model_slug: "general"
+lang: "en"
+source: "FAQ/DEEBOT/【FAQ 2.0】ECOVACS X9 PRO OMNI&YEEDI S16 PLUS 中英文版.xlsx"
+source_sheet: "ECOVACS-EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# Guidelines for the correct installation of the robot
+
+## Question
+
+Guidelines for the correct installation of the robot
+
+## Answer
+
+1. Remove the robot, station, and power cord from the packaging. Remove the protective strip from the robot and remove the plastic cover from the base station.
+2. Install the base by pressing both sides until you hear a "click" to secure it.
+3. Connect the power cord to the interface on the back of the base station, place it against a wall, and then power it on. If using the US version, please turn on the switch at the back of the base station first.
+ (It is recommended to place the station on a flat hard surface, and do not place objects within 5cm from the left, right and 80cm from the front).
+Warm tips:
+For optimal performance, place the station on tile floors. If using it on wood floor, regularly check the base for moisture and clean it promptly to prevent damage.

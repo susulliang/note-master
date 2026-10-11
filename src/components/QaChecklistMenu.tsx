@@ -94,9 +94,9 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'flex items-center gap-2 whitespace-nowrap rounded-full bg-amber-600 font-bold text-white shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,#d97706_55%,transparent)] active:scale-95',
-          'px-3 py-1.5 text-xs'
+          'flex size-9 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-amber-600 px-1 font-bold text-white shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,#d97706_55%,transparent)] active:scale-95 md:size-auto md:px-3 md:py-1.5 md:text-xs'
         )}
+        aria-label="QA checklist"
         title="QA checklist — live completion status from the last AI parse"
       >
         {scoring ? (
@@ -104,11 +104,11 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
         ) : (
           <ClipboardCheck className="size-3.5" />
         )}
-        QA
+        <span className="hidden md:inline">QA</span>
         {overallRatio !== null && (
           <span
             className={cn(
-              'rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tabular-nums',
+              'hidden rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tabular-nums md:inline',
               ratioTextClass(overallRatio)
             )}
           >

@@ -26,6 +26,7 @@ pids
 *.pid.lock
 /dashboard_publish/
 /sf_reports/dashboard-data.json
+/public/faq-content/
 
 # Coverage directory used by tools like istanbul
 coverage/

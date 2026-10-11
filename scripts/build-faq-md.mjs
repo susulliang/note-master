@@ -13,7 +13,7 @@
  *
  * Usage: node scripts/build-faq-md.mjs [--dry-run] [--max-files=20]
  */
-import { readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync, readFileSync, unlinkSync } from 'node:fs';
+import { readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync, readFileSync, renameSync } from 'node:fs';
 import { join, basename, extname, relative, resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -27,12 +27,15 @@ const __dirname = dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Z]:
 const ROOT = resolve(__dirname, '..');
 const FAQ_SRC = join(ROOT, 'FAQ');
 const OUT_DIR = join(ROOT, 'products', 'FAQ');
+const STAGING_DIR = `${OUT_DIR}.next`;
+const REPORT_FILE = join(ROOT, 'logs', 'faq-build-report.json');
 
 const DRY = process.argv.some((a) => a === '--dry-run');
 const MAX_FILES = (() => {
   const m = process.argv.find((a) => a.startsWith('--max-files='));
   if (!m) return Infinity;
-  return parseInt(m.split('=')[1], 10) || Infinity;
+  const parsed = Number.parseInt(m.split('=')[1], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : Infinity;
 })();
 
 // ------------------------- helpers -------------------------
@@ -58,7 +61,12 @@ function slugify(s) {
 }
 
 function digest16(str) {
-  return createHash('sha1').update(str, 'utf8').digest('hex').slice(0, 6);
+  return createHash('sha1').update(str, 'utf8').digest('hex').slice(0, 12);
+}
+
+function modelSlugify(value) {
+  const slug = slugify(value);
+  return slug === 'item' ? `model_${digest16(String(value ?? ''))}` : slug;
 }
 
 // Extract a double (1.0 / 2.6 / 260213 treated as date, not ver)
@@ -130,37 +138,128 @@ function detectLang(name) {
 // ------------------------- sheet content classifiers -------------------------
 
 // Score each column in header row for "Question"-ness and "Answer"-ness.
-const Q_KEYS = [/问题|question|q\s*\d*|query|faq.*item|标题|topic/i];
-const A_KEYS = [/答案|answer|a\s*\d*|solution|resolution|解决|reply|处理|建议方案|detail|说明/i];
-const MODEL_KEYS = [/机型|model|产品|product|series|sku|p\s*\/?\s*n/i];
-const SPEC_KEYS = [/规格|spec|参数|param|功能|feature|对比|compare|基本信息|尺寸|weight|重量|battery|续航|capacity|noise|噪音|power|电压/i];
+const QUESTION_HEADER = /^(?:q|question|query|problem|issue|situation|topic|title|faq(?:\s*item)?|问题|常见问题|问题描述|故障问题|故障现象|症状|标题)$/i;
+const ANSWER_HEADER = /^(?:a|answer|solution|resolution|reply|detail|content|solutions?|处理方法|解决方法|解决方案|答案|答复|详细内容)$/i;
+const MODEL_HEADER = /^(?:product\s*model|model(?:\s*name)?|product(?:\s*name)?|适用机型|适配机型|机型|产品型号|产品名称)$/i;
+const IGNORE_HEADER = /^(?:(?:answer|question|faq|record|article|knowledge)\s+)?(?:id|code|tags?|visit type|status|ranking|language|language code|编号|序号|标记)$/i;
+const SUPPORTED_LANGUAGES = new Set(['en', 'zh', 'fr']);
+const LANGUAGE_CODES = new Set([
+  'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'he', 'hi',
+  'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro',
+  'ru', 'sk', 'sv', 'th', 'tr', 'uk', 'vi', 'zh', 'zh-cn', 'zh-tw',
+]);
 
-function classifySheet(headers, sampleRows) {
-  let qScore = 0, aScore = 0, modelScore = 0, specScore = 0;
-  for (const h of headers || []) {
-    const s = String(h ?? '');
-    if (Q_KEYS.some((r) => r.test(s))) qScore++;
-    if (A_KEYS.some((r) => r.test(s))) aScore++;
-    if (MODEL_KEYS.some((r) => r.test(s))) modelScore++;
-    if (SPEC_KEYS.some((r) => r.test(s))) specScore++;
-  }
-  // Heuristic: comparison table = many columns with model+spec keywords and NO clear Q/A separation
-  // Q&A sheet = Q and A columns both present
-  if (qScore >= 1 && aScore >= 1) return { kind: 'qa', qScore, aScore };
-  if (headers && headers.length >= 4 && modelScore + specScore >= 2) return { kind: 'table', modelScore, specScore };
-  if (qScore >= 1 || aScore >= 1) return { kind: 'qa' }; // lenient
-  // if 4+ cols, treat as table anyway (safer than dropping data)
-  if (headers && headers.length >= 4) return { kind: 'table' };
-  return { kind: 'qa' }; // fallback: render as question/answer pairs per row
+function normalizeHeader(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/[_\-./]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function buildGfmTable(headers, rows) {
-  const head = headers.map((h) => String(h ?? '').replace(/\|/g, '\\|').trim() || '—').join(' | ');
-  const sep = headers.map(() => '---').join(' | ');
-  const body = rows
-    .map((r) => r.map((c) => String(c ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>').trim() || '—').join(' | '))
-    .join('\n');
-  return `| ${head} |\n| ${sep} |\n| ${body} |\n`;
+function languageCode(value) {
+  const raw = String(value ?? '').normalize('NFKC').trim().toLowerCase();
+  const known = raw.match(/(?:^|[^a-z])([a-z]{2,3}(?:-[a-z]{2})?)(?:$|[^a-z])/);
+  if (known) {
+    if (/^en(?:-|$)/.test(known[1])) return 'en';
+    if (/^(?:zh|cn)(?:-|$)/.test(known[1])) return 'zh';
+    if (/^fr(?:-|$)/.test(known[1])) return 'fr';
+    if (LANGUAGE_CODES.has(known[1])) return known[1];
+  }
+  const code = raw.replace(/[^a-z]/g, '');
+  if (code === 'cn' || code === 'zhcn') return 'zh';
+  if (code === 'zhtw') return 'zh-tw';
+  if (LANGUAGE_CODES.has(code)) return code;
+  if (/chinese|mandarin|中文|简体|繁體|繁体|普通话/.test(raw)) return /繁體|繁体/.test(raw) ? 'zh-tw' : 'zh';
+  if (/english|英文/.test(raw)) return 'en';
+  if (/german|德文|德语/.test(raw)) return 'de';
+  if (/french|français|法文|法语/.test(raw)) return 'fr';
+  if (/spanish|西班牙/.test(raw)) return 'es';
+  if (/japanese|日文|日语/.test(raw)) return 'ja';
+  if (/korean|韩文|韩语/.test(raw)) return 'ko';
+  return '';
+}
+
+function headerRole(value) {
+  const raw = String(value ?? '').normalize('NFKC').toLowerCase();
+  const normalized = normalizeHeader(value);
+  if (MODEL_HEADER.test(normalized)) return { role: 'model', lang: '' };
+  if (IGNORE_HEADER.test(normalized)) return { role: 'ignore', lang: '' };
+  const lang = languageCode(raw) || (/[\u4e00-\u9fff]/.test(raw) ? 'zh' : '');
+  const contentHint = /content|answer|solution|resolution|reply|detail|内容|答案|解决|处理/.test(raw);
+  if (QUESTION_HEADER.test(normalized) || (lang && !contentHint)) return { role: 'question', lang };
+  if (ANSWER_HEADER.test(normalized) || (lang && contentHint)) return { role: 'answer', lang };
+  return { role: 'other', lang };
+}
+
+function inferLanguage(...values) {
+  for (const value of values) {
+    const lang = languageCode(value);
+    if (lang) return lang;
+  }
+  const text = values.map((value) => String(value ?? '')).join(' ');
+  if (/[\u4e00-\u9fff]/.test(text)) return 'zh';
+  return '';
+}
+
+function normalizeSupportedLanguage(value) {
+  const language = String(value ?? '').toLowerCase();
+  return language === 'zh' || language.startsWith('zh-') ? 'zh' : language;
+}
+
+function findHeaderRow(aoa) {
+  let best = null;
+  for (let rowIndex = 0; rowIndex < Math.min(10, aoa.length); rowIndex++) {
+    const roles = aoa[rowIndex].map(headerRole);
+    const questions = roles.filter((r) => r.role === 'question').length;
+    const answers = roles.filter((r) => r.role === 'answer').length;
+    const score = Math.min(questions, answers) * 10 + questions + answers;
+    if (questions && answers && (!best || score > best.score)) best = { rowIndex, score };
+  }
+  return best;
+}
+
+function getQaColumnPairs(headers) {
+  const roles = headers.map(headerRole);
+  const questions = roles.flatMap((r, index) => r.role === 'question' ? [{ index, lang: r.lang }] : []);
+  const answers = roles.flatMap((r, index) => r.role === 'answer' ? [{ index, lang: r.lang }] : []);
+  const pairs = [];
+  const usedAnswers = new Set();
+
+  for (const question of questions) {
+    const answer = answers.find((candidate) =>
+      !usedAnswers.has(candidate.index) && question.lang && candidate.lang === question.lang
+    );
+    if (answer) {
+      pairs.push({ questionIdx: question.index, answerIdx: answer.index, lang: question.lang });
+      usedAnswers.add(answer.index);
+    }
+  }
+
+  const remainingQuestions = questions.filter((question) => !pairs.some((pair) => pair.questionIdx === question.index));
+  for (const question of remainingQuestions) {
+    const answer = answers.find((candidate) =>
+      !usedAnswers.has(candidate.index) &&
+      (!question.lang || !candidate.lang || question.lang === candidate.lang)
+    );
+    if (!answer) continue;
+    pairs.push({
+      questionIdx: question.index,
+      answerIdx: answer.index,
+      lang: question.lang || answer.lang,
+    });
+    usedAnswers.add(answer.index);
+  }
+  return {
+    pairs,
+    roles,
+    unmatchedQuestions: questions.filter((question) =>
+      !pairs.some((pair) => pair.questionIdx === question.index)
+    ),
+    unmatchedAnswers: answers.filter((answer) => !usedAnswers.has(answer.index)),
+  };
 }
 
 // ------------------------- per-format readers -------------------------
@@ -181,7 +280,7 @@ function sheetToAoa(ws) {
 }
 
 function writeMd(filename, content) {
-  const p = join(OUT_DIR, filename);
+  const p = join(STAGING_DIR, filename);
   if (DRY) return console.log(`  DRY write ${filename} (${content.length} chars)`);
   writeFileSync(p, content, 'utf8');
   writtenCount++;
@@ -189,9 +288,11 @@ function writeMd(filename, content) {
 
 let writtenCount = 0;
 let qaCount = 0;
-let tableCount = 0;
 let docCount = 0;
 let skippedDupeCount = 0;
+const faqRecords = [];
+const buildIssues = [];
+const unsupportedLanguageReports = new Set();
 
 // ------------------------- main dedupe + dispatch -------------------------
 
@@ -204,7 +305,8 @@ async function main() {
   });
   console.log(`[discover] FAQ 源文件候选：${allFiles.length} 个`);
 
-  // Step 1: meta-map each file → dedupe
+  // Dedupe records, not workbooks: one workbook may contain unique language
+  // tabs or questions that would be lost by choosing a single file winner.
   const metas = allFiles.map((p) => {
     const st = statSync(p);
     const ext = extname(p).toLowerCase();
@@ -222,53 +324,25 @@ async function main() {
     };
   });
 
-  // Group by (category + modelSlug)
-  const groups = new Map();
-  for (const m of metas) {
-    const k = `${m.category}::${m.modelSlug}`;
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(m);
+  const limited = metas.slice(0, MAX_FILES);
+  if (!DRY && limited.length < metas.length) {
+    throw new Error(
+      `Refusing to replace the full FAQ library with a partial run ` +
+      `(${limited.length}/${metas.length} source files). Use --dry-run or omit --max-files.`,
+    );
   }
-  console.log(`[dedupe] ${groups.size} 个产品分组`);
-
-  // Pick winners: higher version → larger date → larger size → newer mtime
-  const winners = [];
-  for (const [groupKey, arr] of groups.entries()) {
-    if (arr.length === 1) {
-      winners.push(arr[0]);
-      continue;
-    }
-    arr.sort((a, b) => {
-      if (b.version !== a.version) return b.version - a.version;
-      if (b.dateStamp !== a.dateStamp) return b.dateStamp - a.dateStamp;
-      if (b.size !== a.size) return b.size - a.size;
-      return b.mtime - a.mtime;
-    });
-    const keep = arr[0];
-    const drop = arr.slice(1);
-    skippedDupeCount += drop.length;
-    console.log(`  去重 ${groupKey} (${arr.length}份) → 保留: ${keep.name} (V${keep.version} / ${Math.round(keep.size / 1024)}KB); 跳过: ${drop.map((d) => d.name).join(' | ')}`);
-    winners.push(keep);
-  }
-  console.log(`[dedupe] 保留 ${winners.length} 份（跳过 ${skippedDupeCount} 份重复）`);
-
-  // Step 2: reset output dir
   if (!DRY) {
-    if (existsSync(OUT_DIR)) rmSync(OUT_DIR, { recursive: true, force: true });
-    mkdirSync(OUT_DIR, { recursive: true });
+    if (existsSync(STAGING_DIR)) rmSync(STAGING_DIR, { recursive: true, force: true });
+    mkdirSync(STAGING_DIR, { recursive: true });
   } else {
-    console.log(`[dry-run] 输出目录：${OUT_DIR}`);
+    console.log(`[dry-run] staging output: ${STAGING_DIR}`);
   }
 
-  // Step 3: process winners
-  let fileIdx = 0;
-  const limited = winners.slice(0, MAX_FILES);
-  console.log(`[process] 处理 ${limited.length} 份文件${MAX_FILES < winners.length ? `（--max-files=${MAX_FILES} 限制）` : ''}…`);
+  console.log(`[process] processing ${limited.length} source files${MAX_FILES < metas.length ? ` (limited to ${MAX_FILES})` : ''}...`);
 
-  for (const meta of limited) {
-    fileIdx++;
-    const prefix = `(${fileIdx}/${limited.length}) [${meta.category}] ${meta.name}`;
-    console.log(`\n▶ ${prefix}`);
+  for (let i = 0; i < limited.length; i++) {
+    const meta = limited[i];
+    console.log(`\n[${i + 1}/${limited.length}] [${meta.category}] ${meta.name}`);
     try {
       if (meta.ext === '.xlsx' || meta.ext === '.xls') {
         await processSheet(meta);
@@ -282,41 +356,56 @@ async function main() {
     }
   }
 
+  const winners = dedupeFaqRecords(faqRecords);
+  if (!DRY && winners.length === 0) {
+    throw new Error('No valid FAQ records were parsed; leaving the existing FAQ library untouched.');
+  }
+  skippedDupeCount = faqRecords.length - winners.length;
+  for (const record of winners) writeFaqRecord(record);
+
+  if (!DRY) {
+    const backupDir = `${OUT_DIR}.previous`;
+    if (existsSync(backupDir)) rmSync(backupDir, { recursive: true, force: true });
+    if (existsSync(OUT_DIR)) renameSync(OUT_DIR, backupDir);
+    try {
+      renameSync(STAGING_DIR, OUT_DIR);
+      if (existsSync(backupDir)) rmSync(backupDir, { recursive: true, force: true });
+    } catch (error) {
+      if (!existsSync(OUT_DIR) && existsSync(backupDir)) renameSync(backupDir, OUT_DIR);
+      throw error;
+    }
+    mkdirSync(join(ROOT, 'logs'), { recursive: true });
+    writeFileSync(REPORT_FILE, JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      sourcesProcessed: limited.length,
+      faqRecordsRead: faqRecords.length,
+      faqRecordsWritten: winners.length,
+      duplicatesSkipped: skippedDupeCount,
+      documentsWritten: docCount,
+      issues: buildIssues,
+    }, null, 2) + '\n');
+  }
+
   console.log('\n================ RESULT ================');
-  console.log(`  QA 条目 MD:    ${qaCount}`);
-  console.log(`  对比表 MD:     ${tableCount}`);
-  console.log(`  文档 MD:       ${docCount}`);
-  console.log(`  TOTAL 写入:    ${writtenCount}`);
+  console.log(`  FAQ rows read:       ${faqRecords.length}`);
+  console.log(`  duplicate rows:      ${skippedDupeCount}`);
+  console.log(`  FAQ entries written: ${qaCount}`);
+  console.log(`  imported documents:  ${docCount}`);
+  console.log(`  build issues:        ${buildIssues.length}`);
+  console.log(`  total files written: ${writtenCount}`);
+  console.log(`  review report:       ${relative(ROOT, REPORT_FILE)}`);
   console.log('========================================');
 
-  // Step 4: clean Office temp lock files (~$...) inside FAQ_SRC (and subdirs)
-  if (!DRY) {
-    const lockFiles = walk(FAQ_SRC).filter((p) => basename(p).startsWith('~$'));
-    for (const lf of lockFiles) {
-      try {
-        unlinkSync(lf);
-        console.log(`  [cleanup] deleted lock: ${relative(ROOT, lf)}`);
-      } catch (e) {
-        console.warn(`  [cleanup] 无法删除 ${lf}: ${e.message}`);
-      }
-    }
+  for (const issue of buildIssues.slice(0, 20)) {
+    console.warn(`  REVIEW ${issue.source} · ${issue.sheet}: ${issue.reason}`);
   }
 }
 
 // ------------------------- per-type processors -------------------------
 
-const sheetFileCounter = new Map();
-
-function nextFileNum(baseKey) {
-  const n = (sheetFileCounter.get(baseKey) ?? 0) + 1;
-  sheetFileCounter.set(baseKey, n);
-  return n;
-}
-
 async function processSheet(meta) {
   const wb = await readWorkbook(meta.path);
   if (!wb) return;
-  const baseKey = `${meta.category}_${meta.modelSlug || meta.lang}`;
 
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
@@ -324,116 +413,174 @@ async function processSheet(meta) {
     const aoa = sheetToAoa(ws);
     if (aoa.length < 2) continue; // need at least header + 1 data row
 
-    // Robust header detection: first non-empty row that has ≥2 non-empty cells
-    let headerRowIdx = 0;
-    for (let i = 0; i < Math.min(5, aoa.length); i++) {
-      const nonEmpty = aoa[i].filter((c) => String(c ?? '').trim().length > 0).length;
-      if (nonEmpty >= 2) { headerRowIdx = i; break; }
+    const header = findHeaderRow(aoa);
+    if (!header) {
+      buildIssues.push({ source: relative(ROOT, meta.path), sheet: sheetName, reason: 'No explicit question-and-answer headers found; sheet skipped.' });
+      continue;
     }
+    const headerRowIdx = header.rowIndex;
     const headers = aoa[headerRowIdx].map((c) => String(c ?? '').trim());
     const rows = aoa.slice(headerRowIdx + 1).filter((r) => r.some((c) => String(c ?? '').trim().length > 0));
     if (rows.length === 0) continue;
 
-    const sampleRows = rows.slice(0, 3);
-    const cls = classifySheet(headers, sampleRows);
-
-    if (cls.kind === 'qa') {
-      writeQaRows(headers, rows, meta, sheetName);
-    } else {
-      writeComparisonTable(headers, rows, meta, sheetName);
+    const { pairs, roles, unmatchedQuestions, unmatchedAnswers } = getQaColumnPairs(headers);
+    if (pairs.length === 0) {
+      buildIssues.push({ source: relative(ROOT, meta.path), sheet: sheetName, reason: 'Headers were ambiguous; no question/answer column pair selected.' });
+      continue;
     }
+    if (unmatchedQuestions.length || unmatchedAnswers.length) {
+      buildIssues.push({
+        source: relative(ROOT, meta.path),
+        sheet: sheetName,
+        reason: `Unpaired language columns were skipped (${unmatchedQuestions.length} question, ${unmatchedAnswers.length} answer).`,
+      });
+    }
+    collectQaRows(headers, rows, roles, pairs, meta, sheetName);
   }
 }
 
-function writeQaRows(headers, rows, meta, sheetName) {
-  // Identify Q/A columns by header score
-  let qIdx = -1, aIdx = -1, multiQIdx = [], multiAIdx = [];
-  headers.forEach((h, i) => {
-    const s = String(h ?? '');
-    const isQ = Q_KEYS.some((r) => r.test(s));
-    const isA = A_KEYS.some((r) => r.test(s));
-    if (isQ && !isA) { qIdx = i; multiQIdx.push(i); }
-    if (isA && !isQ) { aIdx = i; multiAIdx.push(i); }
-    if (isQ && isA) { // ambiguous → both
-      multiQIdx.push(i);
-      multiAIdx.push(i);
-    }
-  });
-  // Fallbacks: no explicit headers → assume col 0 = Q, col 1 = A
-  if (qIdx === -1) qIdx = 0;
-  if (aIdx === -1) aIdx = Math.min(1, headers.length - 1);
-  if (multiQIdx.length === 0) multiQIdx = [qIdx];
-  if (multiAIdx.length === 0) multiAIdx = [aIdx];
-
-  const sectionSlug = slugify(sheetName);
-  const fileKey = `${meta.category}_${meta.modelSlug}_${sectionSlug || 'sheet'}`;
+function collectQaRows(headers, rows, roles, pairs, meta, sheetName) {
+  const modelIdx = roles.findIndex((r) => r.role === 'model');
+    const languageIdx = headers.findIndex((header) => /^language\b/i.test(normalizeHeader(header)));
+  const visitTypeIdx = headers.findIndex((header) => /^visit type$/i.test(normalizeHeader(header)));
+  const idIdx = headers.findIndex((header) => /^(?:answer id|id|编号)$/i.test(normalizeHeader(header)));
 
   for (const row of rows) {
-    const question = multiQIdx.map((i) => String(row[i] ?? '').trim()).filter(Boolean).join(' / ').trim();
-    const answer = multiAIdx.map((i) => String(row[i] ?? '').trim()).filter(Boolean).join('\n\n').trim();
-    if (!question && !answer) continue;
-
-    const num = nextFileNum(fileKey);
-    const safeQ = question.replace(/[#*`_~]/g, '').slice(0, 80);
-    const id = digest16(`${fileKey}::${num}::${safeQ}::${answer.slice(0, 60)}`);
-    // Filename: 0200_DEEBOT_T50_降配版_zh_d9a31f.md — counter then readable slug then digest
-    const counter = String(writtenCount + 1).padStart(4, '0');
-    const fn = `${counter}_${slugify(meta.category)}_${slugify(meta.modelSlug)}_${slugify(meta.lang)}_${id}.md`;
-
-    const title = question || `FAQ ${sheetName} #${num}`;
-    const body = `---
-category: ${meta.category}
-model: ${basename(meta.name, extname(meta.name)).replace(/^[【\[(]|[】\])]s*$/g, '').slice(0, 120)}
-model_slug: ${meta.modelSlug}
-lang: ${meta.lang}
-source: ${relative(ROOT, meta.path).replace(/\\/g, '/')}
-source_sheet: ${sheetName}
-kind: faq
-version: ${meta.version || 1.0}
----
-
-# ${escapeMd(title)}
-
-${meta.category !== 'OTHER' ? `> **产品线**: ${meta.category}  **语言**: ${meta.lang}\n>\n` : ''}
-## 问题 / Question
-
-${question ? escapeMd(question) : '—'}
-
-## 答案 / Answer
-
-${answer ? escapeMd(answer) : '—'}
-`;
-    writeMd(fn, body);
-    qaCount++;
+    if (visitTypeIdx >= 0 && /^redirect$/i.test(String(row[visitTypeIdx] ?? '').trim())) continue;
+    const modelCell = modelIdx >= 0 ? String(row[modelIdx] ?? '').trim() : '';
+    const models = splitModelNames(modelCell || inferModelFromFilename(meta.name));
+    for (const pair of pairs) {
+      const question = String(row[pair.questionIdx] ?? '').trim();
+      const answer = String(row[pair.answerIdx] ?? '').trim();
+      if (!question && !answer) continue;
+      if (!question || !answer) {
+        buildIssues.push({
+          source: relative(ROOT, meta.path),
+          sheet: sheetName,
+          rowId: idIdx >= 0 ? String(row[idIdx] ?? '') : '',
+          reason: `Incomplete FAQ row (${question ? 'answer missing' : 'question missing'}); skipped.`,
+        });
+        continue;
+      }
+      const rowLanguage = languageIdx >= 0 ? String(row[languageIdx] ?? '') : '';
+      const detectedLanguage = pair.lang || inferLanguage(rowLanguage, sheetName, meta.name, question);
+      const lang = normalizeSupportedLanguage(detectedLanguage);
+      if (!SUPPORTED_LANGUAGES.has(lang)) {
+        const reportKey = `${meta.path}::${sheetName}::${lang || 'unknown'}`;
+        if (!unsupportedLanguageReports.has(reportKey)) {
+          unsupportedLanguageReports.add(reportKey);
+          buildIssues.push({
+            source: relative(ROOT, meta.path),
+            sheet: sheetName,
+            reason: `Unsupported or unknown language "${lang || 'unknown'}" skipped; only EN, ZH, and FR are included.`,
+          });
+        }
+        continue;
+      }
+      for (const model of models) {
+        faqRecords.push({
+          category: meta.category,
+          model,
+          modelSlug: modelSlugify(model),
+          lang,
+          source: relative(ROOT, meta.path).replace(/\\/g, '/'),
+          sourceSheet: sheetName,
+          sourceRowId: idIdx >= 0 ? String(row[idIdx] ?? '').trim() : '',
+          question: normalizeContent(question),
+          answer: normalizeContent(answer),
+          version: meta.version || 1,
+          dateStamp: meta.dateStamp,
+          fileSize: meta.size,
+          mtime: meta.mtime,
+        });
+      }
+    }
   }
 }
 
-function writeComparisonTable(headers, rows, meta, sheetName) {
-  const counter = String(writtenCount + 1).padStart(4, '0');
-  const sectionSlug = slugify(sheetName || 'comparison');
-  const id = digest16(`${meta.category}::${meta.modelSlug}::${headers.join(',')}::${JSON.stringify(rows.slice(0, 2))}`);
-  const fn = `${counter}_${slugify(meta.category)}_${slugify(meta.modelSlug)}_tbl_${sectionSlug}_${id}.md`;
-  const title = `${meta.category} · ${sheetName ? sheetName + ' · ' : ''}规格对比表`;
-  const md = `---
-category: ${meta.category}
-model: ${basename(meta.name, extname(meta.name)).slice(0, 120)}
-model_slug: ${meta.modelSlug}
-lang: ${meta.lang}
-source: ${relative(ROOT, meta.path).replace(/\\/g, '/')}
-source_sheet: ${sheetName}
-kind: comparison-table
+function splitModelNames(value) {
+  return [...new Set(String(value ?? '')
+    .split(/[,;，；\n]+/)
+    .map((model) => model.trim())
+    .filter(Boolean))];
+}
+
+function inferModelFromFilename(filename) {
+  return basename(filename, extname(filename))
+    .replace(/^\s*[【\[(]|[】\])]\s*$/g, '')
+    .replace(/(?:FAQ|multi[- ]language|中英文|中英|中文版|英文版|overseas|海外|basic data|纯文字版|用户侧|user side|终版|多语言).*/ig, '')
+    .replace(/\b(?:v(?:ersion)?\s*)?\d+(?:[._]\d+){0,2}\b/ig, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'General';
+}
+
+function normalizeContent(value) {
+  return String(value ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .trim();
+}
+
+function dedupeFaqRecords(records) {
+  const byKey = new Map();
+  const normalizedKey = (value) => normalizeContent(value).toLowerCase().replace(/\s+/g, ' ');
+  for (const record of records) {
+    const key = [
+      record.category,
+      record.modelSlug,
+      normalizedKey(record.model),
+      record.lang,
+      normalizedKey(record.question),
+    ].join('::');
+    const previous = byKey.get(key);
+    if (!previous) {
+      byKey.set(key, record);
+      continue;
+    }
+    const preferred = (candidate) =>
+      candidate.version * 1e15 + candidate.dateStamp * 1e2 + candidate.mtime;
+    if (preferred(record) > preferred(previous)) byKey.set(key, record);
+  }
+  return [...byKey.values()].sort((a, b) =>
+    a.category.localeCompare(b.category) ||
+    a.modelSlug.localeCompare(b.modelSlug) ||
+    a.lang.localeCompare(b.lang) ||
+    a.question.localeCompare(b.question)
+  );
+}
+
+function writeFaqRecord(record) {
+  const id = digest16(`${record.category}::${record.modelSlug}::${record.lang}::${record.question}`);
+  const filename = `faq_${slugify(record.category)}_${record.modelSlug}_${record.lang}_${id}.md`;
+  const safe = (value) => JSON.stringify(String(value ?? ''));
+  const body = `---
+category: ${safe(record.category)}
+model: ${safe(record.model)}
+model_slug: ${safe(record.modelSlug)}
+lang: ${safe(record.lang)}
+source: ${safe(record.source)}
+source_sheet: ${safe(record.sourceSheet)}
+source_row_id: ${safe(record.sourceRowId)}
+kind: faq
+version: ${record.version}
 ---
 
-# ${escapeMd(title)}
+# ${record.question.replace(/\s+/g, ' ')}
 
-> 来源：${relative(ROOT, meta.path).replace(/\\/g, '/')} ｜ Sheet: ${sheetName}
+## Question
 
-### ${escapeMd(sheetName || 'Comparison')}
+${record.question}
 
-${buildGfmTable(headers, rows)}
+## Answer
+
+${record.answer}
 `;
-  writeMd(fn, md);
-  tableCount++;
+  writeMd(filename, body);
+  qaCount++;
 }
 
 async function processDocx(meta) {

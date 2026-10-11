@@ -19,10 +19,15 @@ import {
   type QuizQuestion,
   type TestSuite,
 } from '@/data/self-tests';
-import { normalizeCatId, CAT_SELECTION_STORAGE_KEY, getCatSprite, type CatId } from '@/lib/cat-sprites';
+import { loadNewsIndex, type NewsItem } from '@/utils/newsData';
 
 type Phase = 'menu' | 'name' | 'quiz' | 'result';
 type SubmitState = 'idle' | 'submitting' | 'ok' | 'error';
+
+interface SelfTestWorkspaceProps {
+  onCatThought?: (text: string, ttl?: number) => void;
+  onCatMoveTo?: (position: { x: number; y: number }) => void;
+}
 
 interface AnswerRecord {
   question: QuizQuestion;
@@ -36,6 +41,38 @@ const TEST_RESULTS_ENDPOINT = '/api/test-results';
 const HINT_DELAY_MS = 15_000;
 const CORRECT_STAY_MS = 3_000;
 const WRONG_STAY_MS = 6_000;
+let answerAudioContext: AudioContext | null = null;
+
+function playAnswerTone(correct: boolean) {
+  if (typeof window === 'undefined' || !window.AudioContext) return;
+  try {
+    answerAudioContext ??= new window.AudioContext();
+    const context = answerAudioContext;
+    if (context.state === 'suspended') void context.resume().catch(() => {});
+    const start = context.currentTime + 0.02;
+    const notes = correct
+      ? [{ frequency: 587.33, offset: 0, duration: 0.12 }, { frequency: 783.99, offset: 0.1, duration: 0.2 }]
+      : [{ frequency: 329.63, offset: 0, duration: 0.1 }, { frequency: 261.63, offset: 0.15, duration: 0.16 }];
+
+    for (const note of notes) {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const beginsAt = start + note.offset;
+      const endsAt = beginsAt + note.duration;
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(note.frequency, beginsAt);
+      gain.gain.setValueAtTime(0.0001, beginsAt);
+      gain.gain.exponentialRampToValueAtTime(0.07, beginsAt + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endsAt);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(beginsAt);
+      oscillator.stop(endsAt);
+    }
+  } catch {
+    // Audio feedback is optional when the browser blocks audio output.
+  }
+}
 
 const CAT_CHEERS = [
   'Purr-fect! 🎉',
@@ -59,6 +96,54 @@ const CAT_CONSOLES = [
 ];
 
 const LETTERS = ['A', 'B', 'C', 'D'];
+const ARTICLE_TITLE_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'from', 'with', 'issue', 'update', 'series', 'faq',
+  'new', 'why', 'does', 'after', 'clarification', 'causes', 'solution',
+]);
+
+function normalizeArticleTitle(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function articleTitleTokens(value: string): Set<string> {
+  const tokens: string[] = value.normalize('NFKC').toLocaleLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(tokens.filter((token) =>
+    token.length > 2 && !ARTICLE_TITLE_STOP_WORDS.has(token)
+  ));
+}
+
+function truncateArticleExcerpt(value: string): string {
+  const chars = Array.from(value.replace(/\s+/g, ' ').trim());
+  return chars.length > 100 ? `${chars.slice(0, 99).join('')}…` : chars.join('');
+}
+
+function findArticleExcerpt(title: string, items: NewsItem[]): string {
+  const titleKey = normalizeArticleTitle(title);
+  const exact = items.find((item) => normalizeArticleTitle(item.title) === titleKey);
+  const targetTokens = articleTitleTokens(title);
+  const source = exact ?? items
+    .map((item) => {
+      const tokens = articleTitleTokens(item.title);
+      const overlap = [...targetTokens].filter((token) => tokens.has(token)).length;
+      return { item, score: targetTokens.size ? overlap / targetTokens.size : 0 };
+    })
+    .filter((candidate) => candidate.score >= 0.7)
+    .sort((a, b) => b.score - a.score)[0]?.item;
+  if (!source) return '';
+
+  const firstPostText = source.bodyLines
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('>') && !line.startsWith('#'))
+    .map((line) => line
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`~]/g, '')
+      .replace(/^[-*+]\s+/, '')
+      .trim())
+    .find(Boolean) ?? '';
+  return truncateArticleExcerpt(firstPostText);
+}
 
 /** Rotating candy palette for the suite cards + option buttons. */
 const SUITE_COLORS = [
@@ -158,31 +243,31 @@ function FireworkBurst() {
   );
 }
 
-export default function SelfTestWorkspace() {
+export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTestWorkspaceProps) {
   const [progress, setProgress] = useState<SelfTestProgress>(() => loadSelfTestProgress());
   const [phase, setPhase] = useState<Phase>('menu');
   const [activeSuite, setActiveSuite] = useState<TestSuite | null>(null);
   const [agentName, setAgentName] = useState('');
+  const [currentArticleExcerpt, setCurrentArticleExcerpt] = useState('');
   const [qIndex, setQIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [locked, setLocked] = useState(false);
-  const [catLine, setCatLine] = useState<string | null>(null);
   const [fireworkKey, setFireworkKey] = useState(0);
   const [hintActive, setHintActive] = useState(false);
   const [hintUsed, setHintUsed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const catIdRef = useRef<CatId>('hunao');
-
-  useEffect(() => {
-    try {
-      catIdRef.current = normalizeCatId(localStorage.getItem(CAT_SELECTION_STORAGE_KEY));
-    } catch {
-      // keep default sprite
-    }
-  }, []);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const moveCatTo = useCallback((target: Element | null) => {
+    if (!target || !onCatMoveTo) return;
+    const bounds = target.getBoundingClientRect();
+    onCatMoveTo({
+      x: Math.min(bounds.right + 12, window.innerWidth - 140),
+      y: bounds.top + bounds.height / 2 - 64,
+    });
+  }, [onCatMoveTo]);
 
   /** Flat {question, article} list for the active suite. */
   const quizItems = useMemo(() => {
@@ -197,6 +282,25 @@ export default function SelfTestWorkspace() {
   const currentArticle = shuffledItems[qIndex]?.article ?? '';
   const scorePct = answers.length > 0 ? Math.round((answers.filter((a) => a.correct).length / answers.length) * 100) : 0;
 
+  useEffect(() => {
+    if (!currentArticle) {
+      setCurrentArticleExcerpt('');
+      return;
+    }
+    let alive = true;
+    setCurrentArticleExcerpt('');
+    loadNewsIndex()
+      .then((items) => {
+        if (alive) setCurrentArticleExcerpt(findArticleExcerpt(currentArticle, items));
+      })
+      .catch(() => {
+        if (alive) setCurrentArticleExcerpt('');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [currentArticle]);
+
   const clearAdvanceTimer = useCallback(() => {
     if (advanceTimer.current) {
       clearTimeout(advanceTimer.current);
@@ -206,15 +310,19 @@ export default function SelfTestWorkspace() {
 
   useEffect(() => clearAdvanceTimer, [clearAdvanceTimer]);
 
-  /** 15s reading timer — cat slides to the correct answer (one hint per test). */
+  /** 15s reading timer — the shared cat assistant offers one hint per test. */
   useEffect(() => {
     if (phase !== 'quiz' || locked || hintUsed) return;
     const t = setTimeout(() => {
       setHintUsed(true);
       setHintActive(true);
+      onCatThought?.('Psst… I found the right answer for you. 🐾', 8000);
+      requestAnimationFrame(() => {
+        moveCatTo(workspaceRef.current?.querySelector('[data-selftest-correct="true"]') ?? null);
+      });
     }, HINT_DELAY_MS);
     return () => clearTimeout(t);
-  }, [phase, qIndex, locked, hintUsed]);
+  }, [phase, qIndex, locked, hintUsed, onCatThought, moveCatTo]);
 
   /** Submit the full report to D1 when the test finishes. */
   const submitResult = useCallback(async (suite: TestSuite, name: string, ans: AnswerRecord[]) => {
@@ -250,8 +358,12 @@ export default function SelfTestWorkspace() {
       setActiveSuite(suite);
       setAgentName('');
       setPhase('name');
+      onCatThought?.(`Ready for ${suite.label}? Let’s do this! 🎯`, 5000);
+      requestAnimationFrame(() => {
+        moveCatTo(workspaceRef.current?.querySelector('[data-selftest-name-card]') ?? null);
+      });
     },
-    [progress]
+    [progress, onCatThought, moveCatTo]
   );
 
   const startQuiz = useCallback(() => {
@@ -265,7 +377,6 @@ export default function SelfTestWorkspace() {
     setLocked(false);
     setHintActive(false);
     setHintUsed(false);
-    setCatLine(null);
     setSubmitState('idle');
     setPhase('quiz');
   }, [agentName, activeSuite]);
@@ -276,15 +387,19 @@ export default function SelfTestWorkspace() {
       if (locked || !current || !activeSuite) return;
       setSelected(i);
       const correct = i === current.answerIndex;
+      playAnswerTone(correct);
       setAnswers((prev) => [...prev, { question: current, selected: i, correct }]);
       setLocked(true);
       setHintActive(false);
       if (correct) {
         setFireworkKey((k) => k + 1);
-        setCatLine(pickRandom(CAT_CHEERS));
+        onCatThought?.(pickRandom(CAT_CHEERS), 4500);
       } else {
-        setCatLine(pickRandom(CAT_CONSOLES));
+        onCatThought?.(pickRandom(CAT_CONSOLES), 6000);
       }
+      requestAnimationFrame(() => {
+        moveCatTo(workspaceRef.current?.querySelector('[data-selftest-verdict]') ?? null);
+      });
       const isLast = qIndex + 1 >= quizItems.length;
       advanceTimer.current = setTimeout(() => {
         advanceTimer.current = null;
@@ -297,11 +412,10 @@ export default function SelfTestWorkspace() {
           setQIndex((n) => n + 1);
           setSelected(null);
           setLocked(false);
-          setCatLine(null);
         }
       }, correct ? CORRECT_STAY_MS : WRONG_STAY_MS);
     },
-    [locked, current, activeSuite, qIndex, quizItems.length, answers, agentName, submitResult]
+    [locked, current, activeSuite, qIndex, quizItems.length, answers, agentName, submitResult, onCatThought, moveCatTo]
   );
 
   const handleCopy = useCallback(async () => {
@@ -321,15 +435,12 @@ export default function SelfTestWorkspace() {
     setActiveSuite(null);
     setAnswers([]);
     setLocked(false);
-    setCatLine(null);
     setHintActive(false);
     setHintUsed(false);
   }, [clearAdvanceTimer]);
 
-  const spriteUrl = getCatSprite(catIdRef.current);
-
   return (
-    <div className="h-full min-h-full w-full overflow-y-auto bg-background">
+    <div ref={workspaceRef} className="h-full min-h-full w-full overflow-y-auto bg-background">
       <div className="mx-auto max-w-3xl px-6 py-10">
         {/* ── Suite selection ─────────────────────────────────────────── */}
         {phase === 'menu' && (
@@ -412,7 +523,7 @@ export default function SelfTestWorkspace() {
 
         {/* ── Name entry ──────────────────────────────────────────────── */}
         {phase === 'name' && activeSuite && (
-          <div className="relative mx-auto mt-16 max-w-md overflow-visible rounded-2xl border-2 border-violet-400/40 bg-card/70 p-7 shadow-xl">
+          <div data-selftest-name-card className="relative mx-auto mt-16 max-w-md overflow-visible rounded-2xl border-2 border-violet-400/40 bg-card/70 p-7 shadow-xl">
             <button
               type="button"
               onClick={backToMenu}
@@ -421,8 +532,6 @@ export default function SelfTestWorkspace() {
               <ArrowLeft className="size-4" /> All suites
             </button>
             <div className="flex items-center gap-3">
-              {/* cat greets on the name card */}
-              <span className="cat-sprite-frame size-16 shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]" style={{ backgroundImage: `url("${spriteUrl}")` }} aria-hidden="true" />
               <div>
                 <h2 className="font-mono text-xl font-extrabold text-foreground">
                   {activeSuite.label} · {activeSuite.range}
@@ -492,36 +601,30 @@ export default function SelfTestWorkspace() {
             >
               {locked && answers[answers.length - 1]?.correct && <FireworkBurst key={fireworkKey} />}
 
-              {/* the cat — sits in the top-right; speaks on verdict; hints on the correct row */}
-              {catLine && (
-                <div className="pointer-events-none absolute -top-14 right-2 z-30 flex items-start gap-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
-                  <div className="relative max-w-56 rounded-xl border border-border/70 bg-card/95 px-3 py-2 text-sm font-semibold text-foreground shadow-lg">
-                    {catLine}
-                    <span className="absolute -bottom-1.5 left-5 h-3 w-3 rotate-45 border-b border-r border-border/70 bg-card/95" />
-                  </div>
-                  <span className="cat-sprite-frame size-16 shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]" style={{ backgroundImage: `url("${spriteUrl}")` }} aria-hidden="true" />
-                </div>
-              )}
-
               <p className="font-mono text-xl font-bold leading-relaxed text-foreground sm:text-2xl">{current.prompt}</p>
               <p className="mt-2 text-[11px] leading-snug text-muted-foreground/70">
                 From “{currentArticle}” · {current.source}
               </p>
+              {currentArticleExcerpt && (
+                <p className="mt-1 border-l-2 border-sky-400/40 pl-2 text-xs leading-relaxed text-muted-foreground">
+                  {currentArticleExcerpt}
+                </p>
+              )}
 
               <div className="mt-6 grid gap-3">
                 {current.options.map((opt, i) => {
                   const isSelected = selected === i;
                   const isAnswer = i === current.answerIndex;
-                  const answered = locked && answers[answers.length - 1]?.question.id === current.id;
-                  const showVerdict = answered && isSelected !== null;
                   return (
                     <button
                       key={i}
                       type="button"
                       disabled={locked}
                       onClick={() => handleSelect(i)}
+                      data-selftest-correct={isAnswer ? 'true' : 'false'}
                       className={cn(
                         'relative flex w-full items-start gap-3 rounded-xl border-2 border-b-4 px-4 py-4 text-left text-base font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+                        hintActive && isAnswer && 'ring-2 ring-amber-300/90',
                         !locked && OPTION_COLORS[i % OPTION_COLORS.length],
                         !locked && 'text-foreground hover:-translate-y-0.5 active:translate-y-0.5 active:border-b-2',
                         locked && isAnswer && 'border-emerald-400 bg-emerald-400/20 text-emerald-100 shadow-[0_0_18px_-4px_rgba(52,211,153,0.8)]',
@@ -542,19 +645,6 @@ export default function SelfTestWorkspace() {
                         {locked && isAnswer ? <Check className="size-4" /> : locked && isSelected ? <X className="size-4" /> : LETTERS[i]}
                       </span>
                       <span className="leading-relaxed">{opt}</span>
-                      {/* cat hint — slides in beside the correct answer after 15s of reading */}
-                      {hintActive && isAnswer && !locked && (
-                        <span className="pointer-events-none absolute -right-20 top-1/2 hidden -translate-y-1/2 items-center gap-1 sm:flex animate-in fade-in slide-in-from-right-6 duration-700">
-                          <span className="rounded-lg border border-amber-400/60 bg-amber-400/15 px-2 py-1 text-xs font-bold text-amber-200 shadow-md">
-                            Psst… 🐾
-                          </span>
-                          <span
-                            className="cat-sprite-frame size-14 shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
-                            style={{ backgroundImage: `url("${spriteUrl}")` }}
-                            aria-hidden="true"
-                          />
-                        </span>
-                      )}
                     </button>
                   );
                 })}
@@ -563,6 +653,7 @@ export default function SelfTestWorkspace() {
               {/* verdict footer */}
               {locked && (
                 <div
+                  data-selftest-verdict
                   className={cn(
                     'mt-5 rounded-xl border-2 px-4 py-3 text-base font-bold animate-in fade-in slide-in-from-bottom-1 duration-200',
                     answers[answers.length - 1]?.correct

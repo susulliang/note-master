@@ -113,6 +113,12 @@ function startProcess({ name, command, args, logFileName }) {
 
 killOrphansByPort(CLIENT_DEV_PORT);
 
+log('building compact FAQ search index and lazy content shards');
+execSync(`${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(ROOT, 'scripts', 'build-faq-content.mjs'))}`, {
+  cwd: ROOT,
+  stdio: 'inherit',
+});
+
 // Cross-platform vite launch: bypass npx (unreliable on some Windows Node installs)
 // by invoking vite's bin script directly via node.
 const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');

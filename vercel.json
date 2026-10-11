@@ -11,6 +11,10 @@
       "source": "/api/test-results",
       "destination": "https://note-master.susulliang.workers.dev/api/test-results"
     },
+    {
+      "source": "/api/keyword-alerts",
+      "destination": "https://note-master.susulliang.workers.dev/api/keyword-alerts"
+    },
     { "source": "/((?!assets/|favicon\\.svg|icons\\.svg).*)", "destination": "/index.html" }
   ],
   "headers": [

@@ -1,0 +1,22 @@
+---
+category: "GOAT"
+model: "GOAT G1"
+model_slug: "goat_g1"
+lang: "fr"
+source: "FAQ/GOAT/GOAT HQ support faq basic data _20230214.xlsx"
+source_sheet: "FR"
+source_row_id: "G00062"
+kind: faq
+version: 1
+---
+
+# La GOAT s'est arrêtée à son emplacement d'origine sans avoir terminé son apprentissage.
+
+## Question
+
+La GOAT s'est arrêtée à son emplacement d'origine sans avoir terminé son apprentissage.
+
+## Answer
+
+(1) La GOAT retourne automatiquement à la station d'accueil lorsqu'elle détecte un signal de localisation faible en cas de forte pluie ou de faible luminosité.
+(2) Vérifier le message d'erreur sur l'application. La GOAT peut avoir rencontré des erreurs et avoir besoin d'aide.

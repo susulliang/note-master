@@ -1,12 +1,13 @@
-import { memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import { lazy, Suspense, memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { cn } from '@/lib/utils';
-import AppPhotosPanel from '@/components/AppPhotosPanel';
-import QaPanel from '@/components/QaPanel';
-import ManualsPanel from '@/components/ManualsPanel';
+
+const AppPhotosPanel = lazy(() => import('@/components/AppPhotosPanel'));
+const QaPanel = lazy(() => import('@/components/QaPanel'));
+const ManualsPanel = lazy(() => import('@/components/ManualsPanel'));
 
 interface NodeConfig {
   id: string;
@@ -1460,7 +1461,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               aria-hidden="true"
             />
             <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
-              <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
+              <Suspense fallback={null}>
+                <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
+              </Suspense>
             </div>
           </>
         )}
@@ -1475,7 +1478,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               aria-hidden="true"
             />
             <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
-              <QaPanel onClose={() => setQaOpen(false)} />
+              <Suspense fallback={null}>
+                <QaPanel onClose={() => setQaOpen(false)} />
+              </Suspense>
             </div>
           </>
         )}
@@ -1490,7 +1495,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               aria-hidden="true"
             />
             <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
-              <ManualsPanel onClose={() => setManualsOpen(false)} />
+              <Suspense fallback={null}>
+                <ManualsPanel onClose={() => setManualsOpen(false)} />
+              </Suspense>
             </div>
           </>
         )}

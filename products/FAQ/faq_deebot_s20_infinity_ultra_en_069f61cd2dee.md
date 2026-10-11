@@ -1,0 +1,25 @@
+---
+category: "DEEBOT"
+model: "S20 Infinity Ultra"
+model_slug: "s20_infinity_ultra"
+lang: "en"
+source: "FAQ/DEEBOT/X12 Series FAQ（多语言）.xlsx"
+source_sheet: "EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# How to Fix the Clean Water Tank Error？
+
+## Question
+
+How to Fix the Clean Water Tank Error？
+
+## Answer
+
+If the robot alerts you that the clean water tank is not installed or is low on water, you can try the following steps:
+1.Remove the clean water tank, open the lid, and refill promptly with water.
+2.Inspect the float mechanism to ensure it resets properly after displacement.
+3.Reattach the tank lid securely, verifying all latches are fully engaged.
+4.Reinstall the tank into the base station.

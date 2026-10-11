@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 // ---------------------------------------------------------------------------
@@ -66,22 +66,12 @@ import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
-import OutputModal from '@/components/OutputModal';
-import GbuPopup from '@/components/GbuPopup';
-import TemplatePanel from '@/components/TemplatePanel';
-import TicketTrackerPanel from '@/components/TicketTrackerPanel';
-import CaseTrakBoard from '@/components/CaseTrakBoard';
-import ShiftsWorkspace from '@/components/ShiftsWorkspace';
-import Dash from '@/components/Dash';
-import SelfTestWorkspace from '@/components/SelfTestWorkspace';
+import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
-import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
-import SopPanel from '@/components/SopPanel';
-import ProductLookupPanel from '@/components/ProductLookupPanel';
-import VoiceCaptionPanel from '@/components/VoiceCaptionPanel';
 import CatAssistant from '@/components/CatAssistant';
-import { useCatAssistant, type KeywordAlert } from '@/hooks/use-cat-assistant';
+import { useCatAssistant } from '@/hooks/use-cat-assistant';
+import { useKeywordAlerts } from '@/hooks/use-keyword-alerts';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { useCallCapture } from '@/hooks/use-call-capture';
@@ -118,6 +108,18 @@ import type { NoteHistoryEntry } from '@/data/ticket';
 import { TicketPanelsContext } from '@/components/FlowNode';
 import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
 import type { TemplateEntry } from '@/lib/amr-templates';
+
+const OutputModal = lazy(() => import('@/components/OutputModal'));
+const GbuPopup = lazy(() => import('@/components/GbuPopup'));
+const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
+const TicketTrackerPanel = lazy(() => import('@/components/TicketTrackerPanel'));
+const CaseTrakBoard = lazy(() => import('@/components/CaseTrakBoard'));
+const ShiftsWorkspace = lazy(() => import('@/components/ShiftsWorkspace'));
+const Dash = lazy(() => import('@/components/Dash'));
+const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
+const SopPanel = lazy(() => import('@/components/SopPanel'));
+const ProductLookupPanel = lazy(() => import('@/components/ProductLookupPanel'));
+const VoiceCaptionPanel = lazy(() => import('@/components/VoiceCaptionPanel'));
 
 interface NodeConfig {
   id: string;
@@ -716,33 +718,8 @@ export default function TicketNotesPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [setHiddenNodeIds, ALWAYS_VISIBLE_NODES]);
-  /**
-   * Live-transcript keyword alerts — the cat pops an amber thought bubble
-   * whenever it hears one of these keywords during a call. Editable from
-   * the toolbar's ⚠ menu. Persisted to localStorage.
-   */
-  const [keywordAlerts, setKeywordAlerts] = useScopedState<KeywordAlert[]>(
-    'ecovacs_ticket_keyword_alerts',
-    [
-      {
-        id: 'kw-factory-reset',
-        keyword: 'factory reset',
-        alert: 'Please remind user that settings and maps will be erased.',
-      },
-      {
-        id: 'kw-supervisor',
-        keyword: 'Supervisor',
-        alert:
-          'Please kindly and politely inform user that our supervisor is not available and we are able to take any questions and notes.',
-      },
-      {
-        id: 'kw-amazon',
-        keyword: 'Amazon',
-        alert:
-          'Please verify with user if their purchase is still within the 30-day return window from Amazon',
-      },
-    ]
-  );
+  const keywordAlertState = useKeywordAlerts();
+  const keywordAlerts = keywordAlertState.alerts;
   const hiddenNodesSet = useMemo(
     () => new Set(hiddenNodeIds),
     [hiddenNodeIds]
@@ -980,10 +957,16 @@ export default function TicketNotesPage() {
     ]
       .filter(Boolean)
       .join(' ');
+    let alive = true;
     const timer = window.setTimeout(() => {
-      setTemplateMatches(searchTemplates(query));
+      searchTemplates(query)
+        .then((matches) => alive && setTemplateMatches(matches))
+        .catch(() => alive && setTemplateMatches([]));
     }, 300);
-    return () => window.clearTimeout(timer);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
   }, [formData]);
 
   const handleOpenTemplate = useCallback((tpl: TemplateEntry) => {
@@ -1624,37 +1607,18 @@ Additional information (if needed): ${additional}`;
   }, [call.isCloudParsing, call.lastParseTldr]);
 
   // -------------------------------------------------------------------------
-  //  Keyword alert dictionary handlers (toolbar ⚠ menu).
-  // -------------------------------------------------------------------------
-  const handleAddKeywordAlert = useCallback(() => {
-    setKeywordAlerts((prev) => [
-      ...prev,
-      { id: `kw-${Date.now()}`, keyword: '', alert: '' },
-    ]);
-  }, [setKeywordAlerts]);
-
-  const handleUpdateKeywordAlert = useCallback(
-    (id: string, patch: Partial<Pick<KeywordAlert, 'keyword' | 'alert'>>) => {
-      setKeywordAlerts((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
-      );
-    },
-    [setKeywordAlerts]
-  );
-
-  const handleRemoveKeywordAlert = useCallback(
-    (id: string) => {
-      setKeywordAlerts((prev) => prev.filter((a) => a.id !== id));
-    },
-    [setKeywordAlerts]
-  );
-
-  // -------------------------------------------------------------------------
   //  Cat assistant — the Clippy-style workspace sprite. Pops up tips,
   //  ambient thoughts and greetings (live-transcript advice is paused).
   // -------------------------------------------------------------------------
   const [storedCatId, setStoredCatId] = useScopedState<CatId>(CAT_SELECTION_STORAGE_KEY, 'hunao');
   const selectedCat = normalizeCatId(storedCatId);
+  const [catMoveRequest, setCatMoveRequest] = useState<{ id: number; x: number; y: number } | null>(null);
+  const moveCatTo = useCallback((position: { x: number; y: number }) => {
+    setCatMoveRequest((previous) => ({
+      ...position,
+      id: (previous?.id ?? 0) + 1,
+    }));
+  }, []);
   const cat = useCatAssistant({
     isCapturing: call.isCapturing,
     transcript: call.transcript,
@@ -2015,6 +1979,7 @@ Additional information (if needed): ${additional}`;
                 diagnostics: extensionBridge.connectionDiagnostics,
               },
               transcriptContent: (
+                <Suspense fallback={null}>
                 <VoiceCaptionPanel
                   mic={{
                     isListening: voice.isListening,
@@ -2089,9 +2054,15 @@ Additional information (if needed): ${additional}`;
                     onParseConcise: () => void call.cloudParse('concise'),
                   }}
                 />
+                </Suspense>
               ),
-              trackerContent: <TicketTrackerPanel />,
+              trackerContent: (
+                <Suspense fallback={null}>
+                  <TicketTrackerPanel />
+                </Suspense>
+              ),
               sopContent: (
+                <Suspense fallback={null}>
                 <SopPanel
                   formData={formData}
                   issueTypeId={NODE_IDS.ISSUE_TYPE}
@@ -2105,8 +2076,10 @@ Additional information (if needed): ${additional}`;
                   warmLlm={llmParser.load}
                   quickInsertHidden={true}
                 />
+                </Suspense>
               ),
               productContent: (
+                <Suspense fallback={null}>
                 <ProductLookupPanel
                   robotModel={String(formData[NODE_IDS.DEEBOT_MODEL] ?? '')}
                   issueDescription={String(formData[NODE_IDS.DETAILED_ISSUE] ?? '')}
@@ -2115,6 +2088,7 @@ Additional information (if needed): ${additional}`;
                   templateMatches={templateMatches}
                   onOpenTemplate={handleOpenTemplate}
                 />
+                </Suspense>
               ),
             }}
           >
@@ -2139,10 +2113,29 @@ Additional information (if needed): ${additional}`;
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
               onViewChange={setWorkView}
-              caseTrakContent={<CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />}
-              dashContent={<Dash />}
-              selfTestContent={<SelfTestWorkspace />}
-              shiftsContent={<ShiftsWorkspace />}
+              caseTrakContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Case Trak…</div>}>
+                  <CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />
+                </Suspense>
+              }
+              dashContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading dashboard…</div>}>
+                  <Dash />
+                </Suspense>
+              }
+              selfTestContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading quiz…</div>}>
+                  <SelfTestWorkspace
+                    onCatThought={cat.pushTip}
+                    onCatMoveTo={moveCatTo}
+                  />
+                </Suspense>
+              }
+              shiftsContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading shifts…</div>}>
+                  <ShiftsWorkspace />
+                </Suspense>
+              }
               shiftsEnabled={shiftsUnlocked}
               analyticsEnabled={analyticsUnlocked}
               railBottomSlotRef={setRailControlsSlot}
@@ -2221,9 +2214,7 @@ Additional information (if needed): ${additional}`;
               onToggle: handleToggleGridbox,
             }}
             keywordAlerts={keywordAlerts}
-            onAddKeywordAlert={handleAddKeywordAlert}
-            onUpdateKeywordAlert={handleUpdateKeywordAlert}
-            onRemoveKeywordAlert={handleRemoveKeywordAlert}
+            keywordAlertSource={keywordAlertState.source}
           />,
           railControlsSlot
         )}
@@ -2231,7 +2222,7 @@ Additional information (if needed): ${additional}`;
       {/* Sticky call bar (v0.2.0 ACW acceleration) — only in the NOTES
           canvas. Owns BOTH call controls: the CCP tab-audio + mic capture
           toggle (moved here from the left rail) and the viewport-pinned
-          "End Call and Generate Note" CTA, so agents never scroll to end a
+          "Generate Note" CTA, so agents never scroll to end a
           call. The old in-flow Hang Up node is gone — its function lives
           entirely here. */}
       {workView === 'callNotes' && (() => {
@@ -2256,8 +2247,8 @@ Additional information (if needed): ${additional}`;
             // controls row (never clipped), with a cap so the subtitle
             // truncates on narrow viewports.
             capturing || transcriptEditing
-              ? 'flex max-w-[min(52rem,calc(100vw-8rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
-              : 'flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5'
+              ? 'flex w-max max-w-[min(52rem,calc(100vw-1rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
+              : 'flex w-max max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-1.5 sm:gap-2 md:gap-3'
           )}
         >
           {/* DEBUG transcript editor — double-click the subtitle to open,
@@ -2355,7 +2346,7 @@ Additional information (if needed): ${additional}`;
 
           <div
             className={cn(
-              'flex items-center gap-3 whitespace-nowrap',
+              'flex max-w-full flex-wrap items-center justify-center gap-1 whitespace-nowrap sm:gap-1.5 md:flex-nowrap md:gap-3',
               capturing ? 'justify-center' : ''
             )}
           >
@@ -2479,21 +2470,21 @@ Additional information (if needed): ${additional}`;
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/70" />
                   <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
                 </span>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-destructive">
+                <span className="hidden text-[10px] font-bold uppercase tracking-widest text-destructive md:inline">
                   REC
                 </span>
               </>
             ) : (
               <>
                 <span className="size-2.5 rounded-full bg-muted-foreground/40" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">
+                <span className="hidden text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 md:inline">
                   Idle
                 </span>
               </>
             )}
           </div>
           )}
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           {/* Fill Notes — same engine as the green "Parse" button in the
               Live Call Transcript panel: sends the full transcript window
               to the cloud parser and auto-fills the ticket fields. */}
@@ -2502,9 +2493,10 @@ Additional information (if needed): ${additional}`;
             onClick={() => void call.cloudParse('full')}
             disabled={call.isCloudParsing || call.transcript.length === 0}
             className={cn(
-              'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-success font-bold text-success-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--success)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50',
-              capturing ? 'px-4 py-1.5 text-[13px]' : 'px-3.5 py-1.5 text-xs'
+              'flex size-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-success font-bold text-success-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--success)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 md:size-auto md:px-3.5 md:py-1.5 md:text-xs',
+              capturing && 'md:px-4 md:py-1.5 md:text-[13px]'
             )}
+            aria-label={call.isCloudParsing ? 'Filling notes' : 'Fill notes'}
             title={
               call.transcript.length === 0
                 ? 'No transcript yet — capture the call first, then parse it into the notes'
@@ -2516,9 +2508,9 @@ Additional information (if needed): ${additional}`;
             ) : (
               <Wand2 className="size-3.5" />
             )}
-            {call.isCloudParsing ? 'Filling…' : 'Fill Notes'}
+            <span className="hidden md:inline">{call.isCloudParsing ? 'Filling…' : 'Fill Notes'}</span>
           </button>
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           {/* QA checklist — yellow pill; shows the call-QA completion status
               scored by the same AI parse that fills the notes. */}
           <QaChecklistMenu
@@ -2526,32 +2518,33 @@ Additional information (if needed): ${additional}`;
             scoring={call.isQaScoring}
             summary={call.qaSummary}
           />
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           <button
             type="button"
             onClick={handleHangUp}
             disabled={hangUpRunning}
             className={cn(
-              'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-destructive font-bold text-destructive-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--destructive)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70',
-              capturing ? 'px-4 py-1.5 text-[13px]' : 'px-3.5 py-1.5 text-xs'
+              'flex size-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-destructive font-bold text-destructive-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--destructive)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 md:size-auto md:px-3.5 md:py-1.5 md:text-xs',
+              capturing && 'md:px-4 md:py-1.5 md:text-[13px]'
             )}
-            title="End the call, generate the note and auto-copy it to the clipboard"
+            aria-label={hangUpRunning ? 'Generating note' : 'Generate note'}
+            title="Generate and copy the ticket note. Active call capture will be ended."
           >
             {hangUpRunning ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <PhoneOff className="size-3.5" />
             )}
-            {hangUpRunning ? 'Generating…' : 'End Call and Generate Note'}
+            <span className="hidden md:inline">{hangUpRunning ? 'Generating…' : 'Generate Note'}</span>
           </button>
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           <QuickRepliesMenu />
 
           {/* Reset — the rightmost control on the call bar (moved here from
               the left rail). Confirm dialog guards the destructive wipe;
               hovering ramps up a red warning state so agents don't click it
               by accident mid-call. */}
-          <div className="h-5 w-px bg-foreground/10" aria-hidden="true" />
+          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
@@ -2630,26 +2623,38 @@ Additional information (if needed): ${additional}`;
           },
         }}
       >
-        <OutputModal
-          open={showOutput}
-          onOpenChange={setShowOutput}
-          noteText={noteText}
-          onSaveToHistory={handleOutputClose}
-        />
-        <GbuPopup open={gbuOpen} onOpenChange={setGbuOpen} />
+        {showOutput && (
+          <Suspense fallback={null}>
+            <OutputModal
+              open={showOutput}
+              onOpenChange={setShowOutput}
+              noteText={noteText}
+              onSaveToHistory={handleOutputClose}
+            />
+          </Suspense>
+        )}
+        {gbuOpen && (
+          <Suspense fallback={null}>
+            <GbuPopup open={gbuOpen} onOpenChange={setGbuOpen} />
+          </Suspense>
+        )}
       </TicketPanelsContext.Provider>
 
-      <TemplatePanel
-        template={openTemplate}
-        onClose={handleCloseTemplate}
-        onInsertLine={handleInsertTemplateLine}
-        resolutionText={
-          typeof formData[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
-            ? (formData[NODE_IDS.RESOLUTION_SUMMARY] as string)
-            : ''
-        }
-        onResolutionChange={handleResolutionChange}
-      />
+      {openTemplate && (
+        <Suspense fallback={null}>
+          <TemplatePanel
+            template={openTemplate}
+            onClose={handleCloseTemplate}
+            onInsertLine={handleInsertTemplateLine}
+            resolutionText={
+              typeof formData[NODE_IDS.RESOLUTION_SUMMARY] === 'string'
+                ? (formData[NODE_IDS.RESOLUTION_SUMMARY] as string)
+                : ''
+            }
+            onResolutionChange={handleResolutionChange}
+          />
+        </Suspense>
+      )}
 
       {extensionBridge.pendingPush && (
         <ExtensionPushConfirmPopup
@@ -2677,6 +2682,7 @@ Additional information (if needed): ${additional}`;
         isCapturing={call.isCapturing}
         isThinking={cat.isThinking}
         onDismiss={cat.dismiss}
+        moveRequest={catMoveRequest}
       />
     </div>
   );

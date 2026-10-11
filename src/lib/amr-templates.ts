@@ -22,6 +22,9 @@ export interface TemplateEntry {
   nameStem: string;
   /** Raw content: HTML for AMR templates, Markdown otherwise */
   raw: string;
+  /** FAQ body location; populated by the lazy FAQ content index. */
+  faqShard?: string;
+  faqId?: string;
   /** Where the template came from — `macro` = old QNA/FAQ (MACRO badge); `faq` = real products/FAQ (FAQ badge) */
   kind: 'amr' | 'tbs' | 'err' | 'faq' | 'macro';
   /** Grouping label, e.g. "AMR Email" / "TBS · General" */
@@ -54,14 +57,6 @@ const legacyQnaFaqModules = import.meta.glob('/QNA/FAQ/*.md', {
   eager: true,
 }) as Record<string, string>;
 
-// REAL FAQ content (generated from Excel sheets via scripts/build-faq-md.mjs).
-// Using **/*.md because they live in /products/FAQ/ (ASCII filenames — no glob bug).
-const productFaqModules = import.meta.glob('/products/FAQ/**/*.md', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
-
 /** Very common English words that add noise, not signal */
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'as', 'by',
@@ -79,10 +74,18 @@ const STOPWORDS = new Set([
 ]);
 
 function tokenize(s: string): string[] {
-  return s
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+  const words = s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return words.flatMap((word) => {
+    if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(word)) {
+      return [word];
+    }
+    const chars: string[] = Array.from(word);
+    if (chars.length < 2) return chars;
+    return [
+      word,
+        ...chars.slice(0, -1).map((char, index) => char + (chars[index + 1] ?? '')),
+    ];
+  });
 }
 
 /** Light stemming: singularize plurals and strip -ing so word forms match */
@@ -132,7 +135,7 @@ function makeEntry(
   };
 }
 
-/** All searchable templates: AMR emails, macro TBS steps, error codes, legacy macros + real FAQs */
+/** Small always-needed templates; product FAQ metadata and content are loaded on demand. */
 export const ALL_TEMPLATES: TemplateEntry[] = [
   ...Object.entries(rawModules).map(([path, raw]) =>
     makeEntry(path, raw, 'amr', 'AMR Email')
@@ -157,21 +160,6 @@ export const ALL_TEMPLATES: TemplateEntry[] = [
   ...Object.entries(legacyQnaFaqModules)
     .filter(([path]) => !/(INDEX|FAQ_\d+)/i.test(path) || /FAQ_by_Product/i.test(path))
     .map(([path, raw]) => makeEntry(path, raw, 'macro', 'FAQ Legacy · MACRO')),
-  // REAL products/FAQ/**/*.md → FAQ badge (new real FAQ)
-  ...Object.entries(productFaqModules)
-    .map(([path, raw]) => {
-      // FAQ MD has frontmatter with category + model + heading; try to extract
-      // richer display name from the `# heading` and frontmatter, but fall back
-      // to slug if absent.
-      const fmCat = raw.match(/^category:\s*(.+)\s*$/m)?.[1]?.trim() || 'FAQ';
-      const fmModel = raw.match(/^model:\s*(.+)\s*$/m)?.[1]?.trim() || '';
-      const h1 = raw.match(/^#\s+(.+)$/m)?.[1]?.trim() || fileNameToName(path.split('/').pop() ?? path);
-      const display =
-        (fmModel && h1 && fmModel.toLowerCase().includes(h1.toLowerCase().slice(0, 10)) === false)
-          ? `${fmCat} · ${fmModel || h1} — ${h1.length > 90 ? h1.slice(0, 90) + '…' : h1}`
-          : `${fmCat} · ${h1.length > 100 ? h1.slice(0, 100) + '…' : h1}`;
-      return makeEntry(path, raw, 'faq', `FAQ · ${fmCat}`, display);
-    }),
 ].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 
 // ---------------------------------------------------------------------
@@ -325,12 +313,40 @@ function tokenPairScore(qt: string, nt: string): number {
  * - Weak matches are pruned relative to the best hit, keeping the list
  *   accurate rather than exhaustive.
  */
-export function searchTemplates(query: string, limit = 8): TemplateEntry[] {
+export async function searchTemplates(query: string, limit = 8): Promise<TemplateEntry[]> {
   const rawTokens = tokenize(query);
   const queryTokens = [
-    ...new Set(rawTokens.filter((t) => t.length >= 3 && !STOPWORDS.has(t)).map(stem)),
+    ...new Set(rawTokens.filter((t) =>
+      (t.length >= 3 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(t)) &&
+      !STOPWORDS.has(t)
+    ).map(stem)),
   ];
   if (queryTokens.length === 0) return [];
+
+  const { loadFaqIndex } = await import('../utils/faqData');
+  let faqEntries: Awaited<ReturnType<typeof loadFaqIndex>> = [];
+  try {
+    faqEntries = await loadFaqIndex();
+  } catch {
+    // Keep the bundled support templates searchable if FAQ assets are unavailable.
+  }
+  const faqTemplates: TemplateEntry[] = faqEntries.map((faq) => {
+    const name = `${faq.category} · ${faq.model} — ${faq.title}`;
+    const tokens = tokenize(`${faq.title} ${faq.question} ${faq.model}`).map(stem);
+    return {
+      id: faq.id,
+      file: faq.id,
+      name,
+      tokens,
+      nameStem: tokens.join(' '),
+      raw: '',
+      kind: 'faq',
+      category: `FAQ · ${faq.category}`,
+      faqShard: faq.shard,
+      faqId: faq.id,
+    };
+  });
+  const searchableTemplates = [...ALL_TEMPLATES, ...faqTemplates];
 
   // Consecutive (stemmed) bigrams from the original token order, for the
   // phrase bonus — stopword positions break the phrase
@@ -343,7 +359,7 @@ export function searchTemplates(query: string, limit = 8): TemplateEntry[] {
     }
   }
 
-  const scored = ALL_TEMPLATES.map((t) => {
+  const scored = searchableTemplates.map((t) => {
     let score = 0;
     for (const qt of queryTokens) {
       let best = 0;
@@ -405,8 +421,8 @@ function cleanMarkdownLine(s: string): string {
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\*(.+?)\*/g, '$1')
     .replace(/`(.+?)`/g, '$1')
-    // Non-ASCII (CJK notes + encoding mojibake) — the steps are English
-    .replace(/[^\x20-\x7E]/g, ' ')
+    // Remove control characters while preserving multilingual FAQ content.
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

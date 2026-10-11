@@ -274,14 +274,15 @@ export default function QuickRepliesMenu({ className }: { className?: string }) 
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full font-bold shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,#0ea5e9_45%,transparent)] active:scale-95',
+          'flex size-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-1 font-bold shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,#0ea5e9_45%,transparent)] active:scale-95 md:size-auto md:px-3.5 md:py-1.5',
           'bg-[#0ea5e9] text-white',
-          'px-3.5 py-1.5 text-xs'
+          'text-xs'
         )}
+        aria-label="Quick responses"
         title="Quick reply templates for Salesforce emails"
       >
         <MessageSquareText className="size-3.5" />
-        Quick Responses
+        <span className="hidden md:inline">Quick Responses</span>
         <ChevronDown
           className={cn(
             'size-3 shrink-0 transition-transform',

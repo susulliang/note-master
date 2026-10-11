@@ -26,13 +26,13 @@ import {
   findModels,
   freeSearch,
   getProductIndex,
-  searchFaqs,
   type FaqSearchHit,
   type FreeSearchHit,
   type GoatErrorCode,
   type ModelMatch,
   type ProductIndex,
 } from '@/utils/productData';
+import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import {
   loadNewsIndex,
@@ -335,21 +335,37 @@ export default function ProductLookupPanel({
   );
 
   // --- FAQ search hits --------------------------------------------------------
-  const faqHits: FaqSearchHit[] = useMemo(() => {
-    const activeModel = pinnedModel ?? robotModelDebounced;
-    const query = manualQueryDebounced || `${issueTypeDebounced} ${issueDescDebounced}`;
-    if (!activeModel && !query.trim()) {
-      // Browse case: show 15 newest/most relevant FAQs across the index
-      return index.faqs && index.faqs.length
-        ? index.faqs
-            .slice()
-            .sort((a, b) => b.version - a.version)
-            .slice(0, 15)
-            .map((f) => ({ ...f, score: 0.05, modelMatchScore: 0 }))
-        : [];
+  const [faqHits, setFaqHits] = useState<FaqSearchHit[]>([]);
+  const [faqLoading, setFaqLoading] = useState(false);
+  const faqModel = pinnedModel ?? robotModelDebounced;
+  const faqQuery = manualQueryDebounced || `${issueTypeDebounced} ${issueDescDebounced}`;
+  useEffect(() => {
+    const hasUsefulQuery = faqQuery.trim().length >= 3;
+    if (activeTab !== 'faq' && !faqModel.trim() && !hasUsefulQuery) {
+      setFaqHits([]);
+      setFaqLoading(false);
+      return;
     }
-    return searchFaqs(index, { model: activeModel, query, limit: 25 });
-  }, [index, pinnedModel, robotModelDebounced, manualQueryDebounced, issueTypeDebounced, issueDescDebounced]);
+    let alive = true;
+    setFaqLoading(true);
+    searchLoadedFaqs({
+      model: faqModel,
+      query: faqQuery,
+      limit: 25,
+    })
+      .then((hits) => {
+        if (alive) setFaqHits(hits);
+      })
+      .catch(() => {
+        if (alive) setFaqHits([]);
+      })
+      .finally(() => {
+        if (alive) setFaqLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeTab, faqModel, faqQuery]);
 
   // --- News & Updates hits (Feishu knowledge-sharing digest) -----------------
   // The news markdown chunks load asynchronously AFTER first paint so the
@@ -604,7 +620,7 @@ export default function ProductLookupPanel({
           />
         )}
         {activeTab === 'errors' && <ErrorCodesTab rows={errorCodeHits} />}
-        {activeTab === 'faq' && <FaqTab hits={faqHits} />}
+        {activeTab === 'faq' && <FaqTab hits={faqHits} loading={faqLoading} />}
         {activeTab === 'templates' && (
           <MatchesTab matches={templateMatches ?? []} onOpenTemplate={onOpenTemplate} />
         )}
@@ -1051,9 +1067,28 @@ function FaqBadge({ className }: { className?: string }) {
   );
 }
 
-function FaqTab({ hits }: { hits: FaqSearchHit[] }) {
+function FaqTab({ hits, loading }: { hits: FaqSearchHit[]; loading: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [answerState, setAnswerState] = useState<Record<string, { answer?: string; loading?: boolean }>>({});
+  const openEntry = hits.find((entry) => entry.id === openId);
+  useEffect(() => {
+    if (!openEntry || answerState[openEntry.id]?.answer !== undefined || answerState[openEntry.id]?.loading) return;
+    const id = openEntry.id;
+    setAnswerState((current) => ({ ...current, [id]: { loading: true } }));
+    loadFaqAnswer(openEntry)
+      .then((answer) => setAnswerState((current) => ({
+        ...current,
+        [id]: { answer },
+      })))
+      .catch(() => setAnswerState((current) => ({
+        ...current,
+        [id]: { answer: 'Unable to load this FAQ. Please try again.' },
+      })));
+  }, [openEntry, answerState]);
   if (hits.length === 0) {
+    if (loading) {
+      return <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading FAQ index…</div>;
+    }
     return (
       <EmptyState
         icon={HelpCircle}
@@ -1124,13 +1159,16 @@ function FaqTab({ hits }: { hits: FaqSearchHit[] }) {
                     <div className="whitespace-pre-wrap leading-relaxed text-foreground/85">{f.question}</div>
                   </div>
                 )}
-                {f.answer && (
+                {answerState[f.id]?.loading && (
+                  <div className="text-xs text-muted-foreground">Loading answer…</div>
+                )}
+                {answerState[f.id]?.answer && (
                   <div>
                     <div className="mb-0.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                       <Lightbulb className="size-3" />
                       答案 / Answer
                     </div>
-                    <div className="whitespace-pre-wrap leading-relaxed text-foreground/85">{f.answer}</div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-foreground/85">{answerState[f.id]?.answer}</div>
                   </div>
                 )}
                 {f.sourceSheet && (

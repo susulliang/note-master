@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FileText, X, MousePointerClick, CheckCircle2 } from 'lucide-react';
 import {
   Dialog,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { parseTemplate, type TemplateEntry } from '@/lib/amr-templates';
+import { loadFaqTemplateBody } from '@/utils/faqData';
 import { toast } from 'sonner';
 
 interface TemplatePanelProps {
@@ -36,9 +37,36 @@ export default function TemplatePanel({
   resolutionText,
   onResolutionChange,
 }: TemplatePanelProps) {
+  const [loadedTemplate, setLoadedTemplate] = useState<TemplateEntry | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!template) {
+      setLoadedTemplate(null);
+      return;
+    }
+    if (template.kind !== 'faq' || template.raw) {
+      setLoadedTemplate(template);
+      return;
+    }
+    if (!template.faqShard || !template.faqId) return;
+    let alive = true;
+    setLoadedTemplate(null);
+    setLoading(true);
+    loadFaqTemplateBody(template.faqShard, template.faqId)
+      .then((raw) => alive && setLoadedTemplate({ ...template, raw }))
+      .catch(() => alive && setLoadedTemplate({
+        ...template,
+        raw: `# ${template.name}\n\nFAQ content could not be loaded.`,
+      }))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [template]);
+
   const parsed = useMemo(
-    () => (template ? parseTemplate(template) : null),
-    [template]
+    () => (loadedTemplate ? parseTemplate(loadedTemplate) : null),
+    [loadedTemplate]
   );
 
   const handleInsert = (text: string) => {
@@ -49,7 +77,10 @@ export default function TemplatePanel({
   return (
     <Dialog open={template !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
-        {template && parsed && (
+        {loading && (
+          <div className="py-12 text-center text-sm text-muted-foreground">Loading FAQ content…</div>
+        )}
+        {template && loadedTemplate && parsed && (
           <>
             <DialogHeader className="shrink-0">
               <DialogTitle className="flex items-center gap-2 text-base font-bold">

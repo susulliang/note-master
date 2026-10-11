@@ -1,0 +1,33 @@
+---
+category: "DEEBOT"
+model: "X5 OMNI/X5 PRO OMNI"
+model_slug: "x5_omni_x5_pro_omni"
+lang: "zh"
+source: "FAQ/DEEBOT/X5系列常见问题1.0（纯文字版）中英文(1).xlsx"
+source_sheet: "JA"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOTのアップグレード - ファームウェアのアップグレード
+
+## Question
+
+DEEBOTのアップグレード - ファームウェアのアップグレード
+
+## Answer
+
+製品を快適にお使いいただくために、ECOVACS HOMEアプリのファームウェアのアップグレードが必要になります。アップグレードに関するヒントとガイダンスを以下に示します。
+
+ヒント：
+1. ボットをベースステーションにセットして充電状態にします。
+2. バッテリーレベルが50%以上である必要があります。（3時間充電してからアップグレードすることをお勧めします）
+3. DEEBOTがECOVACS HOMEアプリに接続され、WiFi信号が良好であることを確認します。
+手順：
+1. ECOVACS HOMEアプリにログインします
+2. ［Enter Smart Cleaning（スマートクリーニングを入力）］をタップします
+3. 画面の右上隅にある設定アイコンをタップします
+4. ［About DEEBOT（DEEBOTについて）］から［Update DEEBOT（DEEBOTの更新）］を選択します
+
+注：自動アップグレードが有効になっている場合、DEEBOTは自動的に最新バージョンにアップグレードされます。

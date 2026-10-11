@@ -1,8 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
+import type { KeywordAlert } from '@/lib/keyword-alerts';
+import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
+import KeywordAlertContent from '@/components/KeywordAlertContent';
 import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
@@ -101,6 +105,12 @@ interface EngineSettingsPanelProps {
   isTranscribing: boolean;
   onToggleCapture: () => void;
   onClose: () => void;
+  gridboxVisibility?: {
+    toggles: Array<{ id: string; label: string; visible: boolean }>;
+    onToggle: (id: string, nextVisible: boolean) => void;
+  };
+  keywordAlerts?: KeywordAlert[];
+  keywordAlertSource?: KeywordAlertSource;
 }
 
 /**
@@ -247,6 +257,9 @@ export default function EngineSettingsPanel({
   isTranscribing,
   onToggleCapture,
   onClose,
+  gridboxVisibility,
+  keywordAlerts,
+  keywordAlertSource,
 }: EngineSettingsPanelProps) {
   const panelsCtx = useContext(TicketPanelsContext);
   // Fallback: EngineSettingsPanel may render outside TicketPanelsContext.Provider
@@ -394,6 +407,61 @@ export default function EngineSettingsPanel({
             })}
           </div>
         </section>
+
+        {gridboxVisibility && (
+          <section aria-labelledby="gridbox-settings-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
+            <div className="mb-1 flex items-center gap-1.5">
+              <Boxes className="size-3 text-primary" />
+              <p id="gridbox-settings-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Canvas boxes
+              </p>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {gridboxVisibility.toggles.map((item) => (
+                <label key={item.id} className="flex items-center gap-2 rounded-md px-1 py-1 transition hover:bg-foreground/[0.04]">
+                  <span className={cn('min-w-0 flex-1 truncate text-[10px]', item.visible ? 'text-foreground' : 'text-muted-foreground')}>
+                    {item.label}
+                  </span>
+                  <Switch
+                    checked={item.visible}
+                    onCheckedChange={(next) => gridboxVisibility.onToggle(item.id, !!next)}
+                    aria-label={`Show ${item.label}`}
+                  />
+                </label>
+              ))}
+            </div>
+            <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground/75">
+              Hidden boxes keep their values and remain in the generated note.
+            </p>
+          </section>
+        )}
+
+        {keywordAlerts && (
+          <section aria-labelledby="keyword-alert-settings-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="size-3 text-amber-400" />
+                <p id="keyword-alert-settings-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Keyword alerts
+                </p>
+              </div>
+              <span className="text-[8px] text-muted-foreground">
+                {keywordAlertSource === 'loading' ? 'Loading…' : keywordAlertSource === 'database' ? 'D1 database' : 'Built-in defaults'}
+              </span>
+            </div>
+            <p className="mb-2 text-[9px] leading-relaxed text-muted-foreground/75">
+              The cat watches these terms during live calls. Manage the shared list in the DASH alert tab.
+            </p>
+            <div className="space-y-1.5">
+              {keywordAlerts.map((alert) => (
+                <div key={alert.id} className="rounded-md border border-amber-500/15 bg-amber-500/[0.035] px-2 py-1.5">
+                  <p className="mb-1 truncate text-[10px] font-semibold text-amber-200">{alert.keyword}</p>
+                  <KeywordAlertContent alert={alert} />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ---- Whisper engine ---- */}
         {engine.isSupported && (

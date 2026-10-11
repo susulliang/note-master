@@ -13,7 +13,8 @@
  *   3. Model selling points  — 08 核心卖点 (cols: 系列 / 子系列 / 型号 · 卖点 · 话术)
  *   4. Free-text reference   — 06 全品类故障问题快查, 07 导航窗口
  *
- * Everything is pre-indexed eagerly at module load time (~900KB MD total).
+ * Core sheets are indexed at module load time. Product FAQ records are
+ * fetched from a compact metadata index only when search needs them.
  */
 
 type SheetRecord = {
@@ -536,6 +537,8 @@ export interface FaqEntry {
   /** Full body for text overlap ranking (question + answer). */
   fullText: string;
   version: number;
+  /** Runtime content shard; populated by the on-demand FAQ index. */
+  shard?: string;
 }
 
 /** @internal exposed to test harness; tolerant of malformed docs */
