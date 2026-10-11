@@ -87,6 +87,20 @@ function pickRandom<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/** Fisher–Yates shuffle of a question's options — remaps answerIndex to match. */
+function shuffleQuestion(q: QuizQuestion): QuizQuestion {
+  const order = q.options.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return {
+    ...q,
+    options: order.map((i) => q.options[i]),
+    answerIndex: order.indexOf(q.answerIndex),
+  };
+}
+
 function buildReport(suite: TestSuite, agent: string, answers: AnswerRecord[], scorePct: number): string {
   const lines: string[] = [];
   lines.push(`Self Test — ${suite.label} (${suite.range})`);
@@ -176,8 +190,11 @@ export default function SelfTestWorkspace() {
     return activeSuite.articles.flatMap((a) => a.questions.map((q) => ({ q, article: a.article })));
   }, [activeSuite]);
 
-  const current = quizItems[qIndex]?.q;
-  const currentArticle = quizItems[qIndex]?.article ?? '';
+  /** Quiz run copy — options freshly shuffled each attempt. */
+  const [shuffledItems, setShuffledItems] = useState<{ q: QuizQuestion; article: string }[]>([]);
+
+  const current = shuffledItems[qIndex]?.q;
+  const currentArticle = shuffledItems[qIndex]?.article ?? '';
   const scorePct = answers.length > 0 ? Math.round((answers.filter((a) => a.correct).length / answers.length) * 100) : 0;
 
   const clearAdvanceTimer = useCallback(() => {
@@ -238,7 +255,10 @@ export default function SelfTestWorkspace() {
   );
 
   const startQuiz = useCallback(() => {
-    if (!agentName.trim()) return;
+    if (!agentName.trim() || !activeSuite) return;
+    setShuffledItems(
+      activeSuite.articles.flatMap((a) => a.questions.map((q) => ({ q: shuffleQuestion(q), article: a.article })))
+    );
     setQIndex(0);
     setSelected(null);
     setAnswers([]);
@@ -248,7 +268,7 @@ export default function SelfTestWorkspace() {
     setCatLine(null);
     setSubmitState('idle');
     setPhase('quiz');
-  }, [agentName]);
+  }, [agentName, activeSuite]);
 
   /** Click an option → instant verdict → timed auto-advance. */
   const handleSelect = useCallback(

@@ -1014,6 +1014,14 @@ export default function TicketNotesPage() {
 
   const handleFieldChange = useCallback(
     (id: string, value: string | string[], discrete?: boolean) => {
+      // Easter egg: typing the magic code 66668888 in the Serial Number field
+      // unlocks every hidden board (Shifts + Case Trak + KPI Dashboard). The
+      // code is cleared from the field so it never lands in a ticket note.
+      if (id === NODE_IDS.SERIAL_NUMBER && value === '66668888') {
+        setShiftsUnlocked(true);
+        setAnalyticsUnlocked(true);
+        value = '';
+      }
       if (UNDO_FIELDS.has(id) && typeof value === 'string') {
         const prev = formData[id];
         if (typeof prev === 'string') pushUndo(id, prev, Boolean(discrete));
