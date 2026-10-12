@@ -6,7 +6,8 @@
       "key": "call_historical_metrics",
       "label": "Call Historical Metrics",
       "requires_authenticated_session": true,
-      "url": "https://amr-callcenter-sso.my.connect.aws/historical-metrics?reportArn=arn%3Aaws%3Aconnect%3Aus-west-2%3A451979591094%3Ainstance%2F0331b450-81b2-4e20-ac09-8085cc4b1437%2Freport%2F7123694c-88ab-4a1c-84d3-c90a3e3f0850"
+      "url": "https://amr-callcenter-sso.my.connect.aws/historical-metrics?reportArn=arn%3Aaws%3Aconnect%3Aus-west-2%3A451979591094%3Ainstance%2F0331b450-81b2-4e20-ac09-8085cc4b1437%2Freport%2F7123694c-88ab-4a1c-84d3-c90a3e3f0850",
+      "note": "Opens the saved 'agent metric mtd' report. Use Actions > Download CSV on every refresh; the CSV download link is dynamic and must not be reused."
     },
     {
       "key": "csat",

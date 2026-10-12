@@ -24,12 +24,14 @@ pids
 *.pid
 *.seed
 *.pid.lock
+# Raw authenticated report downloads — refreshed constantly; published data lives in R2 (eco-dash).
+# Ignore all folder contents; keep the folder marker only.
+/sf_reports/*
+!/sf_reports/.gitkeep
 /dashboard_publish/
 # Windows-reserved device filename; prevents invalid checkout on Windows.
 /nul
-# Local Salesforce and Connect exports; retain only the folder marker in Git.
-/sf_reports/*
-!/sf_reports/.gitkeep
+# Local FAQ content exports
 /public/faq-content/
 
 # Coverage directory used by tools like istanbul
