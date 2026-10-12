@@ -55,3 +55,8 @@ Keyword-alert administration uses a PBKDF2 hash stored as the Worker secret
 `ALERT_ADMIN_PASSWORD_HASH`, never as plaintext in the repository or D1. Use
 `node scripts/hash-keyword-alert-password.mjs` to generate a verifier, then
 set it with `npx wrangler secret put ALERT_ADMIN_PASSWORD_HASH`.
+
+During local development, Vite proxies `/api/*` to the Cloudflare Worker by
+default, so test scores and keyword alerts use the shared `eco-data` D1 database.
+Local quiz submissions and alert edits therefore affect live data. To target a
+different Worker, set `LOCAL_WORKER_API_ORIGIN` in `.env.local`.

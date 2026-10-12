@@ -25,6 +25,8 @@ pids
 *.seed
 *.pid.lock
 /dashboard_publish/
+# Windows-reserved device filename; prevents invalid checkout on Windows.
+/nul
 # Local Salesforce and Connect exports; retain only the folder marker in Git.
 /sf_reports/*
 !/sf_reports/.gitkeep

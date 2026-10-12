@@ -294,6 +294,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   // Miaoda-to-env passthrough (harmless on Vercel — will just be "/")
   const base = env.MIAODA_APP_ID ? `/app/${env.MIAODA_APP_ID}` : '/';
+  const localWorkerApiOrigin =
+    env.LOCAL_WORKER_API_ORIGIN || 'https://note-master.susulliang.workers.dev';
 
   return {
     plugins: [
@@ -411,6 +413,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: Number(env.CLIENT_DEV_PORT) || 8001,
       host: '0.0.0.0',
+      proxy: {
+        '/api': {
+          target: localWorkerApiOrigin,
+          changeOrigin: true,
+          secure: true,
+        },
+      },
       // The repo holds 8k+ product FAQ markdown files and the dev launcher
       // streams logs/ — watching them exhausts inotify (ENOSPC crash) and
       // none of them participate in HMR (the ?raw virtual modules cache
