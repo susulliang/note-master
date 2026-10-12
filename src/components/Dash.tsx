@@ -1861,14 +1861,14 @@ export default function Dash() {
             </div>
           </section>
           <MtdVolumeSummary state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
-          <TestScoreSubmissions state={testScores} />
-          <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.8fr)]">
             <ParliamentChart agents={filteredAgents} selectedKey={selected?.key ?? null} onSelect={setSelected} />
             <div className="hidden xl:block">
               <AgentDetailPanel agent={selected} compare={compare} onCompare={toggleCompare} />
             </div>
           </div>
+          <TestScoreSubmissions state={testScores} />
+          <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
           <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
             <AgentMatrix
               agents={filteredAgents}

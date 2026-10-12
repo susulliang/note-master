@@ -14,20 +14,16 @@
     --fg: #f5f5f5;
     --fg-muted: #a3a3a3;
     --fg-dim: #737373;
-    --green: #059669;
-    --green-soft: rgba(5, 150, 105, 0.1);
-    --blue: #2563eb;
-    --blue-soft: rgba(37, 99, 235, 0.1);
-    --purple: #7c3aed;
-    --purple-soft: rgba(124, 58, 237, 0.1);
-    --orange: #ea580c;
-    --orange-soft: rgba(234, 88, 12, 0.1);
-    --pink: #db2777;
-    --pink-soft: rgba(219, 39, 119, 0.1);
+    --green: #22c55e;
+    --green-soft: rgba(34, 197, 94, 0.12);
+    --blue: #3b82f6;
+    --blue-soft: rgba(59, 130, 246, 0.12);
+    --purple: #a855f7;
+    --purple-soft: rgba(168, 85, 247, 0.12);
+    --pink: #ec4899;
+    --pink-soft: rgba(236, 72, 153, 0.12);
   }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
     font-family: 'Futura', 'Futura PT', 'Trebuchet MS', 'Avenir Next', sans-serif;
     background: var(--bg);
@@ -36,14 +32,8 @@
     width: 100%;
     overflow-x: auto;
   }
+  .page { padding: 40px 56px 64px; max-width: 1600px; margin: 0 auto; }
 
-  .page {
-    padding: 40px 56px 64px;
-    max-width: 1600px;
-    margin: 0 auto;
-  }
-
-  /* Header */
   .header {
     display: flex;
     align-items: flex-end;
@@ -52,224 +42,96 @@
     padding-bottom: 20px;
     border-bottom: 1px solid var(--card-border);
   }
-  .header-left h1 {
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--fg);
-  }
+  .header-left h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
   .header-left h1 .dot { color: var(--green); }
-  .header-left .subtitle {
-    font-size: 12px;
-    color: var(--fg-muted);
-    margin-top: 5px;
-    font-weight: 400;
-  }
-  .header-right {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
+  .header-left .subtitle { font-size: 12px; color: var(--fg-muted); margin-top: 5px; }
+  .header-right { display: flex; gap: 12px; align-items: center; }
   .badge {
-    font-size: 10px;
-    padding: 3px 10px;
-    border-radius: 4px;
-    background: var(--bg-2);
-    border: 1px solid var(--card-border);
-    color: var(--fg-muted);
-    letter-spacing: 0.03em;
-    font-weight: 500;
+    font-size: 10px; padding: 3px 10px; border-radius: 4px;
+    background: var(--bg-2); border: 1px solid var(--card-border);
+    color: var(--fg-muted); letter-spacing: 0.03em; font-weight: 500;
   }
-  .badge.green { color: var(--green); border-color: rgba(5,150,105,0.4); background: var(--green-soft); }
+  .badge.green { color: var(--green); border-color: rgba(34,197,94,0.4); background: var(--green-soft); }
 
-  /* Rows */
-  .row {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .tier-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 14px;
-  }
+  .tier-section { margin-bottom: 32px; }
+  .tier-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .tier-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 4px 12px;
-    border-radius: 100px;
-    letter-spacing: 0.06em;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 600; padding: 4px 12px;
+    border-radius: 100px; letter-spacing: 0.06em;
   }
-  .tier-pill .dot-indicator {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-  }
+  .tier-pill .dot-indicator { width: 7px; height: 7px; border-radius: 50%; }
   .tier-pill.top { background: var(--green-soft); color: var(--green); }
   .tier-pill.top .dot-indicator { background: var(--green); }
   .tier-pill.middle { background: var(--purple-soft); color: var(--purple); }
   .tier-pill.middle .dot-indicator { background: var(--purple); }
   .tier-pill.bottom { background: var(--blue-soft); color: var(--blue); }
   .tier-pill.bottom .dot-indicator { background: var(--blue); }
+  .tier-count { font-size: 10px; color: var(--fg-dim); font-weight: 400; }
 
-  .tier-count {
-    font-size: 10px;
-    color: var(--fg-dim);
-    font-weight: 400;
-  }
+  .row { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
 
-  /* Cards — smaller */
   .card {
-    flex: 0 0 auto;
-    min-width: 128px;
-    max-width: 148px;
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    position: relative;
+    flex: 0 0 auto; min-width: 128px; max-width: 148px;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: 8px; padding: 10px 12px; position: relative;
     transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
   }
-  .card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    border-color: #d1d5db;
-  }
-
+  .card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.6); border-color: #404040; }
   .card::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 8px; bottom: 8px;
-    width: 3px;
-    border-radius: 0 2px 2px 0;
+    content: ''; position: absolute; left: 0; top: 8px; bottom: 8px;
+    width: 3px; border-radius: 0 2px 2px 0;
   }
-
   .card.sv::before, .card.tl::before { background: var(--green); }
   .card.t2::before, .card.t3::before { background: var(--purple); }
-  .card.chat::before, .card.call::before { background: var(--blue); }
-  .card.fr::before { background: var(--pink); }
-  .card.trainee::before { background: var(--orange); }
+  .card.chat::before { background: var(--blue); }
+  .card.call::before, .card.fr::before { background: var(--pink); }
 
   .card .role-tag {
-    display: inline-block;
-    font-size: 8px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    padding: 1px 5px;
-    border-radius: 2px;
-    text-transform: uppercase;
-    margin-bottom: 6px;
+    display: inline-block; font-size: 8px; font-weight: 700;
+    letter-spacing: 0.1em; padding: 1px 5px; border-radius: 2px;
+    text-transform: uppercase; margin-bottom: 6px;
   }
   .sv .role-tag, .tl .role-tag { background: var(--green-soft); color: var(--green); }
   .t2 .role-tag, .t3 .role-tag { background: var(--purple-soft); color: var(--purple); }
-  .chat .role-tag, .call .role-tag { background: var(--blue-soft); color: var(--blue); }
-  .fr .role-tag { background: var(--pink-soft); color: var(--pink); }
-  .trainee .role-tag { background: var(--orange-soft); color: var(--orange); }
+  .chat .role-tag { background: var(--blue-soft); color: var(--blue); }
+  .call .role-tag { background: rgba(236,72,153,0.12); color: var(--pink); }
+  .fr .role-tag { background: rgba(236,72,153,0.12); color: var(--pink); }
 
-  .card .name-zh {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg);
-    line-height: 1.2;
-  }
-  .card .name-en {
-    font-size: 10.5px;
-    font-weight: 400;
-    color: var(--fg-muted);
-    margin-top: 1px;
-    letter-spacing: 0.01em;
-  }
+  .card .name-zh { font-size: 12px; font-weight: 600; color: var(--fg); line-height: 1.2; }
+  .card .name-en { font-size: 10.5px; font-weight: 400; color: var(--fg-muted); margin-top: 1px; }
 
-  /* Section spacing */
-  .tier-section {
-    margin-bottom: 32px;
-  }
-
-  /* Agent sub-group headers (Chat / Call / Trainee inline labels in bottom row) */
-  .agent-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .agent-group {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
+  .agent-groups { display: flex; flex-direction: column; gap: 14px; }
+  .agent-group { display: flex; align-items: flex-start; gap: 12px; }
   .agent-group-label {
-    flex: 0 0 auto;
-    width: 52px;
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    padding-top: 14px;
-    text-align: right;
+    flex: 0 0 auto; width: 52px;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--fg-dim);
+    padding-top: 14px; text-align: right;
   }
-  .agent-group.collapsed-label .agent-group-label {
-    color: transparent;
-  }
-  .agent-group .row {
-    flex: 1 1 auto;
-  }
+  .agent-group .row { flex: 1 1 auto; }
 
-  /* Stats footer */
   .footer-stats {
-    margin-top: 40px;
-    padding-top: 18px;
+    margin-top: 40px; padding-top: 18px;
     border-top: 1px solid var(--card-border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    display: flex; justify-content: space-between; align-items: center;
   }
-  .stat-group {
-    display: flex;
-    gap: 28px;
-  }
-  .stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .stat .num {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--fg);
-    letter-spacing: -0.01em;
-  }
-  .stat .label {
-    font-size: 9px;
-    color: var(--fg-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .footer-note {
-    font-size: 9px;
-    color: var(--fg-dim);
-    text-align: right;
-    line-height: 1.6;
-  }
+  .stat-group { display: flex; gap: 28px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat .num { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .stat .label { font-size: 9px; color: var(--fg-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+  .footer-note { font-size: 9px; color: var(--fg-dim); text-align: right; line-height: 1.6; }
 
-  @media print {
-    body { background: #fafafa; }
-  }
+  @media print { body { background: #000; } }
 </style>
 </head>
 <body>
 <div class="page">
-  <!-- Header -->
   <div class="header">
     <div class="header-left">
       <h1>Ecovacs NA Team Roster<span class="dot">_</span></h1>
-      <div class="subtitle">October 2026 · Hierarchy Overview · 34 people</div>
+      <div class="subtitle">October 2026 · Hierarchy Overview · 38 people</div>
     </div>
     <div class="header-right">
       <span class="badge green">● LIVE</span>
@@ -277,81 +139,43 @@
     </div>
   </div>
 
-  <!-- ===== TOP TIER ===== -->
+  <!-- ===== LEADERSHIP ===== -->
   <div class="tier-section">
     <div class="tier-header">
-      <span class="tier-pill top">
-        <span class="dot-indicator"></span>
-        Leadership
-      </span>
-      <span class="tier-count">1 SV · 2 TL · 3 total</span>
+      <span class="tier-pill top"><span class="dot-indicator"></span>Leadership</span>
+      <span class="tier-count">1 SV/OM · 2 TL · 3 total</span>
     </div>
     <div class="row">
-      <div class="card sv">
-        <span class="role-tag">SV/OM</span>
-        <div class="name-zh">黄铠伦</div>
-        <div class="name-en">Hoi</div>
-      </div>
-      <div class="card tl">
-        <span class="role-tag">TL</span>
-        <div class="name-zh">吴宇君</div>
-        <div class="name-en">Alexia</div>
-      </div>
-      <div class="card tl">
-        <span class="role-tag">TL</span>
-        <div class="name-zh">杨浩祥</div>
-        <div class="name-en">Harrison</div>
-      </div>
+      <div class="card sv"><span class="role-tag">SV/OM</span><div class="name-zh">黄铠伦</div><div class="name-en">Hoi</div></div>
+      <div class="card tl"><span class="role-tag">TL</span><div class="name-zh">吴宇君</div><div class="name-en">Alexia</div></div>
+      <div class="card tl"><span class="role-tag">TL</span><div class="name-zh">杨浩祥</div><div class="name-en">Harrison</div></div>
     </div>
   </div>
 
-  <!-- ===== MIDDLE TIER ===== -->
+  <!-- ===== MENTORS ===== -->
   <div class="tier-section">
     <div class="tier-header">
-      <span class="tier-pill middle">
-        <span class="dot-indicator"></span>
-        Mentors
-      </span>
+      <span class="tier-pill middle"><span class="dot-indicator"></span>Mentors</span>
       <span class="tier-count">3 T2 · 1 T3 · 4 total</span>
     </div>
     <div class="row">
-      <div class="card t2">
-        <span class="role-tag">T2</span>
-        <div class="name-zh">蒋志聪</div>
-        <div class="name-en">Steven</div>
-      </div>
-      <div class="card t2">
-        <span class="role-tag">T2</span>
-        <div class="name-zh">李书蒙</div>
-        <div class="name-en">Steve</div>
-      </div>
-      <div class="card t2">
-        <span class="role-tag">T2</span>
-        <div class="name-zh">凌键杨</div>
-        <div class="name-en">George</div>
-      </div>
-      <div class="card t3">
-        <span class="role-tag">T3</span>
-        <div class="name-zh">何晓颖</div>
-        <div class="name-en">Winnie</div>
-      </div>
+      <div class="card t2"><span class="role-tag">T2</span><div class="name-zh">蒋志聪</div><div class="name-en">Steven</div></div>
+      <div class="card t2"><span class="role-tag">T2</span><div class="name-zh">李书蒙</div><div class="name-en">Steve</div></div>
+      <div class="card t2"><span class="role-tag">T2</span><div class="name-zh">凌键杨</div><div class="name-en">George</div></div>
+      <div class="card t3"><span class="role-tag">T3</span><div class="name-zh">何晓颖</div><div class="name-en">Winnie</div></div>
     </div>
   </div>
 
-  <!-- ===== BOTTOM TIER — all horizontal rows ===== -->
+  <!-- ===== FRONTLINE AGENTS ===== -->
   <div class="tier-section">
     <div class="tier-header">
-      <span class="tier-pill bottom">
-        <span class="dot-indicator"></span>
-        Frontline Agents
-      </span>
-      <span class="tier-count">7 Chat · 15 Call · 22 total</span>
+      <span class="tier-pill bottom"><span class="dot-indicator"></span>Frontline Agents</span>
+      <span class="tier-count">8 Chat · 23 Call · 31 total</span>
     </div>
 
     <div class="agent-groups">
-      <!-- Chat row -->
       <div class="agent-group">
-        <div class="agent-group-label">Chat · 7</div>
+        <div class="agent-group-label">Chat · 8</div>
         <div class="row">
           <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">钟明毅</div><div class="name-en">Dagen</div></div>
           <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">苗磊</div><div class="name-en">Ronald</div></div>
@@ -360,13 +184,12 @@
           <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">陆美玲</div><div class="name-en">Lynn</div></div>
           <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">梁建兴</div><div class="name-en">Jacky</div></div>
           <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">胡天琦</div><div class="name-en">TQ</div></div>
-
+          <div class="card chat"><span class="role-tag">Chat</span><div class="name-zh">满俊茹</div><div class="name-en">Catherine</div></div>
         </div>
       </div>
 
-      <!-- Call row (includes FR Call + Trainee merged under Call) -->
       <div class="agent-group">
-        <div class="agent-group-label">Call · 15</div>
+        <div class="agent-group-label">Call · 23</div>
         <div class="row">
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">汤智锋</div><div class="name-en">Alan</div></div>
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">饶志铭</div><div class="name-en">Kira</div></div>
@@ -375,32 +198,36 @@
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">余泽标</div><div class="name-en">Charsan</div></div>
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">张承聪</div><div class="name-en">Patrick</div></div>
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">刘滨</div><div class="name-en">Ruby</div></div>
-          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">刘永霖</div><div class="name-en">Chris</div></div>
-          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">霍婧彤</div><div class="name-en">Hawks</div></div>
-          <div class="card fr"><span class="role-tag">FR</span><div class="name-zh">黄晶</div><div class="name-en">Jing</div></div>
+                    <div class="card call"><span class="role-tag">Call</span><div class="name-zh">霍婧彤</div><div class="name-en">Hawks</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">黄晶</div><div class="name-en">Jing</div></div>
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">梁雨枫</div><div class="name-en">Dezzy</div></div>
-          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">许少锟</div><div class="name-en">Kevin</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">许少锟</div><div class="name-en">Kevin X</div></div>
           <div class="card call"><span class="role-tag">Call</span><div class="name-zh">朱奕信</div><div class="name-en">Yison</div></div>
-          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">孙小雅</div><div class="name-en">Grace</div></div>
-          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">田子凡</div><div class="name-en">Laura</div></div>
+                    <div class="card call"><span class="role-tag">Call</span><div class="name-zh">田子凡</div><div class="name-en">Laura</div></div>
+                    <div class="card call"><span class="role-tag">Call</span><div class="name-zh">罗俊杰</div><div class="name-en">Jun</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">郑泳涛</div><div class="name-en">Jason</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">罗达尧</div><div class="name-en">Jenson</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">王仁达</div><div class="name-en">Kevin W</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">张逸翔</div><div class="name-en">Rachel</div></div>
+<div class="card call"><span class="role-tag">Call</span><div class="name-zh">黄思豪</div><div class="name-en">Trent</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">肖天锐</div><div class="name-en">Tony</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">史庭炜</div><div class="name-en">Stanley</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">康瀚允</div><div class="name-en">Henry</div></div>
+          <div class="card call"><span class="role-tag">Call</span><div class="name-zh">罗昕宸</div><div class="name-en">Eric</div></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Stats Footer -->
   <div class="footer-stats">
     <div class="stat-group">
-      <div class="stat"><span class="num">34</span><span class="label">Total</span></div>
+      <div class="stat"><span class="num">38</span><span class="label">Total</span></div>
       <div class="stat"><span class="num">3</span><span class="label">Leadership</span></div>
       <div class="stat"><span class="num">4</span><span class="label">Mentors</span></div>
-      <div class="stat"><span class="num">22</span><span class="label">Agents</span></div>
-      <div class="stat"><span class="num">7 / 15</span><span class="label">Chat / Call</span></div>
+      <div class="stat"><span class="num">31</span><span class="label">Agents</span></div>
+      <div class="stat"><span class="num">8 / 23</span><span class="label">Chat / Call</span></div>
     </div>
-    <div class="footer-note">
-      Source: October 2026 Roster · Feishu Sheet<br>
-      Excludes departed staff (Wilson · VGZ02540)
-    </div>
+    <div class="footer-note">Source: October 2026 Roster · Feishu Sheet</div>
   </div>
 </div>
 </body>
