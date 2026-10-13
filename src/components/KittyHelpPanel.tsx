@@ -4,6 +4,53 @@ import { cn } from '@/lib/utils';
 import type { KittyHelpResult } from '@/hooks/use-kitty-help';
 
 /**
+ * Render LLM free text with light structure: consecutive "1. …" lines
+ * become an ordered list, "- …" lines a bullet list, everything else
+ * paragraphs — so step-by-step resolutions read as steps, not a wall.
+ */
+function FormattedText({ text, className }: { text: string; className?: string }) {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const blocks: Array<{ type: 'ol' | 'ul' | 'p'; items: string[] }> = [];
+  for (const line of lines) {
+    const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+    const bulleted = line.match(/^[-•*]\s+(.*)$/);
+    if (numbered) {
+      const last = blocks[blocks.length - 1];
+      if (last?.type === 'ol') last.items.push(numbered[1]);
+      else blocks.push({ type: 'ol', items: [numbered[1]] });
+    } else if (bulleted) {
+      const last = blocks[blocks.length - 1];
+      if (last?.type === 'ul') last.items.push(bulleted[1]);
+      else blocks.push({ type: 'ul', items: [bulleted[1]] });
+    } else {
+      blocks.push({ type: 'p', items: [line] });
+    }
+  }
+
+  return (
+    <div className={cn('space-y-1.5', className)}>
+      {blocks.map((block, i) =>
+        block.type === 'p' ? (
+          <p key={i} className="text-sm leading-relaxed text-foreground">{block.items[0]}</p>
+        ) : block.type === 'ol' ? (
+          <ol key={i} className="list-decimal space-y-1 pl-5 text-sm leading-relaxed text-foreground">
+            {block.items.map((item, j) => <li key={j}>{item}</li>)}
+          </ol>
+        ) : (
+          <ul key={i} className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-foreground">
+            {block.items.map((item, j) => <li key={j}>{item}</li>)}
+          </ul>
+        )
+      )}
+    </div>
+  );
+}
+
+/**
  * Glass modal that renders the Kitty Help final resolution: ready-to-read
  * customer script, detailed EN resolution, Chinese TLDR, emotional-support
  * lines and the cited sources — with a one-click full-text copy.
@@ -95,13 +142,13 @@ export function KittyHelpPanel({
           {result.sayToCustomer && (
             <section className="rounded-xl border border-primary/40 bg-primary/10 p-3">
               <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Say to the customer (EN)</p>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.sayToCustomer}</p>
+              <FormattedText text={result.sayToCustomer} className="mt-1.5" />
             </section>
           )}
 
           <section className="rounded-xl border border-border/60 bg-card/40 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resolution (EN)</p>
-            <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.resolutionEn}</p>
+            <FormattedText text={result.resolutionEn} className="mt-1.5" />
           </section>
 
           {result.resolutionZhTldr && (

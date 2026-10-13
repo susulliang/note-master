@@ -10,6 +10,8 @@ import {
   collectKittyCandidates,
   fetchKittySourceContent,
   kittyChat,
+  KITTY_FIELD_IDS,
+  unwrapNestedLlmJson,
   type ChatMsg,
   type KittyCandidate,
 } from '@/lib/kitty-help';
@@ -55,17 +57,19 @@ export interface KittyStage {
   detail?: string;
 }
 
-/** Stable system prompt — written once per conversation, never mutated. */
-function buildKittySystem(extractionContract: string): string {
+/** Stable system prompt — written once per conversation, never mutated.
+ *  Task-specific contracts (extraction JSON, note-draft fields) ride in the
+ *  USER turn of each task, so the system prefix stays byte-identical across
+ *  runs and modes — the best possible setup for provider KV caching. */
+function buildKittySystem(): string {
   return [
     'You are Kitty Help, the Ecovacs NA support workspace assistant living inside the cat mascot.',
     'You help a customer-service agent during a live or just-finished support call.',
     'You always answer with ONLY the JSON object the current task asks for — no prose, no markdown fences.',
     '',
     '## Task 1 — FILL NOTES',
-    'Given the call transcript, extract ticket fields (the JSON contract below) and a bilingual whole-call TLDR.',
-    '',
-    extractionContract,
+    'Given a call transcript (or, when no transcript exists, the agent\'s drafted ticket notes), extract/confirm',
+    'ticket fields and a bilingual whole-call TLDR. The exact JSON contract travels inside the Task 1 user message.',
     '',
     '## Task 2 — PICK KNOWLEDGE SOURCES',
     'Given numbered candidate knowledge titles (id [KIND · ORIGIN] title), pick the 1–8 sources most likely',
@@ -79,6 +83,7 @@ function buildKittySystem(extractionContract: string): string {
     '"emotional_support":"1–2 empathetic sentences to use if the customer is frustrated",',
     '"sources":["cited source title", …]}',
     'Ground the resolution in the provided sources; do not invent policies. Cite only sources you were given.',
+    'Never wrap the JSON in a quoted string — emit the raw object.',
   ].join('\n');
 }
 
@@ -132,8 +137,14 @@ export function useKittyHelp(args: {
    * Transcript → one text blob. Mirrors how the Fill Notes prompt feeds
    * entries, but we also append a small form-context tail so the source
    * preselection knows the model/SKU/issue even if the ASR garbled them.
+   * When no transcript exists the form tail IS the context (note-draft mode).
    */
-  const buildQueryContext = useCallback((): { entries: TranscriptEntry[]; query: string } => {
+  const buildQueryContext = useCallback((): {
+    entries: TranscriptEntry[];
+    transcriptText: string;
+    formTail: string;
+    query: string;
+  } => {
     const formTail = Object.entries(formData)
       .filter(([, v]) => (typeof v === 'string' ? v.trim() : (v as string[])?.length > 0))
       .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' | ') : v}`)
@@ -143,15 +154,20 @@ export function useKittyHelp(args: {
       .map((e) => `${e.speaker === 'agent' ? 'Agent' : e.speaker === 'recording' ? 'Recording' : 'Customer'}: ${e.text}`)
       .join('\n')
       .slice(-4000);
-    return { entries: transcript, query: `${transcriptText}\n\n${formTail}`.trim() };
+    return { entries: transcript, transcriptText, formTail, query: `${transcriptText}\n\n${formTail}`.trim() };
   }, [transcript, formData]);
 
   const start = useCallback(async (): Promise<void> => {
     if (runRef.current) return;
-    const { entries } = buildQueryContext();
-    if (entries.length === 0) {
-      setError('Nothing to help with yet — the transcript is empty.');
-      setStage({ label: 'No transcript yet', detail: 'Start or load a call first.' });
+    const { entries, transcriptText, formTail, query } = buildQueryContext();
+    // Kitty Help activates on EITHER a live transcript OR enough drafted
+    // ticket-note content — the notes are fed to the LLM as the Task-1
+    // source when the transcript is empty.
+    const hasTranscript = transcriptText.trim().length > 0;
+    const hasNotes = formTail.trim().length >= 120;
+    if (!hasTranscript && !hasNotes) {
+      setError('Need a transcript or a filled ticket note to help with.');
+      setStage({ label: 'Nothing to help with yet', detail: 'Capture a call or fill some ticket notes first.' });
       window.setTimeout(() => setStage(null), 4000);
       return;
     }
@@ -164,27 +180,55 @@ export function useKittyHelp(args: {
     try {
       // ---------------------------------------------------------------
       // Stage 1 — Fill Notes (seeds the persistent conversation).
+      // Transcript path: the standard Fill Notes extraction prompt. Note-
+      // draft path (no transcript): the drafted ticket fields themselves
+      // are the source. Either way the JSON contract travels in the USER
+      // message so the system prompt stays byte-identical across runs.
       // ---------------------------------------------------------------
-      setStage({ label: 'Reading the transcript…', detail: 'Filling ticket notes' });
-      const { system: parseSystem, user: parseUser } = buildParsePrompt(
-        entries,
-        [],
-        undefined,
-        /* strict= */ false,
-        /* format= */ 'simple',
-        /* maxChars= */ 16_000,
-        'full',
-        /* includeTldr= */ true
-      );
-
+      setStage({
+        label: hasTranscript ? 'Reading the transcript…' : 'Reading the ticket notes…',
+        detail: 'Filling ticket notes',
+      });
       const messages = messagesRef.current;
       if (messages.length === 0) {
-        messages.push({ role: 'system', content: buildKittySystem(parseSystem) });
+        messages.push({ role: 'system', content: buildKittySystem() });
       }
-      messages.push({
-        role: 'user',
-        content: `TASK 1 — FILL NOTES\n\n${parseUser}`,
-      });
+
+      let task1User: string;
+      if (hasTranscript) {
+        const { system: parseSystem, user: parseUser } = buildParsePrompt(
+          entries,
+          [],
+          undefined,
+          /* strict= */ false,
+          /* format= */ 'simple',
+          /* maxChars= */ 16_000,
+          'full',
+          /* includeTldr= */ true
+        );
+        task1User = [
+          'TASK 1 — FILL NOTES',
+          '',
+          '[EXTRACTION CONTRACT]',
+          parseSystem,
+          '',
+          '[TRANSCRIPT]',
+          parseUser,
+        ].join('\n');
+      } else {
+        task1User = [
+          'TASK 1 — FILL NOTES',
+          '',
+          'No live transcript exists. The agent already drafted the ticket notes below (field: value lines).',
+          'Confirm the fields from this draft and enrich anything you can infer from them.',
+          `Reply ONLY: {"fields":[{"fieldId":"…","value":"…"},…],"tldr":{"en":"…","zh":"…"}}`,
+          `Valid fieldIds: ${KITTY_FIELD_IDS.join(', ')}. Omit fields the draft does not mention.`,
+          '',
+          '[TICKET NOTE DRAFT]',
+          formTail,
+        ].join('\n');
+      }
+      messages.push({ role: 'user', content: task1User });
 
       const reply1 = await kittyChat(messages, 2048);
       messages.push({ role: 'assistant', content: reply1 });
@@ -272,7 +316,10 @@ export function useKittyHelp(args: {
       const reply3 = await kittyChat(messages, 2500);
       messages.push({ role: 'assistant', content: reply3 });
 
-      const parsed3 = extractJsonLoose(reply3) as Partial<KittyHelpResult> | null;
+      // Salvage pass: the model occasionally wraps the whole JSON object in
+      // one level of stringification — unwrapNestedLlmJson merges it back up.
+      const raw3 = extractJsonLoose(reply3) as Record<string, unknown> | null;
+      const parsed3 = unwrapNestedLlmJson(raw3) as Partial<KittyHelpResult> | null;
       const finalResult: KittyHelpResult = {
         sayToCustomer: typeof parsed3?.sayToCustomer === 'string' ? parsed3.sayToCustomer : '',
         resolutionEn: typeof parsed3?.resolutionEn === 'string' ? parsed3.resolutionEn : reply3.trim(),

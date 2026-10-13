@@ -49,6 +49,58 @@ export interface ChatMsg {
   content: string;
 }
 
+/** Field ids the Task-1 fill-notes contract allows (mirror of llm-parser's LLM_FIELD_IDS). */
+export const KITTY_FIELD_IDS = [
+  'customerName',
+  'contactNumber',
+  'emailAddress',
+  'deebotModel',
+  'skuNumber',
+  'serialNumber',
+  'purchaseInfo',
+  'issueDescription',
+  'issueType',
+  'resolutionSummary',
+  'customerNameAddressCount',
+] as const;
+
+/**
+ * Salvage a double-encoded LLM reply. The model sometimes wraps its JSON
+ * object inside ONE level of stringification, which surfaces as a single
+ * field whose value is the whole JSON as escaped text (the panel then shows
+ * raw JSON). If any value in the parsed object is itself a JSON string
+ * carrying expected keys, parse it and merge it upward.
+ */
+export function unwrapNestedLlmJson(
+  parsed: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  if (!parsed) return null;
+  const EXPECTED = [
+    'say_to_customer',
+    'resolution_en',
+    'resolution_zh_tldr',
+    'emotional_support',
+    'sources',
+    'fields',
+    'tldr',
+  ];
+  let merged: Record<string, unknown> | null = null;
+  for (const value of Object.values(parsed)) {
+    if (typeof value !== 'string') continue;
+    const t = value.trim();
+    if (!(t.startsWith('{') && t.endsWith('}'))) continue;
+    try {
+      const inner = JSON.parse(t) as Record<string, unknown>;
+      if (inner && typeof inner === 'object' && EXPECTED.some((k) => k in inner)) {
+        merged = { ...(merged ?? {}), ...inner };
+      }
+    } catch {
+      /* not JSON after all */
+    }
+  }
+  return merged ? { ...parsed, ...merged } : parsed;
+}
+
 /**
  * One completion over the WHOLE persistent conversation. Params are fixed
  * on purpose — varying temperature/max_tokens across turns does not break
