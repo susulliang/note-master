@@ -1012,6 +1012,16 @@ body[data-ui-scale="small"] {
       var(--glass-glow);
   }
 
+  /* DASH readability — on dark themes, panels/widgets inside the AMR
+     Dashboard get a darker surface tint (drop the white lift and mix in
+     black) so bright data rows stay legible against the canvas. */
+  :root:not([data-theme]) .dash-surface .glass-panel,
+  :root[data-theme='evening'] .dash-surface .glass-panel,
+  :root[data-theme='zinc-dark'] .dash-surface .glass-panel,
+  :root[data-theme='amethyst'] .dash-surface .glass-panel {
+    background: color-mix(in oklab, var(--card) 90%, black 10%);
+  }
+
   /* Pull-tab bookmark panels float over the canvas, so they need a much
      frostier, more opaque surface than regular flow nodes — otherwise the
      flowchart lines/nodes show through and hurt text readability. */

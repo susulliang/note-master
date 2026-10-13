@@ -877,13 +877,6 @@ export default function EngineSettingsPanel({
                 ))}
               </div>
             )}
-            <p className="mt-1.5 text-[8px] leading-snug text-muted-foreground/70">
-              A remote AI parser is always available per Parse click (no download, no key entry).
-              The local builds below are one-time downloads cached by the browser; GPU builds
-              (q4f16) need WebGPU (Chrome/Edge 113+) and are verified with a 2-token warmup at
-              load — a GPU too slow to parse falls back to the CPU build automatically. Only one
-              local model is resident at a time.
-            </p>
           </div>
         )}
 

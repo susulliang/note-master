@@ -2151,8 +2151,8 @@ export default function Dash() {
   }, []);
 
   return (
-    <div className="min-h-full bg-background px-3 py-3 text-foreground sm:px-5 sm:py-4">
-      <header className="glass-panel sticky top-0 z-30 -mx-3 mb-4 rounded-xl px-3 py-3 sm:-mx-5 sm:px-5">
+    <div className="dash-surface min-h-full bg-background px-3 py-3 text-foreground sm:px-5 sm:py-4">
+      <header className="glass-panel sticky top-0 z-30 mb-4 rounded-xl px-3 py-3 sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground sm:text-xl"><Activity className="size-5 text-accent" />AMR Dashboard</h1>
@@ -2203,7 +2203,7 @@ export default function Dash() {
               dsatsByAgent={dsatsByAgent}
               onFocusCase={focusDsatsCase}
             />
-            <div className="hidden xl:block" id={DSAT_WIDGET_ID}>
+            <div id={DSAT_WIDGET_ID}>
               <DsatsWidget state={data.dsats.state} agents={data.agents} focusCase={dsatFocus} />
             </div>
           </div>
