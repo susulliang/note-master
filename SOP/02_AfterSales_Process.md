@@ -541,39 +541,53 @@ We appreciate your understanding, and we're always here if you need us\.
 
 ![image\.png](assets/image%2043.png)
 
-#### 2\.4 特殊岛屿区域处理流程
+#### 2\.4 特殊岛屿或偏远区域处理流程（Special Islands or Remote Areas Handling Process）
 
-目前售后仓库无法发机器到特殊岛屿区域（如Hawaii和Puerto Rico），如果该区域用户进线寻求保修，正常收集完信息后（POP，Serial Number号，视频缺一不可），用**以下话术（截图所示）**收集用户资料，用户回复完之后，回复升级专用回复模板，**必须**将工单**升级至Tier 3 \(****Winnie****\) 处****确认退款还是换机：**
+目前售后仓库无法发机器到特殊岛屿或偏远区域（如Hawaii和Puerto Rico），如果该区域用户进线寻求保修，正常收集完信息后（POP，Serial Number号，视频缺一不可），用**以下话术（截图所示）**收集用户资料，用户回复完之后，回复升级专用回复模板，**必须**将工单**升级至Tier 3 \(****Winnie****\) 处****确认退款还是换机：**
+
+*The after\-sales warehouse cannot ship units to special\-island or remote areas (e\.g\. Hawaii and Puerto Rico)\. If a customer from these areas contacts us for warranty service, collect the required information as usual (POP, Serial Number, and video are all mandatory) using the script below (see screenshot)\. Once the customer has replied, send the escalation\-specific reply template and **escalate the ticket to Tier 3 (Winnie) to confirm refund or replacement**\.*
 
 
 
 **若退款，需升级给****Tier 2****/****Team Leader****进行后续跟进。**
 
+***If a refund is approved, escalate to Tier 2 / Team Leader for follow\-up\.***
+
 - *（直至另行通知\) 后续遇到 ****PR\-Guaynabo（邮编 00968、00969）**** 的订单时，****无需升级至 Tier 3 确认换机或退款方案，请直接选择退款选项。***
+  *(Until further notice\) For orders from PR\-Guaynabo (ZIP codes 00968, 00969), do **not** escalate to Tier 3 to confirm refund or replacement — select the refund option directly\.)*
 *目前发现该区域的换机物流成本较高，相关费用约为 ****$700–$800/台****，****无需向客户透露此信息****。*
+*(The logistics cost of exchanging units in this area is high — roughly **$700–$800 per unit**\. Do not disclose this to the customer\.)*
 *其他 Puerto Rico 地区目前暂未发现类似情况，****按照正常流程处理即可****。*
+*(No similar cases have been found in other Puerto Rico areas so far — handle them under the normal process\.)*
+
+- **Iqaluit, Nunavut, Canada，不发货**（目前发现该区域的换机物流成本较高，相关费用约为 **$700–$800/台**，无需向客户透露此信息）——相关咨询，**升级至Tier 2/Team Lead**，**请勿自行答应**。
+  ***Iqaluit, Nunavut, Canada — we do not ship there** (exchange logistics costs in this area are high, roughly **$700–$800 per unit**; do not disclose this to the customer)\. For related inquiries, **escalate to Tier 2 / Team Lead — do not commit to the customer on your own**\.*
 
 
 
 **若换货，请按照****Tier 3****指引处理下一步。**
 
+***If a replacement is approved, follow Tier 3's instructions for the next steps\.***
+
 ![image\.png](assets/image%205.png)
 
-特殊岛屿区域包括：
+特殊岛屿或偏远区域包括（Special islands or remote areas include）：
 
-- Hawaii
+- Hawaii — 夏威夷
 
-- Alaska
+- Alaska — 阿拉斯加
 
-- Puerto Rico
+- Puerto Rico — 波多黎各
 
-- Guam
+- Guam — 关岛
 
-- U\.S\. Virgin Islands
+- U\.S\. Virgin Islands — 美属维尔京群岛
 
-- Northern Mariana Islands
+- Northern Mariana Islands — 北马里亚纳群岛
 
-- American Samoa
+- American Samoa — 美属萨摩亚
+
+- Majuro Atoll — 马朱罗环礁
 
 
 
