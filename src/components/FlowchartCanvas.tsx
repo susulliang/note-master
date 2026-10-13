@@ -1045,7 +1045,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Case Trak board — shares the canvas' dotted bg, fills full
           canvas height/width via h-full on the min-h-full anchor.
           Hidden analytics view: only rendered when unlocked (Shift+D). */}
-      {activeView === 'caseTrak' && analyticsEnabled && (
+      {activeView === 'caseTrak' && (trakEnabled ?? analyticsEnabled) && (
         <div className="h-full min-h-full w-full pl-[92px]">
           {caseTrakContent}
         </div>
@@ -1062,7 +1062,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* KPI Dashboard — AMR Contact Center metrics, rendered from a
           Salesforce dashboard snapshot. Hidden analytics view: only rendered
           when unlocked (Shift+D). Same full-canvas layout as Trak. */}
-      {activeView === 'dash' && analyticsEnabled && (
+      {activeView === 'dash' && (dashEnabled ?? analyticsEnabled) && (
         <div className="h-full min-h-full w-full pl-[92px]">
           {dashContent}
         </div>

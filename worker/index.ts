@@ -428,7 +428,17 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204 });
+  // Preflight MUST carry the same CORS headers as authJson — otherwise
+  // browsers on cross-origin deployments (Vercel, Tauri) fail the fetch
+  // with a network error even though the API itself is reachable.
+  if (request.method === 'OPTIONS') {
+    const preflight = new Response(null, { status: 204 });
+    preflight.headers.set('access-control-allow-origin', '*');
+    preflight.headers.set('access-control-allow-headers', 'content-type, authorization');
+    preflight.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
+    preflight.headers.set('access-control-max-age', '86400');
+    return preflight;
+  }
   if (path === '/api/auth/health' && request.method === 'GET') return authJson({ ok: true });
   if (path === '/api/auth/names' && request.method === 'GET')
     return authJson({ names: AUTH_EXTRA_NAMES, admin: [...AUTH_ADMIN_USERNAMES] });
