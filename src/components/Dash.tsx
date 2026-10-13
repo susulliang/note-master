@@ -1,4 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CartesianGrid,
+  Cell,
+  ReferenceLine,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+  ZAxis,
+  type TooltipProps,
+} from 'recharts';
 import {
   Activity,
   ArrowDownWideNarrow,
@@ -16,25 +29,13 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import {
-  CartesianGrid,
-  Cell,
-  ReferenceLine,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-  ZAxis,
-  type TooltipProps,
-} from 'recharts';
 import { countMtdShifts, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
 import { useCsatReport } from '@/hooks/use-csat-report';
 import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
 import { useResponseTimeReport } from '@/hooks/use-response-time-report';
-import type { HistoricalAgent, OneTouchChannel, ResponseTimeReport } from '@/lib/sf-reports';
+import { useDsatsReport } from '@/hooks/use-dsats-report';
+import type { DsatsCase, HistoricalAgent, OneTouchChannel, ResponseTimeReport } from '@/lib/sf-reports';
 import {
   Dialog,
   DialogContent,
@@ -48,14 +49,21 @@ import {
   DASH_METRICS,
   formatMetric,
   isMetricAbnormal,
+  metricBreachCount,
   metricGap,
   metricMeta,
+  metricStage,
+  METRIC_STAGE_LEGEND,
+  METRIC_STAGE_STYLES,
   metricValue,
   normalizeAgentName,
   type DashAgent,
   type DashMetricId,
+  type MetricStage,
 } from '@/lib/dash-model';
-import { cn } from '@/lib/utils';
+import {
+  cn,
+} from '@/lib/utils';
 import TestScoreSubmissions, { useTestScoreData } from '@/components/TestScoreSubmissions';
 import KeywordAlertsManager from '@/components/KeywordAlertsManager';
 
@@ -202,6 +210,7 @@ function useDashData() {
   const touch = useOneTouchReport();
   const dailies = useDailiesReport();
   const response = useResponseTimeReport();
+  const dsats = useDsatsReport();
 
   const agents = useMemo(
     () =>
@@ -220,10 +229,11 @@ function useDashData() {
     touch.reload();
     dailies.reload();
     response.reload();
+    dsats.reload();
   };
-  const refreshing = csat.refreshing || touch.refreshing || dailies.refreshing || response.refreshing;
+  const refreshing = csat.refreshing || touch.refreshing || dailies.refreshing || response.refreshing || dsats.refreshing;
 
-  return { csat, touch, dailies, response, agents, reload, refreshing };
+  return { csat, touch, dailies, response, dsats, agents, reload, refreshing };
 }
 
 function ReportSources({
@@ -247,6 +257,11 @@ function ReportSources({
       label: 'One-Touch',
       ...loadInfo(data.touch.state),
       report: data.touch.state.status === 'ready' ? data.touch.state.report : null,
+    },
+    {
+      label: 'DSAT MTD',
+      ...loadInfo(data.dsats.state),
+      report: data.dsats.state.status === 'ready' ? data.dsats.state.report : null,
     },
     {
       label: 'Chat volume',
@@ -284,7 +299,7 @@ function ReportSources({
       report: response?.emailAvg ?? null,
     },
   ];
-  const unavailable = [data.csat.state, data.touch.state, data.dailies.state, data.response.state]
+  const unavailable = [data.csat.state, data.touch.state, data.dsats.state, data.dailies.state, data.response.state]
     .filter((state) => {
       const status = loadInfo(state).status;
       return status === 'error' || status === 'stale';
@@ -443,6 +458,13 @@ function ResponseSummaryTile({
   );
 }
 
+const STAGE_ARIA_LABEL: Record<MetricStage, string> = {
+  breach: 'below threshold',
+  warn: 'between threshold and target',
+  target: 'between target and challenge',
+  challenge: 'at challenge level',
+};
+
 function AgentMatrix({
   agents,
   emptyMessage,
@@ -468,7 +490,7 @@ function AgentMatrix({
         if (bv === null && av !== null) return -1;
         if (av !== null && bv !== null && av !== bv) return (av - bv) * (sortDirection === 'ascending' ? 1 : -1);
       } else {
-        const breachDiff = agentBreachCount(b) - agentBreachCount(a);
+        const breachDiff = metricBreachCount(b) - metricBreachCount(a);
         if (breachDiff) return breachDiff;
       }
       return a.name.localeCompare(b.name);
@@ -493,8 +515,16 @@ function AgentMatrix({
         <div>
           <h2 className="text-sm font-semibold text-foreground">Agent signal matrix</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {sortMetric ? `Sorted by ${metricMeta(sortMetric).label}` : 'Sorted by metric breaches'} · each value uses its own limit
+            {sortMetric ? `Sorted by ${metricMeta(sortMetric).label}` : 'Sorted by threshold breaches'} · staged vs KPI matrix thresholds
           </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+            {METRIC_STAGE_LEGEND.map(({ stage, label, dot }) => (
+              <span key={stage} className="inline-flex items-center gap-1">
+                <span className={cn('size-2 rounded-full', dot)} />
+                {label}
+              </span>
+            ))}
+          </div>
         </div>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Rows
@@ -536,7 +566,7 @@ function AgentMatrix({
               </thead>
               <tbody>
                 {rows.map((agent) => {
-                  const breaches = agentBreachCount(agent);
+                  const breaches = metricBreachCount(agent);
                   return (
                     <tr key={agent.key} className="border-b border-border/30 transition-colors hover:bg-accent/5">
                       <th scope="row" className="sticky left-0 z-10 bg-card/90 px-4 py-2 text-left backdrop-blur-md">
@@ -546,7 +576,7 @@ function AgentMatrix({
                       </th>
                       {DASH_METRICS.map((metric) => {
                         const value = metricValue(agent, metric.id);
-                        const abnormal = value !== null && isMetricAbnormal(metric.id, value);
+                        const stage = value !== null ? metricStage(metric.id, value) : null;
                         return (
                           <td key={metric.id} className="px-2 py-2 text-center">
                             {value === null ? (
@@ -555,10 +585,11 @@ function AgentMatrix({
                               <button
                                 type="button"
                                 onClick={() => onMetric(agent, metric.id)}
-                                aria-label={`${agent.name}, ${metric.label}: ${formatMetric(metric.id, value)}${abnormal ? ', outside limit' : ', within limit'}`}
+                                aria-label={`${agent.name}, ${metric.label}: ${formatMetric(metric.id, value)}, ${STAGE_ARIA_LABEL[stage!]}`}
+                                title={`${formatMetric(metric.id, value)} · ${STAGE_ARIA_LABEL[stage!]}`}
                                 className={cn(
                                   'glass-chip rounded-md px-2 py-1 font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
-                                  abnormal ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20' : 'text-foreground hover:bg-accent/10',
+                                  stage ? METRIC_STAGE_STYLES[stage] : 'text-foreground hover:bg-accent/10',
                                 )}
                               >
                                 {formatMetric(metric.id, value)}
@@ -579,7 +610,7 @@ function AgentMatrix({
             </table>
           </div>
           <footer className="flex items-center justify-between gap-3 px-4 py-3 text-xs text-muted-foreground">
-            <span>{sorted.length} report identities · {sorted.reduce((sum, agent) => sum + agentBreachCount(agent), 0)} metric breaches</span>
+            <span>{sorted.length} report identities · {sorted.reduce((sum, agent) => sum + metricBreachCount(agent), 0)} threshold breaches</span>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={currentPage === 0} aria-label="Previous agent page" className={cn(CONTROL, 'min-h-8 px-2 disabled:opacity-40')}>
                 <ChevronLeft className="size-4" />
@@ -677,14 +708,30 @@ function ParliamentChart({
   agents,
   selectedKey,
   onSelect,
+  dsatsByAgent,
+  onFocusCase,
 }: {
   agents: DashAgent[];
   selectedKey: string | null;
   onSelect: (agent: DashAgent) => void;
+  dsatsByAgent: Map<string, DsatsCase[]>;
+  onFocusCase: (caseNumber: string) => void;
 }) {
   const seats = useMemo(() => buildParliamentSeats(agents), [agents]);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const clearTimer = useRef<number | null>(null);
+  // Grace period so the pointer can travel from a seat into the floating
+  // panel's DSAT chips before the panel unmounts.
+  const scheduleHoverClear = useCallback(() => {
+    if (clearTimer.current !== null) window.clearTimeout(clearTimer.current);
+    clearTimer.current = window.setTimeout(() => { setHoveredKey(null); clearTimer.current = null; }, 240);
+  }, []);
+  const cancelHoverClear = useCallback(() => {
+    if (clearTimer.current !== null) { window.clearTimeout(clearTimer.current); clearTimer.current = null; }
+  }, []);
+  useEffect(() => () => { if (clearTimer.current !== null) window.clearTimeout(clearTimer.current); }, []);
   const hovered = seats.find((seat) => seat.agent.key === hoveredKey) ?? null;
+  const hoveredDsats = hovered ? dsatsByAgent.get(hovered.agent.key) ?? [] : [];
   const counts = seats.reduce<Record<OverallBand, number>>((result, seat) => {
     result[seat.band]++;
     return result;
@@ -717,8 +764,8 @@ function ParliamentChart({
                     aria-label={`${seat.agent.name}, ${meta.label}, ${score.met} of ${score.available} reported cutoffs met`}
                     aria-pressed={selected}
                     onClick={() => onSelect(seat.agent)}
-                    onMouseEnter={() => setHoveredKey(seat.agent.key)}
-                    onMouseLeave={() => setHoveredKey((current) => current === seat.agent.key ? null : current)}
+                    onMouseEnter={() => { cancelHoverClear(); setHoveredKey(seat.agent.key); }}
+                    onMouseLeave={scheduleHoverClear}
                     onFocus={() => setHoveredKey(seat.agent.key)}
                     onBlur={() => setHoveredKey((current) => current === seat.agent.key ? null : current)}
                     onKeyDown={(event) => {
@@ -768,7 +815,7 @@ function ParliamentChart({
                 </div>
                 <p className="mt-1 text-[10px] text-muted-foreground">{overallPerformance(hovered.agent).met}/{overallPerformance(hovered.agent).available} reported cutoffs met</p>
           <div className="glass-panel mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg p-2">
-                  {DASH_METRICS.map((metric) => {
+                    {DASH_METRICS.map((metric) => {
                     const value = metricValue(hovered.agent, metric.id);
                     return (
                       <span key={metric.id} className="flex min-w-0 items-center justify-between gap-2 text-[10px]">
@@ -780,6 +827,28 @@ function ParliamentChart({
                     );
                   })}
                 </div>
+                {hoveredDsats.length > 0 && (
+                  <div
+                    className="pointer-events-auto mt-2 cursor-default rounded-lg border border-rose-500/25 bg-rose-500/[0.06] p-2"
+                    onMouseEnter={cancelHoverClear}
+                    onMouseLeave={scheduleHoverClear}
+                  >
+                    <p className="text-[10px] font-semibold text-rose-200">{hoveredDsats.length} DSAT case{hoveredDsats.length > 1 ? 's' : ''} MTD</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {hoveredDsats.map((item) => (
+                        <button
+                          key={item.caseNumber}
+                          type="button"
+                          onClick={() => onFocusCase(item.caseNumber)}
+                          title={`${item.issueType} · ${item.model} — click to open in DSAT MTD`}
+                          className="rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-rose-100 transition-colors hover:bg-rose-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                        >
+                          {item.caseNumber}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -793,6 +862,240 @@ function ParliamentChart({
             ))}
           </div>
           <p className="mt-2 text-center text-[10px] text-muted-foreground">Equal-weight share of available cutoffs met; missing metrics are excluded.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export const DSAT_WIDGET_ID = 'dsat-mtd-widget';
+
+/**
+ * Matches a Salesforce DSAT "Case Owner" label ("Boris Z.", "Lynnet.M") to a
+ * dashboard agent ("Boris"). Equality wins; otherwise the shorter name must
+ * be a prefix of a longer multi-token label, so Steve never matches Steven.
+ */
+export function dsatOwnerMatches(owner: string, agentName: string): boolean {
+  const o = normalizeAgentName(owner);
+  const a = normalizeAgentName(agentName);
+  if (!o || !a) return false;
+  if (o === a) return true;
+  return (o.startsWith(a) || a.startsWith(o)) && Math.max(o.split(' ').length, a.split(' ').length) > 1;
+}
+
+const DSAT_CHANNEL_STYLES: Record<string, string> = {
+  Chat: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+  Email: 'border-violet-500/30 bg-violet-500/10 text-violet-200',
+  Phone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+};
+
+/** Clipboard with a legacy fallback — navigator.clipboard is undefined on plain-http LAN origins. */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* fall through to legacy path */ }
+  }
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+const DSAT_AUTO_SCROLL_PX_PER_SEC = 26;
+
+function DsatsWidget({
+  state,
+  agents,
+  focusCase,
+}: {
+  state: ReturnType<typeof useDashData>['dsats']['state'];
+  agents: DashAgent[];
+  focusCase: string | null;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [listHovered, setListHovered] = useState(false);
+  const pauseUntilRef = useRef(0);
+  const report = state.status === 'ready' ? state.report : null;
+  const cases = report?.cases ?? [];
+
+  useEffect(() => {
+    if (!focusCase) return;
+    document.getElementById(`dsat-case-${focusCase}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    pauseUntilRef.current = performance.now() + 6000; // hold still so the highlight is seen
+  }, [focusCase]);
+
+  // Gentle auto-scroll through the case cards; pauses while hovered or after
+  // a case was focused from the parliament panel.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || cases.length < 6) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      if (listHovered || now < pauseUntilRef.current) return;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll <= 0) return;
+      el.scrollTop += DSAT_AUTO_SCROLL_PX_PER_SEC * dt;
+      if (el.scrollTop >= maxScroll) el.scrollTop = 0;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [listHovered, cases.length]);
+
+  const issueStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of cases) counts.set(item.issueType, (counts.get(item.issueType) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [cases]);
+
+  const agentStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of cases) {
+      const agent = agents.find((candidate) => dsatOwnerMatches(item.owner, candidate.name));
+      const name = agent?.name ?? item.owner;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [cases, agents]);
+
+  const copyCase = async (caseNumber: string) => {
+    if (await copyTextToClipboard(caseNumber)) {
+      setCopied(caseNumber);
+      window.setTimeout(() => setCopied((current) => (current === caseNumber ? null : current)), 1600);
+    }
+  };
+
+  const maxIssue = issueStats[0]?.[1] ?? 1;
+  const maxAgent = agentStats[0]?.[1] ?? 1;
+
+  return (
+    <section className={cn(PANEL, 'flex h-full min-h-[22rem] flex-col overflow-hidden')}>
+      <header className="border-b border-border/50 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <CircleAlert className="size-4 text-rose-300" />
+              DSAT MTD
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Dissatisfaction cases · excludes DTC + other regions</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-rose-200">
+            {cases.length}
+          </span>
+        </div>
+        {report?.asOf && <p className="mt-1 text-[10px] text-muted-foreground">As of {report.asOf}</p>}
+      </header>
+
+      {state.status === 'loading' ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading DSAT cases…</div>
+      ) : state.status === 'error' ? (
+        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-rose-300">{state.message}</div>
+      ) : cases.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">No dissatisfied cases this month. 🎉</div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="glass-panel rounded-lg p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Top drivers</p>
+              <div className="mt-2 space-y-1.5">
+                {issueStats.map(([issue, count]) => (
+                  <div key={issue} className="min-w-0">
+                    <div className="flex items-baseline justify-between gap-2 text-[10px]">
+                      <span className="truncate text-foreground" title={issue}>{issue}</span>
+                      <span className="shrink-0 font-mono tabular-nums text-rose-300">{count}</span>
+                    </div>
+                    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-border/40">
+                      <div className="h-full rounded-full bg-rose-400/80" style={{ width: `${(count / maxIssue) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="glass-panel rounded-lg p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Most affected agents</p>
+              <div className="mt-2 space-y-1.5">
+                {agentStats.map(([name, count]) => (
+                  <div key={name} className="min-w-0">
+                    <div className="flex items-baseline justify-between gap-2 text-[10px]">
+                      <span className="truncate text-foreground" title={name}>{name}</span>
+                      <span className="shrink-0 font-mono tabular-nums text-rose-300">{count}</span>
+                    </div>
+                    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-border/40">
+                      <div className="h-full rounded-full bg-amber-400/80" style={{ width: `${(count / maxAgent) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-3 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cases · click a case number to copy · <span className="font-normal normal-case">auto-scrolls, hover to pause</span></p>
+          <div
+            ref={listRef}
+            onMouseEnter={() => setListHovered(true)}
+            onMouseLeave={() => setListHovered(false)}
+            className="mt-1.5 max-h-[21rem] min-h-0 flex-1 space-y-1 overflow-y-auto pr-1"
+          >
+            {cases.map((item) => {
+              const focused = focusCase === item.caseNumber;
+              return (
+                <div
+                  key={item.caseNumber}
+                  id={`dsat-case-${item.caseNumber}`}
+                  className={cn(
+                    'glass-panel scroll-mt-4 rounded-md px-2 py-1.5 transition-all duration-500',
+                    focused ? 'ring-2 ring-rose-400/80 bg-rose-500/[0.08]' : '',
+                  )}
+                >
+                  <div className="flex items-center gap-x-2">
+                    <button
+                      type="button"
+                      onClick={() => copyCase(item.caseNumber)}
+                      aria-label={`Copy case number ${item.caseNumber}`}
+                      title="Copy case number for Salesforce lookup"
+                      className={cn(
+                        'shrink-0 rounded border px-1.5 py-0.5 font-mono text-[11px] font-bold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                        copied === item.caseNumber
+                          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                          : 'border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/25',
+                      )}
+                    >
+                      {copied === item.caseNumber ? 'Copied!' : item.caseNumber}
+                    </button>
+                    <span className="min-w-0 truncate text-[11px] font-medium text-foreground" title={item.owner}>{item.owner}</span>
+                    <span className={cn('ml-auto shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold leading-none', DSAT_CHANNEL_STYLES[item.channel] ?? 'border-border bg-border/20 text-muted-foreground')}>
+                      {item.channel}
+                    </span>
+                    <span className={cn('shrink-0 text-[9px] leading-none', item.status === 'Closed' ? 'text-muted-foreground' : 'text-amber-200')}>
+                      {item.status}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                    <span className="shrink-0 rounded bg-rose-500/10 px-1 py-0.5 text-[9px] leading-none text-rose-200">{item.issueType}</span>
+                    <span className="min-w-0 truncate text-[9px] leading-none text-muted-foreground" title={item.model}>{item.model}</span>
+                  </div>
+                  {item.description && <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-muted-foreground" title={item.description}>{item.description}</p>}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 shrink-0 text-[9px] text-muted-foreground">{report?.fileName}</p>
         </div>
       )}
     </section>
@@ -890,8 +1193,7 @@ function CallPerformanceCard({
           || b.missed - a.missed
           || (a.serviceLevel20 ?? 100) - (b.serviceLevel20 ?? 100)
           || (a.answerRate ?? 100) - (b.answerRate ?? 100);
-      })
-      .slice(0, 3),
+      }),
     [reportAgents, averageAnswerRate],
   );
   const shiftAverage = useMemo(() => {
@@ -958,8 +1260,8 @@ function CallPerformanceCard({
         ))}
       </div>
 
-      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)]">
-      <div className="glass-panel min-w-0 rounded-lg p-3">
+      <div className="mt-3 grid gap-3 xl:h-[26rem] xl:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)]">
+      <div className="glass-panel flex min-w-0 flex-col rounded-lg p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-foreground">Agent answer vs. 20s SLA</h3>
@@ -971,7 +1273,7 @@ function CallPerformanceCard({
             </div>
           </div>
           {plotAgents.length > 0 && data ? (
-            <div className="mt-1 h-52 w-full" role="img" aria-label="Bubble chart comparing agent answer rate and 20-second service level">
+            <div className="mt-1 h-52 w-full xl:h-auto xl:min-h-0 xl:flex-1" role="img" aria-label="Bubble chart comparing agent answer rate and 20-second service level">
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart margin={{ top: 10, right: 12, bottom: 4, left: -16 }}>
                   <CartesianGrid stroke="rgba(139,148,158,0.16)" strokeDasharray="3 3" />
@@ -1017,21 +1319,21 @@ function CallPerformanceCard({
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="glass-panel mt-3 flex h-52 items-center justify-center rounded-md border-dashed px-4 text-center text-xs text-muted-foreground">
+            <div className="glass-panel mt-3 flex h-52 items-center justify-center rounded-md border-dashed px-4 text-center text-xs text-muted-foreground xl:h-auto xl:min-h-0 xl:flex-1">
               {state.status === 'loading' ? 'Loading agent call metrics…' : agentsReady ? 'Not enough agent data to draw the call chart.' : 'Published snapshot has no agent-level historical metrics yet.'}
             </div>
           )}
         </div>
 
-        <div className="glass-panel min-w-0 rounded-lg p-3">
+        <div className="glass-panel flex min-h-0 min-w-0 flex-col rounded-lg p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-foreground">Call watchlist</h3>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">Agents with the clearest service signals</p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">All agents with service signals · scroll for more</p>
             </div>
             <span className="rounded-full bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-rose-200">{watchlist.length} flagged</span>
           </div>
-          <div className="mt-2 space-y-2">
+          <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {watchlist.length > 0 ? watchlist.map((agent, index) => {
               const reasons = callAttentionReasons(agent, averageAnswerRate);
               return (
@@ -1642,25 +1944,6 @@ function AgentDetailContent({ agent, compare, onCompare }: { agent: DashAgent; c
   );
 }
 
-function AgentDetailPanel({ agent, compare, onCompare }: { agent: DashAgent | null; compare: string[]; onCompare: (key: string) => void }) {
-  return (
-    <section className={cn(PANEL, 'h-full min-h-[22rem] p-4')}>
-      <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <Users className="size-3.5" />
-        Agent detail
-      </div>
-      {agent ? (
-        <AgentDetailContent agent={agent} compare={compare} onCompare={onCompare} />
-      ) : (
-        <div className="flex min-h-[17rem] flex-col items-center justify-center text-center">
-          <div className="text-sm font-medium text-foreground">Select an agent seat</div>
-          <p className="mt-1 max-w-52 text-xs text-muted-foreground">Full reported metrics and cutoff comparisons will appear here.</p>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function AgentInspector({ agent, onClose, compare, onCompare, inlineDetails }: { agent: DashAgent | null; onClose: () => void; compare: string[]; onCompare: (key: string) => void; inlineDetails: boolean }) {
   const [wideScreen, setWideScreen] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches,
@@ -1743,6 +2026,7 @@ export default function Dash() {
   const [selected, setSelected] = useState<DashAgent | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
   const [focusMetric, setFocusMetric] = useState<DashMetricId | null>(null);
+  const [dsatFocus, setDsatFocus] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -1817,6 +2101,24 @@ export default function Dash() {
     });
   };
 
+  const dsatsByAgent = useMemo(() => {
+    const map = new Map<string, DsatsCase[]>();
+    if (data.dsats.state.status !== 'ready') return map;
+    for (const item of data.dsats.state.report.cases) {
+      const agent = data.agents.find((candidate) => dsatOwnerMatches(item.owner, candidate.name));
+      const key = agent?.key ?? `owner:${normalizeAgentName(item.owner)}`;
+      const list = map.get(key);
+      if (list) list.push(item);
+      else map.set(key, [item]);
+    }
+    return map;
+  }, [data.dsats.state, data.agents]);
+
+  const focusDsatsCase = useCallback((caseNumber: string) => {
+    setDsatFocus(caseNumber);
+    document.getElementById(DSAT_WIDGET_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
   return (
     <div className="min-h-full bg-background px-3 py-3 text-foreground sm:px-5 sm:py-4">
       <header className="glass-panel sticky top-0 z-30 -mx-3 mb-4 rounded-xl px-3 py-3 sm:-mx-5 sm:px-5">
@@ -1862,13 +2164,19 @@ export default function Dash() {
           </section>
           <MtdVolumeSummary state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.8fr)]">
-            <ParliamentChart agents={filteredAgents} selectedKey={selected?.key ?? null} onSelect={setSelected} />
-            <div className="hidden xl:block">
-              <AgentDetailPanel agent={selected} compare={compare} onCompare={toggleCompare} />
+            <ParliamentChart
+              agents={filteredAgents}
+              selectedKey={selected?.key ?? null}
+              onSelect={setSelected}
+              dsatsByAgent={dsatsByAgent}
+              onFocusCase={focusDsatsCase}
+            />
+            <div className="hidden xl:block" id={DSAT_WIDGET_ID}>
+              <DsatsWidget state={data.dsats.state} agents={data.agents} focusCase={dsatFocus} />
             </div>
           </div>
-          <TestScoreSubmissions state={testScores} />
           <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
+          <TestScoreSubmissions state={testScores} />
           <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
             <AgentMatrix
               agents={filteredAgents}

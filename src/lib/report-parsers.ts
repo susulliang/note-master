@@ -453,6 +453,91 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
 }
 
 // ---------------------------------------------------------------------------
+// DSAT (dissatisfaction cases, excludes DTC + other regions)
+// ---------------------------------------------------------------------------
+
+export interface DsatsCase {
+  caseNumber: string;
+  owner: string;
+  model: string;
+  issueType: string;
+  /** Sanitized description snippet — emails redacted, whitespace collapsed. */
+  description: string;
+  /** 'Chat' / 'Email' / 'Phone', joined with " / " when several apply. */
+  channel: string;
+  status: string;
+}
+
+export interface DsatsReport {
+  fileName: string;
+  asOf: string | null;
+  cases: DsatsCase[];
+  total: number;
+}
+
+function sanitizeDsatsDescription(raw: string): string {
+  const cleaned = raw
+    .replace(/<mailto:[^>]+>/gi, ' ')
+    .replace(/[\w.+-]+@[\w-]+\.[\w.:-]+/g, '[email]')
+    .replace(/https?:\/\/\S+/g, '[link]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 220 ? `${cleaned.slice(0, 217).trimEnd()}…` : cleaned;
+}
+
+export function parseDsatsWorkbook(data: ArrayBuffer, fileName: string): DsatsReport {
+  const { rows } = sheetRows(data, /dsat/i);
+  const asOf = extractAsOf(rows);
+
+  const headerIdx = rows.findIndex(
+    (r) => r.some((c) => /^Case Owner/i.test(String(c ?? '').trim().replace(/\s*↑.*$/, '')))
+      && r.some((c) => /^Case Number$/i.test(String(c ?? '').trim())),
+  );
+  if (headerIdx === -1) throw new Error(`DSAT header row not found in ${fileName}`);
+  const header = rows[headerIdx]!.map((cell) => String(cell ?? '').trim().replace(/\s*↑.*$/, ''));
+  const col = (re: RegExp) => header.findIndex((h) => re.test(h));
+  const cols = {
+    owner: col(/^Case Owner$/i),
+    caseNumber: col(/^Case Number$/i),
+    model: col(/^AMR Model No\.?$/i),
+    issueType: col(/^Issue Type1 Second Classification$/i),
+    description: col(/^Description$/i),
+    chatResult: col(/^Chat Satisfaction Result$/i),
+    emailResult: col(/^Email CSAT Survey Result$/i),
+    phoneResult: col(/^Phone Survey Result/i),
+    status: col(/^Status$/i),
+  };
+  if (cols.owner === -1 || cols.caseNumber === -1) throw new Error(`DSAT owner/case columns not found in ${fileName}`);
+
+  const cases: DsatsCase[] = [];
+  let lastOwner = '';
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const caseNumber = String(row[cols.caseNumber] ?? '').trim();
+    const ownerCell = String(row[cols.owner] ?? '').trim();
+    // Salesforce groups repeat owners; blank owner cells continue the previous group.
+    if (ownerCell && !/^total$/i.test(ownerCell)) lastOwner = ownerCell;
+    if (!caseNumber || !/^\d{6,}$/.test(caseNumber)) continue; // skips blank pads and the Total footer
+    const channels = [
+      cols.chatResult !== -1 && String(row[cols.chatResult] ?? '').trim() ? 'Chat' : null,
+      cols.emailResult !== -1 && String(row[cols.emailResult] ?? '').trim() ? 'Email' : null,
+      cols.phoneResult !== -1 && String(row[cols.phoneResult] ?? '').trim() ? 'Phone' : null,
+    ].filter((c): c is string => Boolean(c));
+    cases.push({
+      caseNumber,
+      owner: lastOwner,
+      model: String(row[cols.model] ?? '').trim() || 'Unknown model',
+      issueType: String(row[cols.issueType] ?? '').trim() || 'Unclassified',
+      description: sanitizeDsatsDescription(String(row[cols.description] ?? '')),
+      channel: channels.join(' / ') || 'Unknown',
+      status: String(row[cols.status] ?? '').trim() || '—',
+    });
+  }
+  if (cases.length === 0) throw new Error(`No DSAT case rows found in ${fileName}`);
+  return { fileName, asOf, cases, total: cases.length };
+}
+
+// ---------------------------------------------------------------------------
 // Average response time (Chat + Email first / Email avg)
 // ---------------------------------------------------------------------------
 

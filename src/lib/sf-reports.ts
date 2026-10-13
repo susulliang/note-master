@@ -13,6 +13,7 @@ import {
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
   parseChatResponseTimeWorkbook,
+  parseDsatsWorkbook,
   parseEmailAvgResponseWorkbook,
   parseEmailFirstResponseWorkbook,
   parseHistoricalMetricsCsv,
@@ -23,6 +24,8 @@ import {
   type CountRow,
   type CsatAgentRow,
   type CsatReport,
+  type DsatsCase,
+  type DsatsReport,
   type HistoricalAgent,
   type HistoricalMetricsReport,
   type OneTouchChannel,
@@ -52,6 +55,8 @@ export {
   type CountRow,
   type CsatAgentRow,
   type CsatReport,
+  type DsatsCase,
+  type DsatsReport,
   type HistoricalAgent,
   type HistoricalMetricsReport,
   type OneTouchChannel,
@@ -106,6 +111,13 @@ export function pickCallDataExport(files: SfReportFile[]): SfReportFile | undefi
 export function pickHistoricalMetricsExport(files: SfReportFile[]): SfReportFile | undefined {
   return files
     .filter((f) => /\.csv$/i.test(f.name) && /historical[\s_-]*metrics/i.test(f.name))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+}
+
+/** Newest DSAT *.xlsx export (filename starts with "DSAT"). */
+export function pickDsatsExport(files: SfReportFile[]): SfReportFile | undefined {
+  return files
+    .filter((f) => /\.xlsx$/i.test(f.name) && /^dsat/i.test(f.name.trim()))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
 }
 
@@ -188,6 +200,12 @@ export async function fetchHistoricalReport(file: SfReportFile, signal?: AbortSi
   return parseHistoricalMetricsCsv(text, file.name);
 }
 
+export async function fetchDsatsReport(file: SfReportFile, signal?: AbortSignal): Promise<DsatsReport> {
+  const res = await fetch(`${BASE}sf_reports/${encodeURIComponent(file.name)}`, { signal });
+  if (!res.ok) throw new Error(`Failed to download ${file.name}: HTTP ${res.status}`);
+  return parseDsatsWorkbook(await res.arrayBuffer(), file.name);
+}
+
 export async function fetchChatResponseReport(file: SfReportFile, signal?: AbortSignal): Promise<ResponseTimeReport> {
   const res = await fetch(`${BASE}sf_reports/${encodeURIComponent(file.name)}`, { signal });
   if (!res.ok) throw new Error(`Failed to download ${file.name}: HTTP ${res.status}`);
@@ -228,6 +246,7 @@ export interface DashboardData {
   chatResponse?: ResponseTimeReport;
   emailFirstResponse?: ResponseTimeReport;
   emailAvgResponse?: ResponseTimeReport;
+  dsats?: DsatsReport;
 }
 
 let dashboardDataCache: DashboardData | null | undefined;

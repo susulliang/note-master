@@ -19,6 +19,7 @@ import {
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
   parseChatResponseTimeWorkbook,
+  parseDsatsWorkbook,
   parseEmailAvgResponseWorkbook,
   parseEmailFirstResponseWorkbook,
   parseHistoricalMetricsCsv,
@@ -125,6 +126,15 @@ if (callFile) {
   console.log(`  Call  <- ${callFile.name} (${r.handled} handled, SL ${r.serviceLevel20.toFixed(1)}%)`);
 } else console.warn('  Call  : no matching .csv found');
 
+// --- DSAT (dissatisfaction cases) ---
+const dsatsFile = pick(files, /^dsat.*\.xlsx$/i);
+if (dsatsFile) {
+  const r = parseDsatsWorkbook(readBuf(dsatsFile.name), dsatsFile.name);
+  out.dsats = r;
+  (out.sources as Record<string, string>).dsats = dsatsFile.name;
+  console.log(`  DSAT  <- ${dsatsFile.name} (${r.total} dissatisfied cases)`);
+} else console.warn('  DSAT  : no matching DSAT .xlsx found');
+
 // --- Historical metrics ---
 const histFile = pick(files, /historical[\s_-]*metrics.*\.csv$/i);
 if (histFile) {
@@ -175,7 +185,7 @@ if (emailAvgRtFile) {
 } else console.warn('  EaRT  : no matching Email avg-response .xlsx found');
 
 if (process.env.REQUIRE_COMPLETE_DASHBOARD_DATA === '1') {
-  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse'];
+  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse', 'dsats'];
   const missing = required.filter((key) => !(key in out));
   if (missing.length) {
     throw new Error(`Refusing to publish an incomplete dashboard snapshot. Missing: ${missing.join(', ')}`);
