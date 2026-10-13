@@ -31,8 +31,8 @@ import type { DailiesState } from '@/hooks/use-dailies-report';
 
 /**
  * Dailies widget — MTD contact volume across Call / Chat / Email, loaded from
- * the four newest Salesforce exports (MTD Call Data + Historical Metrics CSVs,
- * Chat Messaging + AMR Email xlsx). Each channel panel shows the team average
+ * the three newest Salesforce exports (Historical Metrics CSV + Chat Messaging
+ * + AMR Email xlsx). Each channel panel shows the team average
  * daily volume (MTD total ÷ roster MTD worked shifts) plus a vertical bar
  * graph: call volumes by direction, and per-agent counts for chat & email.
  *

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  callMetricsFromHistorical,
+} from '@/lib/report-parsers';
+import {
   dashboardSnapshotError,
-  fetchCallReport,
   fetchChatReport,
   fetchDashboardData,
   fetchEmailReport,
   fetchHistoricalReport,
   fetchSfReportIndex,
-  pickCallDataExport,
   pickChatExport,
   pickEmailExport,
   pickHistoricalMetricsExport,
@@ -67,21 +68,21 @@ export function useDailiesReport(): DailiesController {
         const files = await fetchSfReportIndex(controller.signal);
         const chatFile = pickChatExport(files);
         const emailFile = pickEmailExport(files);
-        const callFile = pickCallDataExport(files);
         const histFile = pickHistoricalMetricsExport(files);
         if (!chatFile) throw new Error('No Chat Messaging .xlsx export found in sf_reports/');
         if (!emailFile) throw new Error('No AMR Email .xlsx export found in sf_reports/');
-        if (!callFile) throw new Error('No MTD Call Data .csv export found in sf_reports/');
         if (!histFile) throw new Error('No Historical Metrics .csv export found in sf_reports/');
 
-        const [chat, email, call, historical] = await Promise.all([
+        const [chat, email, historical] = await Promise.all([
           fetchChatReport(chatFile, controller.signal),
           fetchEmailReport(emailFile, controller.signal),
-          fetchCallReport(callFile, controller.signal),
           fetchHistoricalReport(histFile, controller.signal),
         ]);
         if (cancelled) return;
 
+        // Team call aggregates derive from the historical report's queue rows;
+        // MTD Call Data.csv is retired from the routine.
+        const call = callMetricsFromHistorical(historical);
         setState({ status: 'ready', data: { chat, email, call, historical } });
         hasLoadedOnce.current = true;
       } catch (e) {

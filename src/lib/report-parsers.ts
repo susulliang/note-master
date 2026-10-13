@@ -288,6 +288,8 @@ export interface HistoricalAgent {
   handledIncoming: number;
   handledOutbound: number;
   missed: number;
+  /** Contacts where the agent never responded and the customer abandoned. */
+  nonResponseAbandons: number;
   answerRate: number | null;
   serviceLevel20: number | null;
   avgIncomingConnectSec: number | null;
@@ -300,23 +302,41 @@ export interface HistoricalMetricsReport {
   agents: HistoricalAgent[];
 }
 
-export function parseMtdCallDataCsv(text: string, fileName: string): CallMetrics {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const headerIdx = lines.findIndex((l) => /Contacts handled/.test(l));
-  if (headerIdx === -1) throw new Error(`MTD Call Data header not found in ${fileName}`);
-  const headers = lines[headerIdx]!.split(',');
-  const values = lines[headerIdx + 1]?.split(',') ?? [];
-  const get = (re: RegExp) => {
-    const i = headers.findIndex((h) => re.test(h.trim()));
-    return i !== -1 ? values[i] : '';
-  };
+/**
+ * Derives team call metrics from the historical metrics report's agent rows
+ * (the queue summary rows in this export only carry the service level).
+ * Replaces the retired MTD Call Data.csv source: SL20 is weighted by incoming
+ * contacts, average handle time by all handled contacts. Abandoned uses the
+ * agent non-response abandons column, the closest equivalent this export has.
+ */
+export function callMetricsFromHistorical(report: HistoricalMetricsReport): CallMetrics {
+  let handled = 0;
+  let handledOutbound = 0;
+  let abandoned = 0;
+  let slaWeighted = 0;
+  let slaWeight = 0;
+  let ahtWeighted = 0;
+  let ahtWeight = 0;
+  for (const a of report.agents) {
+    handled += a.handled;
+    handledOutbound += a.handledOutbound;
+    abandoned += a.nonResponseAbandons;
+    if (a.serviceLevel20 !== null) {
+      slaWeighted += a.serviceLevel20 * Math.max(1, a.handledIncoming);
+      slaWeight += Math.max(1, a.handledIncoming);
+    }
+    if (a.avgHandleTimeSec !== null) {
+      ahtWeighted += a.avgHandleTimeSec * Math.max(1, a.handled);
+      ahtWeight += Math.max(1, a.handled);
+    }
+  }
   return {
-    fileName,
-    handled: toNumber(get(/^Contacts handled$/)),
-    handledOutbound: toNumber(get(/Contacts handled outbound/)),
-    abandoned: toNumber(get(/^Contacts abandoned$/)),
-    serviceLevel20: toPercent(get(/^Service level 20 seconds$/)),
-    avgHandleTimeSec: hmsToSeconds(get(/^Avg\. handle time$/)),
+    fileName: report.fileName,
+    handled,
+    handledOutbound,
+    abandoned,
+    serviceLevel20: slaWeight > 0 ? slaWeighted / slaWeight : 0,
+    avgHandleTimeSec: ahtWeight > 0 ? ahtWeighted / ahtWeight : 0,
   };
 }
 
@@ -336,6 +356,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
     answerRate: col(/^Agent answer rate$/i),
     incomingConnect: col(/^Average agent incoming connecting time$/i),
     missed: col(/^Contacts missed$/i),
+    nonResponseAbandons: col(/^Agent non-response without customer abandons$/i),
     serviceLevel20: col(/^Service level 20 seconds$/i),
     handled: col(/^Contacts handled$/i),
     handledIncoming: col(/^Contacts handled incoming$/i),
@@ -367,6 +388,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
     handledIncoming: number;
     handledOutbound: number;
     missed: number;
+    nonResponseAbandons: number;
     answerRate: WeightedMetric;
     serviceLevel20: WeightedMetric;
     avgIncomingConnectSec: WeightedMetric;
@@ -416,8 +438,9 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
         handled: 0,
         handledIncoming: 0,
         handledOutbound: 0,
-        missed: 0,
-        answerRate: { total: 0, weight: 0 },
+      missed: 0,
+      nonResponseAbandons: 0,
+      answerRate: { total: 0, weight: 0 },
         serviceLevel20: { total: 0, weight: 0 },
         avgIncomingConnectSec: { total: 0, weight: 0 },
         avgHandleTimeSec: { total: 0, weight: 0 },
@@ -429,6 +452,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
     agent.handledIncoming += handledIncoming;
     agent.handledOutbound += handledOutbound;
     agent.missed += missed;
+    agent.nonResponseAbandons += toNumber(value(row, cols.nonResponseAbandons));
     addWeighted(agent.answerRate, answerRate, handledIncoming + missed || handled + missed);
     addWeighted(agent.serviceLevel20, serviceLevel20, handledIncoming);
     addWeighted(agent.avgIncomingConnectSec, avgIncomingConnectSec, handledIncoming);
@@ -444,6 +468,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
       handledIncoming: agent.handledIncoming,
       handledOutbound: agent.handledOutbound,
       missed: agent.missed,
+      nonResponseAbandons: agent.nonResponseAbandons,
       answerRate: mean(agent.answerRate),
       serviceLevel20: mean(agent.serviceLevel20),
       avgIncomingConnectSec: mean(agent.avgIncomingConnectSec),

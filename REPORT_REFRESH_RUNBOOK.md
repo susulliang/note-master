@@ -74,12 +74,15 @@ Historical metrics tab → open the saved "agent metric mtd" report**. Then use
 to reuse a captured export URL. The file downloads as
 `Historical Metrics Report.csv` (overwrites the previous one in `sf_reports/`).
 
-### MTD Call Data (no refresh needed)
+### MTD Call Data (retired)
 
-`MTD Call Data.csv` (aggregate call totals) does **not** need a fresh download
-each run — its numbers are already covered by the refreshed Historical Metrics
-report. The parser still requires the file to exist; keep the most recent copy
-in `sf_reports/` and expect the review output to show it as the oldest source.
+`MTD Call Data.csv` is **no longer part of the routine**. Team call metrics
+(handled, outbound, SL20, handle time, abandoned) are now derived directly
+from the refreshed Historical Metrics report's agent rows via
+`callMetricsFromHistorical` — SL20 weighted by incoming contacts, handle time
+by handled contacts, "abandoned" uses the agent non-response abandons column.
+No extra download is needed; keep the folder free of stale `MTD Call Data.csv`
+copies so nobody mistakes it for an active source.
 
 ## Parse And Review
 

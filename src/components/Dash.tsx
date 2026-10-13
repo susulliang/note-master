@@ -1270,7 +1270,7 @@ function CallPerformanceCard({
           {
             label: 'Team avg handle',
             value: data ? formatCallTime(data.call.avgHandleTimeSec) : '—',
-            note: data ? `${formatNumber(data.call.abandoned)} abandoned contacts` : 'From MTD call report',
+            note: data ? `${formatNumber(data.call.abandoned)} non-response abandons` : 'From historical metrics report',
             color: 'text-violet-300',
           },
         ].map((metric) => (
@@ -1697,10 +1697,10 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted-foreground">
           <span>20s service level <strong className="font-mono text-foreground">{pct(call.serviceLevel20)}</strong></span>
           <span>Avg handle time <strong className="font-mono text-foreground">{Math.floor(call.avgHandleTimeSec / 60)}:{String(call.avgHandleTimeSec % 60).padStart(2, '0')}</strong></span>
-          <span>Abandoned <strong className="font-mono text-foreground">{formatNumber(call.abandoned)}</strong></span>
+          <span>Non-response abandons <strong className="font-mono text-foreground">{formatNumber(call.abandoned)}</strong></span>
           <span>Outbound handled <strong className="font-mono text-foreground">{formatNumber(call.handledOutbound)}</strong></span>
         </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">The Call handled team total uses MTD Call Data; agent-level call counts use Historical Metrics and may not reconcile exactly.</p>
+        <p className="mt-2 text-[10px] text-muted-foreground">The Call handled team total derives from the Historical Metrics queue rows; agent-level call counts come from the same report.</p>
       </section>
       <section className={cn(PANEL, 'overflow-hidden')}>
         <header className="border-b border-border/50 px-4 py-3">

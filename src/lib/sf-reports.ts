@@ -17,7 +17,6 @@ import {
   parseEmailAvgResponseWorkbook,
   parseEmailFirstResponseWorkbook,
   parseHistoricalMetricsCsv,
-  parseMtdCallDataCsv,
   parseOneTouchWorkbook,
   type CallMetrics,
   type CountReport,
@@ -129,13 +128,6 @@ export function pickEmailExport(files: SfReportFile[]): SfReportFile | undefined
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
 }
 
-/** Newest MTD Call Data *.csv export. */
-export function pickCallDataExport(files: SfReportFile[]): SfReportFile | undefined {
-  return files
-    .filter((f) => /\.csv$/i.test(f.name) && /mtd[\s_-]*call/i.test(f.name))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
-}
-
 /** Newest Historical Metrics *.csv export. */
 export function pickHistoricalMetricsExport(files: SfReportFile[]): SfReportFile | undefined {
   return files
@@ -217,11 +209,6 @@ export async function fetchCsvReport(file: SfReportFile, signal?: AbortSignal): 
   const res = await fetch(`${BASE}sf_reports/${encodeURIComponent(file.name)}`, { signal });
   if (!res.ok) throw new Error(`Failed to download ${file.name}: HTTP ${res.status}`);
   return res.text();
-}
-
-export async function fetchCallReport(file: SfReportFile, signal?: AbortSignal): Promise<CallMetrics> {
-  const text = await fetchCsvReport(file, signal);
-  return parseMtdCallDataCsv(text, file.name);
 }
 
 export async function fetchHistoricalReport(file: SfReportFile, signal?: AbortSignal): Promise<HistoricalMetricsReport> {

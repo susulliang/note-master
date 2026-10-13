@@ -16,6 +16,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  callMetricsFromHistorical,
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
   parseChatResponseTimeWorkbook,
@@ -23,7 +24,6 @@ import {
   parseEmailAvgResponseWorkbook,
   parseEmailFirstResponseWorkbook,
   parseHistoricalMetricsCsv,
-  parseMtdCallDataCsv,
   parseOneTouchWorkbook,
 } from '../src/lib/report-parsers';
 
@@ -147,14 +147,20 @@ if (emailFile) {
   console.log(`  Email <- ${emailFile.name} (${r.agents.length} agents, ${r.total} total)`);
 } else console.warn('  Email : no matching .xlsx found');
 
-// --- Call data ---
-const callFile = pick(files, /mtd[\s_-]*call.*\.csv$/i);
-if (callFile) {
-  const r = parseMtdCallDataCsv(readText(callFile.name), callFile.name);
-  out.call = r;
-  (out.sources as Record<string, string>).call = callFile.name;
-  console.log(`  Call  <- ${callFile.name} (${r.handled} handled, SL ${r.serviceLevel20.toFixed(1)}%)`);
-} else console.warn('  Call  : no matching .csv found');
+// --- Historical metrics (also feeds the call section) ---
+const histFile = pick(files, /historical[\s_-]*metrics.*\.csv$/i);
+if (histFile) {
+  const r = parseHistoricalMetricsCsv(readText(histFile.name), histFile.name);
+  out.historical = r;
+  (out.sources as Record<string, string>).historical = histFile.name;
+  console.log(`  Hist  <- ${histFile.name} (${r.agents.length} agents, ${r.queues.length} queues)`);
+  // Team call aggregates now derive from the same report's agent rows —
+  // MTD Call Data.csv is retired from the routine.
+  const call = callMetricsFromHistorical(r);
+  out.call = call;
+  (out.sources as Record<string, string>).call = `${histFile.name} (agent rows)`;
+  console.log(`  Call  <- ${histFile.name} agent rows (${call.handled} handled, SL ${call.serviceLevel20.toFixed(1)}%)`);
+} else console.warn('  Hist  : no matching .csv found');
 
 // --- DSAT (dissatisfaction cases) ---
 const dsatsFile = pick(files, /^dsat.*\.xlsx$/i);
@@ -164,15 +170,6 @@ if (dsatsFile) {
   (out.sources as Record<string, string>).dsats = dsatsFile.name;
   console.log(`  DSAT  <- ${dsatsFile.name} (${r.total} dissatisfied cases)`);
 } else console.warn('  DSAT  : no matching DSAT .xlsx found');
-
-// --- Historical metrics ---
-const histFile = pick(files, /historical[\s_-]*metrics.*\.csv$/i);
-if (histFile) {
-  const r = parseHistoricalMetricsCsv(readText(histFile.name), histFile.name);
-  out.historical = r;
-  (out.sources as Record<string, string>).historical = histFile.name;
-  console.log(`  Hist  <- ${histFile.name} (${r.agents.length} agents, ${r.queues.length} queues)`);
-} else console.warn('  Hist  : no matching .csv found');
 
 // --- Response time: Chat avg response (seconds) ---
 // Match "Average response time ... Chat" but NOT the email files.
