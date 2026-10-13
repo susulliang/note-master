@@ -165,12 +165,15 @@ export function parseOneTouchWorkbook(data: ArrayBuffer, fileName: string): OneT
   const { rows } = sheetRows(data, /one[\s_-]*touch/i);
   const asOf = extractAsOf(rows);
 
-  const groupRowIdx = rows.findIndex((r) => r.some((c) => typeof c === 'string' && /Case Origin/.test(c)));
-  if (groupRowIdx === -1) throw new Error('One-touch pivot header (Case Origin) not found');
-  const groupRow = rows[groupRowIdx];
-  const subRow = rows[groupRowIdx + 1] ?? [];
-  const ownerCol = subRow.findIndex((c) => /^Case Owner/.test(String(c ?? '').trim()));
-  if (ownerCol === -1) throw new Error('One-touch subheader (Case Owner) not found');
+  // Anchor on the subheader row itself: the cell is exactly "Case Owner",
+  // optionally with a sort arrow. Filter lines like "Case Owner contains ..."
+  // and "Case Origin not equal to ..." must not match.
+  const isOwnerHeader = (c: unknown) => /^Case Owner\s*[↑↓⇅]?$/.test(String(c ?? '').trim());
+  const subRowIdx = rows.findIndex((r) => r.some(isOwnerHeader));
+  if (subRowIdx === -1 || subRowIdx === 0) throw new Error('One-touch subheader (Case Owner) not found');
+  const groupRow = rows[subRowIdx - 1] ?? [];
+  const subRow = rows[subRowIdx];
+  const ownerCol = subRow.findIndex(isOwnerHeader);
 
   const groups: { name: string; start: number }[] = [];
   groupRow.forEach((cell, j) => {
@@ -197,7 +200,7 @@ export function parseOneTouchWorkbook(data: ArrayBuffer, fileName: string): OneT
 
   const agents: OneTouchRow[] = [];
   let total: OneTouchRow | null = null;
-  for (let i = groupRowIdx + 2; i < rows.length; i++) {
+  for (let i = subRowIdx + 1; i < rows.length; i++) {
     const parsed = readRow(rows[i]);
     if (!parsed) continue;
     if (/^total$/i.test(parsed.owner)) total = { ...parsed, owner: 'Total' };
@@ -489,12 +492,13 @@ export function parseDsatsWorkbook(data: ArrayBuffer, fileName: string): DsatsRe
   const { rows } = sheetRows(data, /dsat/i);
   const asOf = extractAsOf(rows);
 
+  const stripSortArrow = (c: unknown) => String(c ?? '').trim().replace(/\s*[↑↓].*$/, '');
   const headerIdx = rows.findIndex(
-    (r) => r.some((c) => /^Case Owner/i.test(String(c ?? '').trim().replace(/\s*↑.*$/, '')))
-      && r.some((c) => /^Case Number$/i.test(String(c ?? '').trim())),
+    (r) => r.some((c) => /^Case Owner$/i.test(stripSortArrow(c)))
+      && r.some((c) => /^Case Number$/i.test(stripSortArrow(c))),
   );
   if (headerIdx === -1) throw new Error(`DSAT header row not found in ${fileName}`);
-  const header = rows[headerIdx]!.map((cell) => String(cell ?? '').trim().replace(/\s*↑.*$/, ''));
+  const header = rows[headerIdx]!.map(stripSortArrow);
   const col = (re: RegExp) => header.findIndex((h) => re.test(h));
   const cols = {
     owner: col(/^Case Owner$/i),

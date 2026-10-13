@@ -50,6 +50,13 @@
       "label": "MTD Chat",
       "requires_authenticated_session": true,
       "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00Ocz000007crYjEAI"
+    },
+    {
+      "key": "dsat_mtd",
+      "label": "DSAT MTD",
+      "requires_authenticated_session": true,
+      "url": "https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=00OaV000006dvPZUAY",
+      "note": "Downloads the 'DSAT（排除DTC+其他区域)' report; saved locally as a dsat*.xlsx file for the sync script's filename discovery."
     }
   ]
 }
