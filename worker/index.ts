@@ -79,7 +79,7 @@ interface PrivilegesPayload {
   trak?: unknown;
 }
 
-const AUTH_ADMIN_USERNAMES = new Set(['dezzy']);
+const AUTH_ADMIN_USERNAMES = new Set(['dezzy', 'hoi', 'alexia']);
 const AUTH_EXTRA_NAMES = ['Dezzy', 'Jingyang', 'Troy', 'Yolanda'];
 const AUTH_NAME_RE = /^[A-Za-z][A-Za-z .'-]{0,31}$/;
 const AUTH_MIN_PASSWORD_LEN = 4;

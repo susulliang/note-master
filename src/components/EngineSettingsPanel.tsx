@@ -112,6 +112,10 @@ interface EngineSettingsPanelProps {
   };
   keywordAlerts?: KeywordAlert[];
   keywordAlertSource?: KeywordAlertSource;
+  /** Opens the Shift+R authentication panel (from the not-logged-in Log in button). */
+  onOpenAuth?: () => void;
+  /** Opens the Shift+A admin panel (from the Admin badge — admins only). */
+  onOpenAdmin?: () => void;
 }
 
 /**
@@ -261,6 +265,8 @@ export default function EngineSettingsPanel({
   gridboxVisibility,
   keywordAlerts,
   keywordAlertSource,
+  onOpenAuth,
+  onOpenAdmin,
 }: EngineSettingsPanelProps) {
   const aiParserAvailable = Boolean(parser?.enabled || cloud?.hasKey);
   const panelsCtx = useContext(TicketPanelsContext);
@@ -399,13 +405,23 @@ export default function EngineSettingsPanel({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-foreground">
-                  {authUser.username}
-                  {authUser.isAdmin && (
-                    <span className="ml-1.5 rounded bg-sky-400/20 px-1 py-0.5 align-middle text-[8px] font-bold uppercase tracking-wider text-sky-300">
-                      Admin
-                    </span>
-                  )}
+                <p className="flex items-center gap-1.5 truncate text-sm font-bold text-foreground">
+                  <span className="truncate">{authUser.username}</span>
+                  {authUser.isAdmin &&
+                    (onOpenAdmin ? (
+                      <button
+                        type="button"
+                        onClick={onOpenAdmin}
+                        className="shrink-0 rounded bg-sky-400/20 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-sky-300 transition-colors hover:bg-sky-400/35"
+                        title="Open the admin panel (Shift+A)"
+                      >
+                        Admin
+                      </button>
+                    ) : (
+                      <span className="shrink-0 rounded bg-sky-400/20 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-sky-300">
+                        Admin
+                      </span>
+                    ))}
                 </p>
                 <p className="text-[10px] text-muted-foreground">
                   {[
@@ -427,10 +443,20 @@ export default function EngineSettingsPanel({
               </button>
             </div>
           ) : (
-            <p className="px-1 py-1 text-xs text-muted-foreground">
-              Not logged in — press <kbd className="rounded border border-border/60 bg-muted/60 px-1 font-mono text-[10px]">Shift+R</kbd> to
-              log in or register
-            </p>
+            <div className="flex items-center justify-between gap-2 px-1 py-1">
+              <p className="text-xs text-muted-foreground">
+                Not logged in — press{' '}
+                <kbd className="rounded border border-border/60 bg-muted/60 px-1 font-mono text-[10px]">Shift+R</kbd> or
+              </p>
+              <button
+                type="button"
+                onClick={onOpenAuth}
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-violet-400/50 bg-violet-500/80 px-2.5 py-1.5 text-[11px] font-bold text-white transition-all hover:brightness-110"
+                title="Log in or register (Shift+R)"
+              >
+                <LogIn className="size-3.5" /> Log in
+              </button>
+            </div>
           )}
         </section>
 

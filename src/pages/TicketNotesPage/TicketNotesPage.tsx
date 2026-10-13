@@ -2262,6 +2262,8 @@ Additional information (if needed): ${additional}`;
             }}
             keywordAlerts={keywordAlerts}
             keywordAlertSource={keywordAlertState.source}
+            onOpenAuth={() => setAuthPanelOpen(true)}
+            onOpenAdmin={() => setAdminPanelOpen(true)}
           />,
           railControlsSlot
         )}

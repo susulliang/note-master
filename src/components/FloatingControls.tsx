@@ -48,6 +48,10 @@ interface RailControlsProps {
   /** D1-backed live-transcript keyword alerts shown in Settings. */
   keywordAlerts?: KeywordAlert[];
   keywordAlertSource?: KeywordAlertSource;
+  /** Opens the Shift+R auth panel (Settings → Account → Log in). */
+  onOpenAuth?: () => void;
+  /** Opens the Shift+A admin panel (Settings → Account → Admin badge). */
+  onOpenAdmin?: () => void;
 }
 
 /** Round icon button shared by every rail control — springy hover/active. */
@@ -87,6 +91,8 @@ export default function RailControls({
   gridboxVisibility,
   keywordAlerts,
   keywordAlertSource,
+  onOpenAuth,
+  onOpenAdmin,
 }: RailControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
@@ -195,6 +201,8 @@ export default function RailControls({
               gridboxVisibility={gridboxVisibility}
               keywordAlerts={keywordAlerts}
               keywordAlertSource={keywordAlertSource}
+              onOpenAuth={onOpenAuth}
+              onOpenAdmin={onOpenAdmin}
             />
           </div>
         </>
