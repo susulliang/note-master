@@ -43,6 +43,49 @@ interface TestResultPayload {
   report?: unknown;
 }
 
+// ── Auth (D1-backed accounts) ────────────────────────────────────────────────
+
+interface AuthUserRow {
+  username: string;
+  hash: string;
+  is_admin: number;
+  dash_visible: number;
+  roster_visible: number;
+  trak_visible: number;
+  created_at: number;
+}
+
+interface AuthUser {
+  username: string;
+  isAdmin: boolean;
+  privileges: { dash: boolean; roster: boolean; trak: boolean };
+}
+
+interface RegisterPayload {
+  username?: unknown;
+  password?: unknown;
+  confirm?: unknown;
+}
+
+interface LoginPayload {
+  username?: unknown;
+  password?: unknown;
+}
+
+interface PrivilegesPayload {
+  username?: unknown;
+  dash?: unknown;
+  roster?: unknown;
+  trak?: unknown;
+}
+
+const AUTH_ADMIN_USERNAMES = new Set(['dezzy']);
+const AUTH_EXTRA_NAMES = ['Dezzy', 'Jingyang', 'Troy', 'Yolanda'];
+const AUTH_NAME_RE = /^[A-Za-z][A-Za-z .'-]{0,31}$/;
+const AUTH_MIN_PASSWORD_LEN = 4;
+const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const AUTH_PBKDF2_ITERATIONS = 100_000;
+
 interface KeywordAlertRow {
   id: string;
   keyword: string;
@@ -168,6 +211,250 @@ function parseKeywordAlerts(value: unknown): KeywordAlertRow[] | null {
   return rows;
 }
 
+// ── Auth handlers ────────────────────────────────────────────────────────────
+
+function authJson(data: unknown, status = 200): Response {
+  const response = json(data, status);
+  // The SPA also runs from Vercel / the Tauri desktop shell and always talks
+  // to this Worker cross-origin. Auth requests carry the password or bearer
+  // token in the payload/headers, so permissive CORS carries no CSRF risk.
+  response.headers.set('access-control-allow-origin', '*');
+  response.headers.set('access-control-allow-headers', 'content-type, authorization');
+  response.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
+  return response;
+}
+
+function encodeB64(bytes: Uint8Array): string {
+  return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
+}
+
+/** Same PBKDF2-SHA256 scheme as the alert admin hash ("pbkdf2-sha256$iter$salt$hash"). */
+async function authHashPassword(password: string, salt: Uint8Array): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
+    'deriveBits',
+  ]);
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      salt: salt.buffer.slice(salt.byteOffset, salt.byteOffset + salt.byteLength) as ArrayBuffer,
+      iterations: AUTH_PBKDF2_ITERATIONS,
+    },
+    key,
+    256,
+  );
+  return `pbkdf2-sha256$${AUTH_PBKDF2_ITERATIONS}$${encodeB64(salt)}$${encodeB64(new Uint8Array(bits))}`;
+}
+
+function authNormalizeName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const name = raw.trim().replace(/\s+/g, ' ');
+  return AUTH_NAME_RE.test(name) ? name : null;
+}
+
+function authPublicUser(user: AuthUserRow): AuthUser {
+  return {
+    username: user.username,
+    isAdmin: Number(user.is_admin) === 1,
+    privileges: {
+      dash: Number(user.dash_visible) === 1,
+      roster: Number(user.roster_visible) === 1,
+      trak: Number(user.trak_visible) === 1,
+    },
+  };
+}
+
+async function authIssueSession(env: Env, username: string): Promise<string> {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const token = encodeB64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO auth_sessions (token, username, expires_at, created_at) VALUES (?, ?, ?, ?)',
+  )
+    .bind(token, username, now + AUTH_SESSION_TTL_MS, now)
+    .run();
+  return token;
+}
+
+async function authBearerUser(request: Request, env: Env): Promise<AuthUserRow | null> {
+  const match = /^Bearer\s+(.+)$/i.exec(request.headers.get('authorization') ?? '');
+  if (!match) return null;
+  return env.DB.prepare(
+    `SELECT u.* FROM auth_sessions s JOIN auth_users u ON u.username = s.username
+     WHERE s.token = ? AND s.expires_at > ?`,
+  )
+    .bind(match[1], Date.now())
+    .first<AuthUserRow>();
+}
+
+async function handleAuthRegister(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: RegisterPayload;
+  try {
+    payload = (await request.json()) as RegisterPayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const username = authNormalizeName(payload.username);
+  if (!username) return authJson({ error: 'Invalid username' }, 400);
+  if (typeof payload.password !== 'string' || payload.password.length < AUTH_MIN_PASSWORD_LEN)
+    return authJson({ error: `Password must be at least ${AUTH_MIN_PASSWORD_LEN} characters` }, 400);
+  if (payload.password !== payload.confirm) return authJson({ error: 'Passwords do not match' }, 400);
+
+  const existing = await env.DB.prepare('SELECT username FROM auth_users WHERE username = ?1 COLLATE NOCASE')
+    .bind(username)
+    .first();
+  if (existing) return authJson({ error: 'User already exists — try logging in' }, 409);
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await authHashPassword(payload.password, salt);
+  const now = Date.now();
+  const isAdmin = AUTH_ADMIN_USERNAMES.has(username.toLowerCase()) ? 1 : 0;
+  const insert = await env.DB.prepare(
+    `INSERT INTO auth_users (username, hash, is_admin, dash_visible, roster_visible, trak_visible, created_at, updated_at)
+     VALUES (?, ?, ?, 1, 1, 1, ?, ?)`,
+  )
+    .bind(username, hash, isAdmin, now, now)
+    .run();
+  if (!insert.success) return authJson({ error: 'Registration failed' }, 500);
+
+  const user = await env.DB.prepare('SELECT * FROM auth_users WHERE username = ?')
+    .bind(username)
+    .first<AuthUserRow>();
+  if (!user) return authJson({ error: 'Registration failed' }, 500);
+  const token = await authIssueSession(env, username);
+  return authJson({ token, user: authPublicUser(user) }, 201);
+}
+
+async function handleAuthLogin(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: LoginPayload;
+  try {
+    payload = (await request.json()) as LoginPayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const username = authNormalizeName(payload.username);
+  if (!username || typeof payload.password !== 'string')
+    return authJson({ error: 'Invalid username or password' }, 401);
+
+  // Case-insensitive lookup — "dezzy" and "Dezzy" are the same account.
+  const user = await env.DB.prepare('SELECT * FROM auth_users WHERE username = ?1 COLLATE NOCASE')
+    .bind(username)
+    .first<AuthUserRow>();
+  if (user) {
+    const verifier = parsePasswordVerifier(user.hash);
+    if (!verifier || !(await verifyAdminPassword(payload.password, verifier)))
+      return authJson({ error: 'Invalid username or password' }, 401);
+  } else {
+    // Burn comparable PBKDF2 time so unknown usernames aren't distinguishable.
+    await verifyAdminPassword(
+      payload.password,
+      parsePasswordVerifier(
+        `pbkdf2-sha256$${AUTH_PBKDF2_ITERATIONS}$${encodeB64(crypto.getRandomValues(new Uint8Array(16)))}$${encodeB64(
+          crypto.getRandomValues(new Uint8Array(32)),
+        )}`,
+      ) as PasswordVerifier,
+    );
+    return authJson({ error: 'Invalid username or password' }, 401);
+  }
+  // Session rows must use the canonical username case (from the DB row) —
+  // the sessions↔users JOIN is case-sensitive.
+  const token = await authIssueSession(env, user.username);
+  return authJson({ token, user: authPublicUser(user) });
+}
+
+async function handleAdminUsers(_request: Request, env: Env): Promise<Response> {
+  const result = await env.DB.prepare(
+    `SELECT username, is_admin, dash_visible, roster_visible, trak_visible, created_at
+     FROM auth_users ORDER BY username COLLATE NOCASE`,
+  ).all<AuthUserRow>();
+  return authJson({
+    users: (result.results ?? []).map((user) => ({ ...authPublicUser(user), createdAt: Number(user.created_at) })),
+  });
+}
+
+async function handleAdminPrivileges(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: PrivilegesPayload;
+  try {
+    payload = (await request.json()) as PrivilegesPayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const username = authNormalizeName(payload.username);
+  if (!username) return authJson({ error: 'Invalid username' }, 400);
+  const asInt = (v: unknown) => (v === undefined ? null : v ? 1 : 0);
+  const update = await env.DB.prepare(
+    `UPDATE auth_users SET
+       dash_visible = COALESCE(?2, dash_visible),
+       roster_visible = COALESCE(?3, roster_visible),
+       trak_visible = COALESCE(?4, trak_visible),
+       updated_at = ?5
+     WHERE username = ?1 COLLATE NOCASE`,
+  )
+    .bind(username, asInt(payload.dash), asInt(payload.roster), asInt(payload.trak), Date.now())
+    .run();
+  if (!update.meta.changes) return authJson({ error: 'User not found' }, 404);
+  const user = await env.DB.prepare('SELECT * FROM auth_users WHERE username = ?1 COLLATE NOCASE')
+    .bind(username)
+    .first<AuthUserRow>();
+  return authJson({ user: user ? authPublicUser(user) : null });
+}
+
+async function handleAdminDelete(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: LoginPayload;
+  try {
+    payload = (await request.json()) as LoginPayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const username = authNormalizeName(payload.username);
+  if (!username) return authJson({ error: 'Invalid username' }, 400);
+  if (AUTH_ADMIN_USERNAMES.has(username.toLowerCase()))
+    return authJson({ error: 'Cannot delete the admin account' }, 400);
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE username = ?1 COLLATE NOCASE').bind(username).run();
+  const del = await env.DB.prepare('DELETE FROM auth_users WHERE username = ?1 COLLATE NOCASE').bind(username).run();
+  if (!del.meta.changes) return authJson({ error: 'User not found' }, 404);
+  return authJson({ ok: true });
+}
+
+async function handleAuth(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204 });
+  if (path === '/api/auth/health' && request.method === 'GET') return authJson({ ok: true });
+  if (path === '/api/auth/names' && request.method === 'GET')
+    return authJson({ names: AUTH_EXTRA_NAMES, admin: [...AUTH_ADMIN_USERNAMES] });
+  if (path === '/api/auth/register' && request.method === 'POST') return handleAuthRegister(request, env);
+  if (path === '/api/auth/login' && request.method === 'POST') return handleAuthLogin(request, env);
+
+  if (path === '/api/auth/logout' && request.method === 'POST') {
+    const match = /^Bearer\s+(.+)$/i.exec(request.headers.get('authorization') ?? '');
+    if (match) await env.DB.prepare('DELETE FROM auth_sessions WHERE token = ?').bind(match[1]).run();
+    return authJson({ ok: true });
+  }
+  if (path === '/api/auth/me' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return authJson({ user: authPublicUser(user) });
+  }
+
+  // Admin routes — bearer must belong to an is_admin account.
+  const admin = await authBearerUser(request, env);
+  if (!admin || Number(admin.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+  if (path === '/api/admin/users' && request.method === 'GET') return handleAdminUsers(request, env);
+  if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env);
+  if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
+  return authJson({ error: 'Not found' }, 404);
+}
+
 async function handleKeywordAlerts(
   request: Request,
   env: Env & { ALERT_ADMIN_PASSWORD_HASH?: string },
@@ -272,6 +559,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/keyword-alerts') {
       return handleKeywordAlerts(request, env);
+    }
+    if (url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/')) {
+      return handleAuth(request, env);
     }
     if (url.pathname !== '/api/test-results') {
       return json({ error: 'Not found' }, 404);

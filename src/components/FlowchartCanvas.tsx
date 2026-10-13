@@ -109,6 +109,10 @@ interface FlowchartCanvasProps {
   /** Reveal the hidden Case Trak + KPI Dashboard pills in the left rail
    *  (both hidden by default; unlocked together via Shift+D). */
   analyticsEnabled?: boolean;
+  /** Per-view visibility overrides — auth privileges (Dash / Trak grants)
+   *  OR-ed on top of the Shift+D unlock. Falls back to analyticsEnabled. */
+  dashEnabled?: boolean;
+  trakEnabled?: boolean;
   /** Portal target slot at the bottom of the left rail pill. The page
    *  passes a callback ref here and portals the global toolbar controls
    *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
@@ -424,6 +428,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   shiftsContent,
   shiftsEnabled = false,
   analyticsEnabled = false,
+  dashEnabled,
+  trakEnabled,
   railBottomSlotRef,
   collapsedNodes,
   onToggleNodeCollapsed,
@@ -432,14 +438,16 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
   // Work-view pills shown in the rail. Case Trak + KPI Dashboard are hidden
-  // analytics views (unlocked together with Shift+D via analyticsEnabled);
-  // the Shifts roster is a hidden view (activated with Shift+S).
+  // analytics views (unlocked together with Shift+D via analyticsEnabled, or
+  // individually via auth privileges); the Shifts roster is a hidden view
+  // (activated with Shift+S or a Roster privilege grant).
   const railViews = useMemo<WorkView[]>(() => {
     const views: WorkView[] = ['callNotes', 'selfTest'];
-    if (analyticsEnabled) views.push('caseTrak', 'dash');
+    if (trakEnabled ?? analyticsEnabled) views.push('caseTrak');
+    if (dashEnabled ?? analyticsEnabled) views.push('dash');
     if (shiftsEnabled) views.push('shifts');
     return views;
-  }, [analyticsEnabled, shiftsEnabled]);
+  }, [analyticsEnabled, dashEnabled, trakEnabled, shiftsEnabled]);
 
   // Pull-tab bookmark panels — NONE left: the 24H tracker moved into the
   // copilot drawer (v0.2.0), so the left-edge pull-tab layer is now empty.

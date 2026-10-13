@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, Mic, MicOff, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
 import type { KeywordAlert } from '@/lib/keyword-alerts';
 import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
@@ -302,6 +303,8 @@ export default function EngineSettingsPanel({
   /** Draft API-key input (saved to storage via cloud.onSetApiKey) */
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [keySaved, setKeySaved] = useState(false);
+  // Account state — surfaced as a login-status block at the top of Settings.
+  const { user: authUser, logout: authLogout, resolving: authResolving } = useAuth();
 
   // Live parse window — what the NEXT parse will send (debounced 1s)
   const [windowTick, setWindowTick] = useState(0);
@@ -371,6 +374,66 @@ export default function EngineSettingsPanel({
       </div>
 
       <div className="space-y-2">
+        {/* Account / login status — always the first block in Settings */}
+        <section aria-label="Account" className="rounded-lg border border-border/50 bg-background/35 p-2">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Account</p>
+            <span className="text-[9px] text-muted-foreground/70">Shift+R opens the auth panel</span>
+          </div>
+          {authResolving ? (
+            <p className="flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" /> Checking session…
+            </p>
+          ) : authUser ? (
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  'flex size-8 shrink-0 items-center justify-center rounded-lg',
+                  authUser.isAdmin ? 'border border-sky-400/40 bg-sky-400/10' : 'border border-emerald-400/40 bg-emerald-500/10'
+                )}
+              >
+                {authUser.isAdmin ? (
+                  <ShieldCheck className="size-4 text-sky-300" />
+                ) : (
+                  <LogIn className="size-4 text-emerald-300" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-foreground">
+                  {authUser.username}
+                  {authUser.isAdmin && (
+                    <span className="ml-1.5 rounded bg-sky-400/20 px-1 py-0.5 align-middle text-[8px] font-bold uppercase tracking-wider text-sky-300">
+                      Admin
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {[
+                    authUser.privileges.dash && 'Dash',
+                    authUser.privileges.roster && 'Roster',
+                    authUser.privileges.trak && 'Trak',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'No view privileges'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void authLogout()}
+                className="flex items-center gap-1 rounded-lg border border-red-400/40 px-2.5 py-1.5 text-[11px] font-bold text-red-300 transition-colors hover:bg-red-500/15"
+                title="Log out of this account"
+              >
+                <LogOut className="size-3.5" /> Log out
+              </button>
+            </div>
+          ) : (
+            <p className="px-1 py-1 text-xs text-muted-foreground">
+              Not logged in — press <kbd className="rounded border border-border/60 bg-muted/60 px-1 font-mono text-[10px]">Shift+R</kbd> to
+              log in or register
+            </p>
+          )}
+        </section>
+
         <section aria-labelledby="cat-choice-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <p id="cat-choice-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">

@@ -66,6 +66,9 @@ import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
+import AuthPanel from '@/components/AuthPanel';
+import AdminPanel from '@/components/AdminPanel';
+import { useAuth } from '@/lib/auth-context';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
@@ -841,6 +844,34 @@ export default function TicketNotesPage() {
   // reveals its rail pill and switches to it (kept out of the default UI;
   // it's an internal GZ-OPS roster, not part of the agent-facing flow).
   const [shiftsUnlocked, setShiftsUnlocked] = useState(false);
+  // ── Auth (Shift+R) + Admin (Shift+A) ────────────────────────────────────────
+  // Privileges come from the D1-backed account system; a logged-in user's
+  // grants automatically reveal the corresponding hidden rail pills (Dash /
+  // Roster / Trak) without needing the Shift+D / Shift+S unlock hotkeys.
+  const { user: authUser, privileges: authPrivileges } = useAuth();
+  const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code !== 'KeyR' && e.code !== 'KeyA') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return; // don't hijack typing / selection
+      }
+      e.preventDefault();
+      if (e.code === 'KeyR') setAuthPanelOpen((open) => !open);
+      else if (authUser?.isAdmin) setAdminPanelOpen((open) => !open); // Shift+A — Dezzy only
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authUser?.isAdmin]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'KeyS' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -892,6 +923,19 @@ export default function TicketNotesPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  // If the active work view loses its visibility grant (privilege revoked by
+  // the admin, or a Shift+D lock), fall back to the Call Notes canvas.
+  useEffect(() => {
+    const trakVisible = analyticsUnlocked || !!authPrivileges?.trak;
+    const dashVisible = analyticsUnlocked || !!authPrivileges?.dash;
+    const rosterVisible = shiftsUnlocked || !!authPrivileges?.roster;
+    setWorkView((prev) => {
+      if (prev === 'caseTrak' && !trakVisible) return 'callNotes';
+      if (prev === 'dash' && !dashVisible) return 'callNotes';
+      if (prev === 'shifts' && !rosterVisible) return 'callNotes';
+      return prev;
+    });
+  }, [analyticsUnlocked, shiftsUnlocked, authPrivileges]);
   /** "[OVER24]" report batches pushed by the extension (popup button
    *  "Import Over 24h Report Cases"). Accumulates across imports so the
    *  Case Trak board can merge every batch whenever it mounts. */
@@ -2137,8 +2181,10 @@ Additional information (if needed): ${additional}`;
                   <ShiftsWorkspace />
                 </Suspense>
               }
-              shiftsEnabled={shiftsUnlocked}
+              shiftsEnabled={shiftsUnlocked || !!authPrivileges?.roster}
               analyticsEnabled={analyticsUnlocked}
+              dashEnabled={analyticsUnlocked || !!authPrivileges?.dash}
+              trakEnabled={analyticsUnlocked || !!authPrivileges?.trak}
               railBottomSlotRef={setRailControlsSlot}
               collapsedNodes={collapsedNodes}
               onToggleNodeCollapsed={handleToggleNodeCollapsed}
@@ -2675,6 +2721,10 @@ Additional information (if needed): ${additional}`;
           },
         }}
       />
+
+      {/* Authentication (Shift+R) + Admin (Shift+A, Dezzy only) panels */}
+      {authPanelOpen && <AuthPanel onClose={() => setAuthPanelOpen(false)} />}
+      {adminPanelOpen && authUser?.isAdmin && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
 
       {/* Clippy-style cat assistant — floats above everything */}
       <CatAssistant

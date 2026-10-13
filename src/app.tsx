@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { AuthProvider } from "@/lib/auth-context";
 import TicketNotesPage from "@/pages/TicketNotesPage/TicketNotesPage";
 import NotFoundPage from "@/pages/NotFoundPage/NotFoundPage";
 
@@ -12,21 +13,23 @@ const WhisperBenchPage = import.meta.env.DEV
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route index element={<TicketNotesPage />} />
-        {WhisperBenchPage && (
-          <Route
-            path="whisper-bench"
-            element={
-              <Suspense fallback={null}>
-                <WhisperBenchPage />
-              </Suspense>
-            }
-          />
-        )}
-      </Route>
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+    <AuthProvider>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route index element={<TicketNotesPage />} />
+          {WhisperBenchPage && (
+            <Route
+              path="whisper-bench"
+              element={
+                <Suspense fallback={null}>
+                  <WhisperBenchPage />
+                </Suspense>
+              }
+            />
+          )}
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </AuthProvider>
   );
 }

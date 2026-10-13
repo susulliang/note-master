@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 import {
   loadSelfTestProgress,
   MAX_ATTEMPTS_PER_SUITE,
@@ -244,6 +245,7 @@ function FireworkBurst() {
 }
 
 export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTestWorkspaceProps) {
+  const { user: authUser } = useAuth();
   const [progress, setProgress] = useState<SelfTestProgress>(() => loadSelfTestProgress());
   const [phase, setPhase] = useState<Phase>('menu');
   const [activeSuite, setActiveSuite] = useState<TestSuite | null>(null);
@@ -365,14 +367,20 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
       const used = progress[suite.id]?.attempts ?? 0;
       if (used >= MAX_ATTEMPTS_PER_SUITE) return;
       setActiveSuite(suite);
-      setAgentName('');
+      if (authUser?.username) {
+        // Logged-in users skip the name-entry card — the account name is the
+        // test taker. startQuiz (below) picks the name up from state.
+        setAgentName(authUser.username);
+      } else {
+        setAgentName('');
+      }
       setPhase('name');
       onCatThought?.(`Ready for ${suite.label}? Let’s do this! 🎯`, 5000);
       requestAnimationFrame(() => {
         moveCatTo(workspaceRef.current?.querySelector('[data-selftest-name-card]') ?? null);
       });
     },
-    [progress, onCatThought, moveCatTo]
+    [progress, onCatThought, moveCatTo, authUser?.username]
   );
 
   const startQuiz = useCallback(() => {
@@ -389,6 +397,14 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
     setSubmitState('idle');
     setPhase('quiz');
   }, [agentName, activeSuite]);
+
+  // Logged-in users never see the name card — auto-start the quiz as soon as
+  // a suite is opened with the account name prefilled.
+  useEffect(() => {
+    if (phase === 'name' && authUser?.username && agentName === authUser.username) {
+      startQuiz();
+    }
+  }, [phase, authUser?.username, agentName, startQuiz]);
 
   /** Click an option → instant verdict → timed auto-advance. */
   const handleSelect = useCallback(
@@ -531,8 +547,8 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
           </>
         )}
 
-        {/* ── Name entry ──────────────────────────────────────────────── */}
-        {phase === 'name' && activeSuite && (
+        {/* ── Name entry (skipped entirely for logged-in users) ───────── */}
+        {phase === 'name' && !authUser?.username && activeSuite && (
           <div data-selftest-name-card className="glass-panel relative mx-auto mt-16 max-w-md overflow-visible rounded-2xl border-violet-400/30 p-7">
             <button
               type="button"
