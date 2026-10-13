@@ -74,6 +74,8 @@ import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import CatAssistant from '@/components/CatAssistant';
 import { useCatAssistant } from '@/hooks/use-cat-assistant';
+import { useKittyHelp } from '@/hooks/use-kitty-help';
+import KittyHelpPanel from '@/components/KittyHelpPanel';
 import { useKeywordAlerts } from '@/hooks/use-keyword-alerts';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -1674,6 +1676,20 @@ Additional information (if needed): ${additional}`;
   });
 
   // -------------------------------------------------------------------------
+  //  Kitty Help — double-click the cat mascot: a persistent cloud-LLM
+  //  conversation that fills the notes (task 1), picks ≤8 knowledge sources
+  //  from ≤50 pre-matched titles (task 2), then reads their full content and
+  //  writes a bilingual customer-facing resolution with cited sources
+  //  (task 3). Messages are append-only so provider KV-cache prefixes hit.
+  // -------------------------------------------------------------------------
+  const kitty = useKittyHelp({
+    transcript: call.transcript,
+    formData,
+    isCapturing: call.isCapturing,
+    applyOutcome: call.applyParsedOutcome,
+  });
+
+  // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
   //  The hook has already converted extension flat-keys into form node ids
   //  via EXT_TO_NODE_ID, so we write straight to handleAutoFill using a
@@ -2733,10 +2749,15 @@ Additional information (if needed): ${additional}`;
         catId={selectedCat}
         currentThought={cat.currentThought}
         isCapturing={call.isCapturing}
-        isThinking={cat.isThinking}
+        isThinking={cat.isThinking || kitty.busy}
         onDismiss={cat.dismiss}
         moveRequest={catMoveRequest}
+        onKittyHelp={() => { void kitty.start(); }}
+        kittyStage={kitty.stage}
       />
+      {kitty.panelOpen && kitty.result && (
+        <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
+      )}
     </div>
   );
 }

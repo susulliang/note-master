@@ -28,6 +28,12 @@ interface CatAssistantProps {
   isThinking: boolean;
   onDismiss: () => void;
   moveRequest?: { id: number; x: number; y: number } | null;
+  /** Double-click the cat → run the Kitty Help routine (persistent cloud
+   *  LLM conversation: fill notes → pick sources → write resolution). */
+  onKittyHelp?: () => void;
+  /** Live stage of the Kitty Help routine — rendered as a persistent
+   *  violet bubble above the cat while non-null. */
+  kittyStage?: { label: string; detail?: string } | null;
   className?: string;
 }
 
@@ -38,6 +44,8 @@ export function CatAssistant({
   isThinking,
   onDismiss,
   moveRequest,
+  onKittyHelp,
+  kittyStage,
   className,
 }: CatAssistantProps) {
   const [position, setPosition] = useScopedState(
@@ -157,8 +165,24 @@ export function CatAssistant({
         transition: dragging ? undefined : 'left 550ms cubic-bezier(0.2, 0.8, 0.2, 1), top 550ms cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}
     >
+      {/* Kitty Help stage bubble — persistent while the routine runs. */}
+      {kittyStage && (
+        <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-64 -translate-x-1/2">
+          <div className="glass-panel relative rounded-2xl border border-violet-400/70 bg-violet-500/10 px-3.5 py-2.5 shadow-[0_0_18px_rgba(167,139,250,0.45)]">
+            <p className="flex items-center gap-2 text-sm font-medium leading-snug text-foreground">
+              <span className="inline-block size-2 shrink-0 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
+              {kittyStage.label}
+            </p>
+            {kittyStage.detail && (
+              <p className="mt-1 pl-4 text-[11px] leading-snug text-muted-foreground">{kittyStage.detail}</p>
+            )}
+            <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-violet-400/70 bg-violet-500/10 backdrop-blur-md" />
+          </div>
+        </div>
+      )}
+
       {/* Thought bubble — anchored above the sprite */}
-      {currentThought && (
+      {currentThought && !kittyStage && (
         <div className="pointer-events-auto absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2">
           <div
             className={cn(
@@ -197,8 +221,11 @@ export function CatAssistant({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onDoubleClick={() => {
+          if (!dragging) onKittyHelp?.();
+        }}
         role="img"
-        aria-label={`${catName} cat assistant${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move`}
+        aria-label={`${catName} cat assistant${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, double-click for Kitty Help`}
         className={cn(
           'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center',
           dragging && 'cursor-grabbing'

@@ -1586,6 +1586,35 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     };
   }, [stopLevelLoop]);
 
+  /**
+   * Apply a parsed outcome (fields + bilingual TLDR) through the exact same
+   * authoritative path as an explicit cloud parse — used by Kitty Help, whose
+   * fill-notes turn runs inside its own persistent LLM conversation instead
+   * of `cloudParse()` but must land values identically (llm-confirmed tier,
+   * suggestion list, TLDR memory).
+   */
+  const applyParsedOutcome = useCallback((fields: ExtractedField[], tldr: { en: string; zh: string }) => {
+    if (tldr.en || tldr.zh) {
+      const prev = parseTldrRef.current;
+      parseTldrRef.current = {
+        en: tldr.en || prev?.en || '',
+        zh: tldr.zh || prev?.zh || '',
+      };
+    }
+    if (fields.length === 0) return;
+    for (const field of fields) {
+      llmConfirmedRef.current.add(field.fieldId);
+      llmSuggestionsRef.current.set(field.fieldId, field);
+      // REPLACE: authoritative over regex and prior local-LLM values
+      onAutoFillRef.current(field.fieldId, field.value, 'llm');
+    }
+    setSuggestions((prev) => {
+      const map = new Map(prev.map((f) => [f.fieldId, f]));
+      for (const f of fields) map.set(f.fieldId, f);
+      return [...map.values()];
+    });
+  }, []);
+
   return {
     isSupported,
     isCapturing,
@@ -1604,6 +1633,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
      *  mode = 'full' (default) keeps ALL clauses;
      *  mode = 'concise' keeps 2–4 primary issues + 2–4 main fix steps. */
     cloudParse: runCloudParse,
+    /** Apply externally-parsed fields + TLDR through the same path as
+     *  cloudParse (Kitty Help stage 1 uses this). */
+    applyParsedOutcome,
     isCloudParsing,
     /** QA checklist scores from the last parse's scoring pass (null = none) */
     qaScores,
