@@ -11,7 +11,7 @@ import {
   fetchKittySourceContent,
   kittyChat,
   KITTY_FIELD_IDS,
-  unwrapNestedLlmJson,
+  parseResolutionReply,
   type ChatMsg,
   type KittyCandidate,
 } from '@/lib/kitty-help';
@@ -316,17 +316,26 @@ export function useKittyHelp(args: {
       const reply3 = await kittyChat(messages, 2500);
       messages.push({ role: 'assistant', content: reply3 });
 
-      // Salvage pass: the model occasionally wraps the whole JSON object in
-      // one level of stringification — unwrapNestedLlmJson merges it back up.
-      const raw3 = extractJsonLoose(reply3) as Record<string, unknown> | null;
-      const parsed3 = unwrapNestedLlmJson(raw3) as Partial<KittyHelpResult> | null;
+      // Hardened parse: direct/fenced/brace-slice JSON, line salvage, then a
+      // salvage pass for double-encoded replies. The model answers with
+      // snake_case keys (per the contract), so read those FIRST — reading
+      // camelCase-only keys was why the panel used to fall back to dumping
+      // the raw JSON into the Resolution section.
+      const parsed3 = parseResolutionReply(reply3);
+      const readStr = (...keys: string[]): string => {
+        for (const key of keys) {
+          const value = parsed3?.[key];
+          if (typeof value === 'string' && value.trim()) return value.trim();
+        }
+        return '';
+      };
       const finalResult: KittyHelpResult = {
-        sayToCustomer: typeof parsed3?.sayToCustomer === 'string' ? parsed3.sayToCustomer : '',
-        resolutionEn: typeof parsed3?.resolutionEn === 'string' ? parsed3.resolutionEn : reply3.trim(),
-        resolutionZhTldr: typeof parsed3?.resolutionZhTldr === 'string' ? parsed3.resolutionZhTldr : '',
-        emotionalSupport: typeof parsed3?.emotionalSupport === 'string' ? parsed3.emotionalSupport : '',
+        sayToCustomer: readStr('say_to_customer', 'sayToCustomer'),
+        resolutionEn: readStr('resolution_en', 'resolutionEn') || reply3.trim(),
+        resolutionZhTldr: readStr('resolution_zh_tldr', 'resolutionZhTldr', 'resolution_zh', 'zh_tldr'),
+        emotionalSupport: readStr('emotional_support', 'emotionalSupport'),
         sources: Array.isArray(parsed3?.sources)
-          ? parsed3.sources.filter((s): s is string => typeof s === 'string')
+          ? (parsed3.sources as unknown[]).filter((s): s is string => typeof s === 'string')
           : picked.map((c) => c.title),
         picks: picked.map((c) => ({ id: c.id, title: c.title, reason: pickReasons.get(c.id) ?? '' })),
         ms: Math.round(performance.now() - started),

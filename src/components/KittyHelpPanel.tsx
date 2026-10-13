@@ -140,14 +140,14 @@ export function KittyHelpPanel({
 
         <div className="space-y-3">
           {result.sayToCustomer && (
-            <section className="rounded-xl border border-primary/40 bg-primary/10 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Say to the customer (EN)</p>
+            <section className="rounded-xl border border-violet-400/50 bg-violet-500/10 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Say to the customer (EN)</p>
               <FormattedText text={result.sayToCustomer} className="mt-1.5" />
             </section>
           )}
 
-          <section className="rounded-xl border border-border/60 bg-card/40 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resolution (EN)</p>
+          <section className="rounded-xl border border-sky-400/50 bg-sky-500/10 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300">Resolution (EN)</p>
             <FormattedText text={result.resolutionEn} className="mt-1.5" />
           </section>
 
@@ -159,9 +159,9 @@ export function KittyHelpPanel({
           )}
 
           {result.emotionalSupport && (
-            <section className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Emotional support (if needed)</p>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.emotionalSupport}</p>
+            <section className="rounded-xl border border-emerald-400/50 bg-emerald-500/10 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Emotional support (if needed)</p>
+              <FormattedText text={result.emotionalSupport} className="mt-1.5" />
             </section>
           )}
 

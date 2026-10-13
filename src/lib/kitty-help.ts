@@ -26,6 +26,7 @@ import {
   searchTemplates,
   type TemplateEntry,
 } from '@/lib/amr-templates';
+import { extractJsonLoose } from '@/lib/llm-parser';
 import type { FaqEntry } from '@/utils/productData';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import { loadNewsIndex, type NewsItem } from '@/utils/newsData';
@@ -325,6 +326,40 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
     ...p,
     id: `K${String(i + 1).padStart(2, '0')}`,
   }));
+}
+
+/**
+ * Hardened parser for the Task-3 final-resolution reply. Order:
+ *   1. direct JSON.parse of the whole reply (pure-JSON replies)
+ *   2. markdown-fenced JSON (```json … ```)
+ *   3. first-{ … last-} slice
+ *   4. extractJsonLoose line salvage
+ * then unwrapNestedLlmJson for the double-encoding case. Returns the raw
+ * record — callers read keys with snake_case/camelCase aliases.
+ */
+export function parseResolutionReply(reply: string): Record<string, unknown> | null {
+  const text = reply.trim();
+  const candidates: string[] = [text];
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence?.[1]) candidates.push(fence[1].trim());
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
+
+  let parsed: Record<string, unknown> | null = null;
+  for (const candidate of candidates) {
+    try {
+      const j: unknown = JSON.parse(candidate);
+      if (j && typeof j === 'object' && !Array.isArray(j)) {
+        parsed = j as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  if (!parsed) parsed = extractJsonLoose(text);
+  return unwrapNestedLlmJson(parsed);
 }
 
 /* ------------------------------------------------------------------ */
