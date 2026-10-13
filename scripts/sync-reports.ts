@@ -79,6 +79,36 @@ const out: Record<string, unknown> = {
   sources: {} as Record<string, string>,
 };
 
+// Keep the scorecard outside the frontend bundle; publish it with the report
+// snapshot so data refreshes do not require an app rebuild.
+const moneyGoHigh = JSON.parse(
+  readFileSync(resolve(ROOT, 'scripts/money-go-high.json'), 'utf-8'),
+) as {
+  kpis?: Array<{ name?: string; score?: number }>;
+  totalScore?: number;
+  source?: { sheetName?: string; revision?: number };
+};
+if (
+  !Array.isArray(moneyGoHigh.kpis)
+  || moneyGoHigh.kpis.length === 0
+  || moneyGoHigh.kpis.some((row) => !row.name || !Number.isFinite(row.score))
+  || !Number.isFinite(moneyGoHigh.totalScore)
+) {
+  throw new Error('Invalid Money Go High data in scripts/money-go-high.json');
+}
+const scoreSum = moneyGoHigh.kpis.reduce((sum, row) => sum + (row.score ?? 0), 0);
+if (Math.abs(scoreSum - moneyGoHigh.totalScore!) > 0.01) {
+  throw new Error(
+    `Money Go High score mismatch: KPI rows sum to ${scoreSum.toFixed(2)}, supplied total is ${moneyGoHigh.totalScore}`,
+  );
+}
+out.moneyGoHigh = moneyGoHigh;
+(out.sources as Record<string, string>).moneyGoHigh =
+  `${moneyGoHigh.source?.sheetName ?? 'Money Go High'} (revision ${moneyGoHigh.source?.revision ?? 'unknown'})`;
+console.log(
+  `  KPI   <- ${moneyGoHigh.source?.sheetName ?? 'Money Go High'} (${moneyGoHigh.kpis.length} KPIs, ${moneyGoHigh.totalScore!.toFixed(2)} pts)`,
+);
+
 // --- CSAT ---
 const csatFile = pick(files, /csat.*\.xlsx$/i);
 if (csatFile) {
@@ -185,7 +215,7 @@ if (emailAvgRtFile) {
 } else console.warn('  EaRT  : no matching Email avg-response .xlsx found');
 
 if (process.env.REQUIRE_COMPLETE_DASHBOARD_DATA === '1') {
-  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse', 'dsats'];
+  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse', 'dsats', 'moneyGoHigh'];
   const missing = required.filter((key) => !(key in out));
   if (missing.length) {
     throw new Error(`Refusing to publish an incomplete dashboard snapshot. Missing: ${missing.join(', ')}`);

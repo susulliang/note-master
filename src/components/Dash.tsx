@@ -35,7 +35,7 @@ import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
 import { useResponseTimeReport } from '@/hooks/use-response-time-report';
 import { useDsatsReport } from '@/hooks/use-dsats-report';
-import type { DsatsCase, HistoricalAgent, OneTouchChannel, ResponseTimeReport } from '@/lib/sf-reports';
+import { fetchDashboardData, type DsatsCase, type HistoricalAgent, type MoneyGoHighKpi, type MoneyGoHighReport, type OneTouchChannel, type ResponseTimeReport } from '@/lib/sf-reports';
 import {
   Dialog,
   DialogContent,
@@ -97,24 +97,12 @@ const CONTROL =
 const ACTIVE_CONTROL = 'glass-chip-accent text-foreground';
 const ALERT_CONTROL = 'border-rose-500/40 bg-rose-500/10 text-rose-200';
 
-const MONEY_KPIS = [
-  { category: 'Quality', name: 'CSAT', challenge: '95%', target: '90%', threshold: '85%', weight: 20, achievement: '96%', score: 22.05, direction: 'higher' as const },
-  { category: 'Quality', name: 'One-touch Rate', challenge: '76%', target: '72%', threshold: '68%', weight: 15, achievement: '71.86%', score: 16.5, direction: 'higher' as const },
-  { category: 'Quality', name: 'Bad Reviews on AMZ', challenge: '8%', target: '10%', threshold: '12%', weight: 10, achievement: '11.11%', score: 11, direction: 'lower' as const },
-  { category: 'Efficiency', name: 'Daily replies per agent', challenge: '60', target: '50', threshold: '45', weight: 10, achievement: '45', score: 11, direction: 'higher' as const },
-  { category: 'Efficiency', name: '20s SLA', challenge: '92%', target: '88%', threshold: '84%', weight: 10, achievement: '95.06%', score: 11, direction: 'higher' as const },
-  { category: 'Efficiency', name: 'First Response Time - Email (h)', challenge: '2', target: '4', threshold: '8', weight: 5, achievement: '1.66', score: 5.5, direction: 'lower' as const },
-  { category: 'Efficiency', name: 'Avg Response Time - Email (h)', challenge: '4', target: '6', threshold: '10', weight: 10, achievement: '1.95', score: 11, direction: 'lower' as const },
-  { category: 'Efficiency', name: 'Avg Response Time - Chat (s)', challenge: '20', target: '23', threshold: '26', weight: 5, achievement: '19.93', score: 5.5, direction: 'lower' as const },
-  { category: 'Team Attrition', name: 'Attrition Rate', challenge: '2.50%', target: '5%', threshold: '7.50%', weight: 5, achievement: '0.00%', score: 5.5, direction: 'lower' as const },
-];
-const SCORE_TOTAL = MONEY_KPIS.reduce((sum, row) => sum + row.score, 0);
 const SCORECARD_METRIC_NAMES: Record<DashMetricId, string> = {
   csat: 'CSAT',
   oneTouch: 'One-touch Rate',
-  chat: 'Avg Response Time - Chat (s)',
-  emailFirst: 'First Response Time - Email (h)',
-  emailAvg: 'Avg Response Time - Email (h)',
+  chat: 'Average response time (s)-Chat',
+  emailFirst: 'First Response Time-Email',
+  emailAvg: 'Average Response Time-Email (Business Hrs)',
 };
 type ScorecardBand = 'Challenge' | 'Target' | 'Threshold' | 'Below';
 type MetricBand = ScorecardBand | 'Not reported';
@@ -211,6 +199,34 @@ function useDashData() {
   const dailies = useDailiesReport();
   const response = useResponseTimeReport();
   const dsats = useDsatsReport();
+  const [moneyGoHigh, setMoneyGoHigh] = useState<
+    | { status: 'loading' }
+    | { status: 'error'; message: string }
+    | { status: 'ready'; report: MoneyGoHighReport }
+  >({ status: 'loading' });
+  const [scorecardNonce, setScorecardNonce] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDashboardData(undefined, scorecardNonce > 0)
+      .then((snapshot) => {
+        if (cancelled) return;
+        if (!snapshot?.moneyGoHigh) {
+          throw new Error('Money Go High data is missing from the published dashboard snapshot.');
+        }
+        setMoneyGoHigh({ status: 'ready', report: snapshot.moneyGoHigh });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setMoneyGoHigh({
+          status: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scorecardNonce]);
 
   const agents = useMemo(
     () =>
@@ -230,10 +246,12 @@ function useDashData() {
     dailies.reload();
     response.reload();
     dsats.reload();
+    setScorecardNonce((current) => current + 1);
   };
-  const refreshing = csat.refreshing || touch.refreshing || dailies.refreshing || response.refreshing || dsats.refreshing;
+  const refreshing = csat.refreshing || touch.refreshing || dailies.refreshing || response.refreshing || dsats.refreshing
+    || (scorecardNonce > 0 && moneyGoHigh.status === 'loading');
 
-  return { csat, touch, dailies, response, dsats, agents, reload, refreshing };
+  return { csat, touch, dailies, response, dsats, moneyGoHigh, agents, reload, refreshing };
 }
 
 function ReportSources({
@@ -357,19 +375,21 @@ function MetricTile({
   metric,
   value,
   abnormalCount,
+  scorecard,
   onClick,
 }: {
   metric: DashMetricId;
   value: number | null;
   abnormalCount: number | null;
+  scorecard: MoneyGoHighKpi[];
   onClick: () => void;
 }) {
   const meta = metricMeta(metric);
-  const scorecardRow = scorecardMetricRow(metric);
-  const band = scorecardBandForMetric(metric, value);
+  const scorecardRow = scorecardMetricRow(metric, scorecard);
+  const band = scorecardBandForMetric(metric, value, scorecard);
   const scaleMax = meta.direction === 'higher'
     ? 100
-    : Math.max(meta.threshold * 1.5, value ?? 0, scorecardNumber(scorecardRow?.challenge ?? '0'), 1);
+    : Math.max(meta.threshold * 1.5, value ?? 0, scorecardRow?.challenge ?? 0, 1);
   const axisPosition = (level: number) => Math.min(100, Math.max(0, (
     meta.direction === 'higher' ? level / scaleMax : 1 - level / scaleMax
   ) * 100));
@@ -389,18 +409,18 @@ function MetricTile({
         {value === null ? '—' : formatMetric(metric, value)}
       </span>
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px]">
-        <span className="text-amber-200" title="Scorecard threshold">Thr {scorecardRow?.threshold ?? formatMetric(metric, meta.threshold)}</span>
-        <span className="text-sky-200" title="Scorecard target">Target {scorecardRow?.target ?? '—'}</span>
-        <span className="text-emerald-200" title="Scorecard challenge">Ch {scorecardRow?.challenge ?? '—'}</span>
+        <span className="text-amber-200" title="Scorecard threshold">Thr {scorecardRow ? formatKpiValue(scorecardRow, scorecardRow.threshold) : formatMetric(metric, meta.threshold)}</span>
+        <span className="text-sky-200" title="Scorecard target">Target {scorecardRow ? formatKpiValue(scorecardRow, scorecardRow.target) : '—'}</span>
+        <span className="text-emerald-200" title="Scorecard challenge">Ch {scorecardRow ? formatKpiValue(scorecardRow, scorecardRow.challenge) : '—'}</span>
         <span className={cn('font-semibold', SCORE_BAND_TEXT[band])}>{band}</span>
       </div>
       {metric === 'csat' && <span className="mt-1 block text-[10px] text-muted-foreground/80">Excludes DTC + other regions</span>}
       <span className="relative mt-2 block h-1.5 overflow-hidden rounded-full bg-border/60" aria-hidden="true">
         <span className={cn('dash-progress-fill absolute inset-y-0 left-0 rounded-full', SCORE_BAND_FILL[fillBand])} style={{ width: `${position}%` }} />
         {scorecardRow && ([
-          { label: 'Threshold', value: scorecardNumber(scorecardRow.threshold), color: 'bg-amber-300' },
-          { label: 'Target', value: scorecardNumber(scorecardRow.target), color: 'bg-sky-300' },
-          { label: 'Challenge', value: scorecardNumber(scorecardRow.challenge), color: 'bg-emerald-300' },
+          { label: 'Threshold', value: scorecardRow.threshold, color: 'bg-amber-300' },
+          { label: 'Target', value: scorecardRow.target, color: 'bg-sky-300' },
+          { label: 'Challenge', value: scorecardRow.challenge, color: 'bg-emerald-300' },
         ]).map((marker) => (
           <span key={marker.label} title={marker.label} className={cn('absolute -top-1 h-3.5 w-px', marker.color)} style={{ left: `${axisPosition(marker.value)}%` }} />
         ))}
@@ -412,10 +432,12 @@ function MetricTile({
 function ResponseSummaryTile({
   values,
   abnormalCounts,
+  scorecard,
   onClick,
 }: {
   values: Record<'chat' | 'emailFirst' | 'emailAvg', number | null>;
   abnormalCounts: Record<'chat' | 'emailFirst' | 'emailAvg', number | null>;
+  scorecard: MoneyGoHighKpi[];
   onClick: () => void;
 }) {
   const metrics = ['chat', 'emailFirst', 'emailAvg'] as const;
@@ -434,8 +456,8 @@ function ResponseSummaryTile({
         {metrics.map((metric) => {
           const meta = metricMeta(metric);
           const value = values[metric];
-          const band = scorecardBandForMetric(metric, value);
-          const row = scorecardMetricRow(metric);
+          const band = scorecardBandForMetric(metric, value, scorecard);
+          const row = scorecardMetricRow(metric, scorecard);
           return (
             <span key={metric} className="min-w-0 px-2 first:pl-0 last:pr-0">
               <span className="block truncate text-[10px] text-muted-foreground">{meta.shortLabel}</span>
@@ -445,10 +467,10 @@ function ResponseSummaryTile({
               <span className={cn('mt-1 block truncate text-[9px] font-medium', SCORE_BAND_TEXT[band])}>
                 {band}
               </span>
-              <span title={row ? `Threshold ${row.threshold} · Target ${row.target} · Challenge ${row.challenge}` : undefined} className="mt-1 block truncate text-[8px] text-muted-foreground">
-                <span className="text-amber-200">Thr {row?.threshold ?? '—'}</span>
-                {' · '}<span className="text-sky-200">Tgt {row?.target ?? '—'}</span>
-                {' · '}<span className="text-emerald-200">Ch {row?.challenge ?? '—'}</span>
+              <span title={row ? `Threshold ${formatKpiValue(row, row.threshold)} · Target ${formatKpiValue(row, row.target)} · Challenge ${formatKpiValue(row, row.challenge)}` : undefined} className="mt-1 block truncate text-[8px] text-muted-foreground">
+                <span className="text-amber-200">Thr {row ? formatKpiValue(row, row.threshold) : '—'}</span>
+                {' · '}<span className="text-sky-200">Tgt {row ? formatKpiValue(row, row.target) : '—'}</span>
+                {' · '}<span className="text-emerald-200">Ch {row ? formatKpiValue(row, row.challenge) : '—'}</span>
               </span>
             </span>
           );
@@ -1799,43 +1821,47 @@ function ResponseExplore({ reports, agents }: { reports: ResponseTimeReport[] | 
   );
 }
 
-function scoreBand(row: (typeof MONEY_KPIS)[number]): ScorecardBand {
-  const number = (value: string) => Number.parseFloat(value.replace(/[^0-9.]/g, ''));
-  const achievement = number(row.achievement);
-  const challenge = number(row.challenge);
-  const target = number(row.target);
-  const threshold = number(row.threshold);
+function scoreBand(row: MoneyGoHighKpi, achievement = row.achievement): ScorecardBand {
   if (row.direction === 'higher') {
-    if (achievement >= challenge) return 'Challenge';
-    if (achievement >= target) return 'Target';
-    if (achievement >= threshold) return 'Threshold';
+    if (achievement >= row.challenge) return 'Challenge';
+    if (achievement >= row.target) return 'Target';
+    if (achievement >= row.threshold) return 'Threshold';
   } else {
-    if (achievement <= challenge) return 'Challenge';
-    if (achievement <= target) return 'Target';
-    if (achievement <= threshold) return 'Threshold';
+    if (achievement <= row.challenge) return 'Challenge';
+    if (achievement <= row.target) return 'Target';
+    if (achievement <= row.threshold) return 'Threshold';
   }
   return 'Below';
 }
 
-function scorecardMetricRow(metric: DashMetricId): (typeof MONEY_KPIS)[number] | undefined {
+function scorecardMetricRow(metric: DashMetricId, kpis: MoneyGoHighKpi[]): MoneyGoHighKpi | undefined {
   const name = SCORECARD_METRIC_NAMES[metric];
-  return MONEY_KPIS.find((row) => row.name === name);
+  return kpis.find((row) => row.name === name);
 }
 
-function scorecardNumber(value: string): number {
-  return Number.parseFloat(value.replace(/[^0-9.]/g, ''));
+function formatKpiValue(row: MoneyGoHighKpi, value: number): string {
+  const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+  return row.format === 'percent' ? `${formatted}%` : formatted;
 }
 
-function scorecardBandForMetric(metric: DashMetricId, value: number | null): MetricBand {
+function scorecardBandForMetric(metric: DashMetricId, value: number | null, kpis: MoneyGoHighKpi[]): MetricBand {
   if (value === null) return 'Not reported';
-  const row = scorecardMetricRow(metric);
-  return row ? scoreBand({ ...row, achievement: String(value) }) : 'Below';
+  const row = scorecardMetricRow(metric, kpis);
+  return row ? scoreBand(row, value) : 'Not reported';
 }
 
-function Scorecard() {
+function Scorecard({ state }: { state: ReturnType<typeof useDashData>['moneyGoHigh'] }) {
   const [showDetails, setShowDetails] = useState(false);
-  const number = (value: string) => Number.parseFloat(value.replace(/[^0-9.]/g, ''));
-  const listedWeight = MONEY_KPIS.reduce((sum, row) => sum + row.weight, 0);
+  if (state.status === 'loading') {
+    return <section className={cn(PANEL, 'p-5 text-sm text-muted-foreground')}>Loading Money Go High scorecard from the published dashboard data…</section>;
+  }
+  if (state.status === 'error') {
+    return <section className={cn(PANEL, 'p-5')}><h2 className="text-sm font-semibold text-foreground">Money Go High data unavailable</h2><p className="mt-2 text-xs text-rose-200">{state.message}</p></section>;
+  }
+  const report = state.report;
+  const kpis = report.kpis;
+  const listedWeight = kpis.reduce((sum, row) => sum + row.weight, 0);
+  const scoreSum = kpis.reduce((sum, row) => sum + row.score, 0);
   return (
     <div className="space-y-4">
       <section className={cn(PANEL, 'p-4')}>
@@ -1843,47 +1869,48 @@ function Scorecard() {
           <div className="flex items-center gap-3">
             <span className="flex size-10 items-center justify-center rounded-xl bg-accent/10 text-accent"><Trophy className="size-5" /></span>
             <div>
-              <h2 className="text-sm font-semibold text-foreground">Money Go High · Crazy New 2.0</h2>
-              <p className="mt-1 text-xs text-muted-foreground">October 2026 · static supplied snapshot</p>
+              <h2 className="text-sm font-semibold text-foreground">Money Go High · {report.title}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">{report.period} · {report.scoreLabel} · {report.source.documentTitle} / {report.source.sheetName}</p>
             </div>
           </div>
           <div className="flex items-end gap-6">
-            <div><div className="text-[11px] text-muted-foreground">Supplied score points</div><div className="font-mono text-3xl font-bold tabular-nums text-foreground">{SCORE_TOTAL.toFixed(2)}<span className="text-base font-normal text-muted-foreground"> / 100*</span></div></div>
-            <div className="text-right"><div className="text-[11px] text-muted-foreground">Settlement</div><div className="font-mono text-2xl font-semibold text-foreground">×1</div></div>
+            <div><div className="text-[11px] text-muted-foreground">Supplied score points</div><div className="font-mono text-3xl font-bold tabular-nums text-foreground">{report.totalScore.toFixed(2)}<span className="text-base font-normal text-muted-foreground"> / 100</span></div></div>
+            <div className="text-right"><div className="text-[11px] text-muted-foreground">Settlement</div><div className="font-mono text-2xl font-semibold text-foreground">×{report.settlementCoefficient}</div></div>
           </div>
         </div>
-        <div className="glass-panel mt-4 flex items-start gap-2 rounded-lg border-amber-500/30 bg-amber-500/[0.04] px-3 py-2 text-xs text-amber-100/90">
+        {Math.abs(scoreSum - report.totalScore) > 0.01 && <div className="glass-panel mt-4 flex items-start gap-2 rounded-lg border-amber-500/30 bg-amber-500/[0.04] px-3 py-2 text-xs text-amber-100/90">
           <Info className="mt-0.5 size-4 shrink-0" />
-          Listed KPI weights total {listedWeight}%. The remaining {100 - listedWeight}% is not represented in this snapshot; values and scores are shown as supplied and are not normalized.
-        </div>
+          Supplied score is {report.totalScore.toFixed(2)}; listed KPI scores sum to {scoreSum.toFixed(2)}. Values are shown as supplied and are not normalized.
+        </div>}
+        <p className="mt-3 text-[10px] text-muted-foreground">Listed KPI weights total {listedWeight}% · Source revision {report.source.revision} · Lark updated {new Date(report.source.updatedAt).toLocaleDateString('en-US')}</p>
       </section>
       <section className={cn(PANEL, 'divide-y divide-border/30 overflow-hidden')}>
         <div className="hidden grid-cols-[minmax(150px,220px)_minmax(140px,1fr)_minmax(135px,180px)] gap-4 px-4 py-3 text-[11px] font-medium text-muted-foreground sm:grid">
           <span>KPI</span><span>Achievement ladder</span><span className="text-right">Weight · Score · Band</span>
         </div>
-        {MONEY_KPIS.map((row) => {
-          const points = [row.challenge, row.target, row.threshold, row.achievement].map(number);
+        {kpis.map((row) => {
+          const points = [row.challenge, row.target, row.threshold, row.achievement];
           const min = Math.min(...points);
           const max = Math.max(...points);
           const span = Math.max(max - min, Math.abs(max) * 0.2, 1);
           const low = min - span * 0.1;
           const high = max + span * 0.1;
-          const pos = (value: number) => `${((value - low) / (high - low)) * 100}%`;
+          const pos = (value: number) => `${Math.min(100, Math.max(0, ((value - low) / (high - low)) * 100))}%`;
           const band = scoreBand(row);
           return (
             <div key={row.name} className="grid grid-cols-1 items-center gap-3 px-4 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(140px,1fr)_minmax(135px,180px)] sm:gap-4">
               <div className="min-w-0"><div className="truncate text-xs font-medium text-foreground" title={row.name}>{row.name}</div><div className="mt-1 text-[11px] text-muted-foreground">{row.category} · {row.direction === 'higher' ? 'Higher is better' : 'Lower is better'}</div></div>
               <div>
                 <div className="relative h-2 rounded-full bg-border/50">
-                  <span className="dash-progress-fill absolute inset-y-0 left-0 rounded-full bg-accent/15" style={{ width: pos(number(row.achievement)) }} />
-                  <span className="absolute -top-1 h-4 w-px bg-amber-300" style={{ left: pos(number(row.threshold)) }} />
-                  <span className="absolute -top-1 h-4 w-px bg-sky-300" style={{ left: pos(number(row.target)) }} />
-                  <span className="absolute -top-1 h-4 w-px bg-emerald-300" style={{ left: pos(number(row.challenge)) }} />
-                  <span className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-background" style={{ left: pos(number(row.achievement)) }} />
+                  <span className="dash-progress-fill absolute inset-y-0 left-0 rounded-full bg-accent/15" style={{ width: pos(row.achievement) }} />
+                  <span className="absolute -top-1 h-4 w-px bg-amber-300" style={{ left: pos(row.threshold) }} />
+                  <span className="absolute -top-1 h-4 w-px bg-sky-300" style={{ left: pos(row.target) }} />
+                  <span className="absolute -top-1 h-4 w-px bg-emerald-300" style={{ left: pos(row.challenge) }} />
+                  <span className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-background" style={{ left: pos(row.achievement) }} />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-mono tabular-nums text-muted-foreground">
-                  <span className="text-amber-200">Threshold {row.threshold}</span><span className="text-sky-200">Target {row.target}</span><span className="text-emerald-200">Challenge {row.challenge}</span>
-                  <strong className="text-foreground">Actual {row.achievement}</strong>
+                  <span className="text-amber-200">Threshold {formatKpiValue(row, row.threshold)}</span><span className="text-sky-200">Target {formatKpiValue(row, row.target)}</span><span className="text-emerald-200">Challenge {formatKpiValue(row, row.challenge)}</span>
+                  <strong className="text-foreground">Actual {formatKpiValue(row, row.achievement)}</strong>
                 </div>
               </div>
               <div className="text-right">
@@ -1893,13 +1920,17 @@ function Scorecard() {
             </div>
           );
         })}
-        <div className="flex justify-end px-4 py-3 font-mono text-sm font-bold tabular-nums text-foreground">Supplied score sum&nbsp; {SCORE_TOTAL.toFixed(2)}</div>
+        <div className="flex justify-end px-4 py-3 font-mono text-sm font-bold tabular-nums text-foreground">Supplied score sum&nbsp; {scoreSum.toFixed(2)}</div>
+      </section>
+      <section className={cn(PANEL, 'space-y-2 p-4')}>
+        <h3 className="text-xs font-semibold text-foreground">Scoring notes</h3>
+        {report.notes.map((note) => <p key={note} className="text-[11px] leading-relaxed text-muted-foreground">{note}</p>)}
       </section>
       <section className={cn(PANEL, 'overflow-hidden')}>
         <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((open) => !open)} className="glass-btn flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-semibold text-foreground">
           View scoring details <span className="text-muted-foreground">{showDetails ? 'Hide' : 'Show'}</span>
         </button>
-        {showDetails && <div className="overflow-x-auto border-t border-border/40"><table className="w-full min-w-[760px] text-left text-xs"><thead><tr className="text-muted-foreground">{['Category', 'KPI', 'Direction', 'Challenge', 'Target', 'Threshold', 'Weight', 'Achievement', 'Band', 'Score'].map((label) => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr></thead><tbody>{MONEY_KPIS.map((row) => <tr key={row.name} className="border-t border-border/30"><td className="px-3 py-2 text-muted-foreground">{row.category}</td><td className="px-3 py-2 text-foreground">{row.name}</td><td className="px-3 py-2 text-muted-foreground">{row.direction === 'higher' ? 'Higher' : 'Lower'}</td><td className="px-3 py-2 font-mono text-emerald-200">{row.challenge}</td><td className="px-3 py-2 font-mono text-sky-200">{row.target}</td><td className="px-3 py-2 font-mono text-amber-200">{row.threshold}</td><td className="px-3 py-2 font-mono">{row.weight}%</td><td className="px-3 py-2 font-mono text-foreground">{row.achievement}</td><td className="px-3 py-2">{scoreBand(row)}</td><td className="px-3 py-2 font-mono">{row.score.toFixed(2)}</td></tr>)}</tbody></table></div>}
+        {showDetails && <div className="overflow-x-auto border-t border-border/40"><table className="w-full min-w-[760px] text-left text-xs"><thead><tr className="text-muted-foreground">{['Category', 'KPI', 'Direction', 'Challenge', 'Target', 'Threshold', 'Weight', 'Achievement', 'Band', 'Score'].map((label) => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr></thead><tbody>{kpis.map((row) => <tr key={row.name} className="border-t border-border/30"><td className="px-3 py-2 text-muted-foreground">{row.category}</td><td className="px-3 py-2 text-foreground">{row.name}</td><td className="px-3 py-2 text-muted-foreground">{row.direction === 'higher' ? 'Higher' : 'Lower'}</td><td className="px-3 py-2 font-mono text-emerald-200">{formatKpiValue(row, row.challenge)}</td><td className="px-3 py-2 font-mono text-sky-200">{formatKpiValue(row, row.target)}</td><td className="px-3 py-2 font-mono text-amber-200">{formatKpiValue(row, row.threshold)}</td><td className="px-3 py-2 font-mono">{row.weight}%</td><td className="px-3 py-2 font-mono text-foreground">{formatKpiValue(row, row.achievement)}</td><td className="px-3 py-2">{scoreBand(row)}</td><td className="px-3 py-2 font-mono">{row.score.toFixed(2)}</td></tr>)}</tbody></table></div>}
       </section>
     </div>
   );
@@ -2146,7 +2177,7 @@ export default function Dash() {
       {briefing ? (
         <Briefing data={data} agents={data.agents} />
       ) : view === 'scorecard' ? (
-        <Scorecard />
+        <Scorecard state={data.moneyGoHigh} />
       ) : view === 'alerts' ? (
         <KeywordAlertsManager />
       ) : view === 'overview' ? (
@@ -2154,10 +2185,11 @@ export default function Dash() {
           <section>
             <div className="mb-2 flex items-center justify-between gap-3"><h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team overview</h2><span className="text-[11px] text-muted-foreground">Team totals do not change with agent filters</span></div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {DASH_METRICS.filter((metric) => metric.id === 'csat' || metric.id === 'oneTouch').map((metric) => <MetricTile key={metric.id} metric={metric.id} value={teamValues[metric.id]} abnormalCount={metricCounts[metric.id]} onClick={() => openMetric(metric.id)} />)}
+              {DASH_METRICS.filter((metric) => metric.id === 'csat' || metric.id === 'oneTouch').map((metric) => <MetricTile key={metric.id} metric={metric.id} value={teamValues[metric.id]} abnormalCount={metricCounts[metric.id]} scorecard={data.moneyGoHigh.status === 'ready' ? data.moneyGoHigh.report.kpis : []} onClick={() => openMetric(metric.id)} />)}
               <ResponseSummaryTile
                 values={{ chat: teamValues.chat, emailFirst: teamValues.emailFirst, emailAvg: teamValues.emailAvg }}
                 abnormalCounts={{ chat: metricCounts.chat, emailFirst: metricCounts.emailFirst, emailAvg: metricCounts.emailAvg }}
+                scorecard={data.moneyGoHigh.status === 'ready' ? data.moneyGoHigh.report.kpis : []}
                 onClick={() => openMetric('chat')}
               />
             </div>
@@ -2192,7 +2224,7 @@ export default function Dash() {
             />
             <div className="space-y-4">
               <button type="button" onClick={() => setView('scorecard')} className={cn(PANEL, 'flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:border-accent/50')}>
-                <span><span className="block text-xs font-semibold text-foreground">October 2026 static scorecard</span><span className="mt-1 block text-[11px] text-muted-foreground">Supplied score {SCORE_TOTAL.toFixed(2)} pts · 90% of listed weights</span></span><ChevronRight className="size-4 text-muted-foreground" />
+                <span><span className="block text-xs font-semibold text-foreground">{data.moneyGoHigh.status === 'ready' ? `${data.moneyGoHigh.report.period} scorecard` : 'Money Go High scorecard'}</span><span className="mt-1 block text-[11px] text-muted-foreground">{data.moneyGoHigh.status === 'ready' ? `Supplied score ${data.moneyGoHigh.report.totalScore.toFixed(2)} pts · ${data.moneyGoHigh.report.title}` : data.moneyGoHigh.status === 'loading' ? 'Loading published scorecard…' : 'Published scorecard unavailable'}</span></span><ChevronRight className="size-4 text-muted-foreground" />
               </button>
             </div>
           </div>

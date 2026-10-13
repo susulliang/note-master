@@ -65,6 +65,35 @@ export {
   type ResponseTimeReport,
 };
 
+export interface MoneyGoHighKpi {
+  category: string;
+  name: string;
+  direction: 'higher' | 'lower';
+  format: 'number' | 'percent';
+  challenge: number;
+  target: number;
+  threshold: number;
+  weight: number;
+  achievement: number;
+  score: number;
+}
+
+export interface MoneyGoHighReport {
+  title: string;
+  period: string;
+  scoreLabel: string;
+  totalScore: number;
+  settlementCoefficient: number;
+  source: {
+    documentTitle: string;
+    sheetName: string;
+    revision: number;
+    updatedAt: string;
+  };
+  notes: string[];
+  kpis: MoneyGoHighKpi[];
+}
+
 export async function fetchSfReportIndex(signal?: AbortSignal): Promise<SfReportFile[]> {
   const res = await fetch(`${BASE}sf_reports/index.json`, { signal });
   if (!res.ok) throw new Error(`sf_reports index failed: HTTP ${res.status}`);
@@ -247,6 +276,7 @@ export interface DashboardData {
   emailFirstResponse?: ResponseTimeReport;
   emailAvgResponse?: ResponseTimeReport;
   dsats?: DsatsReport;
+  moneyGoHigh?: MoneyGoHighReport;
 }
 
 let dashboardDataCache: DashboardData | null | undefined;

@@ -8,10 +8,11 @@ browser and Wrangler session. Last exercised end-to-end on 2026-10-11.
 ## Routine At A Glance
 
 1. Browser-download the 7 Salesforce reports + 1 Connect report into `sf_reports/`
-2. Parse: `REQUIRE_COMPLETE_DASHBOARD_DATA=1 npm run sync:reports`
-3. Review sources/counts + run the email privacy check
-4. Publish to R2 (`wrangler r2 object put`)
-5. Verify the live `r2.dev` URL
+2. Refresh `scripts/money-go-high.json` from the current Lark scorecard sheet
+3. Parse: `REQUIRE_COMPLETE_DASHBOARD_DATA=1 npm run sync:reports`
+4. Review sources/counts + run the email privacy check
+5. Publish to R2 (`wrangler r2 object put`)
+6. Verify the live `r2.dev` URL
 
 ## Important Boundaries
 
@@ -90,10 +91,17 @@ REQUIRE_COMPLETE_DASHBOARD_DATA=1 npm run sync:reports
 
 The command writes the ignored file
 `dashboard_publish/dashboard-data.json` and prints the selected source filename
-and parsed counts for each report. Confirm every section is present and each
-selected filename has the timestamp from this refresh (all except `call`, see
-above). "Bad uncompressed size" warnings for the xlsx files are a known zip
-encoding quirk of the Salesforce exports and are non-fatal.
+and parsed counts for each report. It also includes the scorecard from
+[`scripts/money-go-high.json`](scripts/money-go-high.json) as `moneyGoHigh`;
+keep that JSON aligned with the `Crazy New 2.0` sheet in the Lark document
+[`KPI Money Go High!`](https://lmgx8md8u1.feishu.cn/wiki/I3rMwn5JJiXxByk0vQWcfGa2nSi),
+including its source revision. This is data in the published snapshot, so
+scorecard updates do not require a frontend rebuild.
+
+Confirm every section is present and each selected report filename has the
+timestamp from this refresh (all except `call`, see above). "Bad uncompressed
+size" warnings for the xlsx files are a known zip encoding quirk of the
+Salesforce exports and are non-fatal.
 
 Inspect the generated source map:
 
@@ -140,10 +148,23 @@ wrangler r2 object put "eco-dash/dashboard-data.json" `
 ```
 
 The object key defaults to `dashboard-data.json` in bucket `eco-dash`
-(account ID is resolved from the Wrangler login). For GitHub Actions, the
-corresponding secrets are `CLOUDFLARE_ACCOUNT_ID`, `R2_BUCKET`, and
-`CLOUDFLARE_API_TOKEN`; never put the token in a `VITE_` variable, the report
-registry, or a committed file.
+(account ID is resolved from the Wrangler login). Never put the Cloudflare
+token in a `VITE_` variable, the report registry, or a committed file.
+
+### Publish A Scorecard-Only Update
+
+When only the Lark scorecard changes, update `scripts/money-go-high.json` with
+the current sheet values, revision, and modified time, then publish just that
+section while retaining the latest live Salesforce report snapshot:
+
+```sh
+R2_BUCKET=eco-dash npm run publish:money-go-high
+```
+
+The command validates KPI totals, reads the current public R2 snapshot, merges
+the scorecard, checks the combined public JSON for email addresses, and uploads
+the result. Set `DASHBOARD_DATA_SOURCE_URL` only when the existing snapshot is
+hosted at a different public URL.
 
 ## Verify The Published Snapshot
 

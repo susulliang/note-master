@@ -1,0 +1,139 @@
+{
+  "title": "Crazy New 2.0",
+  "period": "October 2026",
+  "scoreLabel": "V3 SCORE",
+  "totalScore": 91.6,
+  "settlementCoefficient": 1,
+  "source": {
+    "documentTitle": "KPI Money Go High!",
+    "sheetName": "Crazy New 2.0 (Oct 2026)",
+    "revision": 2514,
+    "updatedAt": "2026-10-12T22:42:18.000Z"
+  },
+  "notes": [
+    "Attrition deductions: 1 departure deducts 2 points; 2 departures deduct 5 points.",
+    "Settlement coefficient: score above 100 = 1.05; above 90 through 100 = 1.00; above 85 through 90 = 0.95; 85 or below = 0.90."
+  ],
+  "kpis": [
+    {
+      "category": "Quality",
+      "name": "QC Scores",
+      "direction": "higher",
+      "format": "number",
+      "challenge": 98,
+      "target": 95,
+      "threshold": 90,
+      "weight": 10,
+      "achievement": 93.57,
+      "score": 9.85
+    },
+    {
+      "category": "Quality",
+      "name": "CSAT",
+      "direction": "higher",
+      "format": "percent",
+      "challenge": 96,
+      "target": 95,
+      "threshold": 90,
+      "weight": 20,
+      "achievement": 95.27,
+      "score": 20
+    },
+    {
+      "category": "Quality",
+      "name": "One-touch Rate",
+      "direction": "higher",
+      "format": "percent",
+      "challenge": 76,
+      "target": 72,
+      "threshold": 68,
+      "weight": 15,
+      "achievement": 72.05,
+      "score": 15
+    },
+    {
+      "category": "Quality",
+      "name": "Bad Reviews on service on AMZ",
+      "direction": "lower",
+      "format": "percent",
+      "challenge": 8,
+      "target": 10,
+      "threshold": 12,
+      "weight": 10,
+      "achievement": 8.33,
+      "score": 10
+    },
+    {
+      "category": "Efficiency",
+      "name": "Daily replies per agent",
+      "direction": "higher",
+      "format": "number",
+      "challenge": 60,
+      "target": 50,
+      "threshold": 45,
+      "weight": 10,
+      "achievement": 40,
+      "score": 0
+    },
+    {
+      "category": "Efficiency",
+      "name": "20s SLA",
+      "direction": "higher",
+      "format": "percent",
+      "challenge": 92,
+      "target": 88,
+      "threshold": 84,
+      "weight": 10,
+      "achievement": 96,
+      "score": 10.5
+    },
+    {
+      "category": "Efficiency",
+      "name": "First Response Time-Email",
+      "direction": "lower",
+      "format": "number",
+      "challenge": 2,
+      "target": 4,
+      "threshold": 8,
+      "weight": 5,
+      "achievement": 1.8,
+      "score": 5.25
+    },
+    {
+      "category": "Efficiency",
+      "name": "Average Response Time-Email (Business Hrs)",
+      "direction": "lower",
+      "format": "number",
+      "challenge": 4,
+      "target": 6,
+      "threshold": 10,
+      "weight": 10,
+      "achievement": 2.16,
+      "score": 10.5
+    },
+    {
+      "category": "Efficiency",
+      "name": "Average response time (s)-Chat",
+      "direction": "lower",
+      "format": "number",
+      "challenge": 20,
+      "target": 23,
+      "threshold": 26,
+      "weight": 5,
+      "achievement": 17.02,
+      "score": 5.25
+    },
+    {
+      "category": "Team Attrition",
+      "name": "Attrition Rate",
+      "direction": "lower",
+      "format": "percent",
+      "challenge": 2.5,
+      "target": 5,
+      "threshold": 7.5,
+      "weight": 5,
+      "achievement": 0,
+      "score": 5.25
+    }
+  ]
+}
