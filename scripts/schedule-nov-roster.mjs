@@ -223,6 +223,7 @@ p('Peter').fixed = (d) => {
   return REMAP[code] ?? code;
 };
 p('Maggie').fixed = (d) => (d === 1 ? 'Farewell' : ''); // departed — single marker, like Oct
+p('Maggie').departed = true; // Pass 5 leaves the rest blank (no OFF fill)
 
 /* ------------------------------ the solver -------------------------------- */
 
@@ -707,6 +708,7 @@ for (let round = 0; round < 3; round++) {
 /* Pass 5 — leaves + OFF fill. */
 for (const a of novAgents) {
   const pl = plan.get(a.en);
+  if (pl.departed) continue; // Farewell marker + blanks, like the Oct sheet
   for (let d = 1; d <= DAYS; d++) {
     if (shiftsOf(a.en)[d - 1]) continue;
     const leaveCode = pl.leave.get(iso(d));
