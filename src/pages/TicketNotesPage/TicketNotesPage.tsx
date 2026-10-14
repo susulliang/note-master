@@ -2176,7 +2176,7 @@ Additional information (if needed): ${additional}`;
               onViewChange={setWorkView}
               caseTrakContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Case Trak…</div>}>
-                  <CaseTrakBoard reportImports={caseReportImports} scrapeOver24={extensionBridge.scrapeOver24} connected={extensionBridge.connected} />
+                  <CaseTrakBoard reportImports={caseReportImports} connected={extensionBridge.connected} />
                 </Suspense>
               }
               dashContent={

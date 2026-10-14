@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type DragEvent } from 'react';
 import {
   Plus,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Link as LinkIcon,
   Copy,
@@ -12,6 +14,9 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import type { ReportCaseRecord, ReportImportMeta } from '@/hooks/use-ccp-extension-bridge';
+import { parseOver24Workbook } from '@/lib/over24-workbook';
+import { getRoster, ROSTER_MONTHS } from '@/data/roster-index';
+import { DateBelt } from './DateBelt';
 import { TicketPanelsContext } from './FlowNode';
 import { useContext } from 'react';
 
@@ -95,6 +100,8 @@ export interface CaseReportImportBatch {
   meta: ReportImportMeta;
   /** Monotonic per-batch id so remounts can tell batches apart. */
   nonce: number;
+  /** Upload batches auto-distribute cases to owner columns after merging. */
+  distribute?: boolean;
 }
 
 /** Dedupe key: digits only, so "03741727" and "3741727" are the same case */
@@ -148,6 +155,44 @@ const COLUMNS_STORAGE_KEY = 'ecovacs_case_trak_columns_v1';
 const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
 
 /**
+ * Routes every case to the column whose label matches the case's Case Owner
+ * (each label is split into keywords, the owner is substring-matched, first
+ * hit wins). Cases with no matching owner column are spread round-robin so
+ * nothing is dropped. Returns a new array, or null when nothing moved.
+ */
+function routeByOwner(items: CaseTrakItem[], cols: BoardColumn[]): CaseTrakItem[] | null {
+  if (cols.length === 0) return null;
+  const keywordCols = cols.map((col) => ({
+    id: col.id,
+    keywords: col.label
+      .toLowerCase()
+      .split(/[\s,/|;]+/)
+      .map((k) => k.trim())
+      .filter(Boolean),
+  }));
+  const now = new Date().toISOString();
+  let rr = 0;
+  let changedAny = false;
+  const next = items.map((c) => {
+    const owner = (c.caseOwner || '').toLowerCase();
+    let target: string | null = null;
+    if (owner) {
+      const hit = keywordCols.find(
+        (k) => k.keywords.length > 0 && k.keywords.some((w) => owner.includes(w))
+      );
+      if (hit) target = hit.id;
+    }
+    if (!target) target = keywordCols[rr++ % keywordCols.length]!.id;
+    if (c.status !== target) {
+      changedAny = true;
+      return { ...c, status: target, updatedAt: now };
+    }
+    return c;
+  });
+  return changedAny ? next : null;
+}
+
+/**
  * CASE TRAK — a Jira-style kanban board that replaces the old Over-24h
  * tracker. Cases are cards that the agent drags between five status
  * columns: Open · Pending/Done · Escalated · Working · Closed. Each card
@@ -164,22 +209,90 @@ const LEGACY_KEY = 'ecovacs_ticket_24h_tracker';
  */
 export default function CaseTrakBoard({
   reportImports,
-  scrapeOver24,
   connected,
 }: {
   reportImports?: CaseReportImportBatch[];
-  scrapeOver24?: () => Promise<any>;
   connected?: boolean;
 }) {
   const [items, setItems] = useScopedState<CaseTrakItem[]>(STORAGE_KEY, []);
   const [columns, setColumns] = useScopedState<BoardColumn[]>(COLUMNS_STORAGE_KEY, [...DEFAULT_CASE_COLUMNS] as BoardColumn[]);
   const [editingColId, setEditingColId] = useState<string | null>(null);
   const [colLabelDraft, setColLabelDraft] = useState('');
-  const [scraping, setScraping] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Over 24H xlsx uploads — parsed locally, merged through the same
+  // import-batch pipeline as extension scrapes, then auto-distributed.
+  const [uploadBatch, setUploadBatch] = useState<CaseReportImportBatch | null>(null);
+  const uploadNonceRef = useRef(1);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  // Latest columns for the merge effect without re-running it on renames.
+  const columnsRef = useRef(columns);
+  useEffect(() => {
+    columnsRef.current = columns;
+  }, [columns]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<CaseStatus | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
   const [customerDraft, setCustomerDraft] = useState('');
+
+  // --- Roster date belt ------------------------------------------------------
+  // The board's columns are the agents ON DUTY on the selected roster date
+  // (belt defaults to today; falls back to the newest baked roster month when
+  // today's month has no roster). Changing the date rebuilds the columns and
+  // re-routes every case to its owner's column.
+  const today = new Date();
+  const todayMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const initialMonthKey = ROSTER_MONTHS.includes(todayMonthKey)
+    ? todayMonthKey
+    : ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? todayMonthKey;
+  const [beltYear, setBeltYear] = useState(() => Number(initialMonthKey.slice(0, 4)));
+  const [beltMonth, setBeltMonth] = useState(() => Number(initialMonthKey.slice(5, 7)));
+  const [beltDay, setBeltDay] = useState(() =>
+    todayMonthKey === initialMonthKey ? today.getDate() : 1
+  );
+  const beltDim = new Date(beltYear, beltMonth, 0).getDate();
+  const beltDayList = useMemo(
+    () => Array.from({ length: beltDim }, (_, i) => i + 1),
+    [beltDim]
+  );
+  const shiftBeltMonth = (delta: number) => {
+    let m = beltMonth + delta;
+    let y = beltYear;
+    if (m < 1) { m = 12; y -= 1; }
+    if (m > 12) { m = 1; y += 1; }
+    setBeltYear(y);
+    setBeltMonth(m);
+    setBeltDay(1);
+  };
+
+  /** Columns derived from the selected date's roster: every non-DTC agent
+   *  whose shift code that day marks them on duty (A* shifts, or B07 — the
+   *  same on-duty rule the SHIFTS counters use, minus the AL edge case). */
+  const dutyColumns = useMemo(() => {
+    const monthKey = `${beltYear}-${String(beltMonth).padStart(2, '0')}`;
+    const roster = getRoster(monthKey);
+    if (!roster) return [];
+    const iso = `${monthKey}-${String(beltDay).padStart(2, '0')}`;
+    return roster
+      .filter((a) => a.skill !== 'DTC')
+      .filter((a) => {
+        const c = a.shifts[iso] ?? '';
+        return (c.startsWith('A') && c !== 'AL') || c === 'B07';
+      })
+      .map((a, i) => ({
+        id: a.en.toLowerCase().replace(/\s+/g, '_'),
+        label: a.en,
+        ...COLUMN_PALETTE[i % COLUMN_PALETTE.length],
+      }));
+  }, [beltYear, beltMonth, beltDay]);
+
+  // Rebuild the board columns whenever the duty set changes and re-route all
+  // cases to owner columns (off-duty agents' cases spread across the duty
+  // columns). Months without roster data keep the current columns.
+  useEffect(() => {
+    if (dutyColumns.length === 0) return;
+    setColumns(dutyColumns);
+    setItems((prev) => routeByOwner(prev, dutyColumns) ?? prev);
+  }, [dutyColumns, setColumns, setItems]);
   // Hover tooltip state — bubble appears only after the pointer has stayed on
   // a card for > 1s (matches the "hover for over 1 second" requirement).
   const [hoveredCase, setHoveredCase] = useState<string | null>(null);
@@ -230,11 +343,13 @@ export default function CaseTrakBoard({
   // changes the second time.
   const processedImportRef = useRef<Set<number>>(new Set());
   useEffect(() => {
-    if (!reportImports || reportImports.length === 0) return;
-    const pending = reportImports.filter(
+    const allBatches = [...(reportImports ?? []), ...(uploadBatch ? [uploadBatch] : [])];
+    if (allBatches.length === 0) return;
+    const pending = allBatches.filter(
       (b) => Array.isArray(b.cases) && b.cases.length > 0 && !processedImportRef.current.has(b.nonce)
     );
     if (pending.length === 0) return;
+    const needsDistribute = pending.some((b) => b.distribute === true);
     const now = new Date().toISOString();
     for (const batch of pending) processedImportRef.current.add(batch.nonce);
     setItems((prev) => {
@@ -294,15 +409,21 @@ export default function CaseTrakBoard({
           }
         }
       }
-      if (counts.added > 0 || counts.updated > 0) {
+      const changed = counts.added > 0 || counts.updated > 0;
+      if (changed) {
         const source = pending[0]?.meta?.reportName || 'Over-24h report';
         toast.success(
-          `${source}: ${counts.added} new case${counts.added === 1 ? '' : 's'} added, ${counts.updated} refreshed on the board.`
+          `${source}: ${counts.added} new case${counts.added === 1 ? '' : 's'} added, ${counts.updated} refreshed on the board.${needsDistribute ? ' Routed to owner columns.' : ''}`
         );
+      } else if (needsDistribute) {
+        toast.info('Upload matched the current board — no new or refreshed cases.');
       }
-      return counts.added > 0 || counts.updated > 0 ? next : prev;
+      if (needsDistribute) {
+        setItems((prev) => routeByOwner(prev, columnsRef.current) ?? prev);
+      }
+      return changed ? next : prev;
     });
-  }, [reportImports, setItems]);
+  }, [reportImports, uploadBatch, setItems]);
 
   const moveCase = useCallback((id: string, status: CaseStatus) => {
     setItems((prev) =>
@@ -501,8 +622,8 @@ export default function CaseTrakBoard({
   };
 
   const resetColumns = () => {
-    if (!window.confirm('Reset all columns to the default team layout? Cases stay on the board but orphaned ones move to the first column.')) return;
-    const defaults = [...DEFAULT_CASE_COLUMNS];
+    if (!window.confirm('Reset all columns to the current roster day\'s on-duty layout? Cases stay on the board but orphaned ones move to the first column.')) return;
+    const defaults = dutyColumns.length > 0 ? [...dutyColumns] : [...DEFAULT_CASE_COLUMNS];
     const fallback = defaults[0]?.id ?? 'open';
     setColumns(defaults);
     setItems((its) => {
@@ -512,99 +633,54 @@ export default function CaseTrakBoard({
       );
     });
     cancelRenameCol();
-    toast.info('Columns reset to default.');
-  };
-
-  const handleScrapeOver24 = async () => {
-    if (!scrapeOver24) {
-      toast.error('Extension bridge not available. Reload the page or re-install the extension.');
-      return;
-    }
-    setScraping(true);
-    try {
-      const r = await scrapeOver24();
-      if (r?.ok) {
-        const n = Number(r.count ?? 0);
-        const total = r.totalRecords ? ` of ${r.totalRecords}` : '';
-        const incomplete = r.complete === false && r.totalRecords > n;
-        if (r.pushed?.ok) {
-          if (incomplete) {
-            toast.warning(`Imported ${n} case${n === 1 ? '' : 's'}${total} — scrape incomplete. The report tab was auto-reloaded to capture full data; wait a few seconds and hit Scrape again.`);
-          } else {
-            toast.success(`Imported ${n} case${n === 1 ? '' : 's'}${total} → board.`);
-          }
-        } else {
-          toast.warning(`Scraped ${n} case${n === 1 ? '' : 's'}${total}, but the board didn't receive them: ${r.pushed?.error || 'bridge not connected'}.`);
-        }
-      } else {
-        toast.error(r?.error || 'OVER24 scrape failed.');
-      }
-    } catch (e: any) {
-      toast.error(String(e?.message || e));
-    } finally {
-      setScraping(false);
-    }
+    toast.info('Columns reset to the roster day layout.');
   };
 
   // --- Distribute cases across columns ------------------------------------
-  // Rules:
-  //   - The FIRST column keeps every case whose `caseOwner` matches any
-  //     keyword in the first column's name (split on whitespace/slashes/commas).
-  //   - All other cases are shuffled and distributed equally (round-robin)
-  //     across the REMAINING columns.
-  //   - Cases already in the first column because of an owner match stay put.
+  // Owner-based routing: every case moves to the column whose label matches
+  // its Case Owner; unmatched cases spread round-robin. Used by the ⚖ button
+  // and automatically after an Over 24H xlsx upload.
   const distributeCases = useCallback(() => {
-    if (columns.length < 2) {
-      toast.error('Need at least 2 columns to distribute.');
+    const next = routeByOwner(items, columns);
+    if (next === null) {
+      toast.error('Add at least one column to distribute into.');
       return;
     }
-    const firstCol = columns[0];
-    const otherCols = columns.slice(1);
-    if (otherCols.length === 0) return;
+    setItems(next);
+    toast.info(
+      `Routed ${items.length} case${items.length === 1 ? '' : 's'} to their owner columns (unmatched spread evenly).`
+    );
+  }, [columns, items, setItems]);
 
-    // Parse the first column's name into lowercased keywords.
-    const keywords = firstCol.label
-      .toLowerCase()
-      .split(/[\s,/|;]+/)
-      .map((k) => k.trim())
-      .filter(Boolean);
-
-    const now = new Date().toISOString();
-    setItems((prev) => {
-      // Determine which cases "belong" to the first column (owner match).
-      const firstColIds = new Set<string>();
-      if (keywords.length > 0) {
-        for (const c of prev) {
-          const owner = (c.caseOwner || '').toLowerCase();
-          if (owner && keywords.some((k) => owner.includes(k))) {
-            firstColIds.add(c.id);
-          }
-        }
+  // --- Over 24H xlsx upload ------------------------------------------------
+  // Replaces the extension scrape flow: parse the exported report workbook
+  // locally and push it through the import-batch pipeline with distribute
+  // enabled, so cases land on their owner's column automatically.
+  const handleUploadOver24 = async (file: File) => {
+    setUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseOver24Workbook(buf, file.name);
+      if (parsed.cases.length === 0) {
+        toast.error(`No case rows found in ${file.name}.`);
+        return;
       }
-      // Shuffle the non-first-column cases.
-      const pool = prev
-        .filter((c) => !firstColIds.has(c.id))
-        .map((c) => ({ c, r: Math.random() }))
-        .sort((a, b) => a.r - b.r)
-        .map((x) => x.c);
-
-      // Round-robin assign across the other columns.
-      const next = prev.map((c) => {
-        if (firstColIds.has(c.id)) {
-          return c.status === firstCol.id ? c : { ...c, status: firstCol.id, updatedAt: now };
-        }
-        return c;
+      setUploadBatch({
+        cases: parsed.cases,
+        meta: {
+          reportName: `Over 24H upload · ${file.name}`,
+          totalRecords: parsed.cases.length,
+          capturedAt: new Date().toISOString(),
+        },
+        nonce: uploadNonceRef.current++,
+        distribute: true,
       });
-      const byId = new Map(next.map((c) => [c.id, c]));
-      pool.forEach((c, i) => {
-        const target = otherCols[i % otherCols.length].id;
-        const cur = byId.get(c.id);
-        if (cur && cur.status !== target) byId.set(c.id, { ...cur, status: target, updatedAt: now });
-      });
-      return Array.from(byId.values());
-    });
-    toast.info(`Distributed ${items.length} case${items.length === 1 ? '' : 's'} — first column "${firstCol.label}" keeps owner-matched tickets.`);
-  }, [columns, items.length]);
+    } catch (e: any) {
+      toast.error(`Failed to parse ${file.name}: ${String(e?.message || e)}`);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // --- Hover-tooltip handlers ---------------------------------------------
   const startHover = (id: string) => {
@@ -705,19 +781,57 @@ export default function CaseTrakBoard({
 
         <span className="mx-1 h-4 w-px bg-border/60" />
 
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) void handleUploadOver24(f);
+          }}
+        />
         <button
           type="button"
-          onClick={() => void handleScrapeOver24()}
-          disabled={scraping || !scrapeOver24}
+          onClick={() => uploadInputRef.current?.click()}
+          disabled={uploading}
           className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-b from-amber-500/30 to-amber-600/15 px-2.5 py-1 text-[11px] font-bold text-amber-200 ring-1 ring-inset ring-amber-500/40 transition-all hover:from-amber-500/40 hover:to-amber-600/20 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
-          title="Scrape the [OVER24] Salesforce report and import every case into the board"
+          title="Upload the exported Over 24H xlsx — cases merge onto the board and auto-route to their owner's column"
         >
-          <span className={scraping ? 'animate-spin' : ''}>📥</span>
-          {scraping ? 'Scraping OVER24…' : 'Scrape OVER24'}
+          <span className={uploading ? 'animate-spin' : ''}>📄</span>
+          {uploading ? 'Parsing…' : 'Upload Over 24H'}
         </button>
         <span className="ml-auto text-[10px] leading-snug text-muted-foreground/70">
           {connected ? 'Extension connected' : 'Extension not connected — reload the page after re-enabling.'}
         </span>
+      </div>
+
+      {/* Roster date belt — the selected day's on-duty agents become the
+          columns; drag the belt or click a day to switch. */}
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => shiftBeltMonth(-1)}
+          title="Previous month"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/60 bg-card/40 text-muted-foreground transition-colors hover:border-accent/50 hover:text-accent"
+        >
+          <ChevronLeft className="size-3" />
+        </button>
+        <span className="w-16 shrink-0 text-center font-mono text-[11px] font-bold text-foreground">
+          {beltYear}-{String(beltMonth).padStart(2, '0')}
+        </span>
+        <button
+          type="button"
+          onClick={() => shiftBeltMonth(1)}
+          title="Next month"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/60 bg-card/40 text-muted-foreground transition-colors hover:border-accent/50 hover:text-accent"
+        >
+          <ChevronRight className="size-3" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <DateBelt year={beltYear} month={beltMonth} dayList={beltDayList} selected={beltDay} onSelect={setBeltDay} />
+        </div>
       </div>
 
       {/* Board — columns wrap into two rows (29 columns / ~15 per row). */}
