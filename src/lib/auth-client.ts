@@ -33,6 +33,11 @@ export function getStoredToken(): string | null {
   }
 }
 
+/** Resolved API origin — shared by other API clients (e.g. roster-sync). */
+export function getApiBase(): string {
+  return API_BASE;
+}
+
 function setStoredToken(token: string | null): void {
   try {
     if (token) window.localStorage.setItem(TOKEN_KEY, token);

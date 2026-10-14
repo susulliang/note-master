@@ -8,13 +8,7 @@
  * table; subsequent edits upsert single cells.
  */
 
-import { getStoredToken } from '@/lib/auth-client';
-
-const API_BASE: string = (() => {
-  if (import.meta.env.VITE_AUTH_API_BASE)
-    return String(import.meta.env.VITE_AUTH_API_BASE).replace(/\/+$/, '');
-  return '';
-})();
+import { getStoredToken, getApiBase } from '@/lib/auth-client';
 
 export interface RosterCell {
   en: string;
@@ -29,7 +23,7 @@ export async function fetchRosterMonth(monthKey: string): Promise<RosterCell[]> 
   const token = getStoredToken();
   if (!token) return [];
   try {
-    const res = await fetch(`${API_BASE}/api/roster?month=${encodeURIComponent(monthKey)}`, {
+    const res = await fetch(`${getApiBase()}/api/roster?month=${encodeURIComponent(monthKey)}`, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];
@@ -48,7 +42,7 @@ export async function pushRosterFull(
   const token = getStoredToken();
   if (!token) return false;
   try {
-    const res = await fetch(`${API_BASE}/api/roster`, {
+    const res = await fetch(`${getApiBase()}/api/roster`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ month: monthKey, mode: 'full', agents }),
@@ -69,7 +63,7 @@ export async function pushRosterCell(
   const token = getStoredToken();
   if (!token) return false;
   try {
-    const res = await fetch(`${API_BASE}/api/roster`, {
+    const res = await fetch(`${getApiBase()}/api/roster`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ month: monthKey, mode: 'cell', en, iso, code }),
