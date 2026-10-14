@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronDown, RotateCcw, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ROSTER_202610 as ROSTER } from '@/data/roster-2026-10';
+import { getRoster, getDayTotals } from '@/data/roster-index';
+import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
-import type { RosterAgent } from '@/data/roster';
 
 /**
  * Shifts workspace (v0.2.2) — 3rd work-view canvas beside Notes / Trak,
@@ -327,14 +327,24 @@ function MonthYearSelect({
 /* ------------------------------ the workspace ------------------------------ */
 
 export default function ShiftsWorkspace() {
-  const available = ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? { year: 2026, month: 10 };
+  const available = ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? { year: 2026, month: 11 };
   const [year, setYear] = useState(available.year);
   const [month, setMonth] = useState(available.month);
   const [agentEn, setAgentEn] = useState('');
   /** Local shift overrides — `${en}|${iso}` → code (never written to Feishu). */
   const [edits, setEdits] = useState<Record<string, string>>({});
 
-  const agent = useMemo(() => ROSTER.find((a) => a.en === agentEn) ?? null, [agentEn]);
+  /** Month-scoped roster + day-total stat rows. */
+  const ROSTER = useMemo(
+    () => getRoster(`${year}-${String(month).padStart(2, '0')}`) ?? [],
+    [year, month]
+  );
+  const DAY_TOTALS = useMemo(
+    () => getDayTotals(`${year}-${String(month).padStart(2, '0')}`),
+    [year, month]
+  );
+
+  const agent = useMemo(() => ROSTER.find((a) => a.en === agentEn) ?? null, [ROSTER, agentEn]);
 
   const shiftOf = (a: RosterAgent, iso: string): string =>
     edits[`${a.en}|${iso}`] ?? a.shifts[iso] ?? '';
@@ -416,7 +426,7 @@ export default function ShiftsWorkspace() {
       ) : agent ? (
         <AgentMonthView agent={agent} year={year} month={month} shiftOf={shiftOf} setShift={setShift} />
       ) : (
-        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} setShift={setShift} />
+        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} setShift={setShift} totals={DAY_TOTALS} agents={ROSTER} />
       )}
     </div>
   );
@@ -430,12 +440,16 @@ function RosterGrid({
   dayList,
   shiftOf,
   setShift,
+  totals,
+  agents,
 }: {
   year: number;
   month: number;
   dayList: number[];
   shiftOf: (a: RosterAgent, iso: string) => string;
   setShift: (en: string, iso: string, code: string) => void;
+  totals: DayTotalRow[];
+  agents: RosterAgent[];
 }) {
   return (
     <div className="custom-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
@@ -473,7 +487,7 @@ function RosterGrid({
           </tr>
         </thead>
         <tbody>
-          {ROSTER.map((a) => (
+          {agents.map((a) => (
             <tr key={a.hr} className="group/row">
               <td className="sticky left-0 z-10 border-b border-r border-border/50 bg-card/90 px-2 py-1 backdrop-blur group-hover/row:bg-accent/10">
                 <div className="flex items-baseline gap-1.5">
@@ -510,10 +524,59 @@ function RosterGrid({
               ))}
             </tr>
           ))}
+
+          {/* Day-total stat rows — replicate the sheet's COUNTIF block.
+              "Total Chat" / "Total Call" (the 2 requested headcount rows)
+              get emphasized styling. */}
+          {totals.length > 0 && (
+            <>
+              <tr>
+                <td colSpan={dayList.length + 4} className="border-y-2 border-border/70 bg-muted/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Day totals — source-sheet formulas
+                </td>
+              </tr>
+              {totals.map((row) => {
+                const emphasized = row.label === 'Total Chat' || row.label === 'Total Call';
+                return (
+                  <tr key={row.label} className={cn(emulatedRowClass(emphasized))}>
+                    <td
+                      className={cn(
+                        'sticky left-0 z-10 border-b border-r border-border/50 px-2 py-1 backdrop-blur',
+                        emphasized ? 'bg-primary/20 font-bold text-primary' : 'bg-card/90 text-muted-foreground'
+                      )}
+                    >
+                      <span className="text-[10px]">{row.label}</span>
+                    </td>
+                    {dayList.map((d) => {
+                      const iso = isoOf(year, month, d);
+                      const v = row.values[iso];
+                      return (
+                        <td
+                          key={d}
+                          className={cn(
+                            'border-b border-border/30 px-0.5 py-1 text-center font-mono text-[9px]',
+                            emphasized ? 'bg-primary/10 font-bold text-primary' : 'text-muted-foreground'
+                          )}
+                        >
+                          {v ?? ''}
+                        </td>
+                      );
+                    })}
+                    <td colSpan={3} className="border-b border-l border-border/30 bg-muted/20" />
+                  </tr>
+                );
+              })}
+            </>
+          )}
         </tbody>
       </table>
     </div>
   );
+}
+
+/** Class helper for the total stat rows. */
+function emulatedRowClass(emphasized: boolean): string {
+  return emphasized ? 'bg-primary/5' : '';
 }
 
 /* ------------------- single-agent month view (week columns) ---------------- */

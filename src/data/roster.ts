@@ -21,3 +21,13 @@ export interface RosterAgent {
   /** ISO date (YYYY-MM-DD) → shift code. */
   shifts: Record<string, string>;
 }
+
+/** One stat row below the agent block — replicates the source sheet's
+ *  COUNTIF rows (上班总人数 / OM / TL / T2 / T3 / per-shift counts …)
+ *  plus the chat/call headcount rows. */
+export interface DayTotalRow {
+  /** Row label, e.g. "上班总人数" or "Total Chat". */
+  label: string;
+  /** ISO date (YYYY-MM-DD) → count. */
+  values: Record<string, number>;
+}
