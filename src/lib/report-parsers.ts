@@ -282,6 +282,8 @@ export interface HistoricalQueue {
 }
 
 export interface HistoricalAgent {
+  /** Raw login email from the Agent column; empty for non-agent rows. */
+  login: string;
   owner: string;
   queues: string[];
   handled: number;
@@ -321,9 +323,14 @@ export function callMetricsFromHistorical(report: HistoricalMetricsReport): Call
     handled += a.handled;
     handledOutbound += a.handledOutbound;
     abandoned += a.nonResponseAbandons;
-    if (a.serviceLevel20 !== null) {
-      slaWeighted += a.serviceLevel20 * Math.max(1, a.handledIncoming);
-      slaWeight += Math.max(1, a.handledIncoming);
+    // Team SL20 formula (canonical): weighted average of every agent's
+    // reported 20s service level, weighted by "Contacts handled incoming".
+    // Only agents with an email login and a reported SL20 count — drop all
+    // other rows. Never floor the weight, so agents without incoming
+    // contacts contribute nothing.
+    if (a.serviceLevel20 !== null && a.handledIncoming > 0 && /@/.test(a.login)) {
+      slaWeighted += a.serviceLevel20 * a.handledIncoming;
+      slaWeight += a.handledIncoming;
     }
     if (a.avgHandleTimeSec !== null) {
       ahtWeighted += a.avgHandleTimeSec * Math.max(1, a.handled);
@@ -382,6 +389,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
   };
   type WeightedMetric = { total: number; weight: number };
   type AgentAccumulator = {
+    login: string;
     owner: string;
     queues: Set<string>;
     handled: number;
@@ -433,6 +441,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
     let agent = agents.get(key);
     if (!agent) {
       agent = {
+        login,
         owner: displayName(value(row, cols.name), login),
         queues: new Set<string>(),
         handled: 0,
@@ -462,6 +471,7 @@ export function parseHistoricalMetricsCsv(text: string, fileName: string): Histo
   const parsedAgents = [...agents.values()]
     .filter((agent) => agent.handled + agent.missed > 0 || agent.answerRate.weight > 0 || agent.serviceLevel20.weight > 0)
     .map((agent) => ({
+      login: agent.login,
       owner: agent.owner,
       queues: [...agent.queues].sort((a, b) => a.localeCompare(b)),
       handled: agent.handled,
