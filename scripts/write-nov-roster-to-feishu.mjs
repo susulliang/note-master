@@ -76,7 +76,7 @@ const agents = [...block.matchAll(/en: "([^"]+)"[\s\S]*?shifts: \{ ([\s\S]*?) \}
     [...m[2].matchAll(/'(\d{4}-\d{2}-\d{2})': '([^']*)'/g)].map((x) => [x[1], x[2]])
   ),
 }));
-if (agents.length !== 40) throw new Error(`expected 40 agents, got ${agents.length}`);
+if (agents.length !== 39) throw new Error(`expected 39 agents (Maggie excluded), got ${agents.length}`);
 const iso = (d) => `${YEAR}-${String(MONTH).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
 console.log(`Writing November ${YEAR} roster to sheet ${SHEET}…`);

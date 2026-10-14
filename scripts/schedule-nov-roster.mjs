@@ -156,12 +156,16 @@ for (const r of octRows) {
 }
 
 /* Nov agents from the Nov sheet (authoritative team list, rows 3-42). */
+/* Departed agents are excluded from the roster entirely (Maggie quit —
+ * her sheet row stays but the app roster and all totals drop her). */
+const EXCLUDE_EN = new Set(['Maggie']);
 const novAgents = [];
 for (const r of novRows) {
   const no = String(r[0] ?? '').trim();
   if (!/^\d+$/.test(no)) continue;
   const en = String(r[3] ?? '').trim();
   if (!en) continue;
+  if (EXCLUDE_EN.has(en)) continue;
   novAgents.push({
     no, hr: String(r[1] ?? '').trim(), zh: String(r[2] ?? '').trim(), en,
     skill: String(r[4] ?? '').trim(),
@@ -227,8 +231,7 @@ p('Peter').fixed = (d) => {
   if (/^(OFF|PH|AL|调休|病假|事假)$/.test(code)) return code;
   return REMAP[code] ?? code;
 };
-p('Maggie').fixed = (d) => (d === 1 ? 'Farewell' : ''); // departed — single marker, like Oct
-p('Maggie').departed = true; // Pass 5 leaves the rest blank (no OFF fill)
+// (Maggie is excluded entirely — see EXCLUDE_EN)
 
 /* ------------------------------ the solver -------------------------------- */
 

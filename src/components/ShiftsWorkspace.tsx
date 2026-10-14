@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Check, ChevronDown, RotateCcw, Search, X } from 'lucide-react';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import { CalendarDays, Check, ChevronDown, CloudUpload, Download, RotateCcw, Search, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { cn } from '@/lib/utils';
-import { getRoster, getDayTotals } from '@/data/roster-index';
+import { getRoster } from '@/data/roster-index';
 import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
+import { useAuth } from '@/lib/auth-context';
+import { fetchRosterMonth, pushRosterCell, pushRosterFull } from '@/lib/roster-sync';
 
 /**
  * Shifts workspace (v0.2.2) — 3rd work-view canvas beside Notes / Trak,
@@ -334,13 +337,10 @@ export default function ShiftsWorkspace() {
   /** Local shift overrides — `${en}|${iso}` → code (never written to Feishu). */
   const [edits, setEdits] = useState<Record<string, string>>({});
 
-  /** Month-scoped roster + day-total stat rows. */
+  /** Month-scoped roster (day-total stat rows are computed LIVE so local
+   *  edits re-flow the counters, matching the sheet's COUNTIF behavior). */
   const ROSTER = useMemo(
     () => getRoster(`${year}-${String(month).padStart(2, '0')}`) ?? [],
-    [year, month]
-  );
-  const DAY_TOTALS = useMemo(
-    () => getDayTotals(`${year}-${String(month).padStart(2, '0')}`),
     [year, month]
   );
 
@@ -349,15 +349,73 @@ export default function ShiftsWorkspace() {
   const shiftOf = (a: RosterAgent, iso: string): string =>
     edits[`${a.en}|${iso}`] ?? a.shifts[iso] ?? '';
 
-  const setShift = (en: string, iso: string, code: string) =>
+  /* ---------------- D1 backup (admin logins) ----------------
+   * The first edit of a month uploads the entire table to the eco-data D1
+   * (roster_cells); every later edit upserts just the changed cell. */
+  const { user: authUser } = useAuth();
+  const [d1Status, setD1Status] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
+  const d1MonthRef = useRef<Map<string, boolean>>(new Map());
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+  const dim = daysInMonth(year, month);
+  const dayList = useMemo(() => Array.from({ length: dim }, (_, i) => i + 1), [dim]);
+
+  useEffect(() => {
+    if (!authUser?.isAdmin || d1MonthRef.current.has(monthKey)) return;
+    let alive = true;
+    void fetchRosterMonth(monthKey).then((cells) => {
+      if (!alive) return;
+      d1MonthRef.current.set(monthKey, cells.length > 0);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [monthKey, authUser?.isAdmin]);
+
+  const setShift = (en: string, iso: string, code: string) => {
     setEdits((prev) => ({ ...prev, [`${en}|${iso}`]: code }));
+    if (!authUser?.isAdmin || ROSTER.length === 0) return;
+    if (d1MonthRef.current.get(monthKey) === false) {
+      // First submit for this month → upload the entire table.
+      setD1Status('syncing');
+      const agents = ROSTER.map((a) => ({
+        en: a.en,
+        shifts: Object.fromEntries(
+          dayList.map((d) => {
+            const key = isoOf(year, month, d);
+            return [key, d === Number(iso.slice(-2)) && a.en === en ? code : edits[`${a.en}|${key}`] ?? a.shifts[key] ?? ''];
+          })
+        ),
+      }));
+      void pushRosterFull(monthKey, agents).then((ok) => {
+        if (ok) d1MonthRef.current.set(monthKey, true);
+        setD1Status(ok ? 'ok' : 'error');
+      });
+    } else {
+      setD1Status('syncing');
+      void pushRosterCell(monthKey, en, iso, code).then((ok) => setD1Status(ok ? 'ok' : 'error'));
+    }
+  };
+
+  /* ---------------- XLSX export ---------------- */
+  const downloadXlsx = () => {
+    const totals = computeDayTotals(ROSTER, shiftOf, year, month, dayList);
+    const wdRow = ['Agent · Skill', ...dayList.map((d) => WEEKDAY_SHORT[new Date(year, month - 1, d).getDay()])];
+    const dayRow = ['Day', ...dayList.map(String)];
+    const body = ROSTER.map((a) => [
+      `${a.en} (${a.skill})`,
+      ...dayList.map((d) => shiftOf(a, isoOf(year, month, d))),
+    ]);
+    const totalRows = totals.map((t) => [
+      t.label,
+      ...dayList.map((d) => String(t.values[isoOf(year, month, d)] ?? '')),
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([wdRow, dayRow, ...body, [], ...totalRows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Roster ${monthKey}`);
+    XLSX.writeFile(wb, `roster-${monthKey}.xlsx`);
+  };
 
   const monthHasData = ROSTER_MONTHS.some((m) => m.year === year && m.month === month);
-  const dim = daysInMonth(year, month);
-  const dayList = useMemo(
-    () => Array.from({ length: dim }, (_, i) => i + 1),
-    [dim]
-  );
   const editCount = Object.keys(edits).length;
 
   const monthOptions = useMemo(
@@ -400,6 +458,31 @@ export default function ShiftsWorkspace() {
           options={monthOptions}
         />
         <AgentFilter agents={ROSTER} value={agentEn} onChange={setAgentEn} />
+        <button
+          type="button"
+          onClick={downloadXlsx}
+          disabled={!monthHasData}
+          title="Download this month's roster as .xlsx"
+          className="flex h-8 items-center gap-1 rounded-lg border border-border bg-card/80 px-2 text-[10px] font-semibold text-muted-foreground shadow-sm transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-40"
+        >
+          <Download className="size-3" />
+          XLSX
+        </button>
+        {authUser?.isAdmin && (
+          <span
+            className={cn(
+              'flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold',
+              d1Status === 'ok' && 'border-emerald-400/50 bg-emerald-500/10 text-emerald-300',
+              d1Status === 'syncing' && 'border-sky-400/50 bg-sky-400/10 text-sky-300',
+              d1Status === 'error' && 'border-rose-400/50 bg-rose-500/10 text-rose-300',
+              d1Status === 'idle' && 'border-border bg-card/80 text-muted-foreground'
+            )}
+            title="Admin edits are backed up to the eco-data D1 database (full table on the month's first edit, single cells after)"
+          >
+            <CloudUpload className="size-3" />
+            {d1Status === 'ok' ? 'D1 synced' : d1Status === 'syncing' ? 'D1 syncing' : d1Status === 'error' ? 'D1 failed' : 'D1 backup'}
+          </span>
+        )}
         {editCount > 0 && (
           <button
             type="button"
@@ -426,7 +509,7 @@ export default function ShiftsWorkspace() {
       ) : agent ? (
         <AgentMonthView agent={agent} year={year} month={month} shiftOf={shiftOf} setShift={setShift} />
       ) : (
-        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} setShift={setShift} totals={DAY_TOTALS} agents={ROSTER} />
+        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} setShift={setShift} agents={ROSTER} />
       )}
     </div>
   );
@@ -434,13 +517,45 @@ export default function ShiftsWorkspace() {
 
 /* --------------------------- all-agents roster grid ------------------------- */
 
+/** LIVE day-total stat rows — the app-side twin of the sheet's COUNTIF
+ *  block. Recomputed from the current roster + local edits on every render,
+ *  so the bottom counter rows update immediately when a cell changes. */
+function computeDayTotals(
+  agents: RosterAgent[],
+  shiftOf: (a: RosterAgent, iso: string) => string,
+  year: number,
+  month: number,
+  dayList: number[]
+): DayTotalRow[] {
+  const iso = (d: number) => isoOf(year, month, d);
+  const onDuty = (a: RosterAgent, d: number) => {
+    const c = shiftOf(a, iso(d));
+    return c.includes('A') || c.includes('B07');
+  };
+  const frontLine = (a: RosterAgent) => ['Chat', 'Call', 'FR Call'].includes(a.skill);
+  const rows: DayTotalRow[] = [];
+  const row = (label: string, fn: (d: number) => number) =>
+    rows.push({ label, values: Object.fromEntries(dayList.map((d) => [iso(d), fn(d)])) });
+  row('上班总人数', (d) => agents.filter((a) => a.skill !== 'DTC' && onDuty(a, d)).length);
+  row('OM人数', (d) => agents.filter((a) => a.skill === 'SV' && onDuty(a, d)).length);
+  row('TL人数', (d) => agents.filter((a) => a.skill === 'TL' && onDuty(a, d)).length);
+  row('T2人数', (d) => agents.filter((a) => a.skill === 'T2' && onDuty(a, d)).length);
+  row('T3人数', (d) => agents.filter((a) => a.skill === 'T3' && onDuty(a, d)).length);
+  for (const code of ['A06', 'A09', 'A21', 'A22', 'A23', 'A00', 'A01']) {
+    row(`${code}一线人数`, (d) => agents.filter((a) => frontLine(a) && shiftOf(a, iso(d)) === code).length);
+  }
+  row('Trainee人数', (d) => agents.filter((a) => (shiftOf(a, iso(d)) ?? '').startsWith('TR')).length);
+  row('Total Chat', (d) => agents.filter((a) => a.skill === 'Chat' && onDuty(a, d)).length);
+  row('Total Call', (d) => agents.filter((a) => (a.skill === 'Call' || a.skill === 'FR Call') && onDuty(a, d)).length);
+  return rows;
+}
+
 function RosterGrid({
   year,
   month,
   dayList,
   shiftOf,
   setShift,
-  totals,
   agents,
 }: {
   year: number;
@@ -448,15 +563,37 @@ function RosterGrid({
   dayList: number[];
   shiftOf: (a: RosterAgent, iso: string) => string;
   setShift: (en: string, iso: string, code: string) => void;
-  totals: DayTotalRow[];
   agents: RosterAgent[];
 }) {
+  /** LIVE day totals — recomputed from the (locally edited) roster so the
+   *  counter rows stay in sync with every change, like the sheet formulas. */
+  const totals = useMemo(
+    () => computeDayTotals(agents, shiftOf, year, month, dayList),
+    [agents, shiftOf, year, month, dayList]
+  );
+
+  /* Click agent name → scroll their row to the top of the grid; click the
+   * same agent again → restore the previous scroll position. */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<{ en: string; scrollTop: number } | null>(null);
+  const onAgentClick = (en: string, row: HTMLTableRowElement | null) => {
+    const container = scrollRef.current;
+    if (!container || !row) return;
+    if (anchorRef.current?.en === en) {
+      container.scrollTop = anchorRef.current.scrollTop;
+      anchorRef.current = null;
+      return;
+    }
+    anchorRef.current = { en, scrollTop: container.scrollTop };
+    container.scrollTop = row.offsetTop - 28; // below the sticky header
+  };
+
   return (
-    <div className="custom-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
+    <div ref={scrollRef} className="custom-scrollbar relative min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
       <table className="border-separate border-spacing-0 text-[10px]">
-        <thead className="sticky top-0 z-10">
+        <thead>
           <tr>
-            <th className="sticky left-0 z-20 min-w-[130px] border-b border-r border-border/70 bg-card/95 px-2 py-1 text-left font-bold backdrop-blur">
+            <th className="sticky left-0 top-0 z-30 min-w-[130px] border-b border-r border-border/70 bg-card/95 px-2 py-1 text-left font-bold backdrop-blur">
               Agent
             </th>
             {dayList.map((d) => {
@@ -466,8 +603,8 @@ function RosterGrid({
                 <th
                   key={d}
                   className={cn(
-                    'min-w-[34px] border-b border-border/70 bg-card/95 px-0.5 py-1 text-center font-bold backdrop-blur',
-                    weekend && 'text-primary/70'
+                    'sticky top-0 z-10 min-w-[34px] border-b border-border/70 bg-card/95 px-0.5 py-1 text-center font-bold backdrop-blur',
+                    weekend && 'bg-white/[0.04] text-primary/80'
                   )}
                 >
                   <div className="text-[8px] font-medium uppercase text-muted-foreground">{wd}</div>
@@ -489,7 +626,11 @@ function RosterGrid({
         <tbody>
           {agents.map((a) => (
             <tr key={a.hr} className="group/row">
-              <td className="sticky left-0 z-10 border-b border-r border-border/50 bg-card/90 px-2 py-1 backdrop-blur group-hover/row:bg-accent/10">
+              <td
+                onClick={(e) => onAgentClick(a.en, e.currentTarget.closest('tr'))}
+                title="Click to pin this agent's row to the top (click again to restore)"
+                className="sticky left-0 z-10 cursor-pointer border-b border-r border-border/50 bg-card/90 px-2 py-1 backdrop-blur group-hover/row:bg-accent/10"
+              >
                 <div className="flex items-baseline gap-1.5">
                   <span className="truncate text-[11px] font-bold">{a.en}</span>
                   <span className="shrink-0 rounded bg-primary/15 px-1 text-[8px] font-bold text-primary">
@@ -501,8 +642,9 @@ function RosterGrid({
               {dayList.map((d) => {
                 const iso = isoOf(year, month, d);
                 const code = shiftOf(a, iso);
+                const weekend = [0, 6].includes(new Date(year, month - 1, d).getDay());
                 return (
-                  <td key={d} className="border-b border-border/30 p-[2px]">
+                  <td key={d} className={cn('border-b border-border/30 p-[2px]', weekend && 'bg-white/[0.02]')}>
                     {code ? (
                       <ShiftCell
                         code={code}
@@ -550,12 +692,14 @@ function RosterGrid({
                     {dayList.map((d) => {
                       const iso = isoOf(year, month, d);
                       const v = row.values[iso];
+                      const weekend = [0, 6].includes(new Date(year, month - 1, d).getDay());
                       return (
                         <td
                           key={d}
                           className={cn(
                             'border-b border-border/30 px-0.5 py-1 text-center font-mono text-[9px]',
-                            emphasized ? 'bg-primary/10 font-bold text-primary' : 'text-muted-foreground'
+                            emphasized ? 'bg-primary/10 font-bold text-primary' : 'text-muted-foreground',
+                            weekend && 'bg-white/[0.02]'
                           )}
                         >
                           {v ?? ''}

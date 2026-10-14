@@ -456,13 +456,119 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return authJson({ user: authPublicUser(user) });
   }
 
+  // Roster read — any logged-in user (writes are admin-only, below).
+  if (path === '/api/roster' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleRosterGet(request, env);
+  }
+
   // Admin routes — bearer must belong to an is_admin account.
   const admin = await authBearerUser(request, env);
   if (!admin || Number(admin.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
   if (path === '/api/admin/users' && request.method === 'GET') return handleAdminUsers(request, env);
   if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env);
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
+  if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
+}
+
+/* ------------------------------ roster sync -------------------------------- */
+
+/**
+ * POST /api/roster (admin only) — two modes:
+ *   { month: 'YYYY-MM', mode: 'full', agents: [{ en, shifts: { iso: code } }] }
+ *     → bulk-uploads every cell of the month (first submit).
+ *   { month: 'YYYY-MM', mode: 'cell', en, iso, code }
+ *     → upserts a single edited cell.
+ */
+async function handleRosterPost(request: Request, env: Env): Promise<Response> {
+  let payload: {
+    month?: string;
+    mode?: string;
+    agents?: Array<{ en: string; shifts: Record<string, string> }>;
+    en?: string;
+    iso?: string;
+    code?: string;
+  };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const month = String(payload.month ?? '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return authJson({ error: 'Invalid month (YYYY-MM)' }, 400);
+
+  // Self-healing schema (mirrors migrations/0004_roster_cells.sql) so the
+  // endpoint works even when the migration has not been applied yet.
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS roster_cells (
+      month_key TEXT NOT NULL, en TEXT NOT NULL, iso TEXT NOT NULL, code TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (month_key, en, iso)
+    )`
+  ).run();
+
+  if (payload.mode === 'cell') {
+    const en = String(payload.en ?? '').trim();
+    const iso = String(payload.iso ?? '').trim();
+    const code = String(payload.code ?? '').trim();
+    if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
+    await env.DB.prepare(
+      `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))
+       ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, updated_at = datetime('now')`
+    )
+      .bind(month, en, iso, code)
+      .run();
+    return authJson({ ok: true, mode: 'cell', month, en, iso, code });
+  }
+
+  if (payload.mode === 'full') {
+    const agents = payload.agents ?? [];
+    if (agents.length === 0) return authJson({ error: 'No agents provided' }, 400);
+    // D1 caps bound parameters per statement — chunk the multi-row INSERTs
+    // (20 rows × 4 params = 80 params per statement) and batch them.
+    const rows: Array<[string, string, string]> = [];
+    for (const a of agents) {
+      for (const [iso, code] of Object.entries(a.shifts ?? {})) {
+        rows.push([a.en, iso, String(code)]);
+      }
+    }
+    if (rows.length === 0) return authJson({ error: 'No cells provided' }, 400);
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM roster_cells WHERE month_key = ?1`).bind(month),
+      ...chunk(rows, 20).map(
+        (part) =>
+          env.DB.prepare(
+            `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES ${part
+              .map((_, i) => `(?${i * 4 + 1}, ?${i * 4 + 2}, ?${i * 4 + 3}, ?${i * 4 + 4}, datetime('now'))`)
+              .join(', ')}`
+          ).bind(...part.flatMap((r) => [month, r[0], r[1], r[2]]))
+      ),
+    ]);
+    return authJson({ ok: true, mode: 'full', month, cells: rows.length });
+  }
+
+  return authJson({ error: 'Unknown mode (full | cell)' }, 400);
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** GET /api/roster?month=YYYY-MM (any logged-in user) — all cells for a month. */
+async function handleRosterGet(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const month = url.searchParams.get('month') ?? '';
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return authJson({ error: 'Invalid month (YYYY-MM)' }, 400);
+  const result = await env.DB.prepare(
+    'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
+  )
+    .bind(month)
+    .all<{ en: string; iso: string; code: string; updatedAt: string }>();
+  return authJson({ month, cells: result.results ?? [] });
 }
 
 async function handleKeywordAlerts(
