@@ -500,6 +500,16 @@ body {
   height: 100%;
 }
 
+/* #root MUST be height-constrained too — the app layout is a chain of
+   h-full (page root → main → canvas → work-view panels). A missing
+   height here silently turns every h-full below it into content height,
+   so the whole page scrolls at document level and inner scroll
+   containers (e.g. the Shifts grid) never become a scrollport — which
+   broke `sticky top-0` headers and the click-to-anchor row scrolling. */
+#root {
+  height: 100%;
+}
+
 body[data-ui-scale="large"] {
   zoom: 1.25; /* keep in sync with LARGE_UI_ZOOM in src/lib/themes.ts */
 }

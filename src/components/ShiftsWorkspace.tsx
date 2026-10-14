@@ -585,7 +585,10 @@ function RosterGrid({
       return;
     }
     anchorRef.current = { en, scrollTop: container.scrollTop };
-    container.scrollTop = row.offsetTop - 28; // below the sticky header
+    // Land the row just below the sticky header — measure the real header
+    // height (two-line weekday/day cells) instead of a hardcoded guess.
+    const thead = row.closest('table')?.querySelector('thead');
+    container.scrollTop = row.offsetTop - (thead?.offsetHeight ?? 0);
   };
 
   return (
