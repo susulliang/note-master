@@ -81,11 +81,11 @@ const WISHES = {
   Catherine:{ raw: 'A21/22, 周日周一休息', family: ['A22'], restDays: [0, 1] },             // Sun Mon
   Dagen:    { raw: 'A21/22, 周四五休息， 11月10日或者11日要一天年假或者调休，要回家给我妈庆生吃饭', family: ['A22'], restDays: [4, 5], leave: [{ iso: '2026-11-11', code: '调休' }] },
   Catherine_chat_note: null,
-  Ronald:   { raw: '23/00 但愿不急转&不用连上6天 可休一二或周日周一 11号当天生日需要休一天thanks能和休息连起来就更好了', family: ['A00', 'A23'], restDays: [1, 2], leave: [{ iso: '2026-11-11', code: '事假' }] }, // Mon Tue rest + birthday Wed
+  Ronald:   { raw: '23/00 但愿不急转&不用连上6天 可休一二或周日周一 11号当天生日需要休一天thanks能和休息连起来就更好了', family: ['A23', 'A01', 'A00'], restDays: [1, 2], leave: [{ iso: '2026-11-11', code: '事假' }], noJizhuan: true }, // Mon Tue rest + birthday Wed
   Boris:    { raw: '00 01，休周末,能不能11.19或者20一天调休，因为我生日10.20我忘了调休了。', family: ['A01'], restDays: [0, 6], leave: [{ iso: '2026-11-20', code: '调休', flag: 'inside Black-Friday window' }] },
   Vitto:    { raw: '00/01 休周末谢谢🙏', family: ['A01'], restDays: [0, 6] },
   Lynn:     { raw: '00/01，休六日', family: ['A01'], restDays: [0, 6] },
-  Jacky:    { raw: 'A23 尽量周五周六双休或周日周一双休，把剩余的两天调休也用了。希望不急转怕精神不佳。', family: ['A23'], restDays: [4, 5], leave: [{ iso: '2026-11-05', code: '调休' }, { iso: '2026-11-10', code: '调休' }] },
+  Jacky:    { raw: 'A23 尽量周五周六双休或周日周一双休，把剩余的两天调休也用了。希望不急转怕精神不佳。', family: ['A23'], restDays: [4, 5], leave: [{ iso: '2026-11-05', code: '调休' }, { iso: '2026-11-10', code: '调休' }], noJizhuan: true },
   TQ:       { raw: 'A22 周末双休 周末双休 周末双休', family: ['A22'], restDays: [0, 6] },
 };
 /** A00/A01 weekend rest is NOT prioritized (动态轮流双休) — soft only. */
@@ -195,6 +195,11 @@ function restWeekdays(octShifts) {
   const idx = counts.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
   return [idx[0][1], idx[1][1]];
 }
+
+/* Role corrections after the sheet snapshot — Catherine moved T3 → Chat
+ * (announced with the November wishes). */
+const SKILL_OVERRIDE = { Catherine: 'Chat' };
+for (const a of novAgents) if (SKILL_OVERRIDE[a.en]) a.skill = SKILL_OVERRIDE[a.en];
 
 const octByEn = new Map(octAgents.map((a) => [a.en, a]));
 
@@ -365,7 +370,7 @@ const callA22Members = ['Pyro', 'Jim', 'Ruby', 'Hawks', 'Yison', 'Jason', 'Jenso
 const callA01Members = ['Alan', 'Dezzy', 'Laura', 'Kira', 'Patrick', 'Stanley'];
 const callA23Members = ['Charsan', 'Rachel', 'Trent', 'Kevin X'];
 
-balanceRestPairs(chatMembers, (en) => WISHES[en]?.restDays ?? null);
+balanceRestPairs(chatMembers.filter((en) => en !== 'Catherine'), (en) => WISHES[en]?.restDays ?? null); // Catherine's pair is pinned below
 balanceRestPairs(callA22Members, octPair);
 balanceRestPairs(callA01Members, octPair);
 balanceRestPairs(callA23Members, (en) => WISHES[en]?.restDays ?? octPair(en));
@@ -373,9 +378,9 @@ balanceRestPairs(callA23Members, (en) => WISHES[en]?.restDays ?? octPair(en));
 // Management pairs — must satisfy the daily TL/T2 minimums (see Pass 3).
 plan.get('Alexia').restDays = [5, 6];   // Fri Sat (wished)
 plan.get('Harrison').restDays = [2, 3]; // Tue Wed (Mon needs 2 TL + daily ≥1)
-plan.get('Steven').restDays = [0, 6];   // Sat Sun
+plan.get('Steven').restDays = [3, 4];   // Thu Fri (rotated off the weekend)
 plan.get('Steve').restDays = [2, 3];    // Tue Wed
-plan.get('George').restDays = [4, 5];   // Thu Fri (weekend-rest wish soft-denied)
+plan.get('George').restDays = [0, 6];   // Sat Sun (wished 休周末 — T2 pool has slack)
 plan.get('Catherine').restDays = [0, 1]; // Sun Mon (wished)
 plan.get('Winnie').restDays = [0, 6];    // Sat Sun (Oct)
 
@@ -396,6 +401,7 @@ for (const a of novAgents) {
   }
 }
 
+const offFam = new Map(); // per-agent off-family assignment counter (rotation)
 for (let d = 1; d <= DAYS; d++) {
   const wknd = isWeekend(d);
   for (const poolName of ['chat', 'call']) {
@@ -406,18 +412,27 @@ for (let d = 1; d <= DAYS; d++) {
       if (!cands.length) return false;
       cands.sort((x, y) => {
         const fx = plan.get(x.en).family; const fy = plan.get(y.en).family;
-        const sx = fx[0] === code ? 0 : fx.includes(code) ? 1 : 2;
-        const sy = fy[0] === code ? 0 : fy.includes(code) ? 1 : 2;
+        let sx = fx[0] === code ? 0 : fx.includes(code) ? 1 : 2;
+        let sy = fy[0] === code ? 0 : fy.includes(code) ? 1 : 2;
+        // 不急转 wishers never fill an off-family slot while others can
+        if (plan.get(x.en).noJizhuan && !fx.includes(code)) sx += 3;
+        if (plan.get(y.en).noJizhuan && !fy.includes(code)) sy += 3;
+        if (sx === sy) {
+          const ox = offFam.get(x.en) ?? 0; const oy = offFam.get(y.en) ?? 0;
+          if (ox !== oy) return ox - oy; // rotate the off-family burden evenly
+        }
         return sx - sy || totalShifts(x.en) - totalShifts(y.en);
       });
-      assigned.set(cands[0].en, code);
+      const pick = cands[0];
+      if (!plan.get(pick.en).family.includes(code)) offFam.set(pick.en, (offFam.get(pick.en) ?? 0) + 1);
+      assigned.set(pick.en, code);
       return true;
     };
     const mins = poolName === 'chat'
       ? [['A22', 3], ['A01', 2]]
       : [['A22', 8], ['A01', 4], ['A23', wknd ? 0 : 2]];
     const ideals = poolName === 'chat'
-      ? [['A22', 1], ['A01', 1]]
+      ? (wknd ? [['A01', 1]] : [['A22', 1], ['A01', 1], ['A23', 1]])
       : [['A01', 1], ['A00', 1], ['A23', 1]];
     for (const [code, n] of mins) for (let i = 0; i < n; i++) take(code);
     for (const [code, n] of ideals) for (let i = 0; i < n; i++) take(code);
@@ -462,9 +477,11 @@ function ensureCount(d, code, min, poolName, fillerCodes) {
         if (srcMin > 0 && codeCount(d, c, (x) => poolOf(x) === poolName) - 1 < srcMin) return false;
         return true;
       })
-      .sort((x, y) =>
-        fillerCodes.indexOf(shiftsOf(x.en)[d - 1]) - fillerCodes.indexOf(shiftsOf(y.en)[d - 1])
-      )[0];
+      .sort((x, y) => {
+        const nx = plan.get(x.en).noJizhuan && !plan.get(x.en).family.includes(code) ? 1 : 0;
+        const ny = plan.get(y.en).noJizhuan && !plan.get(y.en).family.includes(code) ? 1 : 0;
+        return nx - ny || fillerCodes.indexOf(shiftsOf(x.en)[d - 1]) - fillerCodes.indexOf(shiftsOf(y.en)[d - 1]);
+      })[0];
     if (switchable) {
       const from = shiftsOf(switchable.en)[d - 1];
       shiftsOf(switchable.en)[d - 1] = code;
@@ -477,8 +494,10 @@ function ensureCount(d, code, min, poolName, fillerCodes) {
       .filter((a) => !plan.get(a.en).leave.get(iso(d)))
       .filter((a) => consecutiveWorkBefore(a.en, d) < MAX_CONSECUTIVE)
       .sort((x, y) => {
-        const fx = plan.get(x.en).family.includes(code) ? 0 : 1;
-        const fy = plan.get(y.en).family.includes(code) ? 0 : 1;
+        let fx = plan.get(x.en).family.includes(code) ? 0 : 1;
+        let fy = plan.get(y.en).family.includes(code) ? 0 : 1;
+        if (plan.get(x.en).noJizhuan && !plan.get(x.en).family.includes(code)) fx += 3;
+        if (plan.get(y.en).noJizhuan && !plan.get(y.en).family.includes(code)) fy += 3;
         return fx - fy || totalShifts(x.en) - totalShifts(y.en);
       });
     let borrowed = false;
@@ -672,8 +691,10 @@ for (let round = 0; round < 3; round++) {
             .filter((a) => consecutiveWorkBefore(a.en, d) < MAX_CONSECUTIVE)
             .filter((a) => totalShifts(a.en) < SHIFTS_HARD_MAX)
             .sort((x, y) => {
-              const fx = plan.get(x.en).family.includes(code) ? 0 : 1;
-              const fy = plan.get(y.en).family.includes(code) ? 0 : 1;
+              let fx = plan.get(x.en).family.includes(code) ? 0 : 1;
+              let fy = plan.get(y.en).family.includes(code) ? 0 : 1;
+              if (plan.get(x.en).noJizhuan && !plan.get(x.en).family.includes(code)) fx += 3;
+              if (plan.get(y.en).noJizhuan && !plan.get(y.en).family.includes(code)) fy += 3;
               return fx - fy || totalShifts(x.en) - totalShifts(y.en);
             });
           if (!cands.length) {
@@ -703,6 +724,115 @@ for (let round = 0; round < 3; round++) {
     }
   }
   if (!fixedAny) break;
+}
+
+/* Pass 4c — weekend-rest fairness among the 休周末 wishers. The rest-day
+   swap moves a weekend OFF from the richest wisher to the poorest WITHOUT
+   changing any day's code counts, anyone's shift total, or any leave. */
+const WEEKEND_WISHERS = ['Boris', 'Vitto', 'Lynn', 'TQ'];
+const isRestCode = (c) => /^(OFF|PH|AL|调休|病假|事假)$/.test(c);
+const wkndRestCount = (en) => {
+  let n = 0;
+  for (let d = 1; d <= DAYS; d++) if (isWeekend(d) && isRestCode(shiftsOf(en)[d - 1])) n += 1;
+  return n;
+};
+const maxRunOf = (en) => {
+  let run = 0; let max = 0;
+  for (let d = 1; d <= DAYS; d++) {
+    run = WORK_RE.test(shiftsOf(en)[d - 1]) ? run + 1 : 0;
+    max = Math.max(max, run);
+  }
+  return max;
+};
+for (let iter = 0; iter < 60; iter++) {
+  const counts = WEEKEND_WISHERS.map(wkndRestCount);
+  const hi = counts.indexOf(Math.max(...counts));
+  const lo = counts.indexOf(Math.min(...counts));
+  if (counts[hi] - counts[lo] <= 2) break;
+  const A = WEEKEND_WISHERS[hi]; const B = WEEKEND_WISHERS[lo];
+  let done = false;
+  for (let d = 1; d <= DAYS && !done; d++) {
+    if (!isWeekend(d)) continue;
+    const ca = shiftsOf(A)[d - 1]; const cb = shiftsOf(B)[d - 1];
+    if (ca !== 'OFF' || !WORK_RE.test(cb)) continue; // A rests (plain OFF), B works
+    for (let e = 1; e <= DAYS && !done; e++) {
+      if (isWeekend(e) || e === d) continue;
+      const ea = shiftsOf(A)[e - 1]; const eb = shiftsOf(B)[e - 1];
+      if (eb !== 'OFF' || !WORK_RE.test(ea)) continue; // B rests, A works
+      // apply, then roll back if it breaks the consecutive-workday cap
+      shiftsOf(A)[d - 1] = cb; shiftsOf(B)[d - 1] = ca;
+      shiftsOf(A)[e - 1] = eb; shiftsOf(B)[e - 1] = ea;
+      if (maxRunOf(A) <= MAX_CONSECUTIVE && maxRunOf(B) <= MAX_CONSECUTIVE) {
+        flipNotes.push(`fairness: ${A} weekend rest ${iso(d)} → ${B} (swap via ${iso(e)})`);
+        done = true;
+      } else {
+        shiftsOf(A)[d - 1] = ca; shiftsOf(B)[d - 1] = cb;
+        shiftsOf(A)[e - 1] = ea; shiftsOf(B)[e - 1] = eb;
+      }
+    }
+  }
+  if (!done) break;
+}
+
+/* Pass 4d — weekend-rest maximization: a wisher working a weekend day
+   whose code that day has surplus, and resting a weekday, swaps the two
+   (self-swap) — weekend resters +1, weekday workers +1, both within caps. */
+for (const en of WEEKEND_WISHERS) {
+  for (let d = 1; d <= DAYS; d++) {
+    if (!isWeekend(d)) continue;
+    const cd = shiftsOf(en)[d - 1];
+    if (!WORK_RE.test(cd)) continue; // already resting this weekend day
+    // weekend day must keep its code minimum after losing this worker
+    const poolName = 'chat';
+    if (codeCount(d, cd, (x) => poolOf(x) === poolName) - 1 < minFor(poolName, cd)) continue;
+    // weekend total must stay >= 5
+    if (dayCount(d, (c, x) => WORK_RE.test(c) && poolOf(x) === poolName) - 1 < 5) continue;
+    for (let e = 1; e <= DAYS; e++) {
+      if (isWeekend(e) || shiftsOf(en)[e - 1] !== 'OFF') continue;
+      // weekday total must stay <= 7
+      if (dayCount(e, (c, x) => WORK_RE.test(c) && poolOf(x) === poolName) + 1 > 7) continue;
+      const before = shiftsOf(en)[d - 1];
+      shiftsOf(en)[d - 1] = 'OFF';
+      shiftsOf(en)[e - 1] = cd;
+      if (maxRunOf(en) <= MAX_CONSECUTIVE) {
+        flipNotes.push(`weekend-max: ${en} rest ${iso(d)} (moved work to ${iso(e)})`);
+        break; // one move per weekend day
+      }
+      shiftsOf(en)[d - 1] = before;
+      shiftsOf(en)[e - 1] = 'OFF';
+    }
+  }
+}
+
+/* Pass 4e — fairness round 2: 4d re-skewed the weekend-rest counts,
+   re-balance the four wishers once more (same swap as 4c). */
+for (let iter = 0; iter < 60; iter++) {
+  const counts = WEEKEND_WISHERS.map(wkndRestCount);
+  const hi = counts.indexOf(Math.max(...counts));
+  const lo = counts.indexOf(Math.min(...counts));
+  if (counts[hi] - counts[lo] <= 2) break;
+  const A = WEEKEND_WISHERS[hi]; const B = WEEKEND_WISHERS[lo];
+  let done = false;
+  for (let d = 1; d <= DAYS && !done; d++) {
+    if (!isWeekend(d)) continue;
+    const ca = shiftsOf(A)[d - 1]; const cb = shiftsOf(B)[d - 1];
+    if (ca !== 'OFF' || !WORK_RE.test(cb)) continue;
+    for (let e = 1; e <= DAYS && !done; e++) {
+      if (isWeekend(e) || e === d) continue;
+      const ea = shiftsOf(A)[e - 1]; const eb = shiftsOf(B)[e - 1];
+      if (eb !== 'OFF' || !WORK_RE.test(ea)) continue;
+      shiftsOf(A)[d - 1] = cb; shiftsOf(B)[d - 1] = ca;
+      shiftsOf(A)[e - 1] = eb; shiftsOf(B)[e - 1] = ea;
+      if (maxRunOf(A) <= MAX_CONSECUTIVE && maxRunOf(B) <= MAX_CONSECUTIVE) {
+        flipNotes.push(`fairness2: ${A} weekend rest ${iso(d)} → ${B} (swap via ${iso(e)})`);
+        done = true;
+      } else {
+        shiftsOf(A)[d - 1] = ca; shiftsOf(B)[d - 1] = cb;
+        shiftsOf(A)[e - 1] = ea; shiftsOf(B)[e - 1] = eb;
+      }
+    }
+  }
+  if (!done) break;
 }
 
 /* Pass 5 — leaves + OFF fill. */
