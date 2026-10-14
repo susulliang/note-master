@@ -32,10 +32,10 @@ const DATA_FILE = 'src/data/roster-2026-11.ts';
 /* Sheet row bands (1-based): agents 3–42.
  *   3 Hoi(SV) · 4–5 TL · 6–8 T2 · 9–10 T3 · 11–17 Chat · 18–39 Call ·
  *   40 Jing(FR) · 41–42 DTC (Peter, Maggie) */
-const FRONT_LINE = '11:40'; // Dagen..Jing (mirror Oct's 一线 band, excl. DTC)
+const FRONT_LINE = '9:40'; // Catherine (row 9) included; row 10 Winnie's A07 never matches the per-shift patterns
 const ON_DUTY_BAND = '3:40'; // Hoi..Jing (excl. DTC — mirror Oct 上班总人数)
 const CALL_BAND = '18:40'; // Call + FR Call
-const CHAT_BAND = '11:17';
+const CHAT_BAND = '9:17'; // Catherine row 9 in Chat; row 10 (Winnie, T3) subtracted in wildcard totals
 
 function lark(args) {
   const out = execFileSync('lark-cli', args, { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 });
@@ -93,6 +93,9 @@ csvPut(
   agents.map((a) => Array.from({ length: DAYS }, (_, i) => a.shifts[iso(i + 1)] ?? ''))
 );
 
+/* Catherine role correction: skill cell E9 T3 -> Chat. */
+csvPut('E9', [['Chat']]);
+
 /* ------------------------------ 3. stat rows ------------------------------ */
 /* (row, formula generator per column letter) — mirrors the Oct formulas. */
 const statRows = [
@@ -106,7 +109,7 @@ const statRows = [
   [50, (c) => `=COUNTIF(${c}${FRONT_LINE},\"=*A22*\")`],
   [51, (c) => `=COUNTIF(${c}${FRONT_LINE},\"=*A23*\")`],
   [52, (c) => `=COUNTIF(${c}${FRONT_LINE},\"=*A00*\")`],
-  [53, (c) => `=COUNTIF(${c}9:${c}10,\"=*A*\")+COUNTIF(${c}9:${c}10,\"=*B*\")`],                              // T3人数
+  [53, (c) => `=COUNTIF(${c}10,\"=*A*\")+COUNTIF(${c}10,\"=*B*\")`],                                                      // T3人数 (row 10 only — Catherine moved to Chat)
   [54, (c) => `=${c}43-SUM(${c}44:${c}53)`],                                                                  // 校验
   [55, (c) => `=COUNTIF(${c}3,\"=*A*\")`],                                                                    // SV
   [56, (c) => `=COUNTIF(${c}4:${c}5,\"=*A*\")`],                                                              // TL
@@ -119,7 +122,7 @@ const statRows = [
   [63, (c) => `=COUNTIF(${c}${CHAT_BAND},\"=*A21*\")`],                                                       // A21 Chat
   [64, (c) => `=COUNTIF(${c}${CHAT_BAND},\"=*A22*\")`],                                                       // A22 Chat
   [65, (c) => `=COUNTIF(${c}${CHAT_BAND},\"=*A00*\")`],                                                       // A00 Chat
-  [66, (c) => `=COUNTIF(${c}${CHAT_BAND},\"=*A*\")+COUNTIF(${c}${CHAT_BAND},\"=*B07*\")`],                    // Total Chat
+  [66, (c) => `=COUNTIF(${c}${CHAT_BAND},\"=*A*\")+COUNTIF(${c}${CHAT_BAND},\"=*B07*\")-COUNTIF(${c}10,\"=*A*\")-COUNTIF(${c}10,\"=*B*\")`], // Total Chat (excl. row 10)
   [67, (c) => `=COUNTIF(${c}3:${c}42,\"=*A*\")+COUNTIF(${c}3:${c}42,\"=*B07*\")`,],                           // Total on Duty Agent
   [68, (c) => `=COUNTA(${c}3:${c}42)`],                                                                       // Total HeadCount
   [69, (c) => `=COUNTIF(${c}3:${c}42,\"=*TR*\")`],                                                            // Trainee
