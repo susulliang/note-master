@@ -28,6 +28,8 @@ pids
 # Ignore all folder contents; keep the folder marker only.
 /sf_reports/*
 !/sf_reports/.gitkeep
+# Standalone report-download hub tool page (not a data file).
+!/sf_reports/report-hub.html
 /dashboard_publish/
 # Windows-reserved device filename; prevents invalid checkout on Windows.
 /nul

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ecovacs Report Hub — R2 Source Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: rgba(22, 27, 34, 0.72);
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --green: #238636;
+    --green-bright: #3fb950;
+    --blue: #58a6ff;
+    --red: #f85149;
+    --amber: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background:
+      radial-gradient(1200px 500px at 80% -10%, rgba(35, 134, 54, 0.08), transparent),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px 24px 48px;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 18px;
+  }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
+  header h1 .logo { color: var(--green-bright); }
+  header .sub { width: 100%; font-size: 11px; color: var(--muted); }
+  .banner {
+    border: 1px solid rgba(210, 153, 34, 0.4);
+    background: rgba(210, 153, 34, 0.08);
+    border-radius: 8px; padding: 10px 14px; font-size: 11.5px; line-height: 1.6;
+    color: #e3b341; margin-bottom: 16px;
+  }
+  .banner code { color: #f0d078; background: rgba(210,153,34,0.12); padding: 1px 5px; border-radius: 4px; }
+  .banner b { color: #f0d078; }
+  section.auth { margin-bottom: 18px; }
+  .glass {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(1, 4, 9, 0.55);
+  }
+  .auth-side { padding: 18px 20px; font-size: 12px; line-height: 1.7; display: flex; flex-direction: column; gap: 12px; }
+  .auth-side h2 { font-size: 13px; color: #fff; }
+  .auth-side p { color: var(--muted); }
+  .auth-side ol { margin-left: 18px; color: var(--muted); }
+  .auth-side li { margin-bottom: 6px; }
+  .auth-side b { color: var(--text); }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .toolbar .count { font-size: 11px; color: var(--muted); margin-left: auto; }
+  button {
+    font-family: inherit; font-size: 11.5px; font-weight: 600;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: rgba(88, 166, 255, 0.08); color: var(--blue);
+    padding: 7px 12px; cursor: pointer; transition: all 0.15s ease;
+  }
+  button:hover { border-color: var(--blue); background: rgba(88, 166, 255, 0.16); }
+  button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  button.primary { background: var(--green); border-color: rgba(63, 185, 80, 0.5); color: #fff; }
+  button.primary:hover { background: #2ea043; }
+  button.ghost { background: transparent; color: var(--muted); }
+  button.ghost:hover { color: var(--text); }
+  button.danger { background: rgba(248, 81, 73, 0.1); color: var(--red); border-color: rgba(248, 81, 73, 0.4); }
+  button.danger:hover { background: rgba(248, 81, 73, 0.2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .report { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .report .top { display: flex; align-items: center; gap: 8px; }
+  .report h3 { font-size: 13px; color: #fff; font-weight: 600; }
+  .report .tag {
+    margin-left: auto; font-size: 9px; padding: 2px 8px; border-radius: 999px; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .tag.sf { background: rgba(88, 166, 255, 0.12); color: var(--blue); border: 1px solid rgba(88, 166, 255, 0.35); }
+  .tag.aws { background: rgba(248, 81, 73, 0.1); color: var(--red); border: 1px solid rgba(248, 81, 73, 0.35); }
+  .report .desc { font-size: 11px; color: var(--muted); line-height: 1.55; }
+  .report .meta { font-size: 10px; color: var(--muted); }
+  .report .meta.ok { color: var(--green-bright); }
+  .report .actions { display: flex; gap: 8px; margin-top: 2px; }
+  .report .url {
+    font-size: 9.5px; color: #4d5966; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; direction: rtl; user-select: all;
+  }
+  .report.aws-mode { border-color: rgba(248, 81, 73, 0.35); }
+  .report.done { border-color: rgba(63, 185, 80, 0.55); box-shadow: 0 0 14px rgba(63, 185, 80, 0.12); }
+  .report.done .tag.sf { background: rgba(63, 185, 80, 0.12); color: var(--green-bright); border-color: rgba(63, 185, 80, 0.4); }
+  .pbar {
+    flex: 1 1 160px; max-width: 260px; height: 8px; border-radius: 999px;
+    background: rgba(139, 148, 158, 0.18); overflow: hidden; display: none;
+  }
+  .pbar.on { display: block; }
+  .pbar > div { height: 100%; width: 0%; background: var(--green-bright); transition: width 0.3s ease; border-radius: 999px; }
+  #pbarLabel { font-size: 10px; color: var(--muted); }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: rgba(35, 134, 54, 0.9); color: #fff; border: 1px solid rgba(63, 185, 80, 0.6);
+    padding: 10px 18px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    transition: transform 0.25s ease; pointer-events: none; z-index: 50;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.err { background: rgba(190, 42, 36, 0.92); border-color: rgba(248, 81, 73, 0.6); }
+  footer { margin-top: 22px; font-size: 10.5px; color: #4d5966; line-height: 1.7; }
+  footer code { color: var(--muted); }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="logo">▮▮</span> Ecovacs Report Hub <span style="color:var(--muted);font-size:12px">/ R2 source report downloader</span></h1>
+    <span class="sub">Authenticate with Salesforce first, then pull every report straight into <code>sf_reports/</code>. AWS Connect stays manual — its CSV link is dynamic.</span>
+  </header>
+
+  <div class="banner">
+    <b>One-time setup for automatic save location:</b> set your browser's default download directory to
+    <code id="folderPath"></code>
+    (<b>Chrome/Edge</b>: Settings → Downloads → Location → Change). Every report download then lands in
+    <code>sf_reports/</code> automatically. Without this, each download asks where to save — choose the same folder.
+  </div>
+
+  <section class="auth">
+    <div class="glass auth-side">
+      <h2>How this works</h2>
+      <p>
+        The report URLs are plain GET endpoints. When a browser navigates to one, it sends your
+        Salesforce session cookies and receives <b style="color:var(--green-bright)">Content-Disposition: attachment</b> —
+        the file downloads immediately and this page never unloads. No page is ever rendered, which is
+        why an iframe is useless here (Salesforce blocks embedding with X-Frame-Options anyway).
+        Everything you need is a valid browser session:
+      </p>
+      <ol>
+        <li>Click <b>Open login window</b> and log in (popup = top-level navigation, so Salesforce allows it).</li>
+        <li>Click <b>Test session</b> — if a report file downloads without a login prompt, you are authenticated.</li>
+        <li>Then use <b>⤓ Download</b> buttons or <b>Download all (SF)</b>. Chrome may ask
+        "<span style="color:var(--amber)">Allow multiple downloads?</span>" once — click Allow.</li>
+        <li><span style="color:var(--red)">AWS Connect</span> stays manual: open the page, then Actions → Download CSV (dynamic link).</li>
+      </ol>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="openLogin">Open login window</button>
+        <button id="testSession">Test session</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <button class="primary" id="downloadAll">⤓ Download all (SF)</button>
+    <button class="ghost" id="clearHistory">Clear pulled history</button>
+    <div class="pbar" id="pbar"><div id="pbarFill"></div></div>
+    <span id="pbarLabel"></span>
+    <span class="count" id="countLabel"></span>
+  </div>
+
+  <div class="grid" id="reportGrid"></div>
+
+  <footer>
+    Sync pipeline: after downloads finish, run <code>REQUIRE_COMPLETE_DASHBOARD_DATA=1 npm run sync:reports</code>, then publish to R2 with
+    <code>wrangler r2 object put eco-dash/dashboard-data.json --file dashboard_publish/dashboard-data.json --remote</code>.<br />
+    Raw files in <code>sf_reports/</code> are untracked by Git — the R2 bucket is the single source of truth for the dashboard.
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const SF_BASE = 'https://ecovacs2020.lightning.force.com/servlet/PrintableViewDownloadServlet?isdtp=p1&reportId=';
+  const LS_KEY = '__app_report_hub_pulled';
+
+  const REPORTS = [
+    { key: 'csat',                  label: 'CSAT',                   id: '00Ocz00000AbmHdEAJ', desc: 'Team CSAT MTD satisfaction report.' },
+    { key: 'amr_email',             label: 'AMR Email',              id: '00Ocz00000Abn41EAB', desc: 'Email workload MTD report.' },
+    { key: 'onetouch_mtd',          label: 'One-Touch MTD',          id: '00Ocz000006ANXlEAO', desc: 'One-touch resolution MTD report.' },
+    { key: 'average_response_chat', label: 'Average Response Chat',  id: '00Ocz0000067x7xEAA', desc: 'Average chat response time MTD.' },
+    { key: 'average_response_email',label: 'Average Response Email', id: '00Ocz00000ATN8LEAX', desc: 'Average email response time MTD.' },
+    { key: 'first_response_email',  label: 'First Response Email',   id: '00Ocz0000067p1DEAQ', desc: 'Email first response time MTD.' },
+    { key: 'mtd_chat',              label: 'MTD Chat',               id: '00Ocz000007crYjEAI', desc: 'Chat volume MTD report.' },
+    { key: 'dsat_mtd',              label: 'DSAT MTD',               id: '00OaV000006dvPZUAY', desc: 'DSAT (excluding DTC+ & other regions) dissatisfied cases — feeds the DSAT MTD widget. Saved file keeps the dsat*.xlsx naming for sync discovery.' },
+    { key: 'call_historical_metrics', label: 'AWS Connect · Call Historical Metrics', aws: true,
+      url: 'https://amr-callcenter-sso.my.connect.aws/historical-metrics?reportArn=arn%3Aaws%3Aconnect%3Aus-west-2%3A451979591094%3Ainstance%2F0331b450-81b2-4e20-ac09-8085cc4b1437%2Freport%2F7123694c-88ab-4a1c-84d3-c90a3e3f0850',
+      desc: "Saved 'agent metric mtd' report. MANUAL ONLY: open the page, then Actions → Download CSV. The CSV link is dynamic — never reuse a previous download URL." },
+  ];
+
+  const $ = (sel) => document.querySelector(sel);
+  const pulled = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+
+  document.getElementById('folderPath').textContent = 'c:\\Users\\Yufeng.Liang\\Documents\\econoter2\\sf_reports';
+
+  function toast(msg, isErr) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.toggle('err', !!isErr);
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  function fmtTime(ts) {
+    return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function savePulled() { localStorage.setItem(LS_KEY, JSON.stringify(pulled)); }
+
+  function reportUrl(report) {
+    return report.aws ? report.url : SF_BASE + report.id;
+  }
+
+  function triggerDownload(report) {
+    // Top-level navigation: the servlet replies with Content-Disposition: attachment,
+    // so the browser downloads the file and this page stays put. No iframe involved.
+    const a = document.createElement('a');
+    a.href = reportUrl(report);
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    pulled[report.key] = Date.now();
+    savePulled();
+    renderMeta(report.key);
+    document.querySelector(`[data-key="${report.key}"]`)?.classList.add('done');
+  }
+
+  function renderMeta(key) {
+    const el = document.querySelector(`[data-meta="${key}"]`);
+    const r = REPORTS.find((x) => x.key === key);
+    if (!el || !r) return;
+    if (pulled[key]) {
+      el.textContent = `last pulled ${fmtTime(pulled[key])}`;
+      el.classList.add('ok');
+    } else {
+      el.textContent = r.aws ? 'manual workflow' : 'not pulled this browser';
+      el.classList.remove('ok');
+    }
+  }
+
+  function buildCards() {
+    const grid = $('#reportGrid');
+    grid.innerHTML = '';
+    for (const r of REPORTS) {
+      const url = reportUrl(r);
+      const card = document.createElement('div');
+      card.className = 'glass report' + (r.aws ? ' aws-mode' : '');
+      card.dataset.key = r.key;
+      card.innerHTML = `
+        <div class="top">
+          <h3>${r.label}</h3>
+          <span class="tag ${r.aws ? 'aws' : 'sf'}">${r.aws ? 'manual' : 'auto'}</span>
+        </div>
+        <div class="desc">${r.desc}</div>
+        <div class="meta" data-meta="${r.key}"></div>
+        <div class="url" title="${url}">${url}</div>
+        <div class="actions">
+          ${r.aws
+            ? '<button class="danger" data-act="open">Open report page ↗</button>'
+            : '<button class="primary" data-act="download">⤓ Download</button>'
+            + '<button data-act="open">Open ↗</button>'}
+          <button class="ghost" data-act="copy">Copy URL</button>
+        </div>`;
+      card.querySelector('[data-act="download"]')?.addEventListener('click', () => {
+        triggerDownload(r);
+        toast(`Downloading ${r.label} → browser download location`);
+      });
+      card.querySelector('[data-act="open"]').addEventListener('click', () => {
+        window.open(url, '_blank', 'noopener');
+      });
+      card.querySelector('[data-act="copy"]').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(url); toast('URL copied'); }
+        catch { toast('Copy failed — select the URL text manually', true); }
+      });
+      grid.appendChild(card);
+      renderMeta(r.key);
+    }
+    const sfCount = REPORTS.filter((r) => !r.aws).length;
+    $('#countLabel').textContent = `${sfCount} auto-download SF reports · 1 manual AWS Connect`;
+  }
+
+  $('#downloadAll').addEventListener('click', () => {
+    const btn = $('#downloadAll');
+    if (btn.disabled) return;
+    const sfReports = REPORTS.filter((r) => !r.aws);
+    btn.disabled = true;
+    btn.textContent = '⤓ Downloading…';
+    const fill = $('#pbarFill'), label = $('#pbarLabel');
+    $('#pbar').classList.add('on');
+    fill.style.width = '0%';
+    label.textContent = `0 / ${sfReports.length}`;
+    toast(`${sfReports.length} downloads starting — click "Allow" if the browser asks once`);
+    // Generous 6s spacing: browsers silently drop programmatic downloads that
+    // arrive too quickly in bursts.
+    sfReports.forEach((r, i) => setTimeout(() => {
+      triggerDownload(r);
+      const done = i + 1;
+      fill.style.width = `${(done / sfReports.length) * 100}%`;
+      label.textContent = `${done} / ${sfReports.length}`;
+      if (i === sfReports.length - 1) {
+        btn.disabled = false;
+        btn.textContent = '⤓ Download all (SF)';
+        toast('All SF report downloads triggered');
+        setTimeout(() => $('#pbar').classList.remove('on'), 5000);
+      }
+    }, i * 6000));
+  });
+
+  $('#clearHistory').addEventListener('click', () => {
+    Object.keys(pulled).forEach((k) => delete pulled[k]);
+    savePulled();
+    REPORTS.forEach((r) => renderMeta(r.key));
+    document.querySelectorAll('.report.done').forEach((el) => el.classList.remove('done'));
+    toast('Pulled history cleared');
+  });
+
+  $('#openLogin').addEventListener('click', () => {
+    window.open('https://ecovacs2020.my.salesforce.com/', 'sfLogin', 'width=1100,height=800');
+  });
+
+  $('#testSession').addEventListener('click', () => {
+    triggerDownload(REPORTS[0]);
+    toast('If a file downloaded, the session works. If a login page appeared instead, log in and retry.');
+  });
+
+  buildCards();
+</script>
+</body>
+</html>
