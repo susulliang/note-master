@@ -222,7 +222,7 @@ p('Peter').fixed = (d) => {
   if (/^(OFF|PH|AL|调休|病假|事假)$/.test(code)) return code;
   return REMAP[code] ?? code;
 };
-p('Maggie').fixed = () => 'Farewell';
+p('Maggie').fixed = (d) => (d === 1 ? 'Farewell' : ''); // departed — single marker, like Oct
 
 /* ------------------------------ the solver -------------------------------- */
 
