@@ -517,6 +517,9 @@ export default function ShiftsWorkspace() {
 
 /* --------------------------- all-agents roster grid ------------------------- */
 
+/** Shift code → category (off / ph / leave / …) for the live stat formulas. */
+const CODE_CATEGORY = new Map(SHIFT_CATALOG.map((s) => [s.code, s.category]));
+
 /** LIVE day-total stat rows — the app-side twin of the sheet's COUNTIF
  *  block. Recomputed from the current roster + local edits on every render,
  *  so the bottom counter rows update immediately when a cell changes. */
@@ -572,6 +575,22 @@ function RosterGrid({
     [agents, shiftOf, year, month, dayList]
   );
 
+  /** LIVE per-agent OFF/PH counter — the app-side twin of the sheet's
+   *  COUNTIF formula: counts the agent's OFF/rest days + public holidays
+   *  for the month, re-derived on every local edit. */
+  const offPhCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of agents) {
+      let n = 0;
+      for (const d of dayList) {
+        const cat = CODE_CATEGORY.get(shiftOf(a, isoOf(year, month, d)));
+        if (cat === 'off' || cat === 'ph') n += 1;
+      }
+      m.set(a.en, n);
+    }
+    return m;
+  }, [agents, shiftOf, year, month, dayList]);
+
   /* Click agent name → scroll their row to the top of the grid; click the
    * same agent again → restore the previous scroll position. */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -591,9 +610,69 @@ function RosterGrid({
     container.scrollTop = row.offsetTop - (thead?.offsetHeight ?? 0);
   };
 
+  /* Selected day for the night-coverage chart — defaults to today when the
+   * viewed month is the current one, else the 1st; clamped on month change. */
+  const [selDay, setSelDay] = useState(() => {
+    const now = new Date();
+    return year === now.getFullYear() && month === now.getMonth() + 1 ? now.getDate() : dayList[0];
+  });
+  useEffect(() => {
+    setSelDay((d) => (dayList.includes(d) ? d : dayList[0]));
+  }, [dayList]);
+
+  /* Break time scheduler — the auto-suggested plan is derived per selected
+   * day; manual drags override it per agent+day (session-local, like edits).
+   * Double-clicking the coverage chart toggles the panel. */
+  const [breakPanelOpen, setBreakPanelOpen] = useState(false);
+  const [userBreaks, setUserBreaks] = useState<Record<string, BreakPlan>>({});
+  const isoSel = isoOf(year, month, selDay);
+  const suggestedBreaks = useMemo(
+    () => computeSuggestedBreaks(agents, shiftOf, year, month, selDay),
+    [agents, shiftOf, year, month, selDay]
+  );
+  const breakPlans = useMemo(() => {
+    const out: Record<string, BreakPlan> = {};
+    for (const a of agents) {
+      const p = userBreaks[`${a.en}|${isoSel}`] ?? suggestedBreaks[a.en];
+      if (p) out[a.en] = p;
+    }
+    return out;
+  }, [agents, userBreaks, suggestedBreaks, isoSel]);
+  const breakStarts = useMemo(
+    () => Object.fromEntries(Object.entries(breakPlans).map(([en, p]) => [en, p.start])),
+    [breakPlans]
+  );
+  const setBreak = (en: string, p: BreakPlan) =>
+    setUserBreaks((m) => ({ ...m, [`${en}|${isoSel}`]: p }));
+  const resetBreaks = () =>
+    setUserBreaks((m) => Object.fromEntries(Object.entries(m).filter(([k]) => !k.endsWith(`|${isoSel}`))));
+
   return (
-    <div ref={scrollRef} className="custom-scrollbar relative min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
-      <table className="border-separate border-spacing-0 text-[10px]">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <NightCoverageChart
+        agents={agents}
+        shiftOf={shiftOf}
+        year={year}
+        month={month}
+        day={selDay}
+        breakStarts={breakStarts}
+        onToggleBreakPanel={() => setBreakPanelOpen((o) => !o)}
+      />
+      <DateBelt year={year} month={month} dayList={dayList} selected={selDay} onSelect={setSelDay} />
+      {breakPanelOpen && (
+        <BreakScheduler
+          agents={agents}
+          shiftOf={shiftOf}
+          year={year}
+          month={month}
+          day={selDay}
+          plans={breakPlans}
+          onDrag={setBreak}
+          onReset={resetBreaks}
+        />
+      )}
+      <div ref={scrollRef} className="custom-scrollbar relative min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
+      <table className="w-full border-separate border-spacing-0 text-[10px]">
         <thead>
           <tr>
             <th className="sticky left-0 top-0 z-30 min-w-[130px] border-b border-r border-border/70 bg-card/95 px-2 py-1 text-left font-bold backdrop-blur">
@@ -619,7 +698,7 @@ function RosterGrid({
               <th
                 key={s}
                 className="min-w-[42px] border-b border-l border-border/70 bg-card/95 px-1 py-1 text-center text-[8px] font-bold uppercase text-muted-foreground backdrop-blur"
-                title={s === 'OFF/PH' ? 'OFF（PH不计入）— computed by the source sheet' : `${s} — computed by the source sheet`}
+                title={s === 'OFF/PH' ? 'OFF + PH — live count of the agent\'s off days + public holidays (updates on every edit)' : `${s} — computed by the source sheet`}
               >
                 {s}
               </th>
@@ -659,7 +738,7 @@ function RosterGrid({
                   </td>
                 );
               })}
-              {[a.offPh, a.bhc, a.phc].map((stat, i) => (
+              {[String(offPhCounts.get(a.en) ?? 0), a.bhc, a.phc].map((stat, i) => (
                 <td
                   key={i}
                   className="border-b border-l border-border/30 bg-muted/20 px-1 py-1 text-center font-mono text-[9px] text-muted-foreground"
@@ -717,6 +796,7 @@ function RosterGrid({
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -724,6 +804,820 @@ function RosterGrid({
 /** Class helper for the total stat rows. */
 function emulatedRowClass(emphasized: boolean): string {
   return emphasized ? 'bg-primary/5' : '';
+}
+
+/* ------------------- night-coverage chart + date belt ---------------------- */
+
+const CHAT_COLOR = '#34d399';
+const CALL_COLOR = '#818cf8';
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Parse 'HH:MM–HH:MM' (en-dash, per SHIFT_CATALOG) → [startMin, endMin];
+ *  null for non-working codes (OFF / PH / '—' …). */
+function parseShiftRange(time: string): [number, number] | null {
+  const m = /^(\d{1,2}):(\d{2})–(\d{1,2}):(\d{2})/.exec(time);
+  if (!m) return null;
+  return [Number(m[1]) * 60 + Number(m[2]), Number(m[3]) * 60 + Number(m[4])];
+}
+
+/** Does a shift range cover the given clock time (minutes 0–1439)?
+ *  Ranges crossing midnight (start ≥ end, e.g. A21 21:00–06:00) wrap. */
+function rangeCovers([s, e]: [number, number], clock: number): boolean {
+  return s < e ? clock >= s && clock < e : clock >= s || clock < e;
+}
+
+/** Shift code → [startMin, endMin], cached. B-codes fall back to their
+ *  A-equivalent time range (B07 → A07) since some B codes are absent
+ *  from the catalog. */
+const RANGE_CACHE = new Map<string, [number, number] | null>();
+function shiftRange(code: string): [number, number] | null {
+  const hit = RANGE_CACHE.get(code);
+  if (hit !== undefined || RANGE_CACHE.has(code)) return hit ?? null;
+  let r: [number, number] | null = null;
+  const def =
+    SHIFT_CATALOG.find((s) => s.code === code) ??
+    (code.startsWith('B') ? SHIFT_CATALOG.find((s) => s.code === `A${code.slice(1)}`) : undefined);
+  if (def) r = parseShiftRange(def.time);
+  RANGE_CACHE.set(code, r);
+  return r;
+}
+
+/** Rounded step path through the points — coverage is piecewise-constant
+ *  per 30-min slot, so each value holds flat across its slot and jumps at
+ *  the slot boundary with a small S-curve corner (accurate AND smooth). */
+function stepPath(pts: Array<[number, number]>): string {
+  if (pts.length === 0) return '';
+  const f = (v: number) => v.toFixed(2);
+  if (pts.length === 1) return `M ${f(pts[0][0])} ${f(pts[0][1])}`;
+  const slotX = 100 / (pts.length - 1);
+  let d = `M ${f(pts[0][0])} ${f(pts[0][1])}`;
+  for (let i = 1; i < pts.length; i++) {
+    const x = pts[i][0];
+    const py = pts[i - 1][1];
+    const y = pts[i][1];
+    if (Math.abs(y - py) < 0.01) {
+      d += ` L ${f(x)} ${f(py)}`;
+      continue;
+    }
+    const rr = Math.min(1.1, Math.abs(y - py) / 2, slotX / 2, 100 - x);
+    d += ` L ${f(x - rr)} ${f(py)}`;
+    d += ` C ${f(x - rr * 0.45)} ${f(py)}, ${f(x + rr * 0.45)} ${f(y)}, ${f(x + rr)} ${f(y)}`;
+  }
+  return d;
+}
+
+/** Night-coverage line chart — for the selected day, plots the sum of
+ *  working people (Chat / Call lines) across the night window from that
+ *  day's 21:00 to the next day's 09:00, in 30-min steps. A slot is covered
+ *  when the agent's shift on day D (for 21:00–24:00) or day D+1 (for
+ *  00:00–09:00) covers the clock time — minus agents currently on break.
+ *  Hand-rolled SVG — no chart lib. Double-click toggles the break panel. */
+function NightCoverageChart({
+  agents,
+  shiftOf,
+  year,
+  month,
+  day,
+  breakStarts,
+  onToggleBreakPanel,
+}: {
+  agents: RosterAgent[];
+  shiftOf: (a: RosterAgent, iso: string) => string;
+  year: number;
+  month: number;
+  day: number;
+  breakStarts: Record<string, number>;
+  onToggleBreakPanel: () => void;
+}) {
+  const { chat, call, yMax } = useMemo(() => {
+    const isoD = isoOf(year, month, day);
+    const nd = new Date(year, month - 1, day + 1);
+    const isoD1 = isoOf(nd.getFullYear(), nd.getMonth() + 1, nd.getDate());
+    const chat: number[] = [];
+    const call: number[] = [];
+    for (let m = 21 * 60; m <= 34 * 60; m += 30) {
+      // 21:00 day D → 10:00 day D+1; m ≥ 1440 belongs to the next day's shifts
+      const clock = m % 1440;
+      const winMin = m - 21 * 60; // minutes into the night window (for breaks)
+      const iso = m < 1440 ? isoD : isoD1;
+      let c = 0;
+      let k = 0;
+      for (const a of agents) {
+        const r = shiftRange(shiftOf(a, iso));
+        if (!r || !rangeCovers(r, clock)) continue;
+        const b = breakStarts[a.en];
+        if (b !== undefined && winMin >= b && winMin < b + 60) continue; // on break
+        if (a.skill === 'Chat') c += 1;
+        else if (a.skill === 'Call' || a.skill === 'FR Call') k += 1;
+      }
+      chat.push(c);
+      call.push(k);
+    }
+    const max = Math.max(4, ...chat, ...call);
+    return { chat, call, yMax: Math.ceil(max / 2) * 2 };
+  }, [agents, shiftOf, year, month, day, breakStarts]);
+
+  const n = chat.length;
+  const xy = (arr: number[]): Array<[number, number]> =>
+    arr.map((v, i) => [(i / (n - 1)) * 100, 100 - (v / yMax) * 100]);
+  const lineD = (arr: number[]) => stepPath(xy(arr));
+  const areaD = (arr: number[]) => `${lineD(arr)} L 100 100 L 0 100 Z`;
+  const hourLabels = Array.from({ length: 14 }, (_, i) => String((21 + i) % 24).padStart(2, '0') + ':00');
+  const wd = WEEKDAY_SHORT[new Date(year, month - 1, day).getDay()];
+  const etOff = etOffsetHours(year, month, day);
+
+  /* Hover probe — nearest 30-min slot under the cursor, with headcounts. */
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const onPlotMove = (e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = (e.clientX - rect.left) / rect.width;
+    setHoverIdx(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
+  };
+
+  return (
+    <div
+      className="shrink-0 cursor-default rounded-xl border border-border/70 bg-card/40 p-2.5"
+      onDoubleClick={onToggleBreakPanel}
+      title="Double-click to open / collapse the break time scheduler"
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Night coverage · 21:00 → 10:00 · {MONTH_SHORT[month - 1]} {day} ({wd})
+        </div>
+        <div className="flex items-center gap-3 text-[9px] font-semibold">
+          <span className="hidden text-[8px] font-medium text-muted-foreground/70 sm:inline">
+            2× click → breaks
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-full" style={{ backgroundColor: CHAT_COLOR }} />
+            Chat
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-full" style={{ backgroundColor: CALL_COLOR }} />
+            Call
+          </span>
+        </div>
+      </div>
+      <div className="flex items-stretch gap-1.5">
+        <div className="flex h-20 w-7 shrink-0 flex-col items-end justify-between font-mono text-[8px] leading-none text-muted-foreground">
+          <span>{yMax}</span>
+          <span>{yMax / 2}</span>
+          <span>0</span>
+        </div>
+        <div
+          className="relative min-w-0 flex-1"
+          onMouseMove={onPlotMove}
+          onMouseLeave={() => setHoverIdx(null)}
+        >
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-20 w-full">
+            {[0, 25, 50, 75, 100].map((t) => (
+              <line
+                key={t}
+                x1="0"
+                x2="100"
+                y1={t}
+                y2={t}
+                stroke="currentColor"
+                className="text-border/40"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {/* Dotted vertical guides at every hour tick */}
+            {hourLabels.map((h, i) => (
+              <line
+                key={h}
+                x1={((i * 2) / (n - 1)) * 100}
+                x2={((i * 2) / (n - 1)) * 100}
+                y1="0"
+                y2="100"
+                stroke="currentColor"
+                className="text-border/35"
+                strokeWidth={1}
+                strokeDasharray="2 3"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            <path d={areaD(chat)} fill={CHAT_COLOR} opacity={0.12} />
+            <path d={areaD(call)} fill={CALL_COLOR} opacity={0.12} />
+            <path
+              d={lineD(chat)}
+              fill="none"
+              stroke={CHAT_COLOR}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            <path
+              d={lineD(call)}
+              fill="none"
+              stroke={CALL_COLOR}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          {/* Hover probe: indicator line + headcount tooltip */}
+          {hoverIdx !== null && (
+            <>
+              <div
+                className="pointer-events-none absolute inset-y-0 z-10 w-px bg-foreground/40"
+                style={{ left: `${((hoverIdx / (n - 1)) * 100).toFixed(3)}%` }}
+              />
+              <div
+                className="pointer-events-none absolute top-1 z-20 min-w-[92px] -translate-x-1/2 rounded-md border border-border bg-popover px-1.5 py-1 text-[9px] leading-4 shadow-lg"
+                style={{
+                  left: `${Math.max(9, Math.min(91, (hoverIdx / (n - 1)) * 100)).toFixed(3)}%`,
+                }}
+              >
+                <div className="flex items-center justify-between gap-2 font-mono font-bold text-foreground">
+                  <span>{fmtWindowMin(hoverIdx * 30)}</span>
+                  <span className="font-semibold text-amber-400">{etLabel(21 * 60 + hoverIdx * 30, etOff)}</span>
+                </div>
+                <div className="flex items-center gap-2 font-semibold">
+                  <span className="flex items-center gap-1" style={{ color: CHAT_COLOR }}>
+                    <span className="size-1.5 rounded-full" style={{ backgroundColor: CHAT_COLOR }} />
+                    {chat[hoverIdx]}
+                  </span>
+                  <span className="flex items-center gap-1" style={{ color: CALL_COLOR }}>
+                    <span className="size-1.5 rounded-full" style={{ backgroundColor: CALL_COLOR }} />
+                    {call[hoverIdx]}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {/* Hour labels — absolutely positioned at the exact x of their data
+          points (slot i*2 of n), so ticks and points are vertically aligned.
+          GMT+8 row on top, ET/EST row in amber underneath. */}
+      <div className="relative ml-[34px] mt-1 h-6">
+        {hourLabels.map((h, i) => (
+          <span
+            key={h}
+            className="absolute top-0 -translate-x-1/2 font-mono text-[10px] leading-3 text-muted-foreground"
+            style={{ left: `${(((i * 2) / (n - 1)) * 100).toFixed(3)}%` }}
+          >
+            {h}
+          </span>
+        ))}
+        {hourLabels.map((h, i) => (
+          <span
+            key={`et-${h}`}
+            className="absolute top-3 -translate-x-1/2 font-mono text-[8px] font-semibold leading-3 text-amber-400/90"
+            style={{ left: `${(((i * 2) / (n - 1)) * 100).toFixed(3)}%` }}
+          >
+            {etLabel((21 + i) * 60, etOff)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Belt-like draggable date selector — a horizontal strip of day cells that
+ *  can be dragged like a conveyor; the cell under the fixed center slot
+ *  marker is the selected day. Click a cell to snap it to the middle. */
+function DateBelt({
+  year,
+  month,
+  dayList,
+  selected,
+  onSelect,
+}: {
+  year: number;
+  month: number;
+  dayList: number[];
+  selected: number;
+  onSelect: (day: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ down: false, moved: false, startX: 0, startScroll: 0 });
+  const rafRef = useRef(0);
+
+  /** Center the cell whose center is closest to the container center. */
+  const nearest = () => {
+    const el = scrollRef.current;
+    if (!el) return null;
+    const center = el.scrollLeft + el.clientWidth / 2;
+    let best: HTMLElement | null = null;
+    let bestDist = Infinity;
+    el.querySelectorAll<HTMLElement>('[data-day]').forEach((c) => {
+      const dist = Math.abs(c.offsetLeft + c.offsetWidth / 2 - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = c;
+      }
+    });
+    return best;
+  };
+  const centerOn = (el: HTMLElement, smooth = false) => {
+    const c = scrollRef.current;
+    if (c) c.scrollTo({ left: el.offsetLeft - (c.clientWidth - el.offsetWidth) / 2, behavior: smooth ? 'smooth' : 'auto' });
+  };
+
+  // Keep the selected day centered (mount + month switches).
+  useEffect(() => {
+    if (dragRef.current.down) return;
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-day="${selected}"]`);
+    if (el) centerOn(el);
+  }, [selected, year, month]);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    dragRef.current = { down: true, moved: false, startX: e.clientX, startScroll: el.scrollLeft };
+    el.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    const el = scrollRef.current;
+    if (!d.down || !el) return;
+    const dx = e.clientX - d.startX;
+    if (Math.abs(dx) > 5) d.moved = true;
+    el.scrollLeft = d.startScroll - dx;
+  };
+  const onPointerUp = () => {
+    const d = dragRef.current;
+    if (!d.down) return;
+    d.down = false;
+    if (d.moved) {
+      const best = nearest();
+      if (best) {
+        centerOn(best, true);
+        const day = Number((best as HTMLElement).dataset.day);
+        if (day !== selected) onSelect(day);
+      }
+    }
+  };
+
+  const onScroll = () => {
+    if (rafRef.current || dragRef.current.down) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const best = nearest() as HTMLElement | null;
+      if (!best) return;
+      const day = Number(best.dataset.day);
+      if (Number.isFinite(day) && day !== selected) onSelect(day);
+    });
+  };
+
+  return (
+    <div className="relative shrink-0 rounded-xl border border-border/70 bg-card/40 py-1.5">
+      {/* Fixed center slot marker — the day under it is the selected one. */}
+      <div className="pointer-events-none absolute inset-y-1.5 left-1/2 z-10 w-14 -translate-x-1/2">
+        <div className="h-full rounded-lg border-2 border-primary/70 bg-primary/[0.06]" />
+      </div>
+      <div
+        ref={scrollRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onScroll={onScroll}
+        className="flex cursor-grab touch-none gap-1 overflow-x-auto px-[calc(50%-28px)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {dayList.map((d) => {
+          const wd = WEEKDAY_SHORT[new Date(year, month - 1, d).getDay()];
+          const weekend = wd === 'Sat' || wd === 'Sun';
+          return (
+            <button
+              key={d}
+              data-day={d}
+              type="button"
+              onClick={(e) => {
+                centerOn(e.currentTarget);
+                if (!dragRef.current.moved) onSelect(d);
+              }}
+              className={cn(
+                'flex w-14 shrink-0 select-none flex-col items-center justify-center gap-0.5 rounded-lg border py-1 transition-colors',
+                d === selected
+                  ? 'border-primary/60 bg-primary/15'
+                  : weekend
+                    ? 'border-transparent bg-white/[0.03] hover:bg-accent/10'
+                    : 'border-transparent hover:bg-accent/10'
+              )}
+            >
+              <span className="text-[8px] font-medium uppercase tracking-wide text-muted-foreground">{wd}</span>
+              <span className="font-mono text-[11px] font-bold">{d}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------ break time scheduler ----------------------------- */
+
+/** A break assignment: `start` = minutes into the night window (0 = 21:00,
+ *  30-min steps, 60-min duration), `lane` = row index inside the skill group. */
+interface BreakPlan {
+  start: number;
+  lane: number;
+}
+
+/** Break preference per shift family — the allowed break-START range in
+ *  hours into the agent's own shift, distilled from the Feishu break sheets
+ *  (A21 → hours 0-3, A22 → 2:30-4:30, A23 → 3-4, A00 → 3-6, trainees → 0-1). */
+const BREAK_PREFS: Record<string, [number, number]> = {
+  A21: [0, 2],
+  B21: [0, 2],
+  A22: [2.5, 3.5],
+  B22: [2.5, 3.5],
+  A23: [3, 3],
+  B23: [3, 3],
+  A00: [3, 5],
+  B00: [3, 5],
+  A01: [3, 5],
+  A02: [3, 5],
+};
+
+/** Skill rows of the scheduler — FR Call 1 lane, Chat 1 lane, Call/Call PS 3.
+ *  DTC (and SV/TL/T2/T3 leads) are not scheduled for frontline breaks. */
+const BREAK_GROUPS = [
+  { id: 'fr', label: 'FR Call', lanes: 1, color: '#22d3ee', match: (a: RosterAgent) => a.skill === 'FR Call' },
+  { id: 'chat', label: 'Chat', lanes: 1, color: CHAT_COLOR, match: (a: RosterAgent) => a.skill === 'Chat' },
+  {
+    id: 'call',
+    label: 'Call',
+    lanes: 3,
+    color: CALL_COLOR,
+    match: (a: RosterAgent) => a.skill === 'Call' || a.skill === 'Call PS',
+  },
+];
+
+/** Max simultaneous breaks per group per 30-min slot — equals the group's
+ *  lane count, so no two cards ever overlap on the timeline (1 person on
+ *  FR Call / chat at a time, up to 3 on call — one per lane). */
+const BREAK_CAP: Record<string, number> = { fr: 1, chat: 1, call: 3 };
+
+/** The agent's shift relevant to this night window (a day-D shift starting
+ *  21:00–23:00, else a day-D+1 shift starting 00:00–02:00) → the window
+ *  minutes where their break may start: from shift start until 1h before
+ *  the 9h shift ends (clamped to the window). */
+function shiftWindowFor(
+  a: RosterAgent,
+  shiftOf: (a: RosterAgent, iso: string) => string,
+  isoD: string,
+  isoD1: string
+): [number, number] | null {
+  const startWinOf = (s: number) => (s - 21 * 60 + 2880) % 1440;
+  const rD = shiftRange(shiftOf(a, isoD));
+  if (rD && startWinOf(rD[0]) <= 120) {
+    const w = startWinOf(rD[0]);
+    return [w, Math.min(720, w + 480)];
+  }
+  const rD1 = shiftRange(shiftOf(a, isoD1));
+  if (rD1) {
+    const w = startWinOf(rD1[0]);
+    if (w >= 180 && w <= 300) return [w, Math.min(720, w + 480)];
+  }
+  return null;
+}
+
+/** Allowed break-START range (window minutes) per the shift's preference
+ *  profile, clamped to the agent's own shift — used by the auto algorithm. */
+function breakRangeFor(
+  a: RosterAgent,
+  shiftOf: (a: RosterAgent, iso: string) => string,
+  isoD: string,
+  isoD1: string
+): [number, number] | null {
+  const win = shiftWindowFor(a, shiftOf, isoD, isoD1);
+  if (!win) return null;
+  const snap = (v: number) => Math.round(v / 30) * 30;
+  const pref = BREAK_PREFS[shiftOf(a, isoD).slice(0, 3)] ?? BREAK_PREFS[shiftOf(a, isoD1).slice(0, 3)];
+  if (!pref) return null;
+  const lo = snap(Math.max(win[0], win[0] + pref[0] * 60));
+  const hi = snap(Math.min(win[1], win[0] + pref[1] * 60));
+  return lo <= hi ? [lo, hi] : null;
+}
+
+/** Suggested break plan — staggers agents evenly across their preference
+ *  range within each (group, shift-family) subgroup (mirroring the sheet's
+ *  "0-1 / 1-2 / 2-3" pattern), then enforces the per-group concurrency cap
+ *  by nudging +30min, and packs agents into the group's lanes greedily. */
+function computeSuggestedBreaks(
+  agents: RosterAgent[],
+  shiftOf: (a: RosterAgent, iso: string) => string,
+  year: number,
+  month: number,
+  day: number
+): Record<string, BreakPlan> {
+  const isoD = isoOf(year, month, day);
+  const nd = new Date(year, month - 1, day + 1);
+  const isoD1 = isoOf(nd.getFullYear(), nd.getMonth() + 1, nd.getDate());
+
+  type Entry = { en: string; groupId: string; lo: number; hi: number; maxStart: number };
+  const entries: Entry[] = [];
+  for (const a of agents) {
+    const g = BREAK_GROUPS.find((grp) => grp.match(a));
+    if (!g) continue;
+    const range = breakRangeFor(a, shiftOf, isoD, isoD1);
+    const win = shiftWindowFor(a, shiftOf, isoD, isoD1);
+    if (!range || !win) continue;
+    entries.push({ en: a.en, groupId: g.id, lo: range[0], hi: range[1], maxStart: win[1] });
+  }
+
+  // 1. even stagger within each (group, preference-range) subgroup
+  const plans: Record<string, BreakPlan> = {};
+  const subgroups = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const key = `${e.groupId}|${e.lo}|${e.hi}`;
+    (subgroups.get(key) ?? subgroups.set(key, []).get(key)!).push(e);
+  }
+  const snap = (v: number) => Math.round(v / 30) * 30;
+  for (const list of subgroups.values()) {
+    list.sort((x, y) => x.en.localeCompare(y.en));
+    const k = list.length;
+    list.forEach((e, i) => {
+      const t = k > 1 ? i / (k - 1) : 0;
+      plans[e.en] = { start: snap(e.lo + (e.hi - e.lo) * t), lane: 0 };
+    });
+  }
+
+  // 2. concurrency cap — nudge overlaps later (within the agent's own shift)
+  //    until every 30-min slot is under the group's cap
+  for (const g of BREAK_GROUPS) {
+    const cap = BREAK_CAP[g.id] ?? 3;
+    const list = entries
+      .filter((e) => e.groupId === g.id)
+      .map((e) => ({ p: plans[e.en], maxStart: e.maxStart }))
+      .sort((x, y) => x.p.start - y.p.start);
+    const counts = new Map<number, number>();
+    for (const { p, maxStart } of list) {
+      let start = p.start;
+      let guard = 0;
+      while (
+        guard++ < 24 &&
+        start < maxStart &&
+        ((counts.get(start) ?? 0) >= cap || (counts.get(start + 30) ?? 0) >= cap)
+      ) {
+        start = Math.min(start + 30, maxStart);
+      }
+      if (start !== p.start) p.start = start;
+      counts.set(start, (counts.get(start) ?? 0) + 1);
+      counts.set(start + 30, (counts.get(start + 30) ?? 0) + 1);
+    }
+  }
+
+  // 3. lane packing — greedy interval scheduling across the group's lanes
+  for (const g of BREAK_GROUPS) {
+    const laneEnd = new Array<number>(g.lanes).fill(-1);
+    const list = entries
+      .filter((e) => e.groupId === g.id)
+      .sort((x, y) => plans[x.en].start - plans[y.en].start);
+    for (const e of list) {
+      const s = plans[e.en].start;
+      let lane = laneEnd.findIndex((end) => end <= s);
+      if (lane < 0) lane = laneEnd.indexOf(Math.min(...laneEnd));
+      laneEnd[lane] = s + 60;
+      plans[e.en].lane = lane;
+    }
+  }
+  return plans;
+}
+
+/** Window minute → clock label (21:00 + w). */
+function fmtWindowMin(w: number): string {
+  const t = (21 * 60 + w) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** US Eastern offset from GMT+8 for the given date: 12h during EDT
+ *  (second Sunday of March → first Sunday of November), else 13h (EST).
+ *  A night window never straddles the 2am-ET switch, so the start-day
+ *  regime applies to the whole window. */
+function etOffsetHours(year: number, month: number, day: number): number {
+  const firstSunday = (y: number, m: number) => {
+    const d = new Date(y, m - 1, 1);
+    return 1 + ((7 - d.getDay()) % 7);
+  };
+  if (month === 11) return day < firstSunday(year, 11) ? 12 : 13;
+  if (month === 3) return day >= firstSunday(year, 3) + 7 ? 12 : 13;
+  return month >= 4 && month <= 10 ? 12 : 13;
+}
+
+/** ET/EST clock label for a GMT+8 clock time (minutes 0–1439). */
+function etLabel(clockMin: number, offset: number): string {
+  const t = (clockMin - offset * 60 + 2880) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** Break time scheduler panel — a 21:00→10:00 timeline with 30-min steps,
+ *  one card per agent that they can drag (30-min snap) across their group's
+ *  lanes. The coverage chart above dips live while cards move. */
+function BreakScheduler({
+  agents,
+  shiftOf,
+  year,
+  month,
+  day,
+  plans,
+  onDrag,
+  onReset,
+}: {
+  agents: RosterAgent[];
+  shiftOf: (a: RosterAgent, iso: string) => string;
+  year: number;
+  month: number;
+  day: number;
+  plans: Record<string, BreakPlan>;
+  onDrag: (en: string, plan: BreakPlan) => void;
+  onReset: () => void;
+}) {
+  const hourLabels = Array.from({ length: 14 }, (_, i) => String((21 + i) % 24).padStart(2, '0') + ':00');
+  const etOff = etOffsetHours(year, month, day);
+
+  // Drag clamp per agent — anywhere inside their own 9h shift (the preference
+  // windows only steer the AUTO plan; manual drags are free within the shift)
+  const clampMap = useMemo(() => {
+    const isoD = isoOf(year, month, day);
+    const nd = new Date(year, month - 1, day + 1);
+    const isoD1 = isoOf(nd.getFullYear(), nd.getMonth() + 1, nd.getDate());
+    const m: Record<string, [number, number]> = {};
+    for (const a of agents) {
+      const r = shiftWindowFor(a, shiftOf, isoD, isoD1);
+      if (r) m[a.en] = r;
+    }
+    return m;
+  }, [agents, shiftOf, year, month, day]);
+
+  const dragRef = useRef<{ en: string; groupId: string; lo: number; hi: number; lanes: number } | null>(null);
+  const lanesRef = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const planFromPointer = (clientX: number, clientY: number): BreakPlan | null => {
+    const d = dragRef.current;
+    if (!d) return null;
+    const el = lanesRef.current[d.groupId];
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    const raw = ((clientX - rect.left) / rect.width) * 780;
+    const start = Math.max(d.lo, Math.min(d.hi, Math.round(raw / 30) * 30));
+    const lane = Math.max(0, Math.min(d.lanes - 1, Math.floor(((clientY - rect.top) / rect.height) * d.lanes)));
+    return { start, lane };
+  };
+
+  /** Snap the desired (start, lane) to the nearest placement that doesn't
+   *  overlap another card in the same group — same start other lane first,
+   *  then nearest ±30-min starts within the agent's shift bounds. */
+  const resolveFree = (desired: BreakPlan): BreakPlan => {
+    const d = dragRef.current;
+    if (!d) return desired;
+    const g = BREAK_GROUPS.find((grp) => grp.id === d.groupId);
+    if (!g) return desired;
+    const busy = agents
+      .filter((a) => a.en !== d.en && g.match(a) && plans[a.en])
+      .map((a) => plans[a.en]);
+    const overlaps = (p: BreakPlan) =>
+      busy.some((b) => b.lane === p.lane && p.start < b.start + 60 && b.start < p.start + 60);
+    if (!overlaps(desired)) return desired;
+    for (let lane = 0; lane < g.lanes; lane++) {
+      const p = { start: desired.start, lane };
+      if (!overlaps(p)) return p;
+    }
+    for (let delta = 30; delta <= 720; delta += 30) {
+      for (const s of [desired.start - delta, desired.start + delta]) {
+        if (s < d.lo || s > d.hi) continue;
+        for (let lane = 0; lane < g.lanes; lane++) {
+          const p = { start: s, lane };
+          if (!overlaps(p)) return p;
+        }
+      }
+    }
+    return desired;
+  };
+
+  const onCardPointerDown = (e: React.PointerEvent, en: string, groupId: string) => {
+    const clamp = clampMap[en];
+    if (!clamp) return;
+    const g = BREAK_GROUPS.find((grp) => grp.id === groupId);
+    dragRef.current = { en, groupId, lo: clamp[0], hi: clamp[1], lanes: g?.lanes ?? 1 };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic / already-released pointer — drag still works via move events
+    }
+  };
+  const onCardPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const p = planFromPointer(e.clientX, e.clientY);
+    if (!p) return;
+    const free = resolveFree(p);
+    const cur = plans[d.en];
+    if (cur && (free.start !== cur.start || free.lane !== cur.lane)) onDrag(d.en, free);
+  };
+  const onCardPointerUp = () => {
+    dragRef.current = null;
+  };
+
+  return (
+    <div className="shrink-0 animate-in fade-in slide-in-from-top-2 rounded-xl border border-border/70 bg-card/40 p-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Break time scheduler · 1h per agent · drag cards to reschedule
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          title="Reset this day's breaks to the auto-suggested plan"
+          className="flex items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+        >
+          <RotateCcw className="size-3" />
+          Auto
+        </button>
+      </div>
+      <div className="flex flex-col gap-2">
+        {BREAK_GROUPS.map((g) => {
+          const members = agents.filter((a) => g.match(a) && plans[a.en]);
+          if (members.length === 0) return null;
+          return (
+            <div key={g.id} className="flex items-stretch gap-1.5">
+              <div className="flex w-7 shrink-0 items-center justify-center">
+                <span className="rotate-180 text-[8px] font-bold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
+                  {g.label}
+                  {g.lanes > 1 ? ` ×${g.lanes}` : ''}
+                </span>
+              </div>
+              <div
+                ref={(el) => {
+                  lanesRef.current[g.id] = el;
+                }}
+                className="relative min-w-0 flex-1 rounded-lg bg-white/[0.02]"
+              >
+                {Array.from({ length: 14 }, (_, i) => (
+                  <div
+                    key={i}
+                    className="absolute inset-y-0 w-px"
+                    style={{
+                      left: `${((i / 13) * 100).toFixed(3)}%`,
+                      borderLeft: '1px dotted rgb(255 255 255 / 0.14)',
+                    }}
+                  />
+                ))}
+                {Array.from({ length: g.lanes }, (_, lane) => (
+                  <div key={lane} className={cn('relative h-7', lane > 0 && 'border-t border-border/15')}>
+                    {members
+                      .filter((a) => plans[a.en].lane === lane)
+                      .map((a) => {
+                        const p = plans[a.en];
+                        return (
+                          <div
+                            key={a.en}
+                            onPointerDown={(e) => onCardPointerDown(e, a.en, g.id)}
+                            onPointerMove={onCardPointerMove}
+                            onPointerUp={onCardPointerUp}
+                            onPointerCancel={onCardPointerUp}
+                            title={`${a.zh} · break ${fmtWindowMin(p.start)}–${fmtWindowMin(p.start + 60)} (drag to move)`}
+                            className="absolute inset-y-[2px] z-10 flex cursor-grab touch-none select-none items-center justify-center rounded-md border text-[9px] font-bold shadow-sm transition-colors hover:brightness-125 active:cursor-grabbing"
+                            style={{
+                              left: `${((p.start / 780) * 100).toFixed(3)}%`,
+                              width: `${((60 / 780) * 100).toFixed(3)}%`,
+                              backgroundColor: hexAlpha(g.color, '26'),
+                              borderColor: hexAlpha(g.color, '66'),
+                              color: g.color,
+                            }}
+                          >
+                            <span className="truncate px-0.5">{a.en}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Hour labels — same 34px offset as the chart, so timelines line up.
+          GMT+8 row on top, ET/EST row in amber underneath. */}
+      <div className="relative ml-[34px] mt-1 h-6">
+        {hourLabels.map((h, i) => (
+          <span
+            key={h}
+            className="absolute top-0 -translate-x-1/2 font-mono text-[10px] leading-3 text-muted-foreground"
+            style={{ left: `${((i / 13) * 100).toFixed(3)}%` }}
+          >
+            {h}
+          </span>
+        ))}
+        {hourLabels.map((h, i) => (
+          <span
+            key={`et-${h}`}
+            className="absolute top-3 -translate-x-1/2 font-mono text-[8px] font-semibold leading-3 text-amber-400/90"
+            style={{ left: `${((i / 13) * 100).toFixed(3)}%` }}
+          >
+            {etLabel((21 + i) * 60, etOff)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ------------------- single-agent month view (week columns) ---------------- */
