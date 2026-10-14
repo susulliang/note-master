@@ -676,7 +676,11 @@ export default {
     if (url.pathname === '/api/keyword-alerts') {
       return handleKeywordAlerts(request, env);
     }
-    if (url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/')) {
+    if (
+      url.pathname.startsWith('/api/auth/') ||
+      url.pathname.startsWith('/api/admin/') ||
+      url.pathname.startsWith('/api/roster')
+    ) {
       return handleAuth(request, env);
     }
     if (url.pathname !== '/api/test-results') {
