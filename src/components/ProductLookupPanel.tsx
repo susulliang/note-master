@@ -445,17 +445,20 @@ export default function ProductLookupPanel({
 
   // --- AMR email templates (live D1 pool) ------------------------------------
   // Fetched once per session; the combined search (model + issue + manual
-  // query) ranks them closest-first. Only loads for logged-in users.
+  // query) ranks them closest-first. Re-runs when the signed-in user
+  // changes (empty fetches are not cached, so a later login picks up the
+  // pool without a remount).
   const [amrTemplates, setAmrTemplates] = useState<AmrTemplate[] | null>(null);
+  const { user: authUserForAmr } = useAuth();
   useEffect(() => {
     let alive = true;
     void fetchAmrTemplates().then((rows) => {
-      if (alive && rows.length > 0) setAmrTemplates(rows);
+      if (alive) setAmrTemplates(rows); // [] too — shows the sign-in hint
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [authUserForAmr?.username]);
 
   const amrHits: AmrTemplate[] = useMemo(() => {
     if (!amrTemplates) return [];

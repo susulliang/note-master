@@ -1064,7 +1064,8 @@ export default {
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/store') ||
-      url.pathname.startsWith('/api/spice')
+      url.pathname.startsWith('/api/spice') ||
+      url.pathname.startsWith('/api/amr-templates')
     ) {
       return handleAuth(request, env);
     }

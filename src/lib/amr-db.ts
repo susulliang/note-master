@@ -25,16 +25,18 @@ let pending: Promise<AmrTemplate[]> | null = null;
 export function fetchAmrTemplates(): Promise<AmrTemplate[]> {
   if (cache) return Promise.resolve(cache);
   if (pending) return pending;
-  const token = getStoredToken();
-  if (!token) return Promise.resolve([]);
   pending = fetch(`${getApiBase()}/api/amr-templates`, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${getStoredToken() ?? ''}`,
+    },
   })
     .then(async (res) => {
-      if (!res.ok) return [];
-      const data = await res.json() as { templates?: AmrTemplate[] };
-      cache = data.templates ?? [];
-      return cache;
+      const rows = res.ok ? ((await res.json()) as { templates?: AmrTemplate[] }).templates ?? [] : [];
+      // Only cache real content — an empty result (signed out / session not
+      // resolved yet) must stay retryable once a login appears.
+      if (rows.length > 0) cache = rows;
+      return rows;
     })
     .catch(() => [] as AmrTemplate[])
     .finally(() => {
