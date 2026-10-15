@@ -76,6 +76,7 @@ import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import CatAssistant from '@/components/CatAssistant';
 import { useCatAssistant } from '@/hooks/use-cat-assistant';
+import { useCatPet } from '@/hooks/use-cat-pet';
 import { useKittyHelp } from '@/hooks/use-kitty-help';
 import KittyHelpPanel from '@/components/KittyHelpPanel';
 import { useKeywordAlerts } from '@/hooks/use-keyword-alerts';
@@ -1661,6 +1662,9 @@ Additional information (if needed): ${additional}`;
   // -------------------------------------------------------------------------
   const [storedCatId, setStoredCatId] = useScopedState<CatId>(CAT_SELECTION_STORAGE_KEY, 'hunao');
   const selectedCat = normalizeCatId(storedCatId);
+  // Companion system — mounted ONCE here; the snapshot flows down through
+  // props to CatAssistant and the Settings panel (never via separate state).
+  const catPet = useCatPet({ catId: selectedCat, username: authUser?.username ?? null });
   const [catMoveRequest, setCatMoveRequest] = useState<{ id: number; x: number; y: number } | null>(null);
   const moveCatTo = useCallback((position: { x: number; y: number }) => {
     setCatMoveRequest((previous) => ({
@@ -1675,6 +1679,7 @@ Additional information (if needed): ${additional}`;
     cloudGenerate: sopCloudGenerateEnabled ? sopCloudGenerate : undefined,
     cloudEnabled: sopCloudGenerateEnabled,
     keywordAlerts,
+    pet: catPet.pet,
   });
 
   // -------------------------------------------------------------------------
@@ -1972,6 +1977,7 @@ Additional information (if needed): ${additional}`;
           const total = Object.values(finalScores).reduce((n, v) => n + v, 0);
           const pct = Math.round((total / QA_CHECKLIST_TOTAL) * 100);
           if (pct >= 70) {
+            catPet?.rewardQa(pct); // Bond XP — mirrors the spice award tiers
             void submitQaAward(pct).then(
               (out) => {
                 if (out.awarded > 0) {
@@ -2260,6 +2266,9 @@ Additional information (if needed): ${additional}`;
             onToggleUiScale={handleToggleUiScale}
             selectedCat={selectedCat}
             onSelectCat={setStoredCatId}
+            pet={catPet.pet}
+            petCooldown={catPet.petCooldown}
+            onPet={catPet.petCat}
             callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}
@@ -2787,6 +2796,9 @@ Additional information (if needed): ${additional}`;
         moveRequest={catMoveRequest}
         onKittyHelp={() => { void kitty.start(); }}
         kittyStage={kitty.stage}
+        pet={catPet.pet}
+        onPet={catPet.petCat}
+        petCooldown={catPet.petCooldown}
       />
       {kitty.panelOpen && kitty.result && (
         <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />

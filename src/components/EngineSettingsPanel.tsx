@@ -1,14 +1,30 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, Cpu, KeyRound, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, ChevronDown, Cpu, Heart, KeyRound, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, Sparkles, Star, Utensils, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
+import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
+import { PET_STATUS_COPY, nextStage, statusOf } from '@/lib/cat-pet';
 import type { KeywordAlert } from '@/lib/keyword-alerts';
 import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 import KeywordAlertContent from '@/components/KeywordAlertContent';
 import StorePanel from '@/components/StorePanel';
+
+/** Shared prefers-reduced-motion media query (reactive). */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
 import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
@@ -117,6 +133,12 @@ interface EngineSettingsPanelProps {
   onOpenAuth?: () => void;
   /** Opens the Shift+A admin panel (from the Admin badge — admins only). */
   onOpenAdmin?: () => void;
+  /** Companion-system snapshot (null until the pet model boots). */
+  pet?: CatPetSnapshot | null;
+  /** True while the pet-action cooldown is running. */
+  petCooldown?: boolean;
+  /** Pet the cat (+Mood, 30s cooldown). */
+  onPet?: () => void;
 }
 
 /**
@@ -268,6 +290,9 @@ export default function EngineSettingsPanel({
   keywordAlertSource,
   onOpenAuth,
   onOpenAdmin,
+  pet,
+  petCooldown,
+  onPet,
 }: EngineSettingsPanelProps) {
   const aiParserAvailable = Boolean(parser?.enabled || cloud?.hasKey);
   const panelsCtx = useContext(TicketPanelsContext);
@@ -527,6 +552,11 @@ export default function EngineSettingsPanel({
               );
             })}
           </div>
+
+          {/* ---- Companion profile (bond / care meters) ---- */}
+          {pet && (
+            <PetProfileBlock pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={() => setStoreOpen(true)} className="mt-1.5" />
+          )}
         </section>
 
         {gridboxVisibility && (
@@ -1314,4 +1344,304 @@ function buildDiagnosticsLines(d: any, justConnected: boolean, waitedMs: number)
     lines.push(`  5. Popup → Bridge → Tabs snapshot → find this vercel row → click 🔬 Injectable? → if YES / Bridge: not loaded yet → click 🚀 Inject bridge now.`);
   }
   return lines;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Pet profile block — companion bond/care meters under the cat picker.      */
+/* -------------------------------------------------------------------------- */
+
+interface BloomPetal {
+  key: 'energy' | 'fullness' | 'mood' | 'bond';
+  label: string;
+  /** 0–100 display value (Bond = progress toward the next stage). */
+  value: number;
+  /** Exact stat shown next to the label (Bond shows total XP). */
+  raw: string;
+  icon: typeof Zap;
+  color: string;
+  /** Rotational center of the petal, degrees (0 = up, clockwise). */
+  angle: number;
+  /** Short status + action hint revealed on select/focus. */
+  detail: string;
+}
+
+/** Four-petal radial "bloom" — a living pet-status display. Each petal grows
+ *  outward with its value (fuller = doing well); the growth stage sits in
+ *  the center. Fully keyboard accessible: Tab / arrow keys move between
+ *  petals, Enter/Space selects, and the detail line renders below the chart
+ *  so nothing relies on hover or color alone. */
+function CompanionBloom({
+  pet,
+  petCooldown,
+  onPet,
+  onOpenStore,
+  className,
+}: {
+  pet: CatPetSnapshot;
+  petCooldown?: boolean;
+  onPet?: () => void;
+  onOpenStore?: () => void;
+  className?: string;
+}) {
+  const { state } = pet;
+  const next = pet.xpToNext;
+  const bondPct = next == null ? 100 : Math.min(100, Math.round(((state.xp - pet.stage.xp) / Math.max(1, next - pet.stage.xp)) * 100));
+  const reduceMotion = useReducedMotion();
+
+  const petals: BloomPetal[] = [
+    {
+      key: 'energy', label: 'Energy', value: state.energy, raw: String(state.energy),
+      icon: Zap, color: '#34d399', angle: 0,
+      detail: pet.napping ? 'Resting — napping restores energy over time' : 'Awake — declines while the app is open',
+    },
+    {
+      key: 'fullness', label: 'Fullness', value: state.fullness, raw: String(state.fullness),
+      icon: Utensils, color: '#fbbf24', angle: 90,
+      detail: state.fullness < 45 ? 'Peckish — a wet can from the store helps' : 'Well fed — food purchases restore this',
+    },
+    {
+      key: 'mood', label: 'Mood', value: state.mood, raw: String(state.mood),
+      icon: Heart, color: '#f472b6', angle: 180,
+      detail: petCooldown ? 'Pet again in a moment (cooldown)' : 'Petting, favorite food and good calls lift mood',
+    },
+    {
+      key: 'bond', label: 'Bond', value: next == null ? 100 : bondPct, raw: `${state.xp} xp`,
+      icon: Star, color: '#818cf8', angle: 270,
+      detail: next == null
+        ? `Elder — fully bonded (${state.xp} xp)`
+        : `${next} xp to ${nextStageLabel(state.xp)} (now ${state.xp})`,
+    },
+  ];
+
+  const [focused, setFocused] = useState<BloomPetal['key'] | null>(null);
+  const [selected, setSelected] = useState<BloomPetal['key'] | null>(null);
+  const active = selected ?? focused;
+  /** Which petal indices are keyboard-reachable (roving tabindex). */
+  const activeIndex = active ? petals.findIndex((p) => p.key === active) : 0;
+  const detail = active != null ? petals.find((p) => p.key === active) : null;
+
+  const select = (key: BloomPetal['key']) => {
+    setSelected((prev) => (prev === key ? null : key));
+  };
+
+  const onPetalKeyDown = (e: React.KeyboardEvent, key: BloomPetal['key']) => {
+    const order: BloomPetal['key'][] = ['energy', 'fullness', 'mood', 'bond'];
+    const i = order.indexOf(key);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocused(order[(i + 1) % 4]);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocused(order[(i + 3) % 4]);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      select(key);
+    } else if (e.key === 'Escape') {
+      setSelected(null);
+    }
+  };
+
+  /** Petal geometry: rounded petals radiating from the center hub. Each
+   *  petal is a capsule from r0 (hub edge) to r0 + len·value. */
+  const R_HUB = 26;
+  const R_MAX = 92;
+  const petalShape = (angleDeg: number, value: number) => {
+    const a = ((angleDeg - 90) * Math.PI) / 180;
+    const len = R_HUB + ((R_MAX - R_HUB) * Math.max(4, value)) / 100;
+    const w = 13; // half-width of the petal capsule
+    const cx = 100, cy = 100;
+    const tipX = cx + len * Math.cos(a);
+    const tipY = cy + len * Math.sin(a);
+    // Perpendicular unit vector
+    const px = -Math.sin(a), py = Math.cos(a);
+    const bx = cx + R_HUB * Math.cos(a), by = cy + R_HUB * Math.sin(a);
+    return `M ${bx + px * w} ${by + py * w}
+            L ${tipX + px * w * 0.7} ${tipY + py * w * 0.7}
+            A ${w * 0.7} ${w * 0.7} 0 0 1 ${tipX - px * w * 0.7} ${tipY - py * w * 0.7}
+            L ${bx - px * w} ${by - py * w}
+            A ${w} ${w} 0 0 1 ${bx + px * w} ${by + py * w} Z`;
+  };
+
+  const chartSize = 'w-[160px] md:w-[190px]';
+
+  return (
+    <div className={cn('flex flex-col items-center', className)}>
+      <svg
+        viewBox="0 0 200 200"
+        role="radiogroup"
+        aria-label="Companion care stats — four petals: Energy, Fullness, Mood, Bond"
+        className={cn(chartSize, 'max-w-full select-none')}
+      >
+        {/* Petals — grow with value, brief bloom transition on change */}
+        {petals.map((p, i) => {
+          const isActive = active === p.key;
+          const Icon = p.icon;
+          return (
+            <g
+              key={p.key}
+              role="radio"
+              aria-checked={isActive}
+              aria-label={`${p.label} ${p.value} out of 100`}
+              tabIndex={i === activeIndex ? 0 : -1}
+              className="cursor-pointer outline-none"
+              onFocus={() => setFocused(p.key)}
+              onBlur={() => setFocused(null)}
+              onClick={() => select(p.key)}
+              onKeyDown={(e) => onPetalKeyDown(e, p.key)}
+            >
+              {/* Soft halo on active petal */}
+              {isActive && (
+                <path
+                  d={petalShape(p.angle, p.value)}
+                  fill={p.color}
+                  opacity={0.18}
+                  className="transition-opacity duration-200"
+                />
+              )}
+              <path
+                d={petalShape(p.angle, p.value)}
+                fill={p.color}
+                opacity={isActive ? 0.85 : 0.45}
+                stroke={p.color}
+                strokeWidth={1.2}
+                className={cn(
+                  'transition-all duration-500 ease-out',
+                  !reduceMotion && isActive && 'drop-shadow-[0_0_6px_rgba(255,255,255,0.25)]'
+                )}
+              />
+              {/* Icon at 60% petal length — always visible, not color-only */}
+              <g transform={`translate(${100 + (R_HUB + (R_MAX - R_HUB) * 0.62) * Math.cos(((p.angle - 90) * Math.PI) / 180) - 6}, ${100 + (R_HUB + (R_MAX - R_HUB) * 0.62) * Math.sin(((p.angle - 90) * Math.PI) / 180) - 6})`} pointerEvents="none">
+                <Icon width={12} height={12} fill="none" stroke="#0d1117" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+            </g>
+          );
+        })}
+
+        {/* Center hub — growth stage */}
+        <circle cx={100} cy={100} r={R_HUB} fill="hsl(215 21% 11%)" stroke="hsl(215 12% 32%)" strokeWidth={1} />
+        <text x={100} y={97} textAnchor="middle" className="fill-indigo-300" style={{ fontSize: 11, fontWeight: 700 }}>
+          {pet.stage.name}
+        </text>
+        <text x={100} y={110} textAnchor="middle" style={{ fontSize: 8.5, fill: 'hsl(212 9% 63%)' }}>
+          {next == null ? 'max bond' : `${bondPct}%`}
+        </text>
+      </svg>
+
+      {/* Compact always-visible legend: name + exact value per petal */}
+      <div className="mt-1 grid w-full max-w-[220px] grid-cols-2 gap-x-2 gap-y-0.5">
+        {petals.map((p) => {
+          const Icon = p.icon;
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => select(p.key)}
+              onMouseEnter={() => setFocused(p.key)}
+              onMouseLeave={() => setFocused(null)}
+              className={cn(
+                'flex items-center gap-1 rounded px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70',
+                active === p.key ? 'bg-foreground/[0.06]' : 'hover:bg-foreground/[0.04]'
+              )}
+              aria-pressed={active === p.key}
+            >
+              <Icon className="size-2.5 shrink-0" style={{ color: p.color }} aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-[9px] font-medium text-muted-foreground">{p.label}</span>
+              <span className="font-mono text-[9px] tabular-nums text-foreground/80">{p.raw}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Detail line for the selected/focused petal */}
+      <div className="mt-1 h-7 w-full max-w-[220px] px-1 text-center text-[9px] leading-tight text-muted-foreground/90" aria-live="polite">
+        {detail ? (
+          <>
+            <span className="font-semibold" style={{ color: detail.color }}>{detail.label}:</span>{' '}
+            {detail.detail}
+            {detail.key === 'mood' && !petCooldown && (
+              <button type="button" onClick={onPet} className="ml-1 rounded px-1 text-[9px] font-semibold text-pink-400 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pink-400/60">
+                Pet now
+              </button>
+            )}
+            {detail.key === 'fullness' && state.fullness < 45 && (
+              <button type="button" onClick={onOpenStore} className="ml-1 rounded px-1 text-[9px] font-semibold text-amber-400 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60">
+                Open Store
+              </button>
+            )}
+            {detail.key === 'energy' && pet.napping && <span className="ml-1 text-sky-300/80">💤</span>}
+          </>
+        ) : (
+          <span className="opacity-60">Select a petal for details</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function nextStageLabel(xp: number): string {
+  const next = nextStage(xp);
+  return next ? next.name : 'Elder';
+}
+
+/** Collapsible companion profile — bloom chart, stage badge, trait/quirk,
+ *  live status line and a keyboard-accessible Pet action inside the chart. */
+function PetProfileBlock({
+  pet,
+  petCooldown,
+  onPet,
+  onOpenStore,
+  className,
+}: {
+  pet: CatPetSnapshot;
+  petCooldown?: boolean;
+  onPet?: () => void;
+  onOpenStore?: () => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const { state } = pet;
+  const status = statusOf(state, pet.napping);
+  const next = pet.xpToNext;
+
+  return (
+    <div className={cn('rounded-md border border-border/40 bg-background/40', className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-1.5 py-1 text-left transition-colors hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 rounded-md"
+      >
+        <Sparkles className="size-3 shrink-0 text-indigo-400" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Companion bond
+        </span>
+        <span
+          className="shrink-0 rounded-full bg-indigo-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold leading-none text-indigo-300"
+          title={`Bond XP ${state.xp}${next != null ? ` · ${next} to next stage` : ' · max stage'}`}
+        >
+          {pet.stage.name}
+        </span>
+        <ChevronDown className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="space-y-1 px-1.5 pb-1.5">
+          <CompanionBloom pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={onOpenStore} />
+
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <span className="rounded-full bg-foreground/5 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+              {state.profile.trait}
+            </span>
+            <span className="min-w-0 truncate rounded-full bg-foreground/5 px-1.5 py-0.5 text-[9px] text-muted-foreground" title={state.profile.quirk}>
+              {state.profile.quirk}
+            </span>
+          </div>
+
+          <div className={cn('text-center text-[9px] italic', pet.napping ? 'text-sky-300/80' : 'text-muted-foreground/80')}>
+            {PET_STATUS_COPY[status]}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

@@ -2,17 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { cn } from '@/lib/utils';
 import type { CatThought } from '@/hooks/use-cat-assistant';
 import { useScopedState } from '@/hooks/use-scoped-state';
-import { getCatSprite, CAT_EATING_SPRITE, CAT_EAT_EVENT, type CatId } from '@/lib/cat-sprites';
+import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
+import { getCatSprite, getCatSleepSprite, CAT_EATING_SPRITE, CAT_EAT_EVENT, type CatId } from '@/lib/cat-sprites';
 
 /**
  * Draggable pixel cat with occasional sprite animation and thought bubbles.
+ * Doubles as the pet avatar: nap state, growth scale and pet-to-pet
+ * interactions come from the companion snapshot (`pet` prop).
  */
 const DEFAULT_POSITION = { x: 16, y: 24 };
 const SPRITE_SIZE = 128;
+/** Pointer movement (px) before a press becomes a drag — under this it's a
+ *  click-to-pet, so affection and dragging coexist on the same gesture. */
+const DRAG_THRESHOLD = 6;
 
-function clampPosition(position: { x: number; y: number }) {
-  const maxX = Math.max(0, window.innerWidth - SPRITE_SIZE);
-  const maxY = Math.max(0, window.innerHeight - SPRITE_SIZE);
+function clampPosition(position: { x: number; y: number }, size = SPRITE_SIZE) {
+  const maxX = Math.max(0, window.innerWidth - size);
+  const maxY = Math.max(0, window.innerHeight - size);
   const x = Number.isFinite(position.x) ? position.x : DEFAULT_POSITION.x;
   const y = Number.isFinite(position.y) ? position.y : DEFAULT_POSITION.y;
   return {
@@ -34,6 +40,12 @@ interface CatAssistantProps {
   /** Live stage of the Kitty Help routine — rendered as a persistent
    *  violet bubble above the cat while non-null. */
   kittyStage?: { label: string; detail?: string } | null;
+  /** Companion-system snapshot (null when the pet model hasn't booted). */
+  pet?: CatPetSnapshot | null;
+  /** Pet the cat (+Mood) — short click / Enter / Space. */
+  onPet?: () => void;
+  /** True while the pet-action cooldown is running (dims the paw cursor). */
+  petCooldown?: boolean;
   className?: string;
 }
 
@@ -46,8 +58,13 @@ export function CatAssistant({
   moveRequest,
   onKittyHelp,
   kittyStage,
+  pet,
+  onPet,
+  petCooldown,
   className,
 }: CatAssistantProps) {
+  const petScale = pet?.scale ?? 1;
+  const napping = pet?.napping ?? false;
   const [position, setPosition] = useScopedState(
     '__app_ecovacs_cat_position',
     DEFAULT_POSITION
@@ -57,14 +74,38 @@ export function CatAssistant({
   /** One-shot eating animation triggered by a spice-store cat-food purchase. */
   const [isEating, setIsEating] = useState(false);
   const isEatingRef = useRef(false);
+  /** Napping rig: 'sleep' plays the falling-asleep sheet forwards (holds the
+   *  asleep frame via fill-mode), 'wake' plays it in reverse. 'sleep' stays
+   *  applied the whole nap so the held frame doesn't snap back to standing. */
+  const [sleepMode, setSleepMode] = useState<'sleep' | 'wake' | null>(null);
+  const nappingPrevRef = useRef(napping);
+  useEffect(() => {
+    if (napping !== nappingPrevRef.current) {
+      setSleepMode(napping ? 'sleep' : 'wake');
+      nappingPrevRef.current = napping;
+    }
+  }, [napping]);
   const catName = `${catId.slice(0, 1).toUpperCase()}${catId.slice(1)}`;
 
   const dragOffset = useRef({ x: 0, y: 0 });
+  /** True while the primary pointer is physically down on the sprite. */
+  const pointerDownRef = useRef(false);
+  /** True once the active pointer gesture passed the drag threshold. */
+  const gestureDragRef = useRef(false);
+  const pressStartRef = useRef({ x: 0, y: 0 });
+  /** Brief pet-reaction flash (+Mood). */
+  const [pettedAt, setPettedAt] = useState(0);
+  /** Napping mirror in a ref so the idle-animation timer sees fresh value. */
+  const nappingStateRef = useRef(napping);
+  nappingStateRef.current = napping;
+  const sleepModeRef = useRef(sleepMode);
+  sleepModeRef.current = sleepMode;
   const spriteRef = useRef<HTMLSpanElement>(null);
-  const visiblePosition = clampPosition(position);
+  const visiblePosition = clampPosition(position, SPRITE_SIZE * petScale);
 
   useLayoutEffect(() => {
-    const keepPositionInViewport = () => setPosition((previous) => clampPosition(previous));
+    const size = SPRITE_SIZE * petScale;
+    const keepPositionInViewport = () => setPosition((previous) => clampPosition(previous, size));
     keepPositionInViewport();
     window.addEventListener('resize', keepPositionInViewport);
     const viewport = window.visualViewport;
@@ -75,7 +116,7 @@ export function CatAssistant({
       viewport?.removeEventListener('resize', keepPositionInViewport);
       viewport?.removeEventListener('scroll', keepPositionInViewport);
     };
-  }, [setPosition]);
+  }, [setPosition, petScale]);
 
   useEffect(() => {
     if (!moveRequest) return;
@@ -104,8 +145,8 @@ export function CatAssistant({
       if (cancelled || motionPreference.matches) return;
 
       timeoutId = window.setTimeout(() => {
-        timeoutId = undefined;
-        if (!cancelled && !motionPreference.matches) setIsAnimating(true);
+        // Napping cats don't fidget — the Zzz bubble carries the moment.
+        if (!cancelled && !motionPreference.matches && !nappingStateRef.current) setIsAnimating(true);
       }, 2000 + Math.random() * 28000);
     };
 
@@ -115,6 +156,11 @@ export function CatAssistant({
         isEatingRef.current = false;
         setIsEating(false);
       }
+      if (sleepModeRef.current === 'wake') {
+        // Reverse playback finished — back to the standing idle pose.
+        setSleepMode(null);
+      }
+      // 'sleep' ends holding the asleep frame (forwards fill) — keep it.
       setIsAnimating(false);
       scheduleAnimation();
     };
@@ -147,7 +193,9 @@ export function CatAssistant({
       // Only respond to left / primary button
       if (e.button !== 0) return;
       e.preventDefault();
-      setDragging(true);
+      pointerDownRef.current = true;
+      gestureDragRef.current = false;
+      pressStartRef.current = { x: e.clientX, y: e.clientY };
       dragOffset.current = {
         x: e.clientX - visiblePosition.x,
         y: e.clientY - visiblePosition.y,
@@ -163,17 +211,47 @@ export function CatAssistant({
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragging) return;
+      // Ignore hover moves entirely — only a pressed pointer can drag.
+      if (!pointerDownRef.current) return;
+      // Drag only after the gesture passes the movement threshold — a short
+      // press stays a click-to-pet, so drag / pet / Kitty Help coexist.
+      if (!gestureDragRef.current) {
+        const dx = e.clientX - pressStartRef.current.x;
+        const dy = e.clientY - pressStartRef.current.y;
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        gestureDragRef.current = true;
+        setDragging(true);
+      }
       const x = e.clientX - dragOffset.current.x;
       const y = e.clientY - dragOffset.current.y;
-      setPosition(clampPosition({ x, y }));
+      setPosition(clampPosition({ x, y }, SPRITE_SIZE * petScale));
     },
-    [dragging, setPosition]
+    [petScale, setPosition]
   );
 
   const onPointerUp = useCallback(() => {
+    pointerDownRef.current = false;
+    if (!gestureDragRef.current) {
+      // Short press → pet the cat (heart pop clears itself after 900ms).
+      const at = Date.now();
+      setPettedAt(at);
+      window.setTimeout(() => setPettedAt((v) => (v === at ? 0 : v)), 900);
+      onPet?.();
+    }
+    gestureDragRef.current = false;
     setDragging(false);
-  }, []);
+  }, [onPet]);
+
+  const onPetKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setPettedAt(Date.now());
+        onPet?.();
+      }
+    },
+    [onPet]
+  );
 
   return (
     <div
@@ -243,11 +321,14 @@ export function CatAssistant({
         onDoubleClick={() => {
           if (!dragging) onKittyHelp?.();
         }}
-        role="img"
-        aria-label={`${catName} cat assistant${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, double-click for Kitty Help`}
+        onKeyDown={onPetKey}
+        role="button"
+        tabIndex={0}
+        aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet, double-click for Kitty Help`}
         className={cn(
-          'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center',
-          dragging && 'cursor-grabbing'
+          'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-2xl',
+          dragging && 'cursor-grabbing',
+          petCooldown && 'cursor-default'
         )}
         onLostPointerCapture={onPointerUp}
       >
@@ -255,11 +336,35 @@ export function CatAssistant({
           ref={spriteRef}
           aria-hidden="true"
           className={cn(
-            'cat-sprite-frame h-32 w-32 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]',
-            isEating ? 'cat-sprite-eat' : isAnimating && 'cat-sprite-animate'
+            'cat-sprite-frame h-32 w-32 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)] transition-[filter,transform] duration-300',
+            isEating ? 'cat-sprite-eat' : sleepMode === 'sleep' ? 'cat-sprite-sleep' : sleepMode === 'wake' ? 'cat-sprite-wake' : isAnimating && 'cat-sprite-animate',
+            napping && 'brightness-[0.8] saturate-[0.85]'
           )}
-          style={{ backgroundImage: `url("${isEating ? CAT_EATING_SPRITE : getCatSprite(catId)}")` }}
+          style={{
+            backgroundImage: `url("${isEating ? CAT_EATING_SPRITE : sleepMode ? getCatSleepSprite(catId) : getCatSprite(catId)}")`,
+            transform: `scale(${petScale.toFixed(3)})`,
+          }}
         />
+
+        {/* Napping overlay — Zzz drifts up while the sprite dozes. */}
+        {napping && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute right-1.5 top-0.5 animate-bounce font-mono text-sm font-bold text-sky-300/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
+          >
+            Zzz
+          </span>
+        )}
+        {/* Pet reaction — a brief heart pop above the sprite. */}
+        {Date.now() - pettedAt < 900 && (
+          <span
+            key={pettedAt}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 animate-bounce text-base drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
+          >
+            💗
+          </span>
+        )}
 
         {/* Keep call and generation activity legible without swapping poses. */}
         {isCapturing && !isThinking && (

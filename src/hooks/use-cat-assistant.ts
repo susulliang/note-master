@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TranscriptEntry } from '@/lib/field-extraction';
 import { alertContentAsPlainText, type KeywordAlert } from '@/lib/keyword-alerts';
+import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
 
 export type { KeywordAlert } from '@/lib/keyword-alerts';
 
@@ -63,6 +64,8 @@ export interface CatAssistantProps {
   /** Agent-editable keyword → alert dictionary. Every new transcript line is
    *  scanned for these keywords; a match pops an amber thought bubble. */
   keywordAlerts?: KeywordAlert[];
+  /** Companion snapshot — personality biases ambient thoughts (optional). */
+  pet?: CatPetSnapshot | null;
 }
 
 /** Field ids the cat should nudge about when empty. Keys match NODE_IDS. */
@@ -126,6 +129,27 @@ const ADVICE_SYSTEM =
 
 let thoughtIdSeq = 0;
 
+/** Low-Mood pool — quieter, gentler musings (never guilt-tripping). */
+const AMBIENT_THOUGHTS_LOW_MOOD = [
+  'Just resting my eyes...',
+  'I saved you a sunny spot.',
+  'Still here if you need me.',
+];
+
+/** Sleepy-trait pool — extra nap flavor. */
+const AMBIENT_THOUGHTS_SLEEPY = [
+  'Nap time is 2 minutes. I\'ll be back.',
+  'Purring...',
+  'Five more minutes...',
+];
+
+/** Greedy-trait pool — extra food flavor. */
+const AMBIENT_THOUGHTS_GREEDY = [
+  'Is that... a wet can I smell?',
+  'Lunch is my favorite meeting.',
+  'The store has Fancy Feast, just saying.',
+];
+
 /** Pick a random integer in [min, max). */
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min));
@@ -146,6 +170,7 @@ export function useCatAssistant({
   cloudGenerate,
   cloudEnabled,
   keywordAlerts,
+  pet,
 }: CatAssistantProps) {
   const [thoughts, setThoughts] = useState<CatThought[]>([]);
   /** True while an LLM advice request is in flight (drives the spinner). */
@@ -259,13 +284,26 @@ export function useCatAssistant({
 
   // -----------------------------------------------------------------
   //  Ambient idle thoughts — slow random timer, only when no call.
+  //  Personality-aware: the pet snapshot biases the pool (low Mood →
+  //  quieter musings; trait flavor). Operational thoughts keep priority
+  //  because this only runs when nothing else is happening.
   // -----------------------------------------------------------------
+  const petMoodRef = useRef<number | null>(null);
+  petMoodRef.current = pet?.state.mood ?? null;
+  const petTraitRef = useRef<string | null>(null);
+  petTraitRef.current = pet?.state.profile.trait ?? null;
   const scheduleAmbient = useCallback(() => {
     if (ambientTimerRef.current !== null) return;
     const delay = randInt(AMBIENT_MIN_GAP_MS, AMBIENT_MAX_GAP_MS);
     ambientTimerRef.current = window.setTimeout(() => {
       ambientTimerRef.current = null;
-      pushThought('ambient', AMBIENT_THOUGHTS[randInt(0, AMBIENT_THOUGHTS.length)]);
+      const mood = petMoodRef.current;
+      const trait = petTraitRef.current;
+      let pool = AMBIENT_THOUGHTS;
+      if (mood !== null && mood < 30) pool = AMBIENT_THOUGHTS_LOW_MOOD;
+      else if (trait === 'Sleepy') pool = AMBIENT_THOUGHTS_SLEEPY;
+      else if (trait === 'Greedy') pool = AMBIENT_THOUGHTS_GREEDY;
+      pushThought('ambient', pool[randInt(0, pool.length)]);
       scheduleAmbient();
     }, delay);
   }, [pushThought]);

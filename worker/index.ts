@@ -71,6 +71,8 @@ interface StoreProductRow {
   price: number;
   active: number;
   image?: string | null;
+  /** 'food' (feeds the cat companion) | 'other' — null for legacy rows. */
+  category?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -83,6 +85,7 @@ export interface StoreProduct {
   price: number;
   active: boolean;
   image: string | null;
+  category: 'food' | 'other';
 }
 
 interface RegisterPayload {
@@ -503,6 +506,17 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
       } catch {
         /* column already exists */
       }
+      try {
+        await env.DB.prepare("ALTER TABLE store_products ADD COLUMN category TEXT NOT NULL DEFAULT 'other'").run();
+      } catch {
+        /* column already exists */
+      }
+      // Cat companion pet state — one JSON blob per user (see src/lib/cat-pet.ts).
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS pet_state (
+           username TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL
+         )`
+      ).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -567,7 +581,41 @@ function storeProductPublic(row: StoreProductRow): StoreProduct {
     price: Number(row.price),
     active: Number(row.active) === 1,
     image: typeof row.image === 'string' && row.image ? row.image : null,
+    category: row.category === 'food' ? 'food' : 'other',
   };
+}
+
+/** GET /api/pet — the caller's saved pet-state JSON blob (null if never set). */
+async function handlePetGet(env: Env, user: AuthUserRow): Promise<Response> {
+  await ensureSpiceSchema(env);
+  const row = await env.DB.prepare('SELECT state FROM pet_state WHERE username = ?1')
+    .bind(user.username)
+    .first<{ state: string }>();
+  return authJson({ state: row?.state ?? null });
+}
+
+/** POST /api/pet { state } — upsert the caller's pet-state JSON blob.
+ *  The blob is opaque to the server (the client model owns the math); the
+ *  server only enforces a size ceiling and last-write-wins semantics. */
+async function handlePetSave(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 8_192) return authJson({ error: 'Pet state too large' }, 413);
+  let payload: { state?: unknown };
+  try {
+    payload = (await request.json()) as { state?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const state = typeof payload.state === 'string' ? payload.state : '';
+  if (!state || state.length > 6_000) return authJson({ error: 'Invalid pet state' }, 400);
+  await ensureSpiceSchema(env);
+  await env.DB.prepare(
+    `INSERT INTO pet_state (username, state, updated_at) VALUES (?1, ?2, ?3)
+     ON CONFLICT(username) DO UPDATE SET state = ?2, updated_at = ?3`
+  )
+    .bind(user.username, state, Date.now())
+    .run();
+  return authJson({ ok: true });
 }
 
 /** GET /api/store — active products for the logged-in user. */
@@ -951,6 +999,7 @@ interface AdminStorePayload {
     price?: unknown;
     active?: unknown;
     image?: unknown;
+    category?: unknown;
   };
 }
 
@@ -986,6 +1035,7 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   // Product image: a client-produced data URL (PNG keeps alpha, JPEG for
   // photos) — never larger than ~350 KB after the 256×256 downscale.
   const image = typeof p.image === 'string' && p.image ? p.image : null;
+  const category = p.category === 'food' ? 'food' : 'other';
   if (image && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image))
     return authJson({ error: 'Image must be a base64 PNG or JPEG data URL' }, 400);
   if (image && image.length > 500_000)
@@ -999,12 +1049,12 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   const now = Date.now();
   const id = typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID();
   await env.DB.prepare(
-    `INSERT INTO store_products (id, name, emoji, description, price, active, image, created_at, updated_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+    `INSERT INTO store_products (id, name, emoji, description, price, active, image, category, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?8, ?8)
      ON CONFLICT(id) DO UPDATE SET
-       name = ?2, emoji = ?3, description = ?4, price = ?5, active = ?6, image = ?7, updated_at = ?8`
+       name = ?2, emoji = ?3, description = ?4, price = ?5, active = ?6, image = ?7, category = ?9, updated_at = ?8`
   )
-    .bind(id, name, emoji, description, price, active ? 1 : 0, image, now)
+    .bind(id, name, emoji, description, price, active ? 1 : 0, image, now, category)
     .run();
   const row = await env.DB.prepare('SELECT * FROM store_products WHERE id = ?1').bind(id).first<StoreProductRow>();
   return authJson({ ok: true, product: row ? storeProductPublic(row) : null });
@@ -1055,6 +1105,18 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleSpiceQa(request, env, user);
+  }
+
+  // Cat companion pet state — read/save the caller's own blob.
+  if (path === '/api/pet' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handlePetGet(env, user);
+  }
+  if (path === '/api/pet' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handlePetSave(request, env, user);
   }
 
   // Store — active products list + purchase + transaction history,

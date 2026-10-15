@@ -53,10 +53,12 @@ interface ProductDraft {
   description: string;
   price: string;
   active: boolean;
+  /** 'food' products feed the cat companion. */
+  category: 'food' | 'other';
   image: string | null;
 }
 
-const EMPTY_DRAFT: ProductDraft = { name: '', emoji: '🎁', description: '', price: '5', active: true, image: null };
+const EMPTY_DRAFT: ProductDraft = { name: '', emoji: '🎁', description: '', price: '5', active: true, category: 'other', image: null };
 
 /**
  * Client-side product-image processing: center-crops to a square and
@@ -182,6 +184,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
       description: product.description,
       price: String(product.price),
       active: product.active,
+      category: product.category,
       image: product.image,
     });
 
@@ -200,6 +203,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         description: draft.description.trim(),
         price,
         active: draft.active,
+        category: draft.category,
         image: draft.image,
       });
       setDraft(null);
@@ -523,6 +527,15 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                       maxLength={200}
                     />
                     <div className="flex items-center justify-between gap-2">
+                      <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={draft.category === 'food'}
+                          onChange={(e) => setDraft({ ...draft, category: e.target.checked ? 'food' : 'other' })}
+                          className="accent-amber-500"
+                        />
+                        🐱 Food (feeds the cat)
+                      </label>
                       <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                         <input
                           type="checkbox"

@@ -20,6 +20,8 @@ export interface StoreProduct {
   active: boolean;
   /** Client-produced 256×256 data URL (PNG keeps alpha, JPEG for photos). */
   image: string | null;
+  /** 'food' feeds the cat companion; 'other' is decorative. */
+  category: 'food' | 'other';
 }
 
 const TOKEN_KEY = 'ecovacs_auth_token';
@@ -173,6 +175,23 @@ export async function purchaseItem(productId: string): Promise<{ spice: number }
     token,
   });
   return out;
+}
+
+// ── Cat companion pet state ──────────────────────────────────────────────────
+
+/** Fetch the caller's saved pet-state blob (null if never saved). */
+export async function getPetState(): Promise<string | null> {
+  const token = getStoredToken();
+  if (!token) return null;
+  const out = await call<{ state: string | null }>('/api/pet', { token });
+  return out.state;
+}
+
+/** Save the caller's pet-state blob (last write wins, server-side). */
+export async function savePetState(state: string): Promise<void> {
+  const token = getStoredToken();
+  if (!token) return;
+  await call('/api/pet', { method: 'POST', body: JSON.stringify({ state }), token });
 }
 
 // ── Admin store management ───────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
 import type { CatId } from '@/lib/cat-sprites';
+import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
 import type { KeywordAlert } from '@/lib/keyword-alerts';
 import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 
@@ -36,6 +37,10 @@ interface RailControlsProps {
   parser?: ParserState;
   selectedCat: CatId;
   onSelectCat: (catId: CatId) => void;
+  /** Companion-system snapshot (forwarded to the Settings panel). */
+  pet?: CatPetSnapshot | null;
+  petCooldown?: boolean;
+  onPet?: () => void;
   /** On-demand DeepSeek cloud parser state (the Cloud parse button) */
   cloud?: CloudState;
   transcript?: TranscriptEntry[];
@@ -85,6 +90,9 @@ export default function RailControls({
   parser,
   selectedCat,
   onSelectCat,
+  pet,
+  petCooldown,
+  onPet,
   cloud,
   transcript,
   isTranscribing,
@@ -191,6 +199,9 @@ export default function RailControls({
               engine={engine}
               selectedCat={selectedCat}
               onSelectCat={onSelectCat}
+              pet={pet}
+              petCooldown={petCooldown}
+              onPet={onPet}
               parser={parser}
               cloud={cloud}
               transcript={transcript ?? []}

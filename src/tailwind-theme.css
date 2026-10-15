@@ -706,6 +706,16 @@ body[data-ui-scale="small"] {
   .cat-sprite-eat {
     animation: cat-sprite-loop 4.8s steps(1, end) 1;
   }
+  /* Napping rig — same 16-frame sheet where frame 1 is standing and frame
+   * 16 is deep asleep. Falling asleep plays it forwards and `forwards`
+   * fill holds the last frame; waking plays it in reverse and holds the
+   * standing frame (both end on their final keyframe via fill mode). */
+  .cat-sprite-sleep {
+    animation: cat-sprite-loop 3.6s steps(1, end) 1 forwards;
+  }
+  .cat-sprite-wake {
+    animation: cat-sprite-loop 3.6s steps(1, end) 1 reverse forwards;
+  }
 
   /* Amber pulsing glow for keyword-alert thought bubbles. */
   @keyframes cat-alert-glow {
@@ -893,7 +903,9 @@ body[data-ui-scale="small"] {
     .dash-progress-fill::after,
     .dash-parliament-seat,
     .cat-sprite-animate,
-    .cat-sprite-eat {
+    .cat-sprite-eat,
+    .cat-sprite-sleep,
+    .cat-sprite-wake {
       animation: none !important;
     }
     .cat-sprite-frame {
