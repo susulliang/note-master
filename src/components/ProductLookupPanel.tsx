@@ -21,7 +21,16 @@ import {
   CircuitBoard,
   Smartphone,
   GitCompare,
+  Mail,
+  Pencil,
 } from 'lucide-react';
+import {
+  fetchAmrTemplates,
+  patchAmrTemplate,
+  saveAmrTemplate,
+  type AmrTemplate,
+} from '@/lib/amr-db';
+import { useAuth } from '@/lib/auth-context';
 import {
   findModels,
   freeSearch,
@@ -75,7 +84,7 @@ interface ProductLookupPanelProps {
   onOpenTemplate?: (template: TemplateEntry) => void;
 }
 
-type TabKind = 'specs' | 'errors' | 'faq' | 'templates' | 'news' | 'firmware' | 'appupdates' | 'scientist' | 'free' | 'selling';
+type TabKind = 'specs' | 'errors' | 'faq' | 'templates' | 'amrdb' | 'news' | 'firmware' | 'appupdates' | 'scientist' | 'free' | 'selling';
 
 interface Tab {
   kind: TabKind;
@@ -92,6 +101,9 @@ const TABS_META: Array<Omit<Tab, 'count'>> = [
   // Matching templates (AMR / TBS / ERR / MACRO / FAQ) folded in as a tab
   // (v0.2.0) instead of a standalone drawer panel.
   { kind: 'templates', label: 'Matches', icon: FileSearch },
+  // AMR email-template pool — 319 Salesforce templates served live from
+  // the eco-data D1 (admin-editable, synced back to D1 on save).
+  { kind: 'amrdb', label: 'AMR Templates', icon: Mail },
   // Knowledge updates curated from the Feishu 知识点分享群 (v0.2.0).
   { kind: 'news', label: 'News & Updates', icon: Newspaper },
   // Firmware OTA history + ECOVACS HOME app release notes pulled from the
@@ -431,12 +443,56 @@ export default function ProductLookupPanel({
     [suIndex, manualQueryDebounced, robotModelDebounced, issueTypeDebounced, issueDescDebounced]
   );
 
+  // --- AMR email templates (live D1 pool) ------------------------------------
+  // Fetched once per session; the combined search (model + issue + manual
+  // query) ranks them closest-first. Only loads for logged-in users.
+  const [amrTemplates, setAmrTemplates] = useState<AmrTemplate[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchAmrTemplates().then((rows) => {
+      if (alive && rows.length > 0) setAmrTemplates(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const amrHits: AmrTemplate[] = useMemo(() => {
+    if (!amrTemplates) return [];
+    const q = effectiveQuery.trim();
+    if (!q) return amrTemplates;
+    const tokens = q.toLowerCase().split(/[\s,;:!?'"()\[\]]+/).filter((t) => t.length >= 2);
+    const scored = amrTemplates.map((t) => {
+      const name = t.name.toLowerCase();
+      const subject = t.subject.toLowerCase();
+      const description = t.description.toLowerCase();
+      const folder = t.folder.toLowerCase();
+      const html = t.html.toLowerCase();
+      let score = 0;
+      for (const token of tokens) {
+        if (name.includes(token)) score += 6;
+        if (subject.includes(token)) score += 3;
+        if (description.includes(token)) score += 2;
+        if (folder.includes(token)) score += 1;
+        if (html.includes(token)) score += 1;
+      }
+      return { t, score };
+    });
+    return scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score || a.t.name.localeCompare(b.t.name))
+      .slice(0, 40)
+      .map((s) => s.t);
+  }, [amrTemplates, effectiveQuery]);
+
   const counts = useMemo<Record<TabKind, number>>(
     () => ({
       specs: specSections.reduce((sum, s) => sum + s.rows.length, 0),
       errors: errorCodeHits.length,
       faq: faqHits.length,
       templates: templateMatches?.length ?? 0,
+      // Live D1 AMR templates — hits when searching, total when browsing.
+      amrdb: amrTemplates ? (amrHits.length > 0 && effectiveQuery.trim() ? amrHits.length : amrTemplates.length) : 0,
       // Show live matches when a query is active, otherwise the total
       // number of curated updates (browse case). 0 while still loading.
       news: newsIndex ? (newsHits.length > 0 ? newsHits.length : newsIndex.length) : 0,
@@ -454,7 +510,7 @@ export default function ProductLookupPanel({
       scientist: scientistHits.length,
       free: freeHits.length,
     }),
-    [specSections, errorCodeHits, faqHits, sellingHits, scientistHits, freeHits, templateMatches, newsIndex, newsHits]
+    [specSections, errorCodeHits, faqHits, sellingHits, scientistHits, freeHits, templateMatches, newsIndex, newsHits, amrTemplates, amrHits, effectiveQuery]
   );
 
   // Auto-switch to the tab with the most useful content
@@ -624,6 +680,14 @@ export default function ProductLookupPanel({
         {activeTab === 'templates' && (
           <MatchesTab matches={templateMatches ?? []} onOpenTemplate={onOpenTemplate} />
         )}
+        {activeTab === 'amrdb' && (
+          <AmrTemplatesTab
+            templates={amrTemplates}
+            hits={amrHits}
+            searching={effectiveQuery.trim().length > 0}
+            onSaved={(updated) => setAmrTemplates((prev) => (prev ? prev.map((t) => (t.id === updated.id ? updated : t)) : prev))}
+          />
+        )}
         {activeTab === 'news' && <NewsTab hits={newsHits} index={newsIndex} />}
         {activeTab === 'firmware' && (
           <SoftwareUpdatesTab hits={firmwareHits} index={suIndex} kind="firmware" />
@@ -640,6 +704,181 @@ export default function ProductLookupPanel({
 }
 
 /* ---------------- Sub components ---------------------------------------- */
+
+/**
+ * AMR Templates tab — the 319 Salesforce email templates served live from
+ * the eco-data D1. Click a row to preview the rendered email (sandboxed
+ * iframe); admins edit inline and the change syncs straight back to D1.
+ */
+function AmrTemplatesTab({
+  templates,
+  hits,
+  searching,
+  onSaved,
+}: {
+  templates: AmrTemplate[] | null;
+  hits: AmrTemplate[];
+  searching: boolean;
+  onSaved: (updated: AmrTemplate) => void;
+}) {
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AmrTemplate | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!templates) {
+    return (
+      <p className="flex items-center gap-2 py-3 text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading AMR templates from D1…
+      </p>
+    );
+  }
+  if (templates.length === 0) {
+    return <p className="py-3 text-muted-foreground">Sign in to browse the AMR email-template pool.</p>;
+  }
+  if (hits.length === 0) {
+    return <p className="py-3 text-muted-foreground">{searching ? 'No templates match the current search.' : 'No templates available.'}</p>;
+  }
+
+  const rows = searching || openId === null ? hits : templates.filter((t) => t.id === openId);
+
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveAmrTemplate({
+        id: draft.id,
+        name: draft.name.trim(),
+        folder: draft.folder,
+        description: draft.description.trim(),
+        subject: draft.subject.trim(),
+        html: draft.html,
+      });
+      const updated: AmrTemplate = { ...draft, name: draft.name.trim(), description: draft.description.trim(), subject: draft.subject.trim(), updatedAt: Date.now() };
+      patchAmrTemplate(updated);
+      onSaved(updated);
+      setDraft(null);
+      setOpenId(updated.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the template.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map((t) => {
+        const open = openId === t.id;
+        const editing = draft?.id === t.id;
+        return (
+          <div key={t.id} className="rounded-lg border border-border/60 bg-card/40">
+            <button
+              type="button"
+              onClick={() => {
+                setOpenId(open ? null : t.id);
+                setError(null);
+              }}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/5"
+            >
+              <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-foreground">{t.name}</span>
+              <span className="shrink-0 rounded bg-foreground/10 px-1 py-0.5 text-[9px] font-bold text-muted-foreground">{t.folder || 'AMR'}</span>
+              {!editing && t.description && (
+                <span className="hidden min-w-0 max-w-[40%] truncate text-[10px] text-muted-foreground md:inline">{t.description}</span>
+              )}
+            </button>
+            {open && (
+              <div className="border-t border-border/40 px-2.5 py-2">
+                {editing ? (
+                  <div className="space-y-1.5">
+                    <input
+                      value={draft?.name ?? ''}
+                      onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+                      className="glass-field h-8 w-full rounded-md px-2 text-[11.5px] font-semibold"
+                      placeholder="Template name"
+                    />
+                    <input
+                      value={draft?.subject ?? ''}
+                      onChange={(e) => setDraft((d) => (d ? { ...d, subject: e.target.value } : d))}
+                      className="glass-field h-8 w-full rounded-md px-2 text-[11px]"
+                      placeholder="Email subject"
+                    />
+                    <input
+                      value={draft?.description ?? ''}
+                      onChange={(e) => setDraft((d) => (d ? { ...d, description: e.target.value } : d))}
+                      className="glass-field h-8 w-full rounded-md px-2 text-[11px]"
+                      placeholder="Description"
+                    />
+                    <textarea
+                      value={draft?.html ?? ''}
+                      onChange={(e) => setDraft((d) => (d ? { ...d, html: e.target.value } : d))}
+                      rows={10}
+                      className="custom-scrollbar glass-field w-full rounded-md px-2 py-1.5 font-mono text-[10.5px]"
+                      placeholder="Email HTML body"
+                    />
+                    {error && <p className="text-[10px] font-semibold text-red-400">{error}</p>}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void save()}
+                        disabled={saving}
+                        className="rounded-md bg-primary px-2.5 py-1 text-[10.5px] font-bold text-primary-foreground transition-opacity disabled:opacity-60"
+                      >
+                        {saving ? 'Saving…' : 'Save to D1'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraft(null);
+                          setError(null);
+                        }}
+                        className="rounded-md border border-border px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground hover:text-foreground"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {t.subject && <p className="text-[11px] text-muted-foreground"><span className="font-bold">Subject:</span> {t.subject}</p>}
+                    <iframe
+                      title={`${t.name} preview`}
+                      sandbox=""
+                      srcDoc={t.html}
+                      className="h-64 w-full rounded-md border border-border/60 bg-white"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9.5px] text-muted-foreground">
+                        {t.author ? `by ${t.author} · ` : ''}synced {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                      </span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraft({ ...t });
+                            setError(null);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[10px] font-bold text-accent transition-colors hover:bg-accent/10"
+                        >
+                          <Pencil className="size-3" /> Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * News & Updates tab — knowledge updates curated from the Feishu

@@ -581,6 +581,97 @@ async function handleStoreGet(env: Env, includeInactive = false): Promise<Respon
   return authJson({ products: (result.results ?? []).map(storeProductPublic) });
 }
 
+// ── AMR email templates (Salesforce export, admin-editable) ──────────────────
+
+interface AmrTemplateRow {
+  id: string;
+  folder: string;
+  name: string;
+  description: string;
+  subject: string;
+  html: string;
+  author: string;
+  updated_at: number;
+}
+
+let amrSchemaPromise: Promise<void> | null = null;
+
+/** amr_templates is created by scripts/import-amr-templates.mjs on the
+ *  remote DB; self-heal here so a fresh D1 also works. */
+async function ensureAmrSchema(env: Env): Promise<void> {
+  if (!amrSchemaPromise) {
+    amrSchemaPromise = env.DB
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS amr_templates (
+           id TEXT PRIMARY KEY,
+           folder TEXT NOT NULL DEFAULT '',
+           name TEXT NOT NULL,
+           description TEXT NOT NULL DEFAULT '',
+           subject TEXT NOT NULL DEFAULT '',
+           html TEXT NOT NULL DEFAULT '',
+           author TEXT NOT NULL DEFAULT '',
+           updated_at INTEGER NOT NULL DEFAULT 0
+         )`
+      )
+      .run()
+      .then(() => undefined)
+      .catch((err) => {
+        amrSchemaPromise = null; // retry on the next request
+        throw err;
+      });
+  }
+  return amrSchemaPromise;
+}
+
+/** GET /api/amr-templates — the full AMR email-template pool (any logged-in
+ *  user). ~320 rows; clients filter/search locally. */
+async function handleAmrTemplatesGet(env: Env): Promise<Response> {
+  await ensureAmrSchema(env);
+  const result = await env.DB.prepare(
+    `SELECT id, folder, name, description, subject, html, author,
+            updated_at AS updatedAt
+     FROM amr_templates ORDER BY name COLLATE NOCASE`
+  ).all<AmrTemplateRow>();
+  return authJson({ templates: result.results ?? [] });
+}
+
+/** POST /api/admin/amr-template — admin edit of one template row. */
+async function handleAmrTemplatePost(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 512_000) return authJson({ error: 'Request is too large' }, 413);
+  let payload: {
+    id?: unknown;
+    name?: unknown;
+    folder?: unknown;
+    description?: unknown;
+    subject?: unknown;
+    html?: unknown;
+  };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const id = typeof payload.id === 'string' ? payload.id.trim() : '';
+  const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+  if (!/^00X[A-Za-z0-9]{12,}$/.test(id)) return authJson({ error: 'Missing template id' }, 400);
+  if (!name || name.length > 200) return authJson({ error: 'Name must be 1–200 characters' }, 400);
+  const folder = typeof payload.folder === 'string' ? payload.folder.slice(0, 120) : '';
+  const description = typeof payload.description === 'string' ? payload.description.slice(0, 500) : '';
+  const subject = typeof payload.subject === 'string' ? payload.subject.slice(0, 500) : '';
+  const html = typeof payload.html === 'string' ? payload.html : '';
+  if (html.length > 300_000) return authJson({ error: 'HTML body too large (max ~300 KB)' }, 400);
+  await ensureAmrSchema(env);
+  const result = await env.DB.prepare(
+    `UPDATE amr_templates SET name = ?2, folder = ?3, description = ?4,
+     subject = ?5, html = ?6, updated_at = ?7 WHERE id = ?1`
+  )
+    .bind(id, name, folder, description, subject, html, Date.now())
+    .run();
+  if (!result.meta.changes) return authJson({ error: 'Template not found' }, 404);
+  return authJson({ ok: true });
+}
+
 /** GET /api/store/purchases — the 100 most recent store transactions,
  *  visible to every logged-in user (powers the DASH "Redeemed" widget). */
 async function handleStorePurchases(env: Env): Promise<Response> {
@@ -763,6 +854,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleStorePurchases(env);
   }
+
+  // AMR email templates — read for any logged-in user; edits admin-only.
+  if (path === '/api/amr-templates' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleAmrTemplatesGet(env);
+  }
   if (path === '/api/store/purchase' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
@@ -777,6 +875,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
   if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
   if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
+  if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env);
   if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
 }
