@@ -66,6 +66,7 @@ import {
 } from '@/lib/utils';
 import TestScoreSubmissions, { useTestScoreData } from '@/components/TestScoreSubmissions';
 import KeywordAlertsManager from '@/components/KeywordAlertsManager';
+import RedeemedWidget from '@/components/RedeemedWidget';
 
 type View = 'overview' | 'explore' | 'scorecard' | 'alerts';
 type ExploreView = 'quality' | 'workload' | 'response';
@@ -2229,6 +2230,7 @@ export default function Dash() {
             </div>
           </div>
           <ComparisonStrip agents={data.agents} keys={compare} onClear={() => setCompare([])} />
+          <RedeemedWidget />
         </div>
       ) : (
         <div className="space-y-4">

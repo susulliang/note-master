@@ -339,16 +339,20 @@ export default function ShiftsWorkspace() {
   const [edits, setEdits] = useState<Record<string, string>>({});
 
   /** Month-scoped roster (day-total stat rows are computed LIVE so local
-   *  edits re-flow the counters, matching the sheet's COUNTIF behavior). */
+   *  edits re-flow the counters, matching the sheet's COUNTIF behavior).
+   *  D1 cells fetched live from the worker are layered over the baked
+   *  snapshot so every logged-in user sees the current database state. */
   const ROSTER = useMemo(
     () => getRoster(`${year}-${String(month).padStart(2, '0')}`) ?? [],
     [year, month]
   );
+  /** Live D1 overlay — `${en}|${iso}` → code fetched from roster_cells. */
+  const [d1Overlay, setD1Overlay] = useState<Record<string, string>>({});
 
   const agent = useMemo(() => ROSTER.find((a) => a.en === agentEn) ?? null, [ROSTER, agentEn]);
 
   const shiftOf = (a: RosterAgent, iso: string): string =>
-    edits[`${a.en}|${iso}`] ?? a.shifts[iso] ?? '';
+    edits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`] ?? a.shifts[iso] ?? '';
 
   /* ---------------- D1 backup (admin logins) ----------------
    * The first edit of a month uploads the entire table to the eco-data D1
@@ -361,16 +365,24 @@ export default function ShiftsWorkspace() {
   const dayList = useMemo(() => Array.from({ length: dim }, (_, i) => i + 1), [dim]);
 
   useEffect(() => {
-    if (!authUser?.isAdmin || d1MonthRef.current.has(monthKey)) return;
+    if (!authUser) return;
     let alive = true;
     void fetchRosterMonth(monthKey).then((cells) => {
       if (!alive) return;
       d1MonthRef.current.set(monthKey, cells.length > 0);
+      if (cells.length > 0) {
+        // Layer the live database state over the baked snapshot.
+        setD1Overlay((prev) => {
+          const next = { ...prev };
+          for (const cell of cells) next[`${cell.en}|${cell.iso}`] = cell.code;
+          return next;
+        });
+      }
     });
     return () => {
       alive = false;
     };
-  }, [monthKey, authUser?.isAdmin]);
+  }, [monthKey, authUser]);
 
   const setShift = (en: string, iso: string, code: string) => {
     setEdits((prev) => ({ ...prev, [`${en}|${iso}`]: code }));

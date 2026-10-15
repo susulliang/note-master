@@ -403,11 +403,15 @@ async function handleAuthLogin(request: Request, env: Env): Promise<Response> {
 
 async function handleAdminUsers(_request: Request, env: Env): Promise<Response> {
   const result = await env.DB.prepare(
-    `SELECT username, is_admin, dash_visible, roster_visible, trak_visible, created_at
+    `SELECT username, is_admin, dash_visible, roster_visible, trak_visible, spice, created_at
      FROM auth_users ORDER BY username COLLATE NOCASE`,
   ).all<AuthUserRow>();
   return authJson({
-    users: (result.results ?? []).map((user) => ({ ...authPublicUser(user), createdAt: Number(user.created_at) })),
+    users: (result.results ?? []).map((user) => ({
+      ...authPublicUser(user),
+      spice: Number(user.spice ?? 0),
+      createdAt: Number(user.created_at),
+    })),
   });
 }
 
@@ -577,6 +581,19 @@ async function handleStoreGet(env: Env, includeInactive = false): Promise<Respon
   return authJson({ products: (result.results ?? []).map(storeProductPublic) });
 }
 
+/** GET /api/store/purchases — the 100 most recent store transactions,
+ *  visible to every logged-in user (powers the DASH "Redeemed" widget). */
+async function handleStorePurchases(env: Env): Promise<Response> {
+  await ensureSpiceSchema(env);
+  const result = await env.DB.prepare(
+    `SELECT username, product_name AS productName, price, created_at AS createdAt
+     FROM store_purchases ORDER BY created_at DESC LIMIT 100`
+  ).all<{ username: string; productName: string; price: number; createdAt: number }>();
+  return authJson({
+    purchases: (result.results ?? []).map((row) => ({ ...row, price: Number(row.price) })),
+  });
+}
+
 /** POST /api/store/purchase { productId } — atomic-ish spice deduction. */
 async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
@@ -734,11 +751,17 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleSpiceQa(request, env, user);
   }
 
-  // Store — active products list + purchase, any logged-in user.
+  // Store — active products list + purchase + transaction history,
+  // any logged-in user.
   if (path === '/api/store' && request.method === 'GET') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleStoreGet(env);
+  }
+  if (path === '/api/store/purchases' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleStorePurchases(env);
   }
   if (path === '/api/store/purchase' && request.method === 'POST') {
     const user = await authBearerUser(request, env);

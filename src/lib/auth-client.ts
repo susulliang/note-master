@@ -115,6 +115,7 @@ export async function me(): Promise<AuthUser> {
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 export interface AdminUserRow extends AuthUser {
+  spice: number;
   createdAt: number;
 }
 
