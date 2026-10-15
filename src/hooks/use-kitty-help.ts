@@ -24,7 +24,7 @@ import type { CatFormData } from '@/hooks/use-cat-assistant';
  *     Notes extraction prompt (fields are applied through the same
  *     authoritative path as an explicit cloud Parse).
  *   Stage 2 "Picking sources" → ≤50 pre-selected knowledge titles go to the
- *     model; it picks up to 8.
+ *     model; it picks up to 12.
  *   Stage 3 "Reading sources" → the picked sources' full content is appended;
  *     the model writes the final bilingual resolution.
  *
@@ -72,7 +72,7 @@ function buildKittySystem(): string {
     'ticket fields and a bilingual whole-call TLDR. The exact JSON contract travels inside the Task 1 user message.',
     '',
     '## Task 2 — PICK KNOWLEDGE SOURCES',
-    'Given numbered candidate knowledge titles (id [KIND · ORIGIN] title), pick the 1–8 sources most likely',
+    'Given numbered candidate knowledge titles (id [KIND · ORIGIN] title), pick the 1–12 sources most likely',
     'needed to resolve THIS customer\'s issue. Reply ONLY: {"picks":[{"id":"K07","reason":"short why"}]}',
     '',
     '## Task 3 — FINAL RESOLUTION',
@@ -238,7 +238,7 @@ export function useKittyHelp(args: {
       applyRef.current(fields, tldr);
 
       // ---------------------------------------------------------------
-      // Stage 2 — preselect ≤50 knowledge titles, model picks ≤8.
+      // Stage 2 — preselect ≤50 knowledge titles, model picks ≤12.
       // ---------------------------------------------------------------
       setStage({ label: 'Scanning knowledge sources…', detail: 'Spec sheets · FAQs · News · Error codes · SOP' });
       const { query } = buildQueryContext();
@@ -269,17 +269,17 @@ export function useKittyHelp(args: {
           'TASK 2 — PICK KNOWLEDGE SOURCES',
           `Candidate sources (${candidates.length}):`,
           candidateBlock,
-          'Pick the up-to-8 sources most likely needed for THIS conversation. Reply ONLY: {"picks":[{"id":"K07","reason":"short why"}]}',
+          'Pick the up-to-12 sources most likely needed for THIS conversation. Prefer AMR email templates when they match the issue. Reply ONLY: {"picks":[{"id":"K07","reason":"short why"}]}',
         ].join('\n'),
       });
-      const reply2 = await kittyChat(messages, 512);
+      const reply2 = await kittyChat(messages, 768);
       messages.push({ role: 'assistant', content: reply2 });
 
       const parsed2 = extractJsonLoose(reply2) as { picks?: Array<{ id?: string; reason?: string }> } | null;
       const pickedIds = (parsed2?.picks ?? [])
         .map((p) => (typeof p?.id === 'string' ? p.id.trim().toUpperCase() : ''))
         .filter(Boolean)
-        .slice(0, 8);
+        .slice(0, 12);
       const picked = pickedIds
         .map((id) => candidates.find((c) => c.id === id))
         .filter((c): c is KittyCandidate => Boolean(c));

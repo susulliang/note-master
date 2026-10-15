@@ -1684,7 +1684,7 @@ Additional information (if needed): ${additional}`;
 
   // -------------------------------------------------------------------------
   //  Kitty Help — double-click the cat mascot: a persistent cloud-LLM
-  //  conversation that fills the notes (task 1), picks ≤8 knowledge sources
+  //  conversation that fills the notes (task 1), picks ≤12 knowledge sources
   //  from ≤50 pre-matched titles (task 2), then reads their full content and
   //  writes a bilingual customer-facing resolution with cited sources
   //  (task 3). Messages are append-only so provider KV-cache prefixes hit.

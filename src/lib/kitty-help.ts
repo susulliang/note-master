@@ -8,7 +8,7 @@
  *            uses, applied to the live transcript (fields land in the form).
  *   Task 2 — the agent's pre-selected knowledge candidates (≤50 titles
  *            spanning matched spec sheets, FAQs, News & Updates, error
- *            codes and the SOP handbook) are listed; the model picks ≤8.
+ *            codes and the SOP handbook) are listed; the model picks ≤12.
  *   Task 3 — the full content of the picked sources is appended; the model
  *            writes the final bilingual resolution with cited sources.
  *
@@ -244,7 +244,7 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
     const ranked = rankEntries(
       query,
       amrDb.map(entryFromAmrTemplate),
-      10,
+      12,
     );
     for (const e of ranked) {
       const t = byId.get(e.id);
@@ -261,7 +261,7 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
   // SOP handbook sections.
   const sections = await safe(loadSopSections());
   if (sections) {
-    for (const hit of scoreKeywordCandidates(sections, query).slice(0, 14)) {
+    for (const hit of scoreKeywordCandidates(sections, query).slice(0, 6)) {
       pooled.push({
         kind: 'sop',
         title: hit.section.title,
