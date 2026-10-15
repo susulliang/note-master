@@ -1358,6 +1358,7 @@ export default {
       url.pathname.startsWith('/api/auth/') ||
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
+      url.pathname.startsWith('/api/pet') ||
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/spice') ||
       url.pathname.startsWith('/api/amr-templates') ||
