@@ -37,10 +37,10 @@ const RED_POCKETS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 
 
 /** Reward tiers, mirroring the worker's WHEEL_REWARDS (display only). */
 const REWARD_TIERS: { pockets: number[]; reward: number }[] = [
-  { pockets: [0], reward: 250 },
-  { pockets: [7, 17, 28, 35], reward: 50 },
-  { pockets: [9, 13, 19, 22, 31], reward: 25 },
-  { pockets: [], reward: 10 }, // every other pocket
+  { pockets: [0], reward: 251 },
+  { pockets: [7, 17, 28, 35], reward: 47 },
+  { pockets: [9, 13, 19, 22, 31], reward: 23 },
+  { pockets: [], reward: 11 }, // every other pocket
 ];
 const tierOf = (pocket: number) => REWARD_TIERS.findIndex((t) => t.pockets.includes(pocket));
 const pocketTint = (n: number) =>

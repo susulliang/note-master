@@ -1018,10 +1018,11 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
 /** Casino roulette pocket layout (European single-zero wheel, clockwise from
  *  0) — shared reference for reward values; the client draws the same order. */
 const WHEEL_REWARDS: readonly number[] = (() => {
-  const rewards = new Array<number>(37).fill(10);
-  rewards[0] = 250; // green zero — jackpot
-  for (const n of [7, 17, 28, 35]) rewards[n] = 50;
-  for (const n of [9, 13, 19, 22, 31]) rewards[n] = 25;
+  // All rewards are primes (closest to the former 250/50/25/10, lucky-leaning).
+  const rewards = new Array<number>(37).fill(11);
+  rewards[0] = 251; // green zero — jackpot
+  for (const n of [7, 17, 28, 35]) rewards[n] = 47;
+  for (const n of [9, 13, 19, 22, 31]) rewards[n] = 23;
   return rewards;
 })();
 
