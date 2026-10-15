@@ -79,12 +79,51 @@ export function CatAssistant({
    *  applied the whole nap so the held frame doesn't snap back to standing. */
   const [sleepMode, setSleepMode] = useState<'sleep' | 'wake' | null>(null);
   const nappingPrevRef = useRef(napping);
+  /** Sheets confirmed loaded by the browser. The sleep animation must never
+   *  start over an uncached sheet — the 3.6s playback would run while the
+   *  image is still downloading and the first visible paint would be the
+   *  held last frame (the "nap jumps straight to sleep" bug). */
+  const loadedSheetsRef = useRef<Set<string>>(new Set());
+  const [, setLoadedSheetsTick] = useState(0);
   useEffect(() => {
-    if (napping !== nappingPrevRef.current) {
-      setSleepMode(napping ? 'sleep' : 'wake');
-      nappingPrevRef.current = napping;
+    let cancelled = false;
+    for (const url of [getCatSprite(catId), getCatSleepSprite(catId)]) {
+      if (loadedSheetsRef.current.has(url)) continue;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        loadedSheetsRef.current.add(url);
+        setLoadedSheetsTick((t) => t + 1);
+      };
+      img.src = url;
     }
-  }, [napping]);
+    return () => {
+      cancelled = true;
+    };
+  }, [catId]);
+  useEffect(() => {
+    if (napping === nappingPrevRef.current) return;
+    nappingPrevRef.current = napping;
+    if (!napping) {
+      // Waking: the sleep sheet is guaranteed cached (it was on display).
+      setSleepMode('wake');
+      return;
+    }
+    const sleepUrl = getCatSleepSprite(catId);
+    if (loadedSheetsRef.current.has(sleepUrl)) {
+      setSleepMode('sleep');
+      return;
+    }
+    // Sheet not cached yet — keep the idle pose until it loads, then play.
+    // nappingStateRef guards the stale-load race: if the cat was woken while
+    // the sheet was still downloading, the late onload must not start the nap.
+    const img = new Image();
+    img.onload = () => {
+      loadedSheetsRef.current.add(sleepUrl);
+      if (nappingStateRef.current) setSleepMode('sleep');
+    };
+    img.src = sleepUrl;
+  }, [napping, catId]);
   const catName = `${catId.slice(0, 1).toUpperCase()}${catId.slice(1)}`;
 
   const dragOffset = useRef({ x: 0, y: 0 });
