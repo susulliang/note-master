@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, LockKeyhole, Plus, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import KeywordAlertContent from '@/components/KeywordAlertContent';
 import { useKeywordAlerts, KEYWORD_ALERTS_UPDATED_EVENT } from '@/hooks/use-keyword-alerts';
 import type { KeywordAlert } from '@/lib/keyword-alerts';
+import { getStoredToken } from '@/lib/auth-client';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 
 const PANEL = 'glass-panel rounded-xl';
@@ -21,9 +24,9 @@ function newAlert(): KeywordAlert {
 export default function KeywordAlertsManager() {
   const { alerts, source } = useKeywordAlerts();
   const [drafts, setDrafts] = useState<KeywordAlert[]>(alerts);
-  const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const { setSpice } = useAuth();
 
   useEffect(() => setDrafts(alerts), [alerts]);
 
@@ -33,8 +36,13 @@ export default function KeywordAlertsManager() {
   };
 
   const save = async () => {
-    if (!password || drafts.some((alert) => !alert.keyword.trim() || !alert.alert.trim())) {
-      setMessage({ kind: 'error', text: 'Enter a password and complete every keyword and alert.' });
+    if (drafts.some((alert) => !alert.keyword.trim() || !alert.alert.trim())) {
+      setMessage({ kind: 'error', text: 'Complete every keyword and alert before saving.' });
+      return;
+    }
+    const token = getStoredToken();
+    if (!token) {
+      setMessage({ kind: 'error', text: 'Only logged-in admins can save keyword alerts.' });
       return;
     }
     setSaving(true);
@@ -42,13 +50,25 @@ export default function KeywordAlertsManager() {
     try {
       const response = await fetch('/api/keyword-alerts', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ password, alerts: drafts }),
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ alerts: drafts }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as { error?: string; spice?: number };
       if (!response.ok) throw new Error(result.error || 'Could not save alerts.');
-      setPassword('');
       setMessage({ kind: 'success', text: `Saved ${drafts.length} keyword alert${drafts.length === 1 ? '' : 's'} to D1.` });
+      // Editing the alert database earns the admin +5 spice.
+      if (typeof result.spice === 'number') {
+        setSpice(result.spice);
+        try {
+          toast.success('🌶️ +5 Spice', { description: 'Keyword alerts updated.' });
+        } catch {
+          /* Toaster not mounted */
+        }
+      }
       window.dispatchEvent(new Event(KEYWORD_ALERTS_UPDATED_EVENT));
     } catch (error) {
       setMessage({
@@ -98,7 +118,7 @@ export default function KeywordAlertsManager() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Alerts <span className="font-mono text-xs text-muted-foreground">{drafts.length}</span></h3>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">Changes stay in this draft until saved with the admin password.</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Changes stay in this draft until you save them to D1.</p>
           </div>
           <button
             type="button"
@@ -186,22 +206,10 @@ export default function KeywordAlertsManager() {
       </section>
 
       <section className={cn(PANEL, 'p-3 sm:p-4')}>
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <label className="block text-xs font-medium text-muted-foreground">
-            Admin password
-            <div className="relative mt-1">
-              <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/70" />
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                placeholder="Required to submit changes"
-                className={cn(INPUT, 'pl-9')}
-              />
-            </div>
-            <span className="mt-1 block text-[10px] font-normal">The password is verified by the Worker and is never saved in the database.</span>
-          </label>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[11px] text-muted-foreground">
+            Changes go live for every agent the moment you save. Admin login only — every save earns <span className="font-bold text-amber-400">🌶️ +5 Spice</span>.
+          </p>
           <button
             type="button"
             onClick={() => void save()}

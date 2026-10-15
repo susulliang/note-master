@@ -119,7 +119,6 @@ interface KeywordAlertRow {
 }
 
 interface KeywordAlertPayload {
-  password?: unknown;
   alerts?: unknown;
 }
 
@@ -857,10 +856,7 @@ async function handleRosterGet(request: Request, env: Env): Promise<Response> {
   return authJson({ month, cells: result.results ?? [] });
 }
 
-async function handleKeywordAlerts(
-  request: Request,
-  env: Env & { ALERT_ADMIN_PASSWORD_HASH?: string },
-): Promise<Response> {
+async function handleKeywordAlerts(request: Request, env: Env): Promise<Response> {
   if (request.method === 'GET') {
     try {
       const result = await env.DB.prepare(
@@ -887,45 +883,15 @@ async function handleKeywordAlerts(
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
-  if (
-    typeof payload.password !== 'string' || payload.password.length < 1 || payload.password.length > 256
-  ) return json({ error: 'Password required' }, 400);
   const alerts = parseKeywordAlerts(payload.alerts);
   if (!alerts) return json({ error: 'Invalid keyword alert list' }, 400);
 
-  const verifier = parsePasswordVerifier(env.ALERT_ADMIN_PASSWORD_HASH);
-  if (!verifier) return json({ error: 'Alert management is not configured' }, 503);
-  const remoteAddress = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const remoteHash = await hashRemoteAddress(remoteAddress, verifier);
-  const now = Math.floor(Date.now() / 1000);
-  const attempt = await env.DB.prepare(
-    'SELECT window_started AS windowStarted, failures FROM keyword_alert_login_attempts WHERE ip_hash = ?'
-  ).bind(remoteHash).first<{ windowStarted: number; failures: number }>();
-  if (
-    attempt &&
-    now - Number(attempt.windowStarted) < 900 &&
-    Number(attempt.failures) >= 10
-  ) return json({ error: 'Too many attempts. Try again in 15 minutes.' }, 429);
-
-  if (!(await verifyAdminPassword(payload.password, verifier))) {
-    await env.DB.prepare(
-      `INSERT INTO keyword_alert_login_attempts (ip_hash, window_started, failures)
-       VALUES (?, ?, 1)
-       ON CONFLICT(ip_hash) DO UPDATE SET
-         window_started = CASE
-           WHEN excluded.window_started - keyword_alert_login_attempts.window_started >= 900
-           THEN excluded.window_started ELSE keyword_alert_login_attempts.window_started END,
-         failures = CASE
-           WHEN excluded.window_started - keyword_alert_login_attempts.window_started >= 900
-           THEN 1 ELSE keyword_alert_login_attempts.failures + 1 END`
-    ).bind(remoteHash, now).run();
-    return json({ error: 'Incorrect password' }, 401);
-  }
+  // Admin-only writes — the old shared-password gate is gone; a logged-in
+  // admin session (bearer token) is the single source of authority.
+  const admin = await authBearerUser(request, env);
+  if (!admin || Number(admin.is_admin) !== 1) return json({ error: 'Admin only' }, 403);
 
   try {
-    await env.DB.prepare(
-      'DELETE FROM keyword_alert_login_attempts WHERE ip_hash = ?'
-    ).bind(remoteHash).run();
     const statements = [
       env.DB.prepare('DELETE FROM keyword_alerts'),
       ...alerts.map((alert) =>
@@ -945,7 +911,16 @@ async function handleKeywordAlerts(
       }));
       return json({ error: 'Could not save keyword alerts' }, 500);
     }
-    return json({ success: true, count: alerts.length });
+    // Every successful save earns the editing admin +5 spice.
+    await ensureSpiceSchema(env);
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare('UPDATE auth_users SET spice = spice + 5, updated_at = ?3 WHERE username = ?1')
+        .bind(admin.username, 5, now),
+      env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 5, 'alerts', ?2, ?3)")
+        .bind(admin.username, `alerts:${alerts.length}`, now),
+    ]);
+    return json({ success: true, count: alerts.length, spice: Number(admin.spice ?? 0) + 5 });
   } catch (error) {
     console.error(JSON.stringify({
       event: 'keyword_alert_save_failed',
