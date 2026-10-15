@@ -170,7 +170,8 @@ export function initialState(now: number, profile: CatPetProfile): CatPetState {
     energy: 80,
     fullness: 80,
     mood: 70,
-    xp: 0,
+    /** 1 xp at adoption — the Kitten hub shows visible progress from day one. */
+    xp: 1,
     napping: false,
     profile,
     updatedAt: now,
@@ -304,6 +305,15 @@ export function applyQaScore(state: CatPetState, scorePct: number, now: number):
     daily: { ...ticked.daily, workXp: ticked.daily.workXp + xp },
   };
   return { state: next, xpGained: xp, moodGained: 3, favorite: false, applied: true };
+}
+
+/** Manual nap toggle from the bloom's Energy petal. Napping is normally
+ *  autonomous (energy < 25), but the user can tuck the cat in early —
+ *  same regeneration, no XP. Toggling again wakes the cat. */
+export function applyNapToggle(state: CatPetState, now: number): ActionOutcome {
+  const { state: ticked } = tick(state, now);
+  const next: CatPetState = { ...ticked, napping: !ticked.napping };
+  return { state: next, xpGained: 0, moodGained: 0, favorite: false, applied: true };
 }
 
 /** First authenticated session each day → small Bond XP. Idempotent per day. */

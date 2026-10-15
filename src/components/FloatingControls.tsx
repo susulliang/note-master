@@ -41,6 +41,8 @@ interface RailControlsProps {
   pet?: CatPetSnapshot | null;
   petCooldown?: boolean;
   onPet?: () => void;
+  /** Manual nap toggle (forwarded to the Settings panel). */
+  onToggleNap?: () => void;
   /** On-demand DeepSeek cloud parser state (the Cloud parse button) */
   cloud?: CloudState;
   transcript?: TranscriptEntry[];
@@ -93,6 +95,7 @@ export default function RailControls({
   pet,
   petCooldown,
   onPet,
+  onToggleNap,
   cloud,
   transcript,
   isTranscribing,
@@ -202,6 +205,7 @@ export default function RailControls({
               pet={pet}
               petCooldown={petCooldown}
               onPet={onPet}
+              onToggleNap={onToggleNap}
               parser={parser}
               cloud={cloud}
               transcript={transcript ?? []}

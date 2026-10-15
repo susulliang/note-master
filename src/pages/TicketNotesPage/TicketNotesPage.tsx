@@ -2269,6 +2269,7 @@ Additional information (if needed): ${additional}`;
             pet={catPet.pet}
             petCooldown={catPet.petCooldown}
             onPet={catPet.petCat}
+            onToggleNap={catPet.toggleNap}
             callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}

@@ -6,6 +6,7 @@ import { CAT_EAT_EVENT } from '@/lib/cat-sprites';
 import {
   applyDailyLogin,
   applyFeed,
+  applyNapToggle,
   applyPet,
   applyQaScore,
   generateProfile,
@@ -43,6 +44,8 @@ export interface CatPetApi {
   petCooldown: boolean;
   /** Bond XP award for a QA-scored call (0–100+ pct). */
   rewardQa: (scorePct: number) => void;
+  /** Manual nap toggle (tuck in / wake; no XP). */
+  toggleNap: () => void;
 }
 
 interface UseCatPetOptions {
@@ -303,6 +306,12 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
     [commit]
   );
 
+  /** Manual nap toggle — tuck the cat in / wake it. No XP, mirrors the
+   *  autonomous nap state machine (regen while asleep). */
+  const toggleNap = useCallback(() => {
+    commit((s) => applyNapToggle(s, Date.now()).state);
+  }, [commit]);
+
   const snapshot: CatPetSnapshot | null = useMemo(() => {
     if (!state) return null;
     const stage = stageFor(state.xp);
@@ -316,5 +325,5 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
     };
   }, [state, napping]);
 
-  return { pet: snapshot, petCat, petCooldown, rewardQa };
+  return { pet: snapshot, petCat, petCooldown, rewardQa, toggleNap };
 }

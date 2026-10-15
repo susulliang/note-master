@@ -139,6 +139,8 @@ interface EngineSettingsPanelProps {
   petCooldown?: boolean;
   /** Pet the cat (+Mood, 30s cooldown). */
   onPet?: () => void;
+  /** Manual nap toggle from the bloom's Energy petal. */
+  onToggleNap?: () => void;
 }
 
 /**
@@ -293,8 +295,10 @@ export default function EngineSettingsPanel({
   pet,
   petCooldown,
   onPet,
+  onToggleNap,
 }: EngineSettingsPanelProps) {
   const aiParserAvailable = Boolean(parser?.enabled || cloud?.hasKey);
+  const toggleNap = onToggleNap;
   const panelsCtx = useContext(TicketPanelsContext);
   // Fallback: EngineSettingsPanel may render outside TicketPanelsContext.Provider
   // in some layout paths (same regression OutputModal had earlier). Use the
@@ -555,7 +559,7 @@ export default function EngineSettingsPanel({
 
           {/* ---- Companion profile (bond / care meters) ---- */}
           {pet && (
-            <PetProfileBlock pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={() => setStoreOpen(true)} className="mt-1.5" />
+            <PetProfileBlock pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={() => setStoreOpen(true)} onToggleNap={toggleNap} className="mt-1.5" />
           )}
         </section>
 
@@ -1359,6 +1363,8 @@ interface BloomPetal {
   raw: string;
   icon: typeof Zap;
   color: string;
+  /** Darker shade of `color` used for the solid petal glyph. */
+  glyph: string;
   /** Rotational center of the petal, degrees (0 = up, clockwise). */
   angle: number;
   /** Short status + action hint revealed on select/focus. */
@@ -1375,12 +1381,14 @@ function CompanionBloom({
   petCooldown,
   onPet,
   onOpenStore,
+  onToggleNap,
   className,
 }: {
   pet: CatPetSnapshot;
   petCooldown?: boolean;
   onPet?: () => void;
   onOpenStore?: () => void;
+  onToggleNap?: () => void;
   className?: string;
 }) {
   const { state } = pet;
@@ -1391,22 +1399,22 @@ function CompanionBloom({
   const petals: BloomPetal[] = [
     {
       key: 'energy', label: 'Energy', value: state.energy, raw: String(state.energy),
-      icon: Zap, color: '#34d399', angle: 0,
+      icon: Zap, color: '#34d399', glyph: '#065f46', angle: 0,
       detail: pet.napping ? 'Resting — napping restores energy over time' : 'Awake — declines while the app is open',
     },
     {
       key: 'fullness', label: 'Fullness', value: state.fullness, raw: String(state.fullness),
-      icon: Utensils, color: '#fbbf24', angle: 90,
+      icon: Utensils, color: '#fbbf24', glyph: '#92400e', angle: 90,
       detail: state.fullness < 45 ? 'Peckish — a wet can from the store helps' : 'Well fed — food purchases restore this',
     },
     {
       key: 'mood', label: 'Mood', value: state.mood, raw: String(state.mood),
-      icon: Heart, color: '#f472b6', angle: 180,
+      icon: Heart, color: '#f472b6', glyph: '#9d174d', angle: 180,
       detail: petCooldown ? 'Pet again in a moment (cooldown)' : 'Petting, favorite food and good calls lift mood',
     },
     {
       key: 'bond', label: 'Bond', value: next == null ? 100 : bondPct, raw: `${state.xp} xp`,
-      icon: Star, color: '#818cf8', angle: 270,
+      icon: Star, color: '#818cf8', glyph: '#3730a3', angle: 270,
       detail: next == null
         ? `Elder — fully bonded (${state.xp} xp)`
         : `${next} xp to ${nextStageLabel(state.xp)} (now ${state.xp})`,
@@ -1509,18 +1517,17 @@ function CompanionBloom({
                   !reduceMotion && isActive && 'drop-shadow-[0_0_6px_rgba(255,255,255,0.25)]'
                 )}
               />
-              {/* Icon at ~58% petal length — large, dark-on-color for contrast
-                  against both the petal fill and the page background. */}
+              {/* Icon rides the petal — positioned at 58% of the petal's
+                  *current* length so it always sits on the colored fill
+                  (never stranded on the background when the petal is short). */}
               {(() => {
-                const d = R_HUB + (R_MAX - R_HUB) * 0.58;
+                const len = R_HUB + ((R_MAX - R_HUB) * Math.max(4, p.value)) / 100;
+                const d = R_HUB + (len - R_HUB) * 0.58;
                 const ix = 100 + d * Math.cos(((p.angle - 90) * Math.PI) / 180);
                 const iy = 100 + d * Math.sin(((p.angle - 90) * Math.PI) / 180);
                 return (
-                  <g transform={`translate(${ix - 10}, ${iy - 10})`} pointerEvents="none">
-                    {/* Dark casing halo: thick dark outline under the dark icon
-                        keeps the glyph readable even over the hub/background. */}
-                    <Icon width={20} height={20} fill="none" stroke="hsl(215 25% 8%)" strokeWidth={4.2} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
-                    <Icon width={20} height={20} fill="none" stroke="hsl(215 30% 96%)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+                  <g transform={`translate(${ix - 9}, ${iy - 9})`} pointerEvents="none">
+                    <Icon width={18} height={18} fill={p.glyph} stroke={p.glyph} strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
                   </g>
                 );
               })()}
@@ -1579,6 +1586,11 @@ function CompanionBloom({
                 Open Store
               </button>
             )}
+            {detail.key === 'energy' && (
+              <button type="button" onClick={onToggleNap} className="ml-1 rounded px-1 text-[9px] font-semibold text-sky-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300/60">
+                {pet.napping ? 'Wake up' : 'Nap now'}
+              </button>
+            )}
             {detail.key === 'energy' && pet.napping && <span className="ml-1 text-sky-300/80">💤</span>}
           </>
         ) : (
@@ -1601,12 +1613,14 @@ function PetProfileBlock({
   petCooldown,
   onPet,
   onOpenStore,
+  onToggleNap,
   className,
 }: {
   pet: CatPetSnapshot;
   petCooldown?: boolean;
   onPet?: () => void;
   onOpenStore?: () => void;
+  onToggleNap?: () => void;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -1637,7 +1651,7 @@ function PetProfileBlock({
 
       {open && (
         <div className="space-y-1 px-1.5 pb-1.5">
-          <CompanionBloom pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={onOpenStore} />
+          <CompanionBloom pet={pet} petCooldown={petCooldown} onPet={onPet} onOpenStore={onOpenStore} onToggleNap={onToggleNap} />
 
           <div className="flex flex-wrap items-center justify-center gap-1">
             <span className="rounded-full bg-foreground/5 px-1.5 py-0.5 text-[9px] text-muted-foreground">
