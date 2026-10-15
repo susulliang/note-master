@@ -94,6 +94,29 @@ export function loadNewsIndex(): Promise<NewsItem[]> {
   return newsIndexPromise;
 }
 
+/** Build searchable NewsItems from the D1-backed entries (news-db). Body
+ *  text is stored as the raw markdown below the title line, exactly what
+ *  the tab renderer expects via bodyLines. */
+export function newsItemsFromEntries(
+  entries: Array<{ id: string; date: string; title: string; author: string; body: string }>
+): NewsItem[] {
+  return entries
+    .map((e) => {
+      const bodyLines = e.body.split('\n');
+      const body = bodyLines.join('\n').toLowerCase();
+      return {
+        id: e.id,
+        date: e.date,
+        title: e.title,
+        author: e.author,
+        bodyLines,
+        titleTokens: new Set(tokenize(e.title)),
+        bodyTokens: new Set(tokenize(body)),
+      };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+}
+
 /**
  * Keyword search over a RESOLVED news index. Uses the same bilingual
  * tokenizer as the SOP indexer (English words + Chinese 2-grams); title

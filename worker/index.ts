@@ -773,6 +773,120 @@ async function handleSopEntryPost(request: Request, env: Env, admin: AuthUserRow
   return authJson({ ok: true, spice: Number(admin.spice ?? 0) + 5 });
 }
 
+// ── News & Updates knowledge base (admin-editable) ───────────────────────────
+
+interface NewsEntryRow {
+  id: string;
+  date: string;
+  title: string;
+  author: string;
+  body: string;
+  updated_at: number;
+}
+
+let newsSchemaPromise: Promise<void> | null = null;
+
+async function ensureNewsSchema(env: Env): Promise<void> {
+  if (!newsSchemaPromise) {
+    newsSchemaPromise = env.DB
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS news_entries (
+           id TEXT PRIMARY KEY,
+           date TEXT NOT NULL,
+           title TEXT NOT NULL,
+           author TEXT NOT NULL DEFAULT '',
+           body TEXT NOT NULL DEFAULT '',
+           updated_at INTEGER NOT NULL DEFAULT 0
+         )`
+      )
+      .run()
+      .then(() => undefined)
+      .catch((err) => {
+        newsSchemaPromise = null; // retry on the next request
+        throw err;
+      });
+  }
+  return newsSchemaPromise;
+}
+
+/** GET /api/news — the full knowledge base, newest first (any logged-in user). */
+async function handleNewsGet(env: Env): Promise<Response> {
+  await ensureNewsSchema(env);
+  const result = await env.DB.prepare(
+    `SELECT id, date, title, author, body, updated_at AS updatedAt
+     FROM news_entries ORDER BY date DESC, id DESC`
+  ).all<NewsEntryRow>();
+  return authJson({ entries: result.results ?? [] });
+}
+
+/** POST /api/admin/news-entry — admin add/edit of one knowledge update.
+ *  Every successful write earns the editing admin +5 spice. */
+async function handleNewsEntryPost(request: Request, env: Env, admin: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 512_000) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { id?: unknown; date?: unknown; title?: unknown; author?: unknown; body?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const date = typeof payload.date === 'string' ? payload.date.trim() : '';
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  const author = typeof payload.author === 'string' ? payload.author.trim().slice(0, 60) : '';
+  const body = typeof payload.body === 'string' ? payload.body : '';
+  const rawId = typeof payload.id === 'string' ? payload.id.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return authJson({ error: 'Date must be YYYY-MM-DD' }, 400);
+  if (!title || title.length > 200) return authJson({ error: 'Title must be 1–200 characters' }, 400);
+  if (body.length > 300_000) return authJson({ error: 'Body too large (max ~300 KB)' }, 400);
+  // id: keep the existing slug on edit; derive `date-slug` from the title
+  // on add (slug = lowercased ASCII words, de-duplicated if it collides).
+  let id = rawId;
+  if (!id) {
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'update';
+    id = `${date}-${slug}`;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/.test(id)) return authJson({ error: 'Invalid entry id' }, 400);
+  await ensureNewsSchema(env);
+  await env.DB.prepare(
+    `INSERT INTO news_entries (id, date, title, author, body, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(id) DO UPDATE SET
+       date = excluded.date, title = excluded.title, author = excluded.author,
+       body = excluded.body, updated_at = excluded.updated_at`
+  )
+    .bind(id, date, title, author, body, Date.now())
+    .run();
+  // Every successful add/edit earns the editing admin +5 spice.
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + 5, updated_at = ?3 WHERE username = ?1')
+      .bind(admin.username, 5, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 5, 'news', ?2, ?3)")
+      .bind(admin.username, `news:${id}`, now),
+  ]);
+  return authJson({ ok: true, id, spice: Number(admin.spice ?? 0) + 5 });
+}
+
+/** POST /api/admin/news-delete { id } — admin removal of one knowledge
+ *  update (no spice — deletions don't earn). */
+async function handleNewsDelete(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { id?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const id = typeof payload.id === 'string' ? payload.id.trim() : '';
+  if (!id || id.length > 120) return authJson({ error: 'Missing entry id' }, 400);
+  await ensureNewsSchema(env);
+  const result = await env.DB.prepare('DELETE FROM news_entries WHERE id = ?1').bind(id).run();
+  if (!result.meta.changes) return authJson({ error: 'Entry not found' }, 404);
+  return authJson({ ok: true });
+}
+
 /** GET /api/store/purchases — the 100 most recent store transactions,
  *  visible to every logged-in user (powers the DASH "Redeemed" widget). */
 async function handleStorePurchases(env: Env): Promise<Response> {
@@ -969,6 +1083,14 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleSopGet(env);
   }
+
+  // News & Updates knowledge base — read for any logged-in user; writes
+  // admin-only (see the /api/admin routes below).
+  if (path === '/api/news' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleNewsGet(env);
+  }
   if (path === '/api/store/purchase' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
@@ -985,6 +1107,8 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
   if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env, admin);
   if (path === '/api/admin/sop-entry' && request.method === 'POST') return handleSopEntryPost(request, env, admin);
+  if (path === '/api/admin/news-entry' && request.method === 'POST') return handleNewsEntryPost(request, env, admin);
+  if (path === '/api/admin/news-delete' && request.method === 'POST') return handleNewsDelete(request, env);
   if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
 }
@@ -1175,7 +1299,8 @@ export default {
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/spice') ||
       url.pathname.startsWith('/api/amr-templates') ||
-      url.pathname.startsWith('/api/sop')
+      url.pathname.startsWith('/api/sop') ||
+      url.pathname.startsWith('/api/news')
     ) {
       return handleAuth(request, env);
     }

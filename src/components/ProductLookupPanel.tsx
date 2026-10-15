@@ -23,6 +23,7 @@ import {
   GitCompare,
   Mail,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import {
   fetchAmrTemplates,
@@ -30,6 +31,13 @@ import {
   saveAmrTemplate,
   type AmrTemplate,
 } from '@/lib/amr-db';
+import {
+  fetchNewsEntries,
+  patchNewsEntry,
+  removeNewsEntry,
+  saveNewsEntry,
+  deleteNewsEntry,
+} from '@/lib/news-db';
 import { entryFromAmrTemplate, rankEntries } from '@/lib/amr-templates';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
@@ -47,6 +55,7 @@ import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import type { TemplateEntry } from '@/lib/amr-templates';
 import {
   loadNewsIndex,
+  newsItemsFromEntries,
   searchNews,
   type NewsHit,
   type NewsItem,
@@ -382,14 +391,21 @@ export default function ProductLookupPanel({
   }, [activeTab, faqModel, faqQuery]);
 
   // --- News & Updates hits (Feishu knowledge-sharing digest) -----------------
-  // The news markdown chunks load asynchronously AFTER first paint so the
-  // app shell renders immediately (see loadNewsIndex); hits stay empty
-  // until the index resolves.
+  // The knowledge base lives in D1 (admin-editable) and falls back to the
+  // baked news/*.md bundle when D1 is unavailable; either way the markdown
+  // chunks load asynchronously AFTER first paint so the app shell renders
+  // immediately.
   const [newsIndex, setNewsIndex] = useState<NewsItem[] | null>(null);
   useEffect(() => {
     let alive = true;
-    loadNewsIndex().then((idx) => {
-      if (alive) setNewsIndex(idx);
+    void fetchNewsEntries().then(async (rows) => {
+      if (!alive) return;
+      if (rows.length > 0) {
+        setNewsIndex(newsItemsFromEntries(rows));
+      } else {
+        const idx = await loadNewsIndex();
+        if (alive) setNewsIndex(idx);
+      }
     });
     return () => {
       alive = false;
@@ -680,7 +696,9 @@ export default function ProductLookupPanel({
             onSaved={(updated) => setAmrTemplates((prev) => (prev ? prev.map((t) => (t.id === updated.id ? updated : t)) : prev))}
           />
         )}
-        {activeTab === 'news' && <NewsTab hits={newsHits} index={newsIndex} />}
+        {activeTab === 'news' && (
+          <NewsTab hits={newsHits} index={newsIndex} onIndexUpdated={setNewsIndex} />
+        )}
         {activeTab === 'firmware' && (
           <SoftwareUpdatesTab hits={firmwareHits} index={suIndex} kind="firmware" />
         )}
@@ -884,8 +902,80 @@ function AmrTemplatesTab({
  * `assets/…` image refs are rewritten to the served `${BASE}news/assets/…`
  * URL prefix before rendering.
  */
-function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null }) {
+function NewsTab({
+  hits,
+  index,
+  onIndexUpdated,
+}: {
+  hits: NewsHit[];
+  index: NewsItem[] | null;
+  onIndexUpdated: (items: NewsItem[]) => void;
+}) {
+  const { user, setSpice } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
   const [openId, setOpenId] = useState<string | null>(null);
+  // Admin editor state — null = closed; draft holds the form fields.
+  const [draft, setDraft] = useState<{ id?: string; date: string; title: string; author: string; body: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Rebuild + propagate the searchable index from the patched D1 cache. */
+  const refresh = () => {
+    const rows = fetchNewsEntries();
+    void rows.then((all) => onIndexUpdated(newsItemsFromEntries(all)));
+  };
+
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await saveNewsEntry({
+        id: draft.id,
+        date: draft.date,
+        title: draft.title.trim(),
+        author: draft.author.trim(),
+        body: draft.body,
+      });
+      patchNewsEntry({
+        id: result.id,
+        date: draft.date,
+        title: draft.title.trim(),
+        author: draft.author.trim(),
+        body: draft.body,
+        updatedAt: Date.now(),
+      });
+      refresh();
+      setDraft(null);
+      setOpenId(result.id);
+      // Writing the knowledge base earns the admin +5 spice.
+      if (typeof result.spice === 'number') {
+        setSpice(result.spice);
+        toast.success('🌶️ +5 Spice', { description: 'Knowledge update saved.' });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the entry.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteNewsEntry(id);
+      removeNewsEntry(id);
+      refresh();
+      if (openId === id) setOpenId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the entry.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // Markdown chunks still loading — async skeleton (see loadNewsIndex).
   if (index === null) {
@@ -917,11 +1007,82 @@ function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null })
 
   return (
     <div className="space-y-2">
-      <p className="px-1 text-[10px] text-muted-foreground/80">
-        {matched
-          ? `Matched ${items.length} update${items.length > 1 ? 's' : ''} for the current ticket.`
-          : `Latest ${items.length} knowledge updates (newest first).`}
-      </p>
+      <div className="flex items-center justify-between gap-2 px-1">
+        <p className="text-[10px] text-muted-foreground/80">
+          {matched
+            ? `Matched ${items.length} update${items.length > 1 ? 's' : ''} for the current ticket.`
+            : `Latest ${items.length} knowledge updates (newest first).`}
+        </p>
+        {isAdmin && !draft && (
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setDraft({
+                date: new Date().toISOString().slice(0, 10),
+                title: '',
+                author: user?.username ?? '',
+                body: '',
+              });
+            }}
+            className="shrink-0 rounded-md bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            + Add update
+          </button>
+        )}
+      </div>
+      {error && <p className="px-1 text-[10px] font-semibold text-red-400">{error}</p>}
+      {draft && (
+        <div className="space-y-1.5 rounded-md border border-accent/40 bg-accent/[0.04] p-2">
+          <div className="flex gap-1.5">
+            <input
+              value={draft.date}
+              onChange={(e) => setDraft((d) => (d ? { ...d, date: e.target.value } : d))}
+              placeholder="YYYY-MM-DD"
+              className="glass-field h-7 w-28 rounded-md px-2 text-[10.5px] font-mono"
+            />
+            <input
+              value={draft.author}
+              onChange={(e) => setDraft((d) => (d ? { ...d, author: e.target.value } : d))}
+              placeholder="Author"
+              className="glass-field h-7 w-28 rounded-md px-2 text-[10.5px]"
+            />
+          </div>
+          <input
+            value={draft.title}
+            onChange={(e) => setDraft((d) => (d ? { ...d, title: e.target.value } : d))}
+            placeholder="English title"
+            className="glass-field h-7 w-full rounded-md px-2 text-[11px] font-semibold"
+          />
+          <textarea
+            value={draft.body}
+            onChange={(e) => setDraft((d) => (d ? { ...d, body: e.target.value } : d))}
+            rows={10}
+            placeholder="Bilingual body (markdown)…"
+            className="custom-scrollbar glass-field w-full rounded-md px-2 py-1.5 font-mono text-[10.5px]"
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving}
+              className="rounded-md bg-primary px-2.5 py-1 text-[10.5px] font-bold text-primary-foreground transition-opacity disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : draft.id ? 'Save to D1 (+5 🌶️)' : 'Publish (+5 🌶️)'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(null);
+                setError(null);
+              }}
+              className="rounded-md border border-border px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {items.map((item) => {
         const isOpen = openId === item.id;
         return (
@@ -932,10 +1093,14 @@ function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null })
               'border-primary/20 bg-primary/[0.03] hover:bg-primary/[0.05]'
             )}
           >
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={() => setOpenId(isOpen ? null : item.id)}
-              className="flex w-full items-start gap-2 border-b border-primary/15 bg-primary/10 px-2 py-1 text-left"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setOpenId(isOpen ? null : item.id);
+              }}
+              className="flex w-full cursor-pointer items-start gap-2 border-b border-primary/15 bg-primary/10 px-2 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               <span className="mt-0.5 shrink-0 rounded bg-primary/20 px-1 text-[9px] font-bold text-primary">
                 {item.date.slice(5)}
@@ -954,10 +1119,40 @@ function NewsTab({ hits, index }: { hits: NewsHit[]; index: NewsItem[] | null })
                   isOpen && 'rotate-180'
                 )}
               />
-            </button>
+            </div>
             {isOpen && (
-              <div className="markdown-body px-2 py-1.5 text-[11px] leading-relaxed">
-                {renderBodyMarkdown(prepare(item.bodyLines))}
+              <div className="px-2 py-1.5">
+                {isAdmin && (
+                  <div className="mb-1.5 flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError(null);
+                        setDraft({
+                          id: item.id,
+                          date: item.date,
+                          title: item.title,
+                          author: item.author,
+                          body: item.bodyLines.join('\n'),
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[9.5px] font-bold text-accent transition-colors hover:bg-accent/10"
+                    >
+                      <Pencil className="size-2.5" /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void remove(item.id)}
+                      disabled={deleting}
+                      className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-0.5 text-[9.5px] font-bold text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-60"
+                    >
+                      <Trash2 className="size-2.5" /> {deleting ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
+                )}
+                <div className="markdown-body text-[11px] leading-relaxed">
+                  {renderBodyMarkdown(prepare(item.bodyLines))}
+                </div>
               </div>
             )}
           </div>
