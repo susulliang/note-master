@@ -18,6 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { RotateCw, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { spinWheel } from '@/lib/auth-client';
 
 interface RouletteModalProps {
@@ -33,6 +34,17 @@ const POCKET_ORDER = [
   16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26,
 ] as const;
 const RED_POCKETS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+
+/** Reward tiers, mirroring the worker's WHEEL_REWARDS (display only). */
+const REWARD_TIERS: { pockets: number[]; reward: number }[] = [
+  { pockets: [0], reward: 250 },
+  { pockets: [7, 17, 28, 35], reward: 50 },
+  { pockets: [9, 13, 19, 22, 31], reward: 25 },
+  { pockets: [], reward: 10 }, // every other pocket
+];
+const tierOf = (pocket: number) => REWARD_TIERS.findIndex((t) => t.pockets.includes(pocket));
+const pocketTint = (n: number) =>
+  n === 0 ? 'text-emerald-400' : RED_POCKETS.has(n) ? 'text-red-400' : 'text-zinc-300';
 
 const STEP = (Math.PI * 2) / POCKET_ORDER.length; // wedge angle per pocket
 const DURATION_MS = 20_000;
@@ -310,7 +322,9 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
       for (const hit of hits) {
         const dt = t - hit.t0;
         if (dt <= 0) continue;
-        h += hit.amp * Math.exp(-5 * dt) * Math.abs(Math.sin(dt * Math.PI * 4));
+        // Earth-gravity bounce: tight parabolic humps (~140 ms hang time) with
+        // fast decay — snappy, not floaty.
+        h += hit.amp * Math.exp(-7 * dt) * Math.abs(Math.sin(dt * Math.PI * 7));
       }
       return h;
     };
@@ -322,9 +336,10 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
       // deflector kicks (all exactly zero at touchdown) → pockets to a stop.
       const hd = clamp01((t - DROP_START) / (DROP_END - DROP_START));
       const decay = Math.pow(1 - hd, 2);
-      const hop = Math.abs(Math.sin(hd * Math.PI * 3)) * decay * 0.11 * R;
+      // Fast skitter hops (~230 ms each, shrinking as the ball loses energy).
+      const hop = Math.abs(Math.sin(hd * Math.PI * 20)) * decay * 0.11 * R;
       const kick = deflectorHop(t);
-      const jump = Math.abs(Math.sin(hd * Math.PI * 3 + Math.PI / 3)) * decay * 0.08 * R + kick;
+      const jump = Math.abs(Math.sin(hd * Math.PI * 20 + Math.PI / 3)) * decay * 0.08 * R + kick;
       const radius = R_TRACK + (R_POCKET - R_TRACK) * smooth(hd) + hop + kick * 0.55;
       return { theta, radius, jump, hd, thW };
     };
@@ -575,6 +590,36 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
         ) : (
           <>
             <canvas ref={canvasRef} className={outcome ? '' : 'animate-pulse'} />
+            {/* Minimal reward-tier legend under the wheel. */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {REWARD_TIERS.map((tier, i) => {
+                const won = revealed && outcome !== null && tierOf(outcome.pocket) === i;
+                return (
+                  <span
+                    key={tier.reward}
+                    className={cn(
+                      'rounded border px-2 py-0.5 font-mono text-[10px] tracking-tight transition-colors',
+                      won
+                        ? 'border-amber-400/60 bg-amber-400/10 text-foreground'
+                        : 'border-border/50 text-muted-foreground',
+                    )}
+                  >
+                    {tier.pockets.length === 0 ? (
+                      <span>rest</span>
+                    ) : (
+                      tier.pockets.map((n, j) => (
+                        <span key={n}>
+                          <span className={won ? '' : pocketTint(n)}>{n}</span>
+                          {j < tier.pockets.length - 1 && <span className="text-border">·</span>}
+                        </span>
+                      ))
+                    )}
+                    <span className="mx-1 text-border">→</span>
+                    <span className="text-amber-400/90">{tier.reward}</span>
+                  </span>
+                );
+              })}
+            </div>
             {!outcome && (
               <p className="font-mono text-xs text-muted-foreground">Placing bets… the wheel is warmed up.</p>
             )}
