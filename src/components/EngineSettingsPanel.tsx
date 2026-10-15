@@ -1501,7 +1501,7 @@ function CompanionBloom({
               <path
                 d={petalShape(p.angle, p.value)}
                 fill={p.color}
-                opacity={isActive ? 0.85 : 0.45}
+                opacity={isActive ? 0.95 : 0.72}
                 stroke={p.color}
                 strokeWidth={1.2}
                 className={cn(
@@ -1509,10 +1509,21 @@ function CompanionBloom({
                   !reduceMotion && isActive && 'drop-shadow-[0_0_6px_rgba(255,255,255,0.25)]'
                 )}
               />
-              {/* Icon at 60% petal length — always visible, not color-only */}
-              <g transform={`translate(${100 + (R_HUB + (R_MAX - R_HUB) * 0.62) * Math.cos(((p.angle - 90) * Math.PI) / 180) - 6}, ${100 + (R_HUB + (R_MAX - R_HUB) * 0.62) * Math.sin(((p.angle - 90) * Math.PI) / 180) - 6})`} pointerEvents="none">
-                <Icon width={12} height={12} fill="none" stroke="#0d1117" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
-              </g>
+              {/* Icon at ~58% petal length — large, dark-on-color for contrast
+                  against both the petal fill and the page background. */}
+              {(() => {
+                const d = R_HUB + (R_MAX - R_HUB) * 0.58;
+                const ix = 100 + d * Math.cos(((p.angle - 90) * Math.PI) / 180);
+                const iy = 100 + d * Math.sin(((p.angle - 90) * Math.PI) / 180);
+                return (
+                  <g transform={`translate(${ix - 10}, ${iy - 10})`} pointerEvents="none">
+                    {/* Dark casing halo: thick dark outline under the dark icon
+                        keeps the glyph readable even over the hub/background. */}
+                    <Icon width={20} height={20} fill="none" stroke="hsl(215 25% 8%)" strokeWidth={4.2} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                    <Icon width={20} height={20} fill="none" stroke="hsl(215 30% 96%)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+                  </g>
+                );
+              })()}
             </g>
           );
         })}
