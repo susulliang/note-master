@@ -808,7 +808,7 @@ export default function TicketNotesPage() {
       })),
     [GRIDBOX_VISIBILITY_TOGGLES, hiddenNodesSet]
   );
-  const [rawTheme, setTheme] = useScopedState<ThemeId>('ecovacs_ticket_theme', 'midnight');
+  const [rawTheme, setTheme] = useScopedState<ThemeId>('ecovacs_ticket_theme', 'clay');
   // Normalize legacy 'dark'/'light' values from older sessions
   const theme = normalizeTheme(rawTheme);
   // UI scale ("old people mode"): 1.25x zoom of the entire app

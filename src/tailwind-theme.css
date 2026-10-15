@@ -115,6 +115,52 @@
 /*  time of day. :root (no override) is the deepest step: Midnight.    */
 /* ------------------------------------------------------------------ */
 
+/* Clay — warm ivory canvas with slate text and clay / blue / sage accents. */
+:root[data-theme="clay"] {
+  color-scheme: light;
+  --background: hsl(48 33.3% 97.1%);       /* #FAF9F5 */
+  --foreground: hsl(60 2.6% 7.6%);         /* #141413 */
+  --card: hsl(48 33.3% 99%);
+  --card-foreground: hsl(60 2.6% 7.6%);
+  --popover: hsl(48 33.3% 99%);
+  --popover-foreground: hsl(60 2.6% 7.6%);
+  --primary: hsl(14.8 63.1% 59.6%);       /* #D97757 */
+  --primary-foreground: hsl(60 2.6% 7.6%);
+  --secondary: hsl(210 49% 60.8%);        /* #6A9BCC */
+  --secondary-foreground: hsl(60 2.6% 7.6%);
+  --muted: hsl(48 9% 92%);
+  --muted-foreground: hsl(50 4% 34%);
+  --accent: hsl(210 49% 38%);
+  --accent-foreground: hsl(0 0% 100%);
+  --info: hsl(210 49% 60.8%);             /* #6A9BCC */
+  --info-foreground: hsl(60 2.6% 7.6%);
+  --destructive: hsl(0 72% 46%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(85.5 20.2% 45.7%);       /* #788C5D */
+  --success-foreground: hsl(60 2.6% 7.6%);
+  --warning: hsl(14.8 63.1% 59.6%);       /* #D97757 */
+  --warning-foreground: hsl(60 2.6% 7.6%);
+  --border: hsl(49.1 6.5% 66.9%);         /* #B0AEA5 */
+  --input: hsl(48 24% 94%);
+  --ring: hsl(14.8 63.1% 59.6%);          /* #D97757 */
+  --chart-1: hsl(14.8 63.1% 59.6%);       /* #D97757 */
+  --chart-2: hsl(210 49% 60.8%);          /* #6A9BCC */
+  --chart-3: hsl(85.5 20.2% 45.7%);       /* #788C5D */
+  --chart-4: hsl(12.8 67.3% 60.4%);       /* #DE7356 */
+  --chart-5: hsl(49.1 6.5% 66.9%);        /* #B0AEA5 */
+  --sidebar: hsl(48 33.3% 97.1%);
+  --sidebar-foreground: hsl(60 2.6% 7.6%);
+  --sidebar-primary: hsl(14.8 63.1% 59.6%);
+  --sidebar-primary-foreground: hsl(60 2.6% 7.6%);
+  --sidebar-accent: hsl(48 24% 94%);
+  --sidebar-accent-foreground: hsl(60 2.6% 7.6%);
+  --sidebar-border: hsl(49.1 6.5% 66.9%);
+  --sidebar-ring: hsl(14.8 63.1% 59.6%);
+  --scrollbar-track: hsl(48 18% 91%);
+  --scrollbar-thumb: hsl(49.1 6.5% 66.9%);
+  --scrollbar-thumb-hover: hsl(48 7% 53%);
+}
+
 /* Daylight — bright neutral white (morning / full-sun hours) */
 :root[data-theme="daylight"] {
   color-scheme: light;
@@ -472,6 +518,7 @@
    - Light themes: only slightly darker than the card (just enough to
      read as a field); keeps dark text legible.
    - Dark themes: noticeably darker than the card for strong contrast. */
+:root[data-theme="clay"],
 :root[data-theme="daylight"],
 :root[data-theme="morning"],
 :root[data-theme="afternoon"],
@@ -808,6 +855,16 @@ body[data-ui-scale="small"] {
   }
 
   /* Softer orbs for the light themes */
+  :root[data-theme="clay"] .glass-orb-1 {
+    background: radial-gradient(circle, hsl(14.8 63.1% 74% / 0.4), transparent 65%);
+  }
+  :root[data-theme="clay"] .glass-orb-2 {
+    background: radial-gradient(circle, hsl(210 49% 78% / 0.38), transparent 65%);
+  }
+  :root[data-theme="clay"] .glass-orb-3 {
+    background: radial-gradient(circle, hsl(85.5 20.2% 75% / 0.34), transparent 65%);
+  }
+
   :root[data-theme="daylight"] .glass-orb-1 {
     background: radial-gradient(circle, hsl(137 70% 72% / 0.55), transparent 65%);
   }

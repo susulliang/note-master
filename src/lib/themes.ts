@@ -1,4 +1,4 @@
-import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem, Leaf, Wind, Terminal } from 'lucide-react';
+import { Sun, Sunrise, CloudSun, Sunset, Moon, CloudFog, Cloud, CloudMoon, Gem, Leaf, Wind, Terminal, Palette } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
@@ -18,7 +18,8 @@ export type ThemeId =
   | 'amethyst'
   | 'moss'
   | 'breezy'
-  | 'dos';
+  | 'dos'
+  | 'clay';
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -29,6 +30,7 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ThemeMeta[] = [
+  { id: 'clay', label: 'Clay', icon: Palette, toaster: 'light' },
   { id: 'daylight', label: 'Daylight', icon: Sun, toaster: 'light' },
   { id: 'morning', label: 'Morning', icon: Sunrise, toaster: 'light' },
   { id: 'afternoon', label: 'Afternoon', icon: CloudSun, toaster: 'light' },
@@ -51,11 +53,11 @@ export function normalizeTheme(value: unknown): ThemeId {
     if (value === 'light') return 'daylight';
     if (value === 'dark') return 'midnight';
   }
-  return 'midnight';
+  return 'clay';
 }
 
 export function getThemeMeta(id: ThemeId): ThemeMeta {
-  return THEMES.find((t) => t.id === id) ?? THEMES[THEMES.length - 1];
+  return THEMES.find((t) => t.id === id) ?? THEMES[0];
 }
 
 export function nextTheme(id: ThemeId): ThemeId {
