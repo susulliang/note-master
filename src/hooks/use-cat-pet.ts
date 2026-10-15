@@ -74,6 +74,10 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
   /** latest state ref so event listeners / intervals see fresh values */
   const stateRef = useRef<CatPetState | null>(null);
   const dirtyRef = useRef(false);
+  /** Per-cat D1 map. The worker stores one opaque blob per account, so the
+   *  client namespaces it by catId — without this every cat on the account
+   *  would share (and stomp) the same cloud stats. */
+  const remoteMapRef = useRef<Record<string, CatPetState> | null>(null);
   const identityRef = useRef(identity);
   identityRef.current = identity;
   const catRef = useRef(catId);
@@ -90,11 +94,15 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
   }, []);
 
   /** Debounced D1 flush — at most every 30s, plus a final flush on hide.
+   *  Writes the per-cat map (this cat's slot updated) as one opaque blob.
    *  savePetState no-ops internally when signed out. */
   const flushToD1 = useCallback(() => {
     const s = stateRef.current;
     if (!s || !navigator.onLine) return;
-    void savePetState(saveStateJson(s)).catch(() => undefined);
+    const map: Record<string, CatPetState> = { ...(remoteMapRef.current ?? {}) };
+    map[catRef.current] = s;
+    remoteMapRef.current = map;
+    void savePetState(JSON.stringify(map)).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -165,10 +173,29 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
       }
 
       // Signed in: D1 is the source of truth when it has a newer save.
+      // The blob is a per-cat map ({ [catId]: state }); a legacy blob was a
+      // single CatPetState — attribute it to the cat it was saved from.
       if (identity !== ANONYMOUS_IDENTITY) {
         try {
-          const remote = loadState(await getPetState());
+          const raw = await getPetState();
           if (cancelled) return;
+          const map: Record<string, CatPetState> = {};
+          const legacy = loadState(raw);
+          if (legacy) {
+            map[catId] = legacy;
+          } else if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as Record<string, unknown>;
+              for (const [id, value] of Object.entries(parsed)) {
+                const entry = loadState(JSON.stringify(value));
+                if (entry) map[id] = entry;
+              }
+            } catch {
+              /* corrupt blob — start fresh */
+            }
+          }
+          remoteMapRef.current = map;
+          const remote = map[catId] ?? null;
           if (remote && (!local || remote.updatedAt > local.updatedAt)) {
             local = remote;
             try {
@@ -210,6 +237,16 @@ export function useCatPet({ catId, username }: UseCatPetOptions): CatPetApi {
     void boot();
     return () => {
       cancelled = true;
+      // Switching cats (or signing out): flush the OUTGOING cat's pending
+      // state into its own map slot before the next boot overwrites
+      // stateRef. The closure's catId is the outgoing cat's id.
+      if (stateRef.current && dirtyRef.current && identityRef.current !== ANONYMOUS_IDENTITY) {
+        const map: Record<string, CatPetState> = { ...(remoteMapRef.current ?? {}) };
+        map[catId] = stateRef.current;
+        remoteMapRef.current = map;
+        dirtyRef.current = false;
+        void savePetState(JSON.stringify(map)).catch(() => undefined);
+      }
     };
   }, [identity, catId, writeLocal]);
 
