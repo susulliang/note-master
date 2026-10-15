@@ -554,6 +554,15 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                         />
                         🎰 Wheel of Fortune
                       </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this draws a random TCG card into the buyer's collection">
+                        <input
+                          type="radio"
+                          checked={draft.category === 'cards'}
+                          onChange={() => setDraft({ ...draft, category: 'cards' })}
+                          className="accent-amber-500"
+                        />
+                        🃏 Card draw
+                      </label>
                       <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                         <input
                           type="checkbox"
