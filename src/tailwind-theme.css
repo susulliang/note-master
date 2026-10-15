@@ -701,6 +701,11 @@ body[data-ui-scale="small"] {
   .cat-sprite-animate {
     animation: cat-sprite-loop 3.2s steps(1, end) 1;
   }
+  /* One-shot eating animation (store "Fancy Feast" purchase) — same 16
+   * frames, slower pacing so the meal reads. */
+  .cat-sprite-eat {
+    animation: cat-sprite-loop 4.8s steps(1, end) 1;
+  }
 
   /* Amber pulsing glow for keyword-alert thought bubbles. */
   @keyframes cat-alert-glow {
@@ -887,7 +892,8 @@ body[data-ui-scale="small"] {
     .dash-progress-fill,
     .dash-progress-fill::after,
     .dash-parliament-seat,
-    .cat-sprite-animate {
+    .cat-sprite-animate,
+    .cat-sprite-eat {
       animation: none !important;
     }
     .cat-sprite-frame {

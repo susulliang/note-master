@@ -37,6 +37,12 @@ export const CAT_CHOICES = [
 
 export type CatId = (typeof CAT_CHOICES)[number]['id'];
 
+/** Eating-can sheet (16 frames, same 4×4 64px layout) — shown while the
+ *  heyheyhey cat enjoys a "Fancy Feast" bought from the spice store. */
+export const CAT_EATING_SPRITE = '/assets/cat/heyheyhey-eating-sprites.png';
+/** Window event dispatched after a successful store purchase. */
+export const CAT_EAT_EVENT = 'cat-eat';
+
 export function normalizeCatId(value: unknown): CatId {
   return CAT_CHOICES.find((choice) => choice.id === value)?.id ?? 'hunao';
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { cn } from '@/lib/utils';
 import type { CatThought } from '@/hooks/use-cat-assistant';
 import { useScopedState } from '@/hooks/use-scoped-state';
-import { getCatSprite, type CatId } from '@/lib/cat-sprites';
+import { getCatSprite, CAT_EATING_SPRITE, CAT_EAT_EVENT, type CatId } from '@/lib/cat-sprites';
 
 /**
  * Draggable pixel cat with occasional sprite animation and thought bubbles.
@@ -54,6 +54,9 @@ export function CatAssistant({
   );
   const [dragging, setDragging] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  /** One-shot eating animation triggered by a spice-store cat-food purchase. */
+  const [isEating, setIsEating] = useState(false);
+  const isEatingRef = useRef(false);
   const catName = `${catId.slice(0, 1).toUpperCase()}${catId.slice(1)}`;
 
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -80,6 +83,17 @@ export function CatAssistant({
   }, [moveRequest, setPosition]);
 
   useEffect(() => {
+    // A "Fancy Feast" purchase makes the cat eat (event from StorePanel).
+    const handleEat = () => {
+      isEatingRef.current = true;
+      setIsAnimating(false);
+      setIsEating(true);
+    };
+    window.addEventListener(CAT_EAT_EVENT, handleEat);
+    return () => window.removeEventListener(CAT_EAT_EVENT, handleEat);
+  }, []);
+
+  useEffect(() => {
     const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
     let timeoutId: number | undefined;
     let cancelled = false;
@@ -96,6 +110,11 @@ export function CatAssistant({
     };
 
     const handleAnimationEnd = () => {
+      if (isEatingRef.current) {
+        // Meal finished → back to the idle pose and the random schedule.
+        isEatingRef.current = false;
+        setIsEating(false);
+      }
       setIsAnimating(false);
       scheduleAnimation();
     };
@@ -237,9 +256,9 @@ export function CatAssistant({
           aria-hidden="true"
           className={cn(
             'cat-sprite-frame h-32 w-32 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]',
-            isAnimating && 'cat-sprite-animate'
+            isEating ? 'cat-sprite-eat' : isAnimating && 'cat-sprite-animate'
           )}
-          style={{ backgroundImage: `url("${getCatSprite(catId)}")` }}
+          style={{ backgroundImage: `url("${isEating ? CAT_EATING_SPRITE : getCatSprite(catId)}")` }}
         />
 
         {/* Keep call and generation activity legible without swapping poses. */}

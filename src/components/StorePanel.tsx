@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, ShoppingBag, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listStore, purchaseItem, type StoreProduct } from '@/lib/auth-client';
+import { CAT_EAT_EVENT } from '@/lib/cat-sprites';
 
 interface StorePanelProps {
   /** Current spice balance (displayed in the header). */
@@ -47,6 +48,10 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
       onSpiceChange(out.spice);
       setBoughtId(product.id);
       window.setTimeout(() => setBoughtId((id) => (id === product.id ? null : id)), 1800);
+      // Cat-food purchases feed the assistant — play the eating animation.
+      if (/food|feast|treat|snack/i.test(product.name)) {
+        window.dispatchEvent(new CustomEvent(CAT_EAT_EVENT, { detail: { productName: product.name } }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Purchase failed');
     } finally {
