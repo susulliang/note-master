@@ -742,8 +742,7 @@ body[data-ui-scale="small"] {
     display: block;
     background-repeat: no-repeat;
     background-size: 400% 400%;
-    image-rendering: pixelated;
-    background-position: 0% 0%;
+    image-rendering: pixelated;    background-position: 0% 0%;
   }
   .cat-sprite-animate {
     animation: cat-sprite-loop 3.2s steps(1, end) 1;
@@ -753,15 +752,53 @@ body[data-ui-scale="small"] {
   .cat-sprite-eat {
     animation: cat-sprite-loop 4.8s steps(1, end) 1;
   }
-  /* Napping rig — same 16-frame sheet where frame 1 is standing and frame
-   * 16 is deep asleep. Falling asleep plays it forwards and `forwards`
-   * fill holds the last frame; waking plays it in reverse and holds the
-   * standing frame (both end on their final keyframe via fill mode). */
+  /* Napping rig — same 16-frame sheet: falling asleep plays it forwards and
+   * `forwards` fill holds the last frame; waking plays it in reverse. Each
+   * state uses its OWN animation-name (identical stops, duplicated keyframes):
+   * a finished CSS animation is keyed by name, so reusing one name across
+   * sleep→wake→sleep would never restart — the cat would stay frozen on the
+   * held frame and animationend would never fire again. */
+  @keyframes cat-sprite-loop-nap-sleep {
+    0% { background-position: 0% 0%; }
+    6.25% { background-position: 33.333% 0%; }
+    12.5% { background-position: 66.667% 0%; }
+    18.75% { background-position: 100% 0%; }
+    25% { background-position: 0% 33.333%; }
+    31.25% { background-position: 33.333% 33.333%; }
+    37.5% { background-position: 66.667% 33.333%; }
+    43.75% { background-position: 100% 33.333%; }
+    50% { background-position: 0% 66.667%; }
+    56.25% { background-position: 33.333% 66.667%; }
+    62.5% { background-position: 66.667% 66.667%; }
+    68.75% { background-position: 100% 66.667%; }
+    75% { background-position: 0% 100%; }
+    81.25% { background-position: 33.333% 100%; }
+    87.5% { background-position: 66.667% 100%; }
+    93.75%, 100% { background-position: 100% 100%; }
+  }
+  @keyframes cat-sprite-loop-nap-wake {
+    0% { background-position: 0% 0%; }
+    6.25% { background-position: 33.333% 0%; }
+    12.5% { background-position: 66.667% 0%; }
+    18.75% { background-position: 100% 0%; }
+    25% { background-position: 0% 33.333%; }
+    31.25% { background-position: 33.333% 33.333%; }
+    37.5% { background-position: 66.667% 33.333%; }
+    43.75% { background-position: 100% 33.333%; }
+    50% { background-position: 0% 66.667%; }
+    56.25% { background-position: 33.333% 66.667%; }
+    62.5% { background-position: 66.667% 66.667%; }
+    68.75% { background-position: 100% 66.667%; }
+    75% { background-position: 0% 100%; }
+    81.25% { background-position: 33.333% 100%; }
+    87.5% { background-position: 66.667% 100%; }
+    93.75%, 100% { background-position: 100% 100%; }
+  }
   .cat-sprite-sleep {
-    animation: cat-sprite-loop 3.6s steps(1, end) 1 forwards;
+    animation: cat-sprite-loop-nap-sleep 3.6s steps(1, end) 1 forwards;
   }
   .cat-sprite-wake {
-    animation: cat-sprite-loop 3.6s steps(1, end) 1 reverse forwards;
+    animation: cat-sprite-loop-nap-wake 3.6s steps(1, end) 1 reverse forwards;
   }
 
   /* Amber pulsing glow for keyword-alert thought bubbles. */
