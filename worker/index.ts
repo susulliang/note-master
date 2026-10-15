@@ -53,12 +53,36 @@ interface AuthUserRow {
   roster_visible: number;
   trak_visible: number;
   created_at: number;
+  spice?: number;
 }
 
 interface AuthUser {
   username: string;
   isAdmin: boolean;
+  spice: number;
   privileges: { dash: boolean; roster: boolean; trak: boolean };
+}
+
+interface StoreProductRow {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  price: number;
+  active: number;
+  image?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface StoreProduct {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  price: number;
+  active: boolean;
+  image: string | null;
 }
 
 interface RegisterPayload {
@@ -256,6 +280,7 @@ function authPublicUser(user: AuthUserRow): AuthUser {
   return {
     username: user.username,
     isAdmin: Number(user.is_admin) === 1,
+    spice: Number(user.spice ?? 0),
     privileges: {
       dash: Number(user.dash_visible) === 1,
       roster: Number(user.roster_visible) === 1,
@@ -363,7 +388,18 @@ async function handleAuthLogin(request: Request, env: Env): Promise<Response> {
   // Session rows must use the canonical username case (from the DB row) —
   // the sessions↔users JOIN is case-sensitive.
   const token = await authIssueSession(env, user.username);
-  return authJson({ token, user: authPublicUser(user) });
+  // Every login earns +1 spice (ledger row kept for audit).
+  await ensureSpiceSchema(env);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + 1, updated_at = ?2 WHERE username = ?1')
+      .bind(user.username, Date.now()),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 1, 'login', NULL, ?2)")
+      .bind(user.username, Date.now()),
+  ]);
+  const fresh = await env.DB.prepare('SELECT * FROM auth_users WHERE username = ?')
+    .bind(user.username)
+    .first<AuthUserRow>();
+  return authJson({ token, user: authPublicUser(fresh ?? user) });
 }
 
 async function handleAdminUsers(_request: Request, env: Env): Promise<Response> {
@@ -424,6 +460,234 @@ async function handleAdminDelete(request: Request, env: Env): Promise<Response> 
   return authJson({ ok: true });
 }
 
+/* ------------------------------ spice & store ------------------------------ */
+
+/** One-time (per isolate) schema self-heal — mirrors migrations/0005_spice_store.sql
+ *  so the endpoints work even before the migration is applied. */
+let spiceSchemaPromise: Promise<void> | null = null;
+async function ensureSpiceSchema(env: Env): Promise<void> {
+  if (!spiceSchemaPromise) {
+    spiceSchemaPromise = (async () => {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS spice_ledger (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           username TEXT NOT NULL, delta INTEGER NOT NULL, reason TEXT NOT NULL,
+           detail TEXT, created_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS store_products (
+           id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT NOT NULL DEFAULT '🎁',
+           description TEXT NOT NULL DEFAULT '', price INTEGER NOT NULL,
+           active INTEGER NOT NULL DEFAULT 1,
+           created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS store_purchases (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           username TEXT NOT NULL, product_id TEXT NOT NULL, product_name TEXT NOT NULL,
+           price INTEGER NOT NULL, created_at INTEGER NOT NULL
+         )`
+      ).run();
+      try {
+        await env.DB.prepare('ALTER TABLE auth_users ADD COLUMN spice INTEGER NOT NULL DEFAULT 0').run();
+      } catch {
+        /* column already exists */
+      }
+      try {
+        await env.DB.prepare('ALTER TABLE store_products ADD COLUMN image TEXT').run();
+      } catch {
+        /* column already exists */
+      }
+    })().catch((err) => {
+      spiceSchemaPromise = null; // retry on the next request
+      throw err;
+    });
+  }
+  return spiceSchemaPromise;
+}
+
+/** QA spice tiers: 70/100 → +3, 80/100 → +5, 90/100 → +10. */
+function qaSpiceAward(scorePct: number): number {
+  if (scorePct >= 90) return 10;
+  if (scorePct >= 80) return 5;
+  if (scorePct >= 70) return 3;
+  return 0;
+}
+
+/** POST /api/spice/qa { scorePct } — award spice for the FINAL QA score of a
+ *  call. The client only submits once per call (at hang-up); the server adds
+ *  a cooldown so rapid-fire replays can't farm spice. */
+async function handleSpiceQa(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { scorePct?: unknown };
+  try {
+    payload = (await request.json()) as { scorePct?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const scorePct = Math.round(Number(payload.scorePct));
+  if (!Number.isFinite(scorePct) || scorePct < 0 || scorePct > 200)
+    return authJson({ error: 'Invalid score' }, 400);
+
+  await ensureSpiceSchema(env);
+  const award = qaSpiceAward(scorePct);
+  if (award <= 0) return authJson({ awarded: 0, spice: Number(user.spice ?? 0) });
+
+  // One QA award per 3 minutes — a real call takes at least that long.
+  const last = await env.DB.prepare(
+    "SELECT created_at FROM spice_ledger WHERE username = ?1 AND reason = 'qa' ORDER BY created_at DESC LIMIT 1"
+  )
+    .bind(user.username)
+    .first<{ created_at: number }>();
+  if (last && Date.now() - Number(last.created_at) < 180_000)
+    return authJson({ error: 'QA award cooldown — one award per call' }, 429);
+
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
+      .bind(user.username, award, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'qa', ?3, ?4)")
+      .bind(user.username, award, `qa:${scorePct}`, now),
+  ]);
+  return authJson({ awarded: award, spice: Number(user.spice ?? 0) + award });
+}
+
+function storeProductPublic(row: StoreProductRow): StoreProduct {
+  return {
+    id: row.id,
+    name: row.name,
+    emoji: row.emoji,
+    description: row.description,
+    price: Number(row.price),
+    active: Number(row.active) === 1,
+    image: typeof row.image === 'string' && row.image ? row.image : null,
+  };
+}
+
+/** GET /api/store — active products for the logged-in user. */
+async function handleStoreGet(env: Env, includeInactive = false): Promise<Response> {
+  await ensureSpiceSchema(env);
+  const result = await env.DB.prepare(
+    includeInactive
+      ? 'SELECT * FROM store_products ORDER BY active DESC, created_at ASC'
+      : 'SELECT * FROM store_products WHERE active = 1 ORDER BY created_at ASC'
+  ).all<StoreProductRow>();
+  return authJson({ products: (result.results ?? []).map(storeProductPublic) });
+}
+
+/** POST /api/store/purchase { productId } — atomic-ish spice deduction. */
+async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { productId?: unknown };
+  try {
+    payload = (await request.json()) as { productId?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const productId = String(payload.productId ?? '');
+  if (!productId) return authJson({ error: 'Missing productId' }, 400);
+
+  await ensureSpiceSchema(env);
+  const product = await env.DB.prepare('SELECT * FROM store_products WHERE id = ?1')
+    .bind(productId)
+    .first<StoreProductRow>();
+  if (!product || Number(product.active) !== 1)
+    return authJson({ error: 'Product not available' }, 404);
+
+  const price = Number(product.price);
+  const now = Date.now();
+  const deduct = await env.DB.prepare(
+    'UPDATE auth_users SET spice = spice - ?2, updated_at = ?3 WHERE username = ?1 AND spice >= ?2'
+  )
+    .bind(user.username, price, now)
+    .run();
+  if (!deduct.meta.changes)
+    return authJson({ error: `Not enough spice — need ${price}, you have ${Number(user.spice ?? 0)}` }, 400);
+
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'store', ?3, ?4)")
+      .bind(user.username, -price, product.name, now),
+    env.DB.prepare(
+      'INSERT INTO store_purchases (username, product_id, product_name, price, created_at) VALUES (?1, ?2, ?3, ?4, ?5)'
+    )
+      .bind(user.username, product.id, product.name, price, now),
+  ]);
+  return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product) });
+}
+
+interface AdminStorePayload {
+  action?: unknown;
+  product?: {
+    id?: unknown;
+    name?: unknown;
+    emoji?: unknown;
+    description?: unknown;
+    price?: unknown;
+    active?: unknown;
+    image?: unknown;
+  };
+}
+
+/** POST /api/admin/store — { action: 'upsert' | 'delete', product: {...} }. */
+async function handleAdminStorePost(request: Request, env: Env): Promise<Response> {
+  // Raised for product images: a 256×256 PNG/JPEG data URL stays well under
+  // ~150 KB base64, with headroom for the rest of the payload.
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 768_000) return authJson({ error: 'Request is too large' }, 413);
+  let payload: AdminStorePayload;
+  try {
+    payload = (await request.json()) as AdminStorePayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  await ensureSpiceSchema(env);
+
+  if (payload.action === 'delete') {
+    const id = String(payload.product?.id ?? '');
+    if (!id) return authJson({ error: 'Missing product id' }, 400);
+    const del = await env.DB.prepare('DELETE FROM store_products WHERE id = ?1').bind(id).run();
+    if (!del.meta.changes) return authJson({ error: 'Product not found' }, 404);
+    return authJson({ ok: true });
+  }
+
+  if (payload.action !== 'upsert') return authJson({ error: 'Unknown action (upsert | delete)' }, 400);
+  const p = payload.product ?? {};
+  const name = String(p.name ?? '').trim();
+  const emoji = String(p.emoji ?? '🎁').trim() || '🎁';
+  const description = String(p.description ?? '').trim();
+  const price = Math.round(Number(p.price));
+  const active = p.active === undefined ? true : !!p.active;
+  // Product image: a client-produced data URL (PNG keeps alpha, JPEG for
+  // photos) — never larger than ~350 KB after the 256×256 downscale.
+  const image = typeof p.image === 'string' && p.image ? p.image : null;
+  if (image && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image))
+    return authJson({ error: 'Image must be a base64 PNG or JPEG data URL' }, 400);
+  if (image && image.length > 500_000)
+    return authJson({ error: 'Image too large (max ~350 KB)' }, 400);
+  if (!name || name.length > 60) return authJson({ error: 'Name must be 1–60 characters' }, 400);
+  if (emoji.length > 8) return authJson({ error: 'Emoji too long' }, 400);
+  if (description.length > 200) return authJson({ error: 'Description too long (max 200)' }, 400);
+  if (!Number.isFinite(price) || price < 1 || price > 100_000)
+    return authJson({ error: 'Price must be 1–100000 spice' }, 400);
+
+  const now = Date.now();
+  const id = typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO store_products (id, name, emoji, description, price, active, image, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+     ON CONFLICT(id) DO UPDATE SET
+       name = ?2, emoji = ?3, description = ?4, price = ?5, active = ?6, image = ?7, updated_at = ?8`
+  )
+    .bind(id, name, emoji, description, price, active ? 1 : 0, image, now)
+    .run();
+  const row = await env.DB.prepare('SELECT * FROM store_products WHERE id = ?1').bind(id).first<StoreProductRow>();
+  return authJson({ ok: true, product: row ? storeProductPublic(row) : null });
+}
+
 async function handleAuth(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -463,12 +727,34 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleRosterGet(request, env);
   }
 
+  // Spice QA award — any logged-in user, one award per call (client submits
+  // the FINAL QA score at hang-up; a server-side cooldown blocks farming).
+  if (path === '/api/spice/qa' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleSpiceQa(request, env, user);
+  }
+
+  // Store — active products list + purchase, any logged-in user.
+  if (path === '/api/store' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleStoreGet(env);
+  }
+  if (path === '/api/store/purchase' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleStorePurchase(request, env, user);
+  }
+
   // Admin routes — bearer must belong to an is_admin account.
   const admin = await authBearerUser(request, env);
   if (!admin || Number(admin.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
   if (path === '/api/admin/users' && request.method === 'GET') return handleAdminUsers(request, env);
   if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env);
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
+  if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
+  if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
   if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
 }
@@ -679,7 +965,9 @@ export default {
     if (
       url.pathname.startsWith('/api/auth/') ||
       url.pathname.startsWith('/api/admin/') ||
-      url.pathname.startsWith('/api/roster')
+      url.pathname.startsWith('/api/roster') ||
+      url.pathname.startsWith('/api/store') ||
+      url.pathname.startsWith('/api/spice')
     ) {
       return handleAuth(request, env);
     }

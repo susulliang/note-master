@@ -7,7 +7,19 @@
 export interface AuthUser {
   username: string;
   isAdmin: boolean;
+  spice: number;
   privileges: { dash: boolean; roster: boolean; trak: boolean };
+}
+
+export interface StoreProduct {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  price: number;
+  active: boolean;
+  /** Client-produced 256×256 data URL (PNG keeps alpha, JPEG for photos). */
+  image: string | null;
 }
 
 const TOKEN_KEY = 'ecovacs_auth_token';
@@ -128,4 +140,73 @@ export async function adminSetPrivileges(
 export async function adminDeleteUser(username: string): Promise<void> {
   const token = getStoredToken();
   await call('/api/admin/delete', { method: 'POST', body: JSON.stringify({ username }), token });
+}
+
+// ── Spice & store ────────────────────────────────────────────────────────────
+
+/** Submit the FINAL QA score of a call (0–100+ pct). Awards +3 / +5 / +10
+ *  spice at 70 / 80 / 90; only call this once per call (at hang-up). */
+export async function submitQaAward(scorePct: number): Promise<{ awarded: number; spice: number }> {
+  const token = getStoredToken();
+  const out = await call<{ awarded: number; spice: number }>('/api/spice/qa', {
+    method: 'POST',
+    body: JSON.stringify({ scorePct }),
+    token,
+  });
+  return out;
+}
+
+/** Active store products available for purchase. */
+export async function listStore(): Promise<StoreProduct[]> {
+  const token = getStoredToken();
+  const out = await call<{ products: StoreProduct[] }>('/api/store', { token });
+  return out.products;
+}
+
+/** Buy a product — returns the new spice balance. */
+export async function purchaseItem(productId: string): Promise<{ spice: number }> {
+  const token = getStoredToken();
+  const out = await call<{ spice: number }>('/api/store/purchase', {
+    method: 'POST',
+    body: JSON.stringify({ productId }),
+    token,
+  });
+  return out;
+}
+
+// ── Admin store management ───────────────────────────────────────────────────
+
+/** All store products (admin) — includes inactive ones. */
+export async function adminListStore(): Promise<StoreProduct[]> {
+  const token = getStoredToken();
+  const out = await call<{ products: StoreProduct[] }>('/api/admin/store', { token });
+  return out.products;
+}
+
+export async function adminSaveStoreProduct(
+  product: Partial<StoreProduct> & {
+    name: string;
+    emoji: string;
+    description: string;
+    price: number;
+    active: boolean;
+    image?: string | null;
+  }
+): Promise<StoreProduct> {
+  const token = getStoredToken();
+  const out = await call<{ product: StoreProduct }>('/api/admin/store', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'upsert', product }),
+    token,
+  });
+  return out.product;
+}
+
+export async function adminDeleteStoreProduct(id: string): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/admin/store', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'delete', product: { id } }),
+    token,
+  });
 }

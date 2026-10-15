@@ -26,6 +26,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   /** Re-pull /me (e.g. after an admin edits this user's privileges). */
   refresh: () => Promise<void>;
+  /** Locally patch the spice balance (after a purchase / QA award round-trip). */
+  setSpice: (spice: number) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -78,6 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setSpice = useCallback((spice: number) => {
+    setUser((prev) => (prev ? { ...prev, spice } : prev));
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -87,8 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       logout,
       refresh,
+      setSpice,
     }),
-    [user, resolving, login, register, logout, refresh]
+    [user, resolving, login, register, logout, refresh, setSpice]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

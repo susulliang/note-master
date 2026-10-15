@@ -69,6 +69,8 @@ import FlowchartCanvas from '@/components/FlowchartCanvas';
 import AuthPanel from '@/components/AuthPanel';
 import AdminPanel from '@/components/AdminPanel';
 import { useAuth } from '@/lib/auth-context';
+import { getStoredToken, submitQaAward } from '@/lib/auth-client';
+import { QA_CHECKLIST_TOTAL } from '@/data/qaCallChecklist';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
@@ -850,7 +852,7 @@ export default function TicketNotesPage() {
   // Privileges come from the D1-backed account system; a logged-in user's
   // grants automatically reveal the corresponding hidden rail pills (Dash /
   // Roster / Trak) without needing the Shift+D / Shift+S unlock hotkeys.
-  const { user: authUser, privileges: authPrivileges } = useAuth();
+  const { user: authUser, privileges: authPrivileges, setSpice: setAuthSpice } = useAuth();
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
@@ -1961,11 +1963,42 @@ Additional information (if needed): ${additional}`;
       } catch {
         /* navigator.clipboard unavailable — modal buttons still work */
       }
+      // Step 5 (spice): submit the FINAL QA score of this call. Multiple
+      // Fill Notes runs during the call each re-score — only this last
+      // score, read AFTER the auto-parse above, counts towards spice.
+      try {
+        const finalScores = callRef.current.qaScores;
+        if (getStoredToken() && finalScores) {
+          const total = Object.values(finalScores).reduce((n, v) => n + v, 0);
+          const pct = Math.round((total / QA_CHECKLIST_TOTAL) * 100);
+          if (pct >= 70) {
+            void submitQaAward(pct).then(
+              (out) => {
+                if (out.awarded > 0) {
+                  setAuthSpice(out.spice);
+                  try {
+                    toast.success(`🌶️ +${out.awarded} Spice`, {
+                      description: `Final call QA score ${pct}/100 — keep it up!`,
+                    });
+                  } catch {
+                    /* Toaster not mounted */
+                  }
+                }
+              },
+              () => {
+                /* spice is best-effort — never surface award errors */
+              }
+            );
+          }
+        }
+      } catch {
+        /* spice is best-effort */
+      }
     } finally {
       hangUpInFlightRef.current = false;
       setHangUpRunning(false);
     }
-  }, [buildNoteText]);
+  }, [buildNoteText, setAuthSpice]);
 
   const handleClearMic = useCallback(() => {
     voice.clear();

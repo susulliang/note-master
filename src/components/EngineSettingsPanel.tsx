@@ -8,6 +8,7 @@ import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
 import type { KeywordAlert } from '@/lib/keyword-alerts';
 import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 import KeywordAlertContent from '@/components/KeywordAlertContent';
+import StorePanel from '@/components/StorePanel';
 import { APP_VERSION, APP_RELEASED_AT } from '@/lib/app-version';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import type { WhisperStatus } from '@/hooks/use-local-transcriber';
@@ -310,7 +311,8 @@ export default function EngineSettingsPanel({
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   // Account state — surfaced as a login-status block at the top of Settings.
-  const { user: authUser, logout: authLogout, resolving: authResolving } = useAuth();
+  const { user: authUser, logout: authLogout, resolving: authResolving, setSpice: setAuthSpice } = useAuth();
+  const [storeOpen, setStoreOpen] = useState(false);
 
   // Live parse window — what the NEXT parse will send (debounced 1s)
   const [windowTick, setWindowTick] = useState(0);
@@ -457,6 +459,35 @@ export default function EngineSettingsPanel({
                 <LogIn className="size-3.5" /> Log in
               </button>
             </div>
+          )}
+
+          {/* Spice balance + store — bottom of the Account block (logged in only) */}
+          {authUser && !authResolving && (
+            <>
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/40 pt-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold text-foreground">
+                  <span aria-hidden="true" className="text-sm">🌶️</span> Spice
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-extrabold tabular-nums text-amber-400">
+                    {authUser.spice}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setStoreOpen(true)}
+                  className="flex items-center gap-1 rounded-lg border border-amber-400/50 bg-amber-500/80 px-2.5 py-1 text-[11px] font-bold text-white transition-all hover:brightness-110"
+                  title="Open the spice store"
+                >
+                  🛒 Store
+                </button>
+              </div>
+              {storeOpen && (
+                <StorePanel
+                  spice={authUser.spice}
+                  onSpiceChange={setAuthSpice}
+                  onClose={() => setStoreOpen(false)}
+                />
+              )}
+            </>
           )}
         </section>
 
