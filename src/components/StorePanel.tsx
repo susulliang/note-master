@@ -11,6 +11,7 @@ import { Loader2, ShoppingBag, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listStore, purchaseItem, type StoreProduct } from '@/lib/auth-client';
 import { CAT_EAT_EVENT } from '@/lib/cat-sprites';
+import RouletteModal from '@/components/RouletteModal';
 
 interface StorePanelProps {
   /** Current spice balance (displayed in the header). */
@@ -25,6 +26,8 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [boughtId, setBoughtId] = useState<string | null>(null);
+  /** Non-null while the Wheel of Fortune ceremony is on screen. */
+  const [wheelToken, setWheelToken] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -46,6 +49,11 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
     try {
       const out = await purchaseItem(product.id);
       onSpiceChange(out.spice);
+      // Wheel of Fortune: open the roulette ceremony instead of the toast.
+      if (out.spinToken) {
+        setWheelToken(out.spinToken);
+        return;
+      }
       setBoughtId(product.id);
       window.setTimeout(() => setBoughtId((id) => (id === product.id ? null : id)), 1800);
       // Cat-food purchases feed the assistant — play the eating animation.
@@ -175,6 +183,10 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
         <p className="mt-3 shrink-0 text-center text-[10px] text-muted-foreground/70">
           Earn spice: +1 per login · +3/+5/+10 for call QA scores of 70/80/90+
         </p>
+
+        {wheelToken && (
+          <RouletteModal token={wheelToken} onSpiceChange={onSpiceChange} onClose={() => setWheelToken(null)} />
+        )}
       </div>
     </div>
   );

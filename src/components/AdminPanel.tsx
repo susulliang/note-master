@@ -53,8 +53,8 @@ interface ProductDraft {
   description: string;
   price: string;
   active: boolean;
-  /** 'food' products feed the cat companion. */
-  category: 'food' | 'other';
+  /** 'food' feeds the cat companion; 'wheel' launches the roulette reward. */
+  category: 'food' | 'wheel' | 'other';
   image: string | null;
 }
 
@@ -527,14 +527,32 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                       maxLength={200}
                     />
                     <div className="flex items-center justify-between gap-2">
-                      <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                         <input
-                          type="checkbox"
+                          type="radio"
+                          checked={draft.category === 'other'}
+                          onChange={() => setDraft({ ...draft, category: 'other' })}
+                          className="accent-amber-500"
+                        />
+                        📦 Standard
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                        <input
+                          type="radio"
                           checked={draft.category === 'food'}
-                          onChange={(e) => setDraft({ ...draft, category: e.target.checked ? 'food' : 'other' })}
+                          onChange={() => setDraft({ ...draft, category: 'food' })}
                           className="accent-amber-500"
                         />
                         🐱 Food (feeds the cat)
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this launches the casino roulette — the ball lands on a spice reward">
+                        <input
+                          type="radio"
+                          checked={draft.category === 'wheel'}
+                          onChange={() => setDraft({ ...draft, category: 'wheel' })}
+                          className="accent-amber-500"
+                        />
+                        🎰 Wheel of Fortune
                       </label>
                       <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                         <input

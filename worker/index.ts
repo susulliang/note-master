@@ -85,7 +85,7 @@ export interface StoreProduct {
   price: number;
   active: boolean;
   image: string | null;
-  category: 'food' | 'other';
+  category: 'food' | 'wheel' | 'other';
 }
 
 interface RegisterPayload {
@@ -517,6 +517,21 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            username TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL
          )`
       ).run();
+      // Wheel of Fortune — one pre-paid spin per wheel-product purchase. The
+      // token is minted at purchase time and consumed exactly once at spin
+      // time, so each purchase can yield at most one server-decided reward.
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS wheel_spins (
+           token TEXT PRIMARY KEY,
+           username TEXT NOT NULL,
+           product_id TEXT NOT NULL,
+           pocket INTEGER,
+           reward INTEGER NOT NULL DEFAULT 0,
+           consumed INTEGER NOT NULL DEFAULT 0,
+           created_at INTEGER NOT NULL,
+           consumed_at INTEGER
+         )`
+      ).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -581,7 +596,7 @@ function storeProductPublic(row: StoreProductRow): StoreProduct {
     price: Number(row.price),
     active: Number(row.active) === 1,
     image: typeof row.image === 'string' && row.image ? row.image : null,
-    category: row.category === 'food' ? 'food' : 'other',
+    category: row.category === 'food' ? 'food' : row.category === 'wheel' ? 'wheel' : 'other',
   };
 }
 
@@ -986,7 +1001,77 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
     )
       .bind(user.username, product.id, product.name, price, now),
   ]);
+
+  // Wheel of Fortune products: mint a one-time spin token so the client can
+  // run the roulette animation and claim exactly one server-decided reward.
+  const isWheel = product.category === 'wheel' || /wheel/i.test(product.name);
+  if (isWheel) {
+    const token = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO wheel_spins (token, username, product_id, created_at) VALUES (?1, ?2, ?3, ?4)'
+    ).bind(token, user.username, product.id, now).run();
+    return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product), spinToken: token });
+  }
   return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product) });
+}
+
+/** Casino roulette pocket layout (European single-zero wheel, clockwise from
+ *  0) — shared reference for reward values; the client draws the same order. */
+const WHEEL_REWARDS: readonly number[] = (() => {
+  const rewards = new Array<number>(37).fill(10);
+  rewards[0] = 250; // green zero — jackpot
+  for (const n of [7, 17, 28, 35]) rewards[n] = 50;
+  for (const n of [9, 13, 19, 22, 31]) rewards[n] = 25;
+  return rewards;
+})();
+
+/** POST /api/store/wheel/spin { token } — consume a pre-paid spin token and
+ *  award the spice for the server-chosen pocket. Server-authoritative: the
+ *  pocket comes from crypto randomness here; the client animation merely
+ *  replays the outcome. Tokens are single-use and bound to the buyer. */
+async function handleWheelSpin(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { token?: unknown };
+  try {
+    payload = (await request.json()) as { token?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const token = String(payload.token ?? '');
+  if (!token) return authJson({ error: 'Missing spin token' }, 400);
+
+  await ensureSpiceSchema(env);
+  const spin = await env.DB.prepare(
+    'SELECT token, username, consumed FROM wheel_spins WHERE token = ?1'
+  ).bind(token).first<{ token: string; username: string; consumed: number }>();
+  if (!spin || spin.username !== user.username)
+    return authJson({ error: 'Spin token not found' }, 404);
+  if (Number(spin.consumed) !== 0)
+    return authJson({ error: 'This spin has already been played' }, 409);
+
+  // Uniform pocket draw — 37 European pockets.
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  const pocket = buf[0] % 37;
+  const reward = WHEEL_REWARDS[pocket] ?? 10;
+  const now = Date.now();
+
+  // Consume the token and pay out atomically-ish; the conditional UPDATE is
+  // the guard against double-spin races.
+  const consume = await env.DB.prepare(
+    'UPDATE wheel_spins SET consumed = 1, pocket = ?2, reward = ?3, consumed_at = ?4 WHERE token = ?1 AND consumed = 0'
+  ).bind(token, pocket, reward, now).run();
+  if (!consume.meta.changes)
+    return authJson({ error: 'This spin has already been played' }, 409);
+
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
+      .bind(user.username, reward, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'wheel', ?3, ?4)")
+      .bind(user.username, reward, `Roulette pocket ${pocket}`, now),
+  ]);
+  return authJson({ pocket, reward, spice: Number(user.spice ?? 0) + reward });
 }
 
 interface AdminStorePayload {
@@ -1035,7 +1120,7 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   // Product image: a client-produced data URL (PNG keeps alpha, JPEG for
   // photos) — never larger than ~350 KB after the 256×256 downscale.
   const image = typeof p.image === 'string' && p.image ? p.image : null;
-  const category = p.category === 'food' ? 'food' : 'other';
+  const category = p.category === 'food' ? 'food' : p.category === 'wheel' ? 'wheel' : 'other';
   if (image && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image))
     return authJson({ error: 'Image must be a base64 PNG or JPEG data URL' }, 400);
   if (image && image.length > 500_000)
@@ -1157,6 +1242,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleStorePurchase(request, env, user);
+  }
+  if (path === '/api/store/wheel/spin' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleWheelSpin(request, env, user);
   }
 
   // Admin routes — bearer must belong to an is_admin account.

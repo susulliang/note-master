@@ -21,7 +21,7 @@ export interface StoreProduct {
   /** Client-produced 256×256 data URL (PNG keeps alpha, JPEG for photos). */
   image: string | null;
   /** 'food' feeds the cat companion; 'other' is decorative. */
-  category: 'food' | 'other';
+  category: 'food' | 'wheel' | 'other';
 }
 
 const TOKEN_KEY = 'ecovacs_auth_token';
@@ -166,13 +166,26 @@ export async function listStore(): Promise<StoreProduct[]> {
   return out.products;
 }
 
-/** Buy a product — returns the new spice balance. */
-export async function purchaseItem(productId: string): Promise<{ spice: number }> {
+/** Buy a product — returns the new spice balance. Wheel of Fortune products
+ *  additionally return a one-time spinToken for the roulette reward claim. */
+export async function purchaseItem(productId: string): Promise<{ spice: number; spinToken?: string }> {
   const token = getStoredToken();
-  const out = await call<{ spice: number }>('/api/store/purchase', {
+  const out = await call<{ spice: number; spinToken?: string }>('/api/store/purchase', {
     method: 'POST',
     body: JSON.stringify({ productId }),
     token,
+  });
+  return out;
+}
+
+/** Play a Wheel of Fortune spin — consumes the purchase token and returns the
+ *  server-decided pocket, its spice reward, and the new balance. */
+export async function spinWheel(token: string): Promise<{ pocket: number; reward: number; spice: number }> {
+  const authToken = getStoredToken();
+  const out = await call<{ pocket: number; reward: number; spice: number }>('/api/store/wheel/spin', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+    token: authToken,
   });
   return out;
 }
