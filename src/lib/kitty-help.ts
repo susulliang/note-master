@@ -29,6 +29,7 @@ import {
   type TemplateEntry,
 } from '@/lib/amr-templates';
 import { fetchAmrTemplates } from '@/lib/amr-db';
+import { loadSopRaw } from '@/lib/sop-db';
 import { extractJsonLoose } from '@/lib/llm-parser';
 import type { FaqEntry } from '@/utils/productData';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
@@ -176,27 +177,8 @@ export interface KittyCandidate {
   sheetKey?: string;
 }
 
-/* SOP loader — same lazy concat as SopPanel (files split under /SOP). */
-const sopLoaders = import.meta.glob('/SOP/*.md', {
-  query: '?raw',
-  import: 'default',
-}) as Record<string, () => Promise<string>>;
-let sopRawPromise: Promise<string> | null = null;
-function loadSopRaw(): Promise<string> {
-  if (!sopRawPromise) {
-    sopRawPromise = (async () => {
-      const entries = await Promise.all(
-        Object.entries(sopLoaders).map(async ([key, load]) => [key, await load()] as const)
-      );
-      return entries
-        .filter(([key]) => !/000_INDEX\.md$/.test(key))
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([, content]) => content)
-        .join('\n\n');
-    })();
-  }
-  return sopRawPromise;
-}
+/* SOP loader — shared D1-first loader (see sop-db). Falls back to the
+ * baked /SOP/*.md concat when the D1 pool is unavailable. */
 
 let sopSectionsPromise: Promise<SopSection[]> | null = null;
 function loadSopSections(): Promise<SopSection[]> {

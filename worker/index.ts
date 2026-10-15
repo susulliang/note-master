@@ -672,6 +672,87 @@ async function handleAmrTemplatePost(request: Request, env: Env): Promise<Respon
   return authJson({ ok: true });
 }
 
+// ── SOP handbook (Feishu wiki export, admin-editable) ────────────────────────
+
+interface SopEntryRow {
+  id: string;
+  level: number;
+  title: string;
+  body: string;
+  parent_id: string | null;
+  sort_order: number;
+  updated_at: number;
+}
+
+let sopSchemaPromise: Promise<void> | null = null;
+
+/** sop_entries is created by scripts/import-sop-wiki.mjs on the remote DB;
+ *  self-heal here so a fresh D1 also works. */
+async function ensureSopSchema(env: Env): Promise<void> {
+  if (!sopSchemaPromise) {
+    sopSchemaPromise = env.DB
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS sop_entries (
+           id TEXT PRIMARY KEY,
+           level INTEGER NOT NULL,
+           title TEXT NOT NULL,
+           body TEXT NOT NULL DEFAULT '',
+           parent_id TEXT,
+           sort_order INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL DEFAULT 0
+         )`
+      )
+      .run()
+      .then(() => undefined)
+      .catch((err) => {
+        sopSchemaPromise = null; // retry on the next request
+        throw err;
+      });
+  }
+  return sopSchemaPromise;
+}
+
+/** GET /api/sop — the full SOP handbook as heading sections, in document
+ *  order (any logged-in user). Clients reassemble raw markdown and reuse
+ *  the existing indexer. */
+async function handleSopGet(env: Env): Promise<Response> {
+  await ensureSopSchema(env);
+  const result = await env.DB.prepare(
+    `SELECT id, level, title, body, parent_id AS parentId,
+            sort_order AS sortOrder, updated_at AS updatedAt
+     FROM sop_entries ORDER BY sort_order`
+  ).all<SopEntryRow>();
+  return authJson({ entries: result.results ?? [] });
+}
+
+/** POST /api/admin/sop-entry { id, title, body } — admin edit of one SOP
+ *  heading section (title + own body). Structure (level/parent/order) is
+ *  owned by the wiki re-import, not by edits. */
+async function handleSopEntryPost(request: Request, env: Env): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 256_000) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { id?: unknown; title?: unknown; body?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const id = typeof payload.id === 'string' ? payload.id.trim() : '';
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  const body = typeof payload.body === 'string' ? payload.body : '';
+  if (!/^h[1-6]-\d+$/.test(id)) return authJson({ error: 'Missing section id' }, 400);
+  if (!title || title.length > 300) return authJson({ error: 'Title must be 1–300 characters' }, 400);
+  if (body.length > 200_000) return authJson({ error: 'Body too large (max ~200 KB)' }, 400);
+  await ensureSopSchema(env);
+  const result = await env.DB.prepare(
+    `UPDATE sop_entries SET title = ?2, body = ?3, updated_at = ?4 WHERE id = ?1`
+  )
+    .bind(id, title, body, Date.now())
+    .run();
+  if (!result.meta.changes) return authJson({ error: 'SOP section not found' }, 404);
+  return authJson({ ok: true });
+}
+
 /** GET /api/store/purchases — the 100 most recent store transactions,
  *  visible to every logged-in user (powers the DASH "Redeemed" widget). */
 async function handleStorePurchases(env: Env): Promise<Response> {
@@ -861,6 +942,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleAmrTemplatesGet(env);
   }
+
+  // SOP handbook — read for any logged-in user; edits admin-only.
+  if (path === '/api/sop' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleSopGet(env);
+  }
   if (path === '/api/store/purchase' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
@@ -876,6 +964,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
   if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
   if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env);
+  if (path === '/api/admin/sop-entry' && request.method === 'POST') return handleSopEntryPost(request, env);
   if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
 }
@@ -1065,7 +1154,8 @@ export default {
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/spice') ||
-      url.pathname.startsWith('/api/amr-templates')
+      url.pathname.startsWith('/api/amr-templates') ||
+      url.pathname.startsWith('/api/sop')
     ) {
       return handleAuth(request, env);
     }

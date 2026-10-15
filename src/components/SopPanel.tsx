@@ -7,38 +7,24 @@ import {
   type KeywordCandidate,
 } from '@/utils/sopIndexer';
 import { extractJsonLoose } from '@/lib/llm-parser';
-import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
+import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveSopImageSrc, renderBodyMarkdown, renderInlineText } from './SopPanel.md';
+import {
+  loadSopRaw,
+  fetchSopEntries,
+  assembleSopMarkdown,
+  saveSopEntry,
+  patchSopEntry,
+  resetSopRawCache,
+  type SopEntry,
+} from '@/lib/sop-db';
+import { useAuth } from '@/lib/auth-context';
 
-/* SOP handbook is split into numbered section files (01_…, 02_…, …) under
- * /SOP so the handbook can be updated section-by-section. We glob all .md
- * files LAZILY (no `eager`) — the markdown chunks are fetched after the app
- * shell has painted so the initial load isn't blocked by the handbook text.
- * Once resolved we drop the INDEX, sort by filename, and concatenate into
- * one raw string so indexSopMarkdown builds a single unified heading tree. */
-const sopLoaders = import.meta.glob('/SOP/*.md', {
-  query: '?raw',
-  import: 'default',
-}) as Record<string, () => Promise<string>>;
-
-/** Lazily load + concatenate all SOP section files (cached promise). */
-let sopRawPromise: Promise<string> | null = null;
-function loadSopRaw(): Promise<string> {
-  if (!sopRawPromise) {
-    sopRawPromise = (async () => {
-      const entries = await Promise.all(
-        Object.entries(sopLoaders).map(async ([key, load]) => [key, await load()] as const)
-      );
-      return entries
-        .filter(([key]) => !/000_INDEX\.md$/.test(key))
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([, content]) => content)
-        .join('\n\n');
-    })();
-  }
-  return sopRawPromise;
-}
+/* SOP handbook source — the D1-backed pool (Feishu wiki import, admin-
+ * editable) is preferred; the shared loader in sop-db falls back to the
+ * baked /SOP/*.md bundle when D1 is unavailable. Loaded LAZILY after the
+ * app shell has painted so the initial load isn't blocked. */
 
 /** Min shape of the parser hook's exposed `generate` return. The cloud
  *  DeepSeek completion returns the same shape so the two backends share a
@@ -101,9 +87,12 @@ export default function SopPanel({
   const [sopRaw, setSopRaw] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    loadSopRaw().then((raw) => {
-      if (alive) setSopRaw(raw);
-    });
+    void (async () => {
+      const rows = await fetchSopEntries();
+      if (!alive) return;
+      setSopRows(rows.length > 0 ? rows : null);
+      setSopRaw(await loadSopRaw());
+    })();
     return () => {
       alive = false;
     };
@@ -114,6 +103,17 @@ export default function SopPanel({
     for (const s of sections) m.set(s.id, s);
     return m;
   }, [sections]);
+
+  // --- admin editing (D1-backed handbook) ----------------------------------
+  // Admins edit a section's title + own body inline; the change upserts
+  // into D1 and the panel reassembles its raw markdown from the patched
+  // rows (Kitty Help shares the same D1-first loader).
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.isAdmin ?? false;
+  const [sopRows, setSopRows] = useState<SopEntry[] | null>(null);
+  const [sopEditing, setSopEditing] = useState<{ title: string; body: string } | null>(null);
+  const [sopSaving, setSopSaving] = useState(false);
+  const [sopError, setSopError] = useState<string | null>(null);
 
   // --- query inputs ----------------------------------------------------
   const issueType = String(formData[issueTypeId] ?? '').trim();
@@ -324,6 +324,41 @@ export default function SopPanel({
     return chain;
   })();
 
+  /** Persist an admin edit for the active section: upsert to D1, patch the
+   *  client cache, and reassemble the panel's raw markdown in place. */
+  const saveSopEdit = async () => {
+    if (!sopEditing || !activeSection || sopSaving) return;
+    setSopSaving(true);
+    setSopError(null);
+    try {
+      const title = sopEditing.title.trim();
+      await saveSopEntry({ id: activeSection.id, title, body: sopEditing.body });
+      const prev = sopRows?.find((r) => r.id === activeSection.id);
+      const updated: SopEntry = {
+        id: activeSection.id,
+        level: prev?.level ?? activeSection.level,
+        title,
+        body: sopEditing.body,
+        parentId: prev?.parentId ?? activeSection.parentId,
+        sortOrder: prev?.sortOrder ?? 0,
+        updatedAt: Date.now(),
+      };
+      patchSopEntry(updated);
+      const nextRows = sopRows ? sopRows.map((r) => (r.id === updated.id ? updated : r)) : null;
+      setSopRows(nextRows);
+      if (nextRows) setSopRaw(assembleSopMarkdown(nextRows));
+      else {
+        resetSopRawCache();
+        setSopRaw(await loadSopRaw());
+      }
+      setSopEditing(null);
+    } catch (err) {
+      setSopError(err instanceof Error ? err.message : 'Could not save the SOP section.');
+    } finally {
+      setSopSaving(false);
+    }
+  };
+
   // Handbook chunks still loading — skeleton instead of the full panel.
   if (sopRaw === null) {
     return (
@@ -531,19 +566,79 @@ export default function SopPanel({
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
                   {activeSection.id} · H{activeSection.level} · {activeSection.bodyLines.length} body lines
                 </div>
-                <div className="mt-0.5 text-[14px] font-bold text-foreground">{renderInlineText(activeSection.title)}</div>
+                {sopEditing ? (
+                  <input
+                    value={sopEditing.title}
+                    onChange={(e) => setSopEditing((d) => (d ? { ...d, title: e.target.value } : d))}
+                    className="glass-field mt-1 h-8 w-full rounded-md px-2 text-[13px] font-bold text-foreground"
+                    placeholder="Section heading"
+                  />
+                ) : (
+                  <div className="mt-0.5 text-[14px] font-bold text-foreground">{renderInlineText(activeSection.title)}</div>
+                )}
               </div>
-              {pinned && (
-                <span className="rounded-full border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent/90">
-                  Pinned
-                </span>
-              )}
+              <div className="flex shrink-0 items-center gap-1.5">
+                {sopEditing ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void saveSopEdit()}
+                      disabled={sopSaving}
+                      className="rounded-md bg-primary px-2.5 py-1 text-[10.5px] font-bold text-primary-foreground transition-opacity disabled:opacity-60"
+                    >
+                      {sopSaving ? 'Saving…' : 'Save to D1'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSopEditing(null);
+                        setSopError(null);
+                      }}
+                      className="rounded-md border border-border px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const entry = sopRows?.find((r) => r.id === activeSection.id);
+                        setSopEditing({ title: activeSection.title, body: entry?.body ?? activeSection.bodyLines.join('\n') });
+                        setSopError(null);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[10px] font-bold text-accent transition-colors hover:bg-accent/10"
+                    >
+                      <Pencil className="size-3" /> Edit
+                    </button>
+                  )
+                )}
+                {pinned && (
+                  <span className="rounded-full border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent/90">
+                    Pinned
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="space-y-0.5">
-              {renderBodyMarkdown(activeSection.bodyLines, {
-                onImageClick: (src, alt) => setLightbox({ src, alt }),
-              })}
-            </div>
+            {sopEditing ? (
+              <div className="space-y-1.5">
+                <textarea
+                  value={sopEditing.body}
+                  onChange={(e) => setSopEditing((d) => (d ? { ...d, body: e.target.value } : d))}
+                  rows={16}
+                  className="custom-scrollbar glass-field w-full rounded-md px-2 py-1.5 font-mono text-[11px]"
+                  placeholder="Section body (markdown)"
+                />
+                {sopError && <p className="text-[10px] font-semibold text-red-400">{sopError}</p>}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {renderBodyMarkdown(activeSection.bodyLines, {
+                  onImageClick: (src, alt) => setLightbox({ src, alt }),
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
