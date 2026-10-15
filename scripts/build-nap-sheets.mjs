@@ -54,14 +54,71 @@ function bboxOf(buf) {
   return maxX < 0 ? null : { minX, minY, maxX, maxY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
+/**
+ * Keep only the LARGEST connected opaque blob of a raw 256px cell, zeroing
+ * everything else. The source contact sheets have each row's cat bleeding a
+ * few dozen px past its cell bottom, so every cell also contains the *feet
+ * of the cat above* as a stray disconnected fragment — including it made
+ * every built frame look like a sliced-off cat. 8-connectivity, alpha-gated.
+ */
+function keepLargestBlob(buf, size) {
+  const seen = new Uint8Array(size * size);
+  const label = new Int32Array(size * size).fill(-1);
+  const blobs = [];
+  const stack = [];
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const i = y * size + x;
+      if (seen[i] || buf[i * 4 + 3] <= ALPHA_MIN) continue;
+      const id = blobs.length;
+      let pixelCount = 0;
+      stack.push(i);
+      seen[i] = 1;
+      while (stack.length) {
+        const cur = stack.pop();
+        label[cur] = id;
+        pixelCount += 1;
+        const cx = cur % size;
+        const cy = (cur / size) | 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+            const ni = ny * size + nx;
+            if (!seen[ni] && buf[ni * 4 + 3] > ALPHA_MIN) {
+              seen[ni] = 1;
+              stack.push(ni);
+            }
+          }
+        }
+      }
+      blobs.push({ id, pixelCount });
+    }
+  }
+  if (blobs.length <= 1) return buf;
+  const best = blobs.reduce((a, b) => (b.pixelCount > a.pixelCount ? b : a)).id;
+  for (let i = 0; i < size * size; i += 1) {
+    if (buf[i * 4 + 3] > ALPHA_MIN && label[i] !== best) {
+      buf[i * 4 + 3] = 0;
+    }
+  }
+  return buf;
+}
+
 for (const { source, output } of TARGETS) {
   const src = sharp(readFileSync(resolve(CAT_DIR, source))).ensureAlpha();
   const frameBuffers = [];
   for (let row = 0; row < GRID; row += 1) {
     for (let col = 0; col < GRID; col += 1) {
-      const cell = await src
+      const cellRaw = await src
         .clone()
         .extract({ left: col * FRAME_IN, top: row * FRAME_IN, width: FRAME_IN, height: FRAME_IN })
+        .raw()
+        .toBuffer();
+      // Drop the previous row's feet fragment before any measuring.
+      keepLargestBlob(cellRaw, FRAME_IN);
+      const cell = await sharp(cellRaw, { raw: { width: FRAME_IN, height: FRAME_IN, channels: 4 } })
         .resize(FRAME_OUT, FRAME_OUT, { kernel: 'nearest' })
         .raw()
         .toBuffer();
