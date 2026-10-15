@@ -54,7 +54,7 @@ interface ProductDraft {
   price: string;
   active: boolean;
   /** 'food' feeds the cat companion; 'wheel' launches the roulette reward. */
-  category: 'food' | 'wheel' | 'other';
+  category: 'food' | 'wheel' | 'cards' | 'other';
   image: string | null;
 }
 

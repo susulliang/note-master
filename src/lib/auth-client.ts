@@ -20,8 +20,18 @@ export interface StoreProduct {
   active: boolean;
   /** Client-produced 256×256 data URL (PNG keeps alpha, JPEG for photos). */
   image: string | null;
-  /** 'food' feeds the cat companion; 'other' is decorative. */
-  category: 'food' | 'wheel' | 'other';
+  /** 'food' feeds the cat companion; 'cards' is a TCG card draw; 'other' is decorative. */
+  category: 'food' | 'wheel' | 'cards' | 'other';
+}
+
+/** A card pulled from a TCG set (server-decided; image served from /assets/tcg). */
+export interface TcgCard {
+  id: string;
+  code: string;
+  name: string;
+  price: number;
+  rarity: string;
+  image: string;
 }
 
 const TOKEN_KEY = 'ecovacs_auth_token';
@@ -167,15 +177,29 @@ export async function listStore(): Promise<StoreProduct[]> {
 }
 
 /** Buy a product — returns the new spice balance. Wheel of Fortune products
- *  additionally return a one-time spinToken for the roulette reward claim. */
-export async function purchaseItem(productId: string): Promise<{ spice: number; spinToken?: string }> {
+ *  additionally return a one-time spinToken for the roulette reward claim;
+ *  TCG card products return the server-decided card. */
+export async function purchaseItem(
+  productId: string,
+): Promise<{ spice: number; spinToken?: string; card?: TcgCard }> {
   const token = getStoredToken();
-  const out = await call<{ spice: number; spinToken?: string }>('/api/store/purchase', {
+  const out = await call<{ spice: number; spinToken?: string; card?: TcgCard }>('/api/store/purchase', {
     method: 'POST',
     body: JSON.stringify({ productId }),
     token,
   });
   return out;
+}
+
+/** The signed-in user's TCG card pulls (cardId + qty rows). */
+export async function fetchCardCollection(): Promise<
+  { cardId: string; qty: number; firstAcquired: number; lastAcquired: number }[]
+> {
+  const token = getStoredToken();
+  const out = await call<{
+    collection: { cardId: string; qty: number; firstAcquired: number; lastAcquired: number }[];
+  }>('/api/cards/collection', { token });
+  return out.collection;
 }
 
 /** Play a Wheel of Fortune spin — consumes the purchase token and returns the

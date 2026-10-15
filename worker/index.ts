@@ -9,6 +9,8 @@
 
 /// <reference path="./worker-configuration.d.ts" />
 
+import { TCG_CARDS, TCG_TIER_WEIGHTS } from './tcg-manifest.gen';
+
 interface TestResultSummary {
   totalSubmissions: number;
   averageScorePct: number | null;
@@ -532,6 +534,26 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            consumed_at INTEGER
          )`
       ).run();
+      // TCG card draws — one row per (user, card) with a duplicate counter.
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS card_collection (
+           username TEXT NOT NULL,
+           card_id TEXT NOT NULL,
+           qty INTEGER NOT NULL DEFAULT 1,
+           first_acquired INTEGER NOT NULL,
+           last_acquired INTEGER NOT NULL,
+           PRIMARY KEY (username, card_id)
+         )`
+      ).run();
+      // Seed the SDS card-draw store item (id-stable; price/edits via admin).
+      const nowSeed = Date.now();
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO store_products
+           (id, name, emoji, description, price, active, category, created_at, updated_at)
+         VALUES ('tcg-sds-card', 'The Seven Deadly Sins — Draw a Card', '🃏',
+           'Open a pack from the Seven Deadly Sins TCG set — 249 cards, rarity set by market price. Results land in My Collection.',
+           9, 1, 'cards', ?1, ?1)`
+      ).bind(nowSeed).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -1012,7 +1034,50 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
     ).bind(token, user.username, product.id, now).run();
     return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product), spinToken: token });
   }
+
+  // TCG card products: decide the card server-side (rarity-weighted), record
+  // it in the collection, and return it immediately — the client animation is
+  // a pure reveal of this outcome.
+  if (product.category === 'cards') {
+    const card = pickTcgCard();
+    await env.DB.prepare(
+      `INSERT INTO card_collection (username, card_id, qty, first_acquired, last_acquired)
+       VALUES (?1, ?2, 1, ?3, ?3)
+       ON CONFLICT (username, card_id) DO UPDATE SET qty = qty + 1, last_acquired = ?3`
+    ).bind(user.username, card.id, now).run();
+    return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product), card });
+  }
   return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product) });
+}
+
+/** Rarity-weighted card pick from the baked SDS pool (crypto random). */
+function pickTcgCard(): (typeof TCG_CARDS)[number] {
+  const tierIds = new Map<string, (typeof TCG_CARDS)[number][]>();
+  for (const card of TCG_CARDS) {
+    const list = tierIds.get(card.rarity) ?? [];
+    list.push(card);
+    tierIds.set(card.rarity, list);
+  }
+  const total = Object.values(TCG_TIER_WEIGHTS).reduce((a, b) => a + b, 0);
+  let roll = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * total;
+  for (const [tier, weight] of Object.entries(TCG_TIER_WEIGHTS)) {
+    roll -= weight;
+    if (roll > 0) continue;
+    const list = tierIds.get(tier);
+    if (!list?.length) continue;
+    return list[crypto.getRandomValues(new Uint32Array(1))[0] % list.length];
+  }
+  const commons = tierIds.get('Common') ?? TCG_CARDS;
+  return commons[crypto.getRandomValues(new Uint32Array(1))[0] % commons.length];
+}
+
+/** GET /api/cards/collection — the signed-in user's pulled cards. */
+async function handleCardsCollection(env: Env, user: AuthUserRow): Promise<Response> {
+  await ensureSpiceSchema(env);
+  const result = await env.DB.prepare(
+    'SELECT card_id AS cardId, qty, first_acquired AS firstAcquired, last_acquired AS lastAcquired FROM card_collection WHERE username = ?1 ORDER BY last_acquired DESC'
+  ).bind(user.username).all<{ cardId: string; qty: number; firstAcquired: number; lastAcquired: number }>();
+  return authJson({ collection: result.results ?? [] });
 }
 
 /** Casino roulette pocket layout (European single-zero wheel, clockwise from
@@ -1250,6 +1315,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleWheelSpin(request, env, user);
   }
 
+  // TCG card collection — any logged-in user can view their own pulls.
+  if (path === '/api/cards/collection' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCardsCollection(env, user);
+  }
+
   // Admin routes — bearer must belong to an is_admin account.
   const admin = await authBearerUser(request, env);
   if (!admin || Number(admin.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
@@ -1451,6 +1523,7 @@ export default {
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/pet') ||
       url.pathname.startsWith('/api/store') ||
+      url.pathname.startsWith('/api/cards') ||
       url.pathname.startsWith('/api/spice') ||
       url.pathname.startsWith('/api/amr-templates') ||
       url.pathname.startsWith('/api/sop') ||

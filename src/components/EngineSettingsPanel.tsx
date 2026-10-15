@@ -11,6 +11,7 @@ import type { KeywordAlert } from '@/lib/keyword-alerts';
 import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 import KeywordAlertContent from '@/components/KeywordAlertContent';
 import StorePanel from '@/components/StorePanel';
+import CardCollectionPanel from '@/components/CardCollectionPanel';
 
 /** Shared prefers-reduced-motion media query (reactive). */
 function useReducedMotion(): boolean {
@@ -342,6 +343,7 @@ export default function EngineSettingsPanel({
   // Account state — surfaced as a login-status block at the top of Settings.
   const { user: authUser, logout: authLogout, resolving: authResolving, setSpice: setAuthSpice } = useAuth();
   const [storeOpen, setStoreOpen] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
 
   // Live parse window — what the NEXT parse will send (debounced 1s)
   const [windowTick, setWindowTick] = useState(0);
@@ -500,14 +502,24 @@ export default function EngineSettingsPanel({
                     {authUser.spice}
                   </span>
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setStoreOpen(true)}
-                  className="flex items-center gap-1 rounded-lg border border-amber-400/50 bg-amber-500/80 px-2.5 py-1 text-[11px] font-bold text-white transition-all hover:brightness-110"
-                  title="Open the spice store"
-                >
-                  🛒 Store
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCollectionOpen(true)}
+                    className="flex items-center gap-1 rounded-lg border border-violet-400/50 bg-violet-500/70 px-2.5 py-1 text-[11px] font-bold text-white transition-all hover:brightness-110"
+                    title="View your TCG card collection"
+                  >
+                    🃏 My Collection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStoreOpen(true)}
+                    className="flex items-center gap-1 rounded-lg border border-amber-400/50 bg-amber-500/80 px-2.5 py-1 text-[11px] font-bold text-white transition-all hover:brightness-110"
+                    title="Open the spice store"
+                  >
+                    🛒 Store
+                  </button>
+                </div>
               </div>
               {storeOpen && (
                 <StorePanel
@@ -516,6 +528,7 @@ export default function EngineSettingsPanel({
                   onClose={() => setStoreOpen(false)}
                 />
               )}
+              {collectionOpen && <CardCollectionPanel onClose={() => setCollectionOpen(false)} />}
             </>
           )}
         </section>

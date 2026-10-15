@@ -9,9 +9,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, ShoppingBag, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { listStore, purchaseItem, type StoreProduct } from '@/lib/auth-client';
+import { listStore, purchaseItem, type StoreProduct, type TcgCard } from '@/lib/auth-client';
 import { CAT_EAT_EVENT } from '@/lib/cat-sprites';
 import RouletteModal from '@/components/RouletteModal';
+import CardOpeningModal from '@/components/CardOpeningModal';
 
 interface StorePanelProps {
   /** Current spice balance (displayed in the header). */
@@ -28,6 +29,8 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
   const [boughtId, setBoughtId] = useState<string | null>(null);
   /** Non-null while the Wheel of Fortune ceremony is on screen. */
   const [wheelToken, setWheelToken] = useState<string | null>(null);
+  /** Non-null while the TCG card-opening ceremony is on screen. */
+  const [wonCard, setWonCard] = useState<TcgCard | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -52,6 +55,11 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
       // Wheel of Fortune: open the roulette ceremony instead of the toast.
       if (out.spinToken) {
         setWheelToken(out.spinToken);
+        return;
+      }
+      // TCG card product: run the crate-opening ceremony for the won card.
+      if (out.card) {
+        setWonCard(out.card);
         return;
       }
       setBoughtId(product.id);
@@ -173,7 +181,15 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
                   )}
                   title={affordable ? `Buy for ${product.price} spice` : `Need ${product.price} spice`}
                 >
-                  {busy ? <Loader2 className="size-3.5 animate-spin" /> : bought ? 'Purchased!' : affordable ? 'Buy' : 'Locked'}
+                  {busy ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : bought ? (
+                    'Purchased!'
+                  ) : affordable ? (
+                    product.category === 'cards' ? 'Draw' : 'Buy'
+                  ) : (
+                    'Locked'
+                  )}
                 </button>
               </div>
             );
@@ -186,6 +202,15 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
 
         {wheelToken && (
           <RouletteModal token={wheelToken} onSpiceChange={onSpiceChange} onClose={() => setWheelToken(null)} />
+        )}
+
+        {wonCard && (
+          <CardOpeningModal
+            card={wonCard}
+            spice={spice}
+            onSpiceChange={onSpiceChange}
+            onClose={() => setWonCard(null)}
+          />
         )}
       </div>
     </div>
