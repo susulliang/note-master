@@ -65,12 +65,13 @@ export function assembleSopMarkdown(rows: SopEntry[]): string {
     .join('\n\n');
 }
 
-/** Admin upsert of one SOP section (worker validates + stamps updated_at). */
+/** Admin upsert of one SOP section (worker validates + stamps updated_at).
+ *  Returns the admin's fresh spice balance (+5 per edit). */
 export async function saveSopEntry(entry: {
   id: string;
   title: string;
   body: string;
-}): Promise<void> {
+}): Promise<number | undefined> {
   const token = getStoredToken();
   if (!token) throw new Error('Only logged-in admins can edit SOP sections.');
   const res = await fetch(`${getApiBase()}/api/admin/sop-entry`, {
@@ -78,8 +79,9 @@ export async function saveSopEntry(entry: {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(entry),
   });
-  const data = await res.json() as { error?: string };
+  const data = await res.json() as { error?: string; spice?: number };
   if (!res.ok) throw new Error(data.error || 'Could not save the SOP section.');
+  return data.spice;
 }
 
 /* --------------------- raw-markdown loader (D1 first) ----------------- */

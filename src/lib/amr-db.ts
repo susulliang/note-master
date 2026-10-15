@@ -51,7 +51,8 @@ export function patchAmrTemplate(updated: AmrTemplate): void {
   cache = cache.map((t) => (t.id === updated.id ? updated : t));
 }
 
-/** Admin upsert of one template row (worker validates + stamps updated_at). */
+/** Admin upsert of one template row (worker validates + stamps updated_at).
+ *  Returns the admin's fresh spice balance (+5 per edit). */
 export async function saveAmrTemplate(t: {
   id: string;
   name: string;
@@ -59,7 +60,7 @@ export async function saveAmrTemplate(t: {
   description: string;
   subject: string;
   html: string;
-}): Promise<void> {
+}): Promise<number | undefined> {
   const token = getStoredToken();
   if (!token) throw new Error('Only logged-in admins can edit templates.');
   const res = await fetch(`${getApiBase()}/api/admin/amr-template`, {
@@ -67,6 +68,7 @@ export async function saveAmrTemplate(t: {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(t),
   });
-  const data = await res.json() as { error?: string };
+  const data = await res.json() as { error?: string; spice?: number };
   if (!res.ok) throw new Error(data.error || 'Could not save the template.');
+  return data.spice;
 }

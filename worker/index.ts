@@ -635,8 +635,9 @@ async function handleAmrTemplatesGet(env: Env): Promise<Response> {
   return authJson({ templates: result.results ?? [] });
 }
 
-/** POST /api/admin/amr-template — admin edit of one template row. */
-async function handleAmrTemplatePost(request: Request, env: Env): Promise<Response> {
+/** POST /api/admin/amr-template — admin edit of one template row. Every
+ *  successful edit earns the editing admin +5 spice. */
+async function handleAmrTemplatePost(request: Request, env: Env, admin: AuthUserRow): Promise<Response> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (contentLength > 512_000) return authJson({ error: 'Request is too large' }, 413);
   let payload: {
@@ -669,7 +670,16 @@ async function handleAmrTemplatePost(request: Request, env: Env): Promise<Respon
     .bind(id, name, folder, description, subject, html, Date.now())
     .run();
   if (!result.meta.changes) return authJson({ error: 'Template not found' }, 404);
-  return authJson({ ok: true });
+  // Every successful template edit earns the editing admin +5 spice.
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + 5, updated_at = ?3 WHERE username = ?1')
+      .bind(admin.username, 5, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 5, 'amr', ?2, ?3)")
+      .bind(admin.username, `amr:${id}`, now),
+  ]);
+  return authJson({ ok: true, spice: Number(admin.spice ?? 0) + 5 });
 }
 
 // ── SOP handbook (Feishu wiki export, admin-editable) ────────────────────────
@@ -727,8 +737,9 @@ async function handleSopGet(env: Env): Promise<Response> {
 
 /** POST /api/admin/sop-entry { id, title, body } — admin edit of one SOP
  *  heading section (title + own body). Structure (level/parent/order) is
- *  owned by the wiki re-import, not by edits. */
-async function handleSopEntryPost(request: Request, env: Env): Promise<Response> {
+ *  owned by the wiki re-import, not by edits. Every successful edit earns
+ *  the editing admin +5 spice. */
+async function handleSopEntryPost(request: Request, env: Env, admin: AuthUserRow): Promise<Response> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (contentLength > 256_000) return authJson({ error: 'Request is too large' }, 413);
   let payload: { id?: unknown; title?: unknown; body?: unknown };
@@ -750,7 +761,16 @@ async function handleSopEntryPost(request: Request, env: Env): Promise<Response>
     .bind(id, title, body, Date.now())
     .run();
   if (!result.meta.changes) return authJson({ error: 'SOP section not found' }, 404);
-  return authJson({ ok: true });
+  // Every successful SOP edit earns the editing admin +5 spice.
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + 5, updated_at = ?3 WHERE username = ?1')
+      .bind(admin.username, 5, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 5, 'sop', ?2, ?3)")
+      .bind(admin.username, `sop:${id}`, now),
+  ]);
+  return authJson({ ok: true, spice: Number(admin.spice ?? 0) + 5 });
 }
 
 /** GET /api/store/purchases — the 100 most recent store transactions,
@@ -963,8 +983,8 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
   if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
   if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
-  if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env);
-  if (path === '/api/admin/sop-entry' && request.method === 'POST') return handleSopEntryPost(request, env);
+  if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env, admin);
+  if (path === '/api/admin/sop-entry' && request.method === 'POST') return handleSopEntryPost(request, env, admin);
   if (path === '/api/roster' && request.method === 'POST') return handleRosterPost(request, env);
   return authJson({ error: 'Not found' }, 404);
 }

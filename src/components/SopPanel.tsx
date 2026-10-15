@@ -7,6 +7,7 @@ import {
   type KeywordCandidate,
 } from '@/utils/sopIndexer';
 import { extractJsonLoose } from '@/lib/llm-parser';
+import { toast } from 'sonner';
 import { MicOff, Sparkles, Search, BookOpen, Loader2, ChevronDown, RefreshCw, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveSopImageSrc, renderBodyMarkdown, renderInlineText } from './SopPanel.md';
@@ -108,7 +109,7 @@ export default function SopPanel({
   // Admins edit a section's title + own body inline; the change upserts
   // into D1 and the panel reassembles its raw markdown from the patched
   // rows (Kitty Help shares the same D1-first loader).
-  const { user: authUser } = useAuth();
+  const { user: authUser, setSpice } = useAuth();
   const isAdmin = authUser?.isAdmin ?? false;
   const [sopRows, setSopRows] = useState<SopEntry[] | null>(null);
   const [sopEditing, setSopEditing] = useState<{ title: string; body: string } | null>(null);
@@ -332,7 +333,7 @@ export default function SopPanel({
     setSopError(null);
     try {
       const title = sopEditing.title.trim();
-      await saveSopEntry({ id: activeSection.id, title, body: sopEditing.body });
+      const spice = await saveSopEntry({ id: activeSection.id, title, body: sopEditing.body });
       const prev = sopRows?.find((r) => r.id === activeSection.id);
       const updated: SopEntry = {
         id: activeSection.id,
@@ -352,6 +353,11 @@ export default function SopPanel({
         setSopRaw(await loadSopRaw());
       }
       setSopEditing(null);
+      // Editing the handbook earns the admin +5 spice.
+      if (typeof spice === 'number') {
+        setSpice(spice);
+        toast.success('🌶️ +5 Spice', { description: 'SOP section updated.' });
+      }
     } catch (err) {
       setSopError(err instanceof Error ? err.message : 'Could not save the SOP section.');
     } finally {

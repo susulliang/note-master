@@ -32,6 +32,7 @@ import {
 } from '@/lib/amr-db';
 import { entryFromAmrTemplate, rankEntries } from '@/lib/amr-templates';
 import { useAuth } from '@/lib/auth-context';
+import { toast } from 'sonner';
 import {
   findModels,
   freeSearch,
@@ -712,7 +713,7 @@ function AmrTemplatesTab({
   searching: boolean;
   onSaved: (updated: AmrTemplate) => void;
 }) {
-  const { user } = useAuth();
+  const { user, setSpice } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AmrTemplate | null>(null);
@@ -741,7 +742,7 @@ function AmrTemplatesTab({
     setSaving(true);
     setError(null);
     try {
-      await saveAmrTemplate({
+      const spice = await saveAmrTemplate({
         id: draft.id,
         name: draft.name.trim(),
         folder: draft.folder,
@@ -754,6 +755,11 @@ function AmrTemplatesTab({
       onSaved(updated);
       setDraft(null);
       setOpenId(updated.id);
+      // Editing the template pool earns the admin +5 spice.
+      if (typeof spice === 'number') {
+        setSpice(spice);
+        toast.success('🌶️ +5 Spice', { description: 'AMR template updated.' });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save the template.');
     } finally {
