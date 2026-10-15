@@ -7,15 +7,16 @@ import {
   Link as LinkIcon,
   Copy,
   Trash2,
-  User,
   X,
 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import type { ReportCaseRecord, ReportImportMeta } from '@/hooks/use-ccp-extension-bridge';
 import { parseOver24Workbook } from '@/lib/over24-workbook';
 import { getRoster, ROSTER_MONTHS } from '@/data/roster-index';
+import { fetchRosterMonth, type RosterCell } from '@/lib/roster-sync';
 import { DateBelt } from './DateBelt';
 import { TicketPanelsContext } from './FlowNode';
 import { useContext } from 'react';
@@ -231,24 +232,18 @@ export default function CaseTrakBoard({
   }, [columns]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<CaseStatus | null>(null);
-  const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
-  const [customerDraft, setCustomerDraft] = useState('');
 
   // --- Roster date belt ------------------------------------------------------
   // The board's columns are the agents ON DUTY on the selected roster date
-  // (belt defaults to today; falls back to the newest baked roster month when
-  // today's month has no roster). Changing the date rebuilds the columns and
-  // re-routes every case to its owner's column.
+  // (belt defaults to today). Baked roster months read their local table;
+  // any other month (and overlay edits for baked months too) is pulled from
+  // the D1 roster sync. Changing the date rebuilds the columns and re-routes
+  // every case to its owner's column.
   const today = new Date();
   const todayMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const initialMonthKey = ROSTER_MONTHS.includes(todayMonthKey)
-    ? todayMonthKey
-    : ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? todayMonthKey;
-  const [beltYear, setBeltYear] = useState(() => Number(initialMonthKey.slice(0, 4)));
-  const [beltMonth, setBeltMonth] = useState(() => Number(initialMonthKey.slice(5, 7)));
-  const [beltDay, setBeltDay] = useState(() =>
-    todayMonthKey === initialMonthKey ? today.getDate() : 1
-  );
+  const [beltYear, setBeltYear] = useState(() => today.getFullYear());
+  const [beltMonth, setBeltMonth] = useState(() => today.getMonth() + 1);
+  const [beltDay, setBeltDay] = useState(() => today.getDate());
   const beltDim = new Date(beltYear, beltMonth, 0).getDate();
   const beltDayList = useMemo(
     () => Array.from({ length: beltDim }, (_, i) => i + 1),
@@ -264,26 +259,54 @@ export default function CaseTrakBoard({
     setBeltDay(1);
   };
 
-  /** Columns derived from the selected date's roster: every non-DTC agent
-   *  whose shift code that day marks them on duty (A* shifts, or B07 — the
-   *  same on-duty rule the SHIFTS counters use, minus the AL edge case). */
+  // Roster month key currently on the belt.
+  const rosterMonthKey = `${beltYear}-${String(beltMonth).padStart(2, '0')}`;
+
+  // Pull the selected month's cells from D1 roster sync (covers months that
+  // have no baked local roster, and overlays admin edits on baked months).
+  const [d1Cells, setD1Cells] = useState<Record<string, RosterCell[]>>({});
+  const fetchedMonthsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (fetchedMonthsRef.current.has(rosterMonthKey)) return;
+    fetchedMonthsRef.current.add(rosterMonthKey);
+    let alive = true;
+    void fetchRosterMonth(rosterMonthKey).then((cells) => {
+      if (!alive) return;
+      if (cells.length > 0) {
+        setD1Cells((prev) => ({ ...prev, [rosterMonthKey]: cells }));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [rosterMonthKey]);
+
+  /** Columns derived from the selected date's roster: only Call and Chat
+   *  agents whose shift code that day marks them on duty (A* shifts or B07 —
+   *  the same on-duty rule the SHIFTS counters use, minus the AL edge case).
+   *  Agent identity/skill comes from the newest baked roster; the target
+   *  month's shift codes come from baked data overlaid with D1 cells. */
   const dutyColumns = useMemo(() => {
-    const monthKey = `${beltYear}-${String(beltMonth).padStart(2, '0')}`;
-    const roster = getRoster(monthKey);
-    if (!roster) return [];
-    const iso = `${monthKey}-${String(beltDay).padStart(2, '0')}`;
-    return roster
-      .filter((a) => a.skill !== 'DTC')
-      .filter((a) => {
-        const c = a.shifts[iso] ?? '';
-        return (c.startsWith('A') && c !== 'AL') || c === 'B07';
-      })
-      .map((a, i) => ({
+    const fallback =
+      getRoster(rosterMonthKey) ??
+      getRoster(ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? '') ??
+      [];
+    if (fallback.length === 0) return [];
+    const iso = `${rosterMonthKey}-${String(beltDay).padStart(2, '0')}`;
+    const cellCode = new Map<string, string>();
+    for (const c of d1Cells[rosterMonthKey] ?? []) {
+      if (c.iso === iso && c.code) cellCode.set(c.en, c.code);
+    }
+    return fallback
+      .filter((a) => a.skill === 'Call' || a.skill === 'Chat')
+      .map((a) => ({ a, code: cellCode.get(a.en) ?? a.shifts[iso] ?? '' }))
+      .filter(({ code }) => (code.startsWith('A') && code !== 'AL') || code === 'B07')
+      .map(({ a }, i) => ({
         id: a.en.toLowerCase().replace(/\s+/g, '_'),
         label: a.en,
         ...COLUMN_PALETTE[i % COLUMN_PALETTE.length],
       }));
-  }, [beltYear, beltMonth, beltDay]);
+  }, [rosterMonthKey, beltDay, d1Cells]);
 
   // Rebuild the board columns whenever the duty set changes and re-route all
   // cases to owner columns (off-duty agents' cases spread across the duty
@@ -296,6 +319,8 @@ export default function CaseTrakBoard({
   // Hover tooltip state — bubble appears only after the pointer has stayed on
   // a card for > 1s (matches the "hover for over 1 second" requirement).
   const [hoveredCase, setHoveredCase] = useState<string | null>(null);
+  // Viewport anchor for the portal-rendered hover bubble (fixed positioning).
+  const [hoverPos, setHoverPos] = useState<{ left: number; top: number; flip: boolean } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelsCtx = useContext(TicketPanelsContext);
   const openCase = panelsCtx?.openCase;
@@ -437,17 +462,6 @@ export default function CaseTrakBoard({
 
   const removeCase = useCallback((id: string) => {
     setItems((prev) => prev.filter((c) => c.id !== id));
-  }, [setItems]);
-
-  const setCustomerName = useCallback((id: string, name: string) => {
-    const trimmed = name.trim();
-    setItems((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? { ...c, customerName: trimmed || null, updatedAt: new Date().toISOString() }
-          : c
-      )
-    );
   }, [setItems]);
 
   const setDirectCaseUrl = useCallback((id: string) => {
@@ -637,18 +651,27 @@ export default function CaseTrakBoard({
   };
 
   // --- Distribute cases across columns ------------------------------------
-  // Owner-based routing: every case moves to the column whose label matches
-  // its Case Owner; unmatched cases spread round-robin. Used by the ⚖ button
-  // and automatically after an Over 24H xlsx upload.
+  // Random reshuffle: every case is re-assigned to a random column
+  // (shuffle + round-robin keeps the spread even).
   const distributeCases = useCallback(() => {
-    const next = routeByOwner(items, columns);
-    if (next === null) {
+    if (columns.length === 0) {
       toast.error('Add at least one column to distribute into.');
       return;
     }
-    setItems(next);
+    const now = new Date().toISOString();
+    const shuffled = items
+      .map((c) => ({ c, r: Math.random() }))
+      .sort((a, b) => a.r - b.r)
+      .map((x) => x.c);
+    const byId = new Map(items.map((c) => [c.id, c]));
+    shuffled.forEach((c, i) => {
+      const target = columns[i % columns.length].id;
+      const cur = byId.get(c.id);
+      if (cur && cur.status !== target) byId.set(c.id, { ...cur, status: target, updatedAt: now });
+    });
+    setItems(Array.from(byId.values()));
     toast.info(
-      `Routed ${items.length} case${items.length === 1 ? '' : 's'} to their owner columns (unmatched spread evenly).`
+      `Shuffled ${items.length} case${items.length === 1 ? '' : 's'} randomly across ${columns.length} columns.`
     );
   }, [columns, items, setItems]);
 
@@ -683,7 +706,14 @@ export default function CaseTrakBoard({
   };
 
   // --- Hover-tooltip handlers ---------------------------------------------
-  const startHover = (id: string) => {
+  // The bubble renders through a portal with position:fixed so it is never
+  // clipped by the column's scroll container.
+  const startHover = (id: string, el?: HTMLElement) => {
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const flip = r.bottom + 320 > window.innerHeight && r.top > 320;
+      setHoverPos({ left: r.left + r.width / 2, top: flip ? r.top - 8 : r.bottom + 8, flip });
+    }
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = setTimeout(() => setHoveredCase(id), 500);
   };
@@ -701,6 +731,10 @@ export default function CaseTrakBoard({
         @keyframes ct-bubble-in {
           from { opacity: 0; transform: translate(-50%, -4px) scale(0.97); }
           to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+        @keyframes ct-bubble-in-up {
+          from { opacity: 0; transform: translate(-50%, -100%) translateY(4px) scale(0.97); }
+          to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
         }
       `}</style>
     <div className="flex h-full min-h-full min-w-0 flex-col gap-3 p-4">
@@ -909,20 +943,21 @@ export default function CaseTrakBoard({
                       draggable
                       onDragStart={(e) => onDragStart(e, c.id)}
                       onDragEnd={onDragEnd}
-                      onMouseEnter={() => startHover(c.id)}
+                      onMouseEnter={(e) => startHover(c.id, e.currentTarget)}
                       onMouseLeave={cancelHover}
                       className={cn(
-                        'group relative cursor-grab rounded-lg border border-border/50 bg-card/70 p-2.5 shadow-sm backdrop-blur-sm transition-all active:cursor-grabbing',
+                        'group relative cursor-grab rounded-md border border-border/50 bg-card/70 px-2 py-1.5 shadow-sm backdrop-blur-sm transition-all active:cursor-grabbing',
                         'hover:border-foreground/20 hover:shadow-md',
                         isDragging && 'opacity-40 ring-2 ring-accent/50',
                         hoveredCase === c.id && 'z-40'
                       )}
                     >
-                      {/* Case number */}
-                      <div className="flex items-center justify-between gap-2">
+                      {/* Line 1 — case number + status. Hover actions overlay
+                          the status (group-hover swaps visibility). */}
+                      <div className="flex items-center justify-between gap-1.5">
                         <span
                           className={cn(
-                            'font-mono text-sm font-bold tabular-nums text-foreground',
+                            'truncate font-mono text-[11px] font-bold tabular-nums text-foreground',
                             c.directCaseUrl ? 'cursor-pointer hover:underline underline-offset-2' : ''
                           )}
                           onClick={c.directCaseUrl ? () => void doOpenOne(c) : undefined}
@@ -936,174 +971,66 @@ export default function CaseTrakBoard({
                         >
                           {c.caseNumber}
                           {c.directCaseUrl && (
-                            <LinkIcon className="ml-1 inline size-2.5 align-[-3px] text-accent opacity-70" />
+                            <LinkIcon className="ml-1 inline size-2.5 align-[-2px] text-accent opacity-70" />
                           )}
                         </span>
-                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            type="button"
-                            onClick={() => void doOpenOne(c)}
-                            className="flex size-5 items-center justify-center rounded-full text-accent/80 transition-colors hover:bg-accent/15 hover:text-accent"
-                            aria-label={`Open case ${c.caseNumber} in Salesforce`}
-                            title="Open in Salesforce"
-                            disabled={!openCase && !c.directCaseUrl}
+                        {c.reportStatus && (
+                          <span
+                            className={cn(
+                              'shrink-0 text-[8px] font-bold uppercase tracking-wide group-hover:invisible',
+                              reportStatusColor(c.reportStatus)
+                            )}
                           >
-                            <ExternalLink className="size-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDirectCaseUrl(c.id)}
-                            className="flex size-5 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-                            aria-label={`Paste direct Lightning URL for ${c.caseNumber}`}
-                            title={c.directCaseUrl ? 'Update saved direct URL' : 'Paste a direct Lightning Case URL'}
-                          >
-                            <LinkIcon className="size-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeCase(c.id)}
-                            className="flex size-5 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/15 hover:text-destructive"
-                            aria-label={`Remove case ${c.caseNumber}`}
-                            title="Remove case"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Customer name — editable inline */}
-                      <div className="mt-1.5">
-                        {editingCustomer === c.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              autoFocus
-                              value={customerDraft}
-                              onChange={(e) => setCustomerDraft(e.target.value)}
-                              onBlur={() => {
-                                setCustomerName(c.id, customerDraft);
-                                setEditingCustomer(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  setCustomerName(c.id, customerDraft);
-                                  setEditingCustomer(null);
-                                } else if (e.key === 'Escape') {
-                                  setEditingCustomer(null);
-                                }
-                              }}
-                              placeholder="Customer name…"
-                              className="h-6 w-full rounded border border-accent/50 bg-foreground/[0.04] px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                            />
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCustomerDraft(c.customerName || '');
-                              setEditingCustomer(c.id);
-                            }}
-                            className="flex w-full items-center gap-1 text-left"
-                            title="Click to set customer name"
-                          >
-                            <User className="size-3 shrink-0 text-muted-foreground/50" />
-                            <span className={cn(
-                              'truncate text-[11px]',
-                              c.customerName ? 'font-semibold text-foreground/90' : 'italic text-muted-foreground/50'
-                            )}>
-                              {c.customerName || 'Add customer name'}
-                            </span>
-                          </button>
+                            {c.reportStatus}
+                          </span>
                         )}
                       </div>
 
-                      {/* Report-scraped labels — tiny label/value rows in a
-                          two-column grid (only when any [OVER24] field exists).
-                          Kept minimal: Status, Owner, Last reply. Full info
-                          (opened / modified / timestamps) lives in the 1s
-                          hover bubble. */}
-                      {(c.caseOwner || c.reportStatus || c.customerLastReplyTime) && (
-                        <dl className="mt-1.5 grid grid-cols-[auto_1fr] items-baseline gap-x-1.5 gap-y-0.5 text-[9px] leading-tight">
-                          {c.reportStatus && (
-                            <>
-                              <dt className="text-muted-foreground/60">Status</dt>
-                              <dd className={cn('truncate font-bold', reportStatusColor(c.reportStatus))}>
-                                {c.reportStatus}
-                              </dd>
-                            </>
-                          )}
-                          {c.caseOwner && (
-                            <>
-                              <dt className="text-muted-foreground/60">Owner</dt>
-                              <dd className="truncate text-foreground/80">{c.caseOwner}</dd>
-                            </>
-                          )}
-                          {c.customerLastReplyTime && (
-                            <>
-                              <dt className="text-muted-foreground/60">Last reply</dt>
-                              <dd className="truncate text-amber-300/90">{c.customerLastReplyTime}</dd>
-                            </>
-                          )}
-                        </dl>
-                      )}
+                      {/* Line 2 — owner + last customer reply */}
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[9px] leading-tight">
+                        {c.caseOwner ? (
+                          <span className="truncate text-muted-foreground/80">{c.caseOwner}</span>
+                        ) : (
+                          <span className="truncate italic text-muted-foreground/40">no owner</span>
+                        )}
+                        {c.customerLastReplyTime && (
+                          <span className="ml-auto shrink-0 truncate font-semibold text-amber-300/90">
+                            {c.customerLastReplyTime}
+                          </span>
+                        )}
+                      </div>
 
-                      {/* Hover bubble — full case info, appears after 1s. */}
-                      {hoveredCase === c.id && (
-                        <div
-                          className="pointer-events-none absolute left-1/2 top-full z-[100] mt-2 w-64 rounded-lg border border-border/70 bg-background/95 p-3 text-[11px] shadow-2xl backdrop-blur-md"
-                          style={{ animation: 'ct-bubble-in 0.18s ease-out both' }}
-                          onMouseEnter={() => startHover(c.id)}
-                          onMouseLeave={cancelHover}
+                      {/* Hover actions — compact icon row overlaying line 1 */}
+                      <div className="absolute right-1 top-1 hidden items-center gap-0.5 rounded bg-card/95 px-0.5 shadow-sm backdrop-blur-sm group-hover:flex">
+                        <button
+                          type="button"
+                          onClick={() => void doOpenOne(c)}
+                          className="flex size-4 items-center justify-center rounded-full text-accent/80 transition-colors hover:bg-accent/15 hover:text-accent"
+                          aria-label={`Open case ${c.caseNumber} in Salesforce`}
+                          title="Open in Salesforce"
+                          disabled={!openCase && !c.directCaseUrl}
                         >
-                          <div className="mb-1.5 flex items-center justify-between border-b border-border/50 pb-1.5">
-                            <span className="font-mono font-bold text-foreground">{c.caseNumber}</span>
-                            {c.reportStatus && (
-                              <span className={cn('text-[10px] font-bold', reportStatusColor(c.reportStatus))}>
-                                {c.reportStatus}
-                              </span>
-                            )}
-                          </div>
-                          <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1">
-                            {c.customerName && (
-                              <>
-                                <dt className="text-muted-foreground/60">Customer</dt>
-                                <dd className="break-words text-foreground/90">{c.customerName}</dd>
-                              </>
-                            )}
-                            {c.caseOwner && (
-                              <>
-                                <dt className="text-muted-foreground/60">Owner</dt>
-                                <dd className="break-words text-foreground/90">{c.caseOwner}</dd>
-                              </>
-                            )}
-                            {c.dateTimeOpened && (
-                              <>
-                                <dt className="text-muted-foreground/60">Opened</dt>
-                                <dd className="break-words text-foreground/90">{c.dateTimeOpened}</dd>
-                              </>
-                            )}
-                            {c.lastModifiedDate && (
-                              <>
-                                <dt className="text-muted-foreground/60">Modified</dt>
-                                <dd className="break-words text-foreground/90">{c.lastModifiedDate}</dd>
-                              </>
-                            )}
-                            {c.customerLastReplyTime && (
-                              <>
-                                <dt className="text-muted-foreground/60">Last reply</dt>
-                                <dd className="break-words text-amber-300/90">{c.customerLastReplyTime}</dd>
-                              </>
-                            )}
-                            <dt className="text-muted-foreground/60">Added</dt>
-                            <dd className="break-words text-foreground/70">{formatCardTime(c.createdAt)}</dd>
-                            {c.updatedAt !== c.createdAt && (
-                              <>
-                                <dt className="text-muted-foreground/60">Updated</dt>
-                                <dd className="break-words text-foreground/70">{formatCardTime(c.updatedAt)}</dd>
-                              </>
-                            )}
-                          </dl>
-                        </div>
-                      )}
+                          <ExternalLink className="size-2.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDirectCaseUrl(c.id)}
+                          className="flex size-4 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                          aria-label={`Paste direct Lightning URL for ${c.caseNumber}`}
+                          title={c.directCaseUrl ? 'Update saved direct URL' : 'Paste a direct Lightning Case URL'}
+                        >
+                          <LinkIcon className="size-2.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeCase(c.id)}
+                          className="flex size-4 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                          aria-label={`Remove case ${c.caseNumber}`}
+                          title="Remove case"
+                        >
+                          <X className="size-2.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1112,6 +1039,76 @@ export default function CaseTrakBoard({
           );
         })}
       </div>
+      {/* Hover bubble — full case info after 1s. Portal-rendered with
+          position:fixed so it always sits above every panel, never clipped
+          by the column's scroll container. Flips above the card near the
+          viewport bottom. */}
+      {(() => {
+        if (!hoveredCase || !hoverPos) return null;
+        const c = items.find((x) => x.id === hoveredCase);
+        if (!c) return null;
+        return createPortal(
+          <div
+            className="pointer-events-none fixed z-[9999] w-64 rounded-lg border border-border/70 bg-background/95 p-3 text-[11px] shadow-2xl backdrop-blur-md"
+            style={{
+              left: hoverPos.left,
+              top: hoverPos.top,
+              transform: hoverPos.flip ? 'translate(-50%, -100%)' : 'translateX(-50%)',
+              animation: `${hoverPos.flip ? 'ct-bubble-in-up' : 'ct-bubble-in'} 0.18s ease-out both`,
+            }}
+          >
+            <div className="mb-1.5 flex items-center justify-between border-b border-border/50 pb-1.5">
+              <span className="font-mono font-bold text-foreground">{c.caseNumber}</span>
+              {c.reportStatus && (
+                <span className={cn('text-[10px] font-bold', reportStatusColor(c.reportStatus))}>
+                  {c.reportStatus}
+                </span>
+              )}
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1">
+              {c.customerName && (
+                <>
+                  <dt className="text-muted-foreground/60">Customer</dt>
+                  <dd className="break-words text-foreground/90">{c.customerName}</dd>
+                </>
+              )}
+              {c.caseOwner && (
+                <>
+                  <dt className="text-muted-foreground/60">Owner</dt>
+                  <dd className="break-words text-foreground/90">{c.caseOwner}</dd>
+                </>
+              )}
+              {c.dateTimeOpened && (
+                <>
+                  <dt className="text-muted-foreground/60">Opened</dt>
+                  <dd className="break-words text-foreground/90">{c.dateTimeOpened}</dd>
+                </>
+              )}
+              {c.lastModifiedDate && (
+                <>
+                  <dt className="text-muted-foreground/60">Modified</dt>
+                  <dd className="break-words text-foreground/90">{c.lastModifiedDate}</dd>
+                </>
+              )}
+              {c.customerLastReplyTime && (
+                <>
+                  <dt className="text-muted-foreground/60">Last reply</dt>
+                  <dd className="break-words text-amber-300/90">{c.customerLastReplyTime}</dd>
+                </>
+              )}
+              <dt className="text-muted-foreground/60">Added</dt>
+              <dd className="break-words text-foreground/70">{formatCardTime(c.createdAt)}</dd>
+              {c.updatedAt !== c.createdAt && (
+                <>
+                  <dt className="text-muted-foreground/60">Updated</dt>
+                  <dd className="break-words text-foreground/70">{formatCardTime(c.updatedAt)}</dd>
+                </>
+              )}
+            </dl>
+          </div>,
+          document.body
+        );
+      })()}
     </div>
     </>
   );
