@@ -299,19 +299,7 @@ function tokenPairScore(qt: string, nt: string): number {
 /**
  * Fuzzy-search template names (AMR emails + macro TBS steps) against the
  * query text (typically the issue type + model + detailed issue description).
- *
- * - Each query token is matched to its best keyword per template; tokens
- *   that match nothing simply contribute zero — not all words need to match.
- * - Matches are weighted by IDF: rare keywords count more, common words
- *   ("water", "charging") count less, so results reflect the *distinctive*
- *   words in the query.
- * - Synonyms count too: query and template tokens in the same synonym
- *   group score just below exact matches ("sink" ↔ "tray", "tangle" ↔
- *   "entanglement", "cleaning sink" ↔ "Mop Washing Tray").
- * - Consecutive query word pairs that appear verbatim in a template name
- *   earn a phrase bonus (e.g. "wheel stuck" → Driving Wheel Stuck).
- * - Weak matches are pruned relative to the best hit, keeping the list
- *   accurate rather than exhaustive.
+ * See rankEntries for the scoring contract.
  */
 export async function searchTemplates(query: string, limit = 8): Promise<TemplateEntry[]> {
   const rawTokens = tokenize(query);
@@ -348,6 +336,24 @@ export async function searchTemplates(query: string, limit = 8): Promise<Templat
   });
   const searchableTemplates = [...ALL_TEMPLATES, ...faqTemplates];
 
+  return rankEntries(query, searchableTemplates, limit);
+}
+
+/** Score, threshold, sort and clip caller-supplied entries with the exact
+ *  same pipeline searchTemplates uses (tokenize → stem → IDF-weighted
+ *  token-pair scoring → synonym groups → phrase bigram bonus → relative
+ *  threshold pruning). Exported so the live-D1 AMR pool in amr-db can be
+ *  ranked identically to the baked pool. */
+export function rankEntries(query: string, entries: TemplateEntry[], limit = 8): TemplateEntry[] {
+  const rawTokens = tokenize(query);
+  const queryTokens = [
+    ...new Set(rawTokens.filter((t) =>
+      (t.length >= 3 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(t)) &&
+      !STOPWORDS.has(t)
+    ).map(stem)),
+  ];
+  if (queryTokens.length === 0) return [];
+
   // Consecutive (stemmed) bigrams from the original token order, for the
   // phrase bonus — stopword positions break the phrase
   const bigrams: string[] = [];
@@ -359,7 +365,7 @@ export async function searchTemplates(query: string, limit = 8): Promise<Templat
     }
   }
 
-  const scored = searchableTemplates.map((t) => {
+  const scored = entries.map((t) => {
     let score = 0;
     for (const qt of queryTokens) {
       let best = 0;
@@ -385,6 +391,30 @@ export async function searchTemplates(query: string, limit = 8): Promise<Templat
     .sort((a, b) => b.score - a.score || a.t.id.localeCompare(b.t.id))
     .slice(0, limit)
     .map((s) => s.t);
+}
+
+/** Convert a live-D1 AMR template (see amr-db) into a rankable TemplateEntry.
+ *  Metadata is tokenized in full; the HTML body is tag-stripped and sampled
+ *  so the 300+ template pool stays cheap to pre-tokenize. */
+export function entryFromAmrTemplate(t: {
+  id: string;
+  name: string;
+  subject: string;
+  description: string;
+  html: string;
+}): TemplateEntry {
+  const text = `${t.name} ${t.subject} ${t.description} ${t.html.replace(/<[^>]*>/g, ' ').slice(0, 4000)}`;
+  const tokens = tokenize(text).map(stem);
+  return {
+    file: t.id,
+    id: t.id,
+    name: t.name,
+    tokens,
+    nameStem: tokens.join(' '),
+    raw: t.html,
+    kind: 'amr',
+    category: 'AMR Email',
+  };
 }
 
 /** A single clickable line of template content */

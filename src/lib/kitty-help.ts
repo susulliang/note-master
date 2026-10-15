@@ -22,7 +22,9 @@
  */
 
 import {
+  entryFromAmrTemplate,
   parseTemplate,
+  rankEntries,
   searchTemplates,
   type TemplateEntry,
 } from '@/lib/amr-templates';
@@ -251,42 +253,25 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
   }
 
   // AMR email templates — the live D1 pool (Salesforce export,
-  // admin-editable). Same 'amr' kind: fetchKittySourceContent already
-  // strips the HTML body for stage 3.
+  // admin-editable), ranked with the exact same fuzzy pipeline as the
+  // baked pool. Same 'amr' kind: fetchKittySourceContent already strips
+  // the HTML body for stage 3.
   const amrDb = await safe(fetchAmrTemplates());
   if (amrDb && amrDb.length > 0) {
-    const qTokens = new Set(tokenize(query).map((t) => t.toLowerCase()));
-    const scored = amrDb
-      .map((t) => {
-        const meta = `${t.name} ${t.subject} ${t.description}`.toLowerCase();
-        const body = t.html.toLowerCase();
-        let score = 0;
-        for (const tok of qTokens) {
-          if (meta.includes(tok)) score += 3;
-          else if (body.includes(tok)) score += 1;
-        }
-        return { t, score };
-      })
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
-    for (const { t } of scored) {
+    const byId = new Map(amrDb.map((t) => [t.id, t]));
+    const ranked = rankEntries(
+      query,
+      amrDb.map(entryFromAmrTemplate),
+      10,
+    );
+    for (const e of ranked) {
+      const t = byId.get(e.id);
+      if (!t) continue;
       pooled.push({
         kind: 'amr',
         title: t.name,
         origin: 'AMR Email · D1',
-        candidate: {
-          template: {
-            file: `${t.id}.html`,
-            id: 'D1',
-            name: t.name,
-            tokens: [],
-            nameStem: '',
-            raw: t.html,
-            kind: 'amr',
-            category: 'AMR Email',
-          },
-        },
+        candidate: { template: e },
       });
     }
   }

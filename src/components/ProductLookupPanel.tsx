@@ -30,6 +30,7 @@ import {
   saveAmrTemplate,
   type AmrTemplate,
 } from '@/lib/amr-db';
+import { entryFromAmrTemplate, rankEntries } from '@/lib/amr-templates';
 import { useAuth } from '@/lib/auth-context';
 import {
   findModels,
@@ -460,33 +461,20 @@ export default function ProductLookupPanel({
     };
   }, [authUserForAmr?.username]);
 
+  const amrEntries = useMemo(
+    () => (amrTemplates ?? []).map(entryFromAmrTemplate),
+    [amrTemplates]
+  );
+
   const amrHits: AmrTemplate[] = useMemo(() => {
     if (!amrTemplates) return [];
-    const q = effectiveQuery.trim();
-    if (!q) return amrTemplates;
-    const tokens = q.toLowerCase().split(/[\s,;:!?'"()\[\]]+/).filter((t) => t.length >= 2);
-    const scored = amrTemplates.map((t) => {
-      const name = t.name.toLowerCase();
-      const subject = t.subject.toLowerCase();
-      const description = t.description.toLowerCase();
-      const folder = t.folder.toLowerCase();
-      const html = t.html.toLowerCase();
-      let score = 0;
-      for (const token of tokens) {
-        if (name.includes(token)) score += 6;
-        if (subject.includes(token)) score += 3;
-        if (description.includes(token)) score += 2;
-        if (folder.includes(token)) score += 1;
-        if (html.includes(token)) score += 1;
-      }
-      return { t, score };
-    });
-    return scored
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score || a.t.name.localeCompare(b.t.name))
-      .slice(0, 40)
-      .map((s) => s.t);
-  }, [amrTemplates, effectiveQuery]);
+    if (!effectiveQuery.trim()) return amrTemplates;
+    const byId = new Map(amrTemplates.map((t) => [t.id, t]));
+    // Same tokenize→stem→IDF→synonym→phrase ranking the Matches tab uses.
+    return rankEntries(effectiveQuery, amrEntries, 40)
+      .map((e) => byId.get(e.id))
+      .filter((t): t is AmrTemplate => Boolean(t));
+  }, [amrTemplates, amrEntries, effectiveQuery]);
 
   const counts = useMemo<Record<TabKind, number>>(
     () => ({
