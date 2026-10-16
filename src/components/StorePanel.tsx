@@ -11,7 +11,7 @@ import { Loader2, ShoppingBag, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listStore, purchaseItem, type StoreProduct, type TcgCard } from '@/lib/auth-client';
 import { CAT_EAT_EVENT } from '@/lib/cat-sprites';
-import RouletteModal from '@/components/RouletteModal';
+import RouletteModal, { WHEEL_PENDING_KEY } from '@/components/RouletteModal';
 import CardOpeningModal from '@/components/CardOpeningModal';
 
 interface StorePanelProps {
@@ -27,8 +27,9 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [boughtId, setBoughtId] = useState<string | null>(null);
-  /** Non-null while the Wheel of Fortune ceremony is on screen. */
-  const [wheelToken, setWheelToken] = useState<string | null>(null);
+  /** Non-null while the Wheel of Fortune ceremony is on screen. A token the
+   *  player closed mid-betting stays in localStorage and is resumed here. */
+  const [wheelToken, setWheelToken] = useState<string | null>(() => localStorage.getItem(WHEEL_PENDING_KEY));
   /** Non-null while the TCG card-opening ceremony is on screen. */
   const [wonCard, setWonCard] = useState<TcgCard | null>(null);
 
@@ -54,6 +55,7 @@ export default function StorePanel({ spice, onSpiceChange, onClose }: StorePanel
       onSpiceChange(out.spice);
       // Wheel of Fortune: open the roulette ceremony instead of the toast.
       if (out.spinToken) {
+        localStorage.setItem(WHEEL_PENDING_KEY, out.spinToken);
         setWheelToken(out.spinToken);
         return;
       }

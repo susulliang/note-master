@@ -1,25 +1,27 @@
 /**
- * RouletteModal — Wheel of Fortune reward ceremony, opened right after a
- * successful store purchase of a wheel product. Renders a casino roulette
- * wheel (European single-zero) on a canvas and plays a ~20s spin: the wheel
- * decelerates one way while the ball races the opposite way around the outer
- * track, spirals down, rattles off frets and deflectors with damped bounces,
- * and finally locks into the pocket the SERVER decided (see
- * /api/store/wheel/spin — the animation merely replays the outcome).
+ * RouletteModal — Wheel of Fortune betting round + reward ceremony, opened
+ * right after a successful store purchase of a wheel product. Phase 1 is a
+ * live betting board (standard European table: straight numbers, dozens,
+ * columns, red/black/even/odd/high/low) where each click stacks one spice on
+ * a spot. Phase 2 plays the ~20s spin: the wheel decelerates one way while
+ * the ball races the opposite way around the outer track, spirals down,
+ * rattles off frets and deflectors with damped bounces, and finally locks
+ * into the pocket the SERVER decided (see /api/store/wheel/spin — the
+ * animation merely replays the outcome).
  *
  * Ball motion is ONE continuous decelerating glide: its total angular
  * displacement is the shortest residual to the landing angle (wheel rest +
  * awarded pocket) minus a fixed number of full laps, so the ball travels the
  * long way round and still comes to rest exactly in the awarded pocket —
  * no phase blending, no discontinuities, nothing that can visibly jump.
- * The reward banner is only revealed after the ball has landed. Fret-crossing
+ * The settlement is only revealed after the ball has landed. Fret-crossing
  * ticks are synthesized with WebAudio.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { RotateCw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { spinWheel } from '@/lib/auth-client';
+import { spinWheel, type WheelSpinResult } from '@/lib/auth-client';
 
 interface RouletteModalProps {
   /** One-time spin token minted by the purchase endpoint. */
@@ -28,6 +30,10 @@ interface RouletteModalProps {
   onClose: () => void;
 }
 
+/** localStorage key holding an un-spun purchase token so a modal closed
+ *  mid-betting can be resumed from the Store instead of eating the spice. */
+export const WHEEL_PENDING_KEY = '__app_wheel_pending_token';
+
 /** European wheel pocket order, clockwise from 0. */
 const POCKET_ORDER = [
   0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24,
@@ -35,16 +41,10 @@ const POCKET_ORDER = [
 ] as const;
 const RED_POCKETS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 
-/** Reward tiers, mirroring the worker's WHEEL_REWARDS (display only). */
-const REWARD_TIERS: { pockets: number[]; reward: number }[] = [
-  { pockets: [0], reward: 251 },
-  { pockets: [7, 17, 28, 35], reward: 47 },
-  { pockets: [9, 13, 19, 22, 31], reward: 23 },
-  { pockets: [], reward: 11 }, // every other pocket
-];
-const tierOf = (pocket: number) => REWARD_TIERS.findIndex((t) => t.pockets.includes(pocket));
-const pocketTint = (n: number) =>
-  n === 0 ? 'text-emerald-400' : RED_POCKETS.has(n) ? 'text-red-400' : 'text-zinc-300';
+/** Profit multiplier per 1 🌶️ staked (standard casino odds × 1.5, rounded). */
+const PAYOUT_STRAIGHT = Math.round(35 * 1.5); // 53
+const PAYOUT_DOZEN = Math.round(2 * 1.5); // 3
+const PAYOUT_EVEN = Math.round(1 * 1.5); // 2
 
 const STEP = (Math.PI * 2) / POCKET_ORDER.length; // wedge angle per pocket
 const DURATION_MS = 20_000;
@@ -64,6 +64,7 @@ const DEFLECTORS = 8; // bowl-mounted diamond deflector ramps
 const DEFLECTOR_RADIAL = 0.03; // radial half-extent (×R) — short ramps
 const DEFLECTOR_TANGENT = 0.058; // tangential half-extent (×R) — wide, like real ones
 const BALL_RADIUS = 0.026; // ball radius (×R)
+const IDLE_REVS_PER_S = 0.06; // lazy ceremonial rotation while bets are open
 
 const smooth = (x: number) => x * x * (3 - 2 * x);
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -75,72 +76,214 @@ const wrapAngle = (a: number) => {
   return x;
 };
 
-interface SpinResult {
-  pocket: number;
-  reward: number;
-  spice: number;
+/** Human label for a bet spot key (used in the settlement breakdown). */
+function betLabel(key: string): string {
+  if (key.startsWith('n:')) return key.slice(2);
+  switch (key) {
+    case 'red': return 'Red';
+    case 'black': return 'Black';
+    case 'even': return 'Even';
+    case 'odd': return 'Odd';
+    case 'low': return '1–18';
+    case 'high': return '19–36';
+    case 'dozen:1': return '1st 12';
+    case 'dozen:2': return '2nd 12';
+    case 'dozen:3': return '3rd 12';
+    case 'col:1': return 'Col ▲1';
+    case 'col:2': return 'Col ▲2';
+    case 'col:3': return 'Col ▲3';
+    default: return key;
+  }
 }
 
 export default function RouletteModal({ token, onSpiceChange, onClose }: RouletteModalProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Server outcome (drives the animation, never rendered directly) and the
-  // post-landing reveal (banner + Collect button appear only after touchdown).
-  const [outcome, setOutcome] = useState<SpinResult | null>(null);
+  // Phase 1 'betting' — board is live, wheel idles. Phase 2 'spinning' — the
+  // server outcome is in and the ceremony replays it. Phase 3 'done'.
+  const [phase, setPhase] = useState<'betting' | 'spinning' | 'done'>('betting');
+  const [bets, setBets] = useState<Record<string, number>>({});
+  const betStackRef = useRef<string[]>([]); // click order, for Undo
+  const [result, setResult] = useState<WheelSpinResult | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [spinError, setSpinError] = useState<string | null>(null);
-  const [collected, setCollected] = useState(false);
+  const [spinning, setSpinning] = useState(false);
   // Apply the spice delta exactly once, whichever way the modal closes.
   const spiceAppliedRef = useRef(false);
-  const resultRef = useRef<SpinResult | null>(null);
+  const resultRef = useRef<WheelSpinResult | null>(null);
+  // Wheel head angle from the idle loop — the spin continues from it so the
+  // betting → spin handover never pops.
+  const idleAngleRef = useRef(0);
+
+  const staked = Object.values(bets).reduce((a, b) => a + b, 0);
 
   const applyAndClose = () => {
     if (!spiceAppliedRef.current && resultRef.current) {
       spiceAppliedRef.current = true;
       onSpiceChange(resultRef.current.spice);
     }
+    if (resultRef.current) localStorage.removeItem(WHEEL_PENDING_KEY); // spent
     onClose();
   };
 
-  // Ask the server for the landing pocket first — the animation starts only
-  // once the outcome is known so the ball can be guaranteed to land on it.
-  useEffect(() => {
-    let alive = true;
-    spinWheel(token)
+  // Spin: send the betting board to the server, then play the ceremony.
+  const doSpin = () => {
+    if (phase !== 'betting' || spinning || staked === 0) return;
+    setSpinError(null);
+    setSpinning(true);
+    spinWheel(token, bets)
       .then((out) => {
-        if (!alive) return;
         resultRef.current = out;
-        setOutcome(out);
+        setResult(out);
+        setPhase('spinning');
       })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setSpinError(err instanceof Error ? err.message : 'Spin failed');
-      });
+      .catch((err: unknown) => setSpinError(err instanceof Error ? err.message : 'Spin failed'))
+      .finally(() => setSpinning(false));
+  };
+
+  // Whatever way the modal closes after a completed spin, apply the balance
+  // and clear the pending-token marker. Closing during betting keeps the
+  // token pending so the Store can resume it.
+  useEffect(() => {
     return () => {
-      alive = false;
-      if (!spiceAppliedRef.current && resultRef.current) {
+      if (spiceAppliedRef.current) return;
+      if (resultRef.current) {
         spiceAppliedRef.current = true;
         onSpiceChange(resultRef.current.spice);
+        localStorage.removeItem(WHEEL_PENDING_KEY);
       }
     };
-  }, [token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // The render loop — mounts once the spin result is in.
+  // ── idle loop (betting phase): lazy ceremonial wheel rotation ─────────────
   useEffect(() => {
-    if (!outcome) return;
+    if (phase !== 'betting') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssSize = Math.min(420, window.innerWidth - 48, window.innerHeight - 360);
+    canvas.width = Math.round(cssSize * dpr);
+    canvas.height = Math.round(cssSize * dpr);
+    canvas.style.width = `${cssSize}px`;
+    canvas.style.height = `${cssSize}px`;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const R = (canvas.width / 2) * 0.96;
+    const R_NUMBER = 0.655 * R;
+
+    const drawHead = (thW: number) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(thW);
+      for (let i = 0; i < POCKET_ORDER.length; i++) {
+        const n = POCKET_ORDER[i];
+        const a0 = i * STEP;
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.7 * R, a0, a0 + STEP);
+        ctx.arc(0, 0, 0.52 * R, a0 + STEP, a0, true);
+        ctx.closePath();
+        ctx.fillStyle = n === 0 ? '#1e8449' : RED_POCKETS.has(n) ? '#b03a2e' : '#16161a';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(212,175,55,0.85)';
+        ctx.lineWidth = Math.max(1, R * 0.004);
+        ctx.stroke();
+        ctx.save();
+        ctx.rotate((i + 0.5) * STEP);
+        ctx.fillStyle = '#f5f0e1';
+        ctx.font = `700 ${Math.round(R * 0.055)}px ui-monospace, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(n), R_NUMBER, 0);
+        ctx.restore();
+      }
+      const cone = ctx.createRadialGradient(0, 0, 0, 0, 0, 0.52 * R);
+      cone.addColorStop(0, '#3d2b1f');
+      cone.addColorStop(1, '#241a11');
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.52 * R, 0, TAU);
+      ctx.fillStyle = cone;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.09 * R, 0, TAU);
+      ctx.fillStyle = '#d4af37';
+      ctx.fill();
+      ctx.restore();
+    };
+    const drawBowl = () => {
+      const rim = ctx.createRadialGradient(cx, cy, 0.86 * R, cx, cy, R);
+      rim.addColorStop(0, '#7a4a22');
+      rim.addColorStop(0.5, '#5b3a1e');
+      rim.addColorStop(1, '#3a2412');
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, TAU);
+      ctx.fillStyle = rim;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 0.9 * R, 0, TAU);
+      ctx.arc(cx, cy, 0.79 * R, 0, TAU, true);
+      ctx.fillStyle = '#241609';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(212,175,55,0.5)';
+      ctx.lineWidth = Math.max(1.5, R * 0.006);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 0.9 * R, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 0.79 * R, 0, TAU);
+      ctx.stroke();
+      const DEF_DR = DEFLECTOR_RADIAL * R;
+      const DEF_TW = DEFLECTOR_TANGENT * R;
+      for (let k = 0; k < DEFLECTORS; k++) {
+        const a = (k * TAU) / DEFLECTORS + TAU / (DEFLECTORS * 2);
+        ctx.save();
+        ctx.translate(cx + Math.cos(a) * 0.735 * R, cy + Math.sin(a) * 0.735 * R);
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.moveTo(DEF_DR, 0);
+        ctx.lineTo(0, DEF_TW);
+        ctx.lineTo(-DEF_DR, 0);
+        ctx.lineTo(0, -DEF_TW);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(212,175,55,0.92)';
+        ctx.fill();
+        ctx.restore();
+      }
+    };
+
+    let raf = 0;
+    let last = performance.now();
+    const frame = (now: number) => {
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      idleAngleRef.current += IDLE_REVS_PER_S * TAU * dt;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBowl();
+      drawHead(idleAngleRef.current);
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [phase]);
+
+  // ── ceremony loop: replays the server outcome once it is known ────────────
+  useEffect(() => {
+    if (phase !== 'spinning' || !result) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const pocketIndex = POCKET_ORDER.indexOf(outcome.pocket as (typeof POCKET_ORDER)[number]);
+    const pocketIndex = POCKET_ORDER.indexOf(result.pocket as (typeof POCKET_ORDER)[number]);
     const pocketAngle = (pocketIndex + 0.5) * STEP;
 
-    // Cosmetic randomness around the server-decided outcome.
-    const thetaW0 = Math.random() * TAU;
+    // Continue seamlessly from the idle rotation; the ball joins fresh.
+    const thetaW0 = idleAngleRef.current % TAU;
     const thetaB0 = Math.random() * TAU;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const cssSize = Math.min(520, window.innerWidth - 48, window.innerHeight - 200);
+    const cssSize = Math.min(420, window.innerWidth - 48, window.innerHeight - 360);
     canvas.width = Math.round(cssSize * dpr);
     canvas.height = Math.round(cssSize * dpr);
     canvas.style.width = `${cssSize}px`;
@@ -251,10 +394,7 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
     const wheelAngle = (t: number) => thetaW0 + WHEEL_REVS * TAU * (1 - Math.pow(1 - t, WHEEL_POW));
 
     // Ball: a single decelerating glide from thetaB0 that ends exactly on the
-    // awarded pocket (mod 2π) when the wheel comes to rest. Total displacement
-    // = shortest residual to the landing angle minus BALL_REVS full laps, so
-    // the ball races the long way round and still lands precisely — one
-    // continuous motion with no phase switches.
+    // awarded pocket (mod 2π) when the wheel comes to rest.
     const landAngle = thetaW0 + WHEEL_REVS * TAU + pocketAngle; // wheel rest + pocket centre
     let ballDelta = landAngle - thetaB0;
     ballDelta -= TAU * Math.round(ballDelta / TAU); // reduce to (-π, π]
@@ -269,10 +409,6 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
     };
 
     // ── deflector collision pre-pass ─────────────────────────────────────────
-    // The spiral descent crosses the deflector band exactly once. Scan it for
-    // diamonds the ball clips and bake one damped hop impulse per hit, scaled
-    // by the closing speed: fast early impacts launch the ball off the ramp,
-    // slow grazes barely lift it. Trajectory stays the server-decided one.
     const DEF_DR = DEFLECTOR_RADIAL * R;
     const DEF_TW = DEFLECTOR_TANGENT * R;
     const BALL_R = BALL_RADIUS * R;
@@ -332,11 +468,8 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
     const ballState = (t: number) => {
       const thW = wheelAngle(t);
       const theta = ballAngle(t);
-      // Radial journey: outer lane → spiral in with skitter hops and damped
-      // deflector kicks (all exactly zero at touchdown) → pockets to a stop.
       const hd = clamp01((t - DROP_START) / (DROP_END - DROP_START));
       const decay = Math.pow(1 - hd, 2);
-      // Fast skitter hops (~230 ms each, shrinking as the ball loses energy).
       const hop = Math.abs(Math.sin(hd * Math.PI * 20)) * decay * 0.11 * R;
       const kick = deflectorHop(t);
       const jump = Math.abs(Math.sin(hd * Math.PI * 20 + Math.PI / 3)) * decay * 0.08 * R + kick;
@@ -529,8 +662,9 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
       if (t < 1) {
         raf = requestAnimationFrame(frame);
       } else if (!revealedNow) {
-        // Ball has landed — only now is the reward revealed to the player.
+        // Ball has landed — only now is the settlement revealed to the player.
         revealedNow = true;
+        setPhase('done');
         setRevealed(true);
       }
     };
@@ -543,9 +677,107 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
         /* already stopped */
       }
     };
-  }, [outcome]);
+  }, [phase, result]);
 
-  const colorLabel = outcome ? (outcome.pocket === 0 ? 'GREEN' : RED_POCKETS.has(outcome.pocket) ? 'RED' : 'BLACK') : '';
+  // ── betting board ────────────────────────────────────────────────────────────
+  const addBet = (key: string) => {
+    if (phase !== 'betting') return;
+    betStackRef.current.push(key);
+    setBets((b) => ({ ...b, [key]: (b[key] ?? 0) + 1 }));
+  };
+  const removeBet = (key: string) => {
+    if (phase !== 'betting') return;
+    setBets((b) => {
+      const next = { ...b };
+      const left = (next[key] ?? 0) - 1;
+      if (left > 0) next[key] = left;
+      else delete next[key];
+      return next;
+    });
+    const i = betStackRef.current.lastIndexOf(key);
+    if (i >= 0) betStackRef.current.splice(i, 1);
+  };
+  const undoBet = () => {
+    const key = betStackRef.current.pop();
+    if (key) removeBet(key);
+  };
+  const clearBets = () => {
+    if (phase !== 'betting') return;
+    betStackRef.current = [];
+    setBets({});
+  };
+
+  const chip = (n: number) =>
+    n > 0 ? (
+      <span className="absolute -right-1 -top-1 z-10 flex min-w-4 items-center justify-center rounded-full border border-amber-200/70 bg-amber-400 px-0.5 text-[9px] font-black tabular-nums text-black shadow">
+        {n}
+      </span>
+    ) : null;
+
+  const spot = (key: string, label: string, extra: string, place?: { gridColumn?: string; gridRow?: string }) => {
+    const n = bets[key] ?? 0;
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={() => addBet(key)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          removeBet(key);
+        }}
+        style={place}
+        title={`${label} — pays ×${key.startsWith('n:') ? PAYOUT_STRAIGHT : key.startsWith('dozen:') || key.startsWith('col:') ? PAYOUT_DOZEN : PAYOUT_EVEN}`}
+        className={cn(
+          'relative flex h-7 min-w-0 items-center justify-center rounded border font-mono text-[10px] font-bold transition-all',
+          'hover:brightness-125 active:scale-95 disabled:cursor-not-allowed',
+          n > 0 ? 'border-amber-300 ring-1 ring-amber-300/60' : '',
+          extra,
+        )}
+      >
+        {label}
+        {chip(n)}
+      </button>
+    );
+  };
+
+  // Standard European table orientation: top row 3,6,…,36; middle 2,5,…,35;
+  // bottom 1,4,…,34; the three "2:1" column cells sit to the right of the row
+  // they cover. Everything is placed explicitly — auto-flow would scramble it.
+  const bettingBoard = (
+    <div className="w-full select-none rounded-xl border border-emerald-900/60 bg-emerald-950/40 p-2">
+      <div
+        className="grid gap-0.5"
+        style={{ gridTemplateColumns: '28px repeat(12, minmax(0,1fr)) 38px', gridTemplateRows: 'repeat(5, 28px)' }}
+      >
+        {spot('n:0', '0', 'bg-emerald-700/80 text-emerald-100', { gridColumn: '1', gridRow: '1 / span 3' })}
+        {[1, 2, 3].map((row) =>
+          Array.from({ length: 12 }, (_, c) => c + 1).map((col) => {
+            const n = col * 3 - (row - 1);
+            return spot(
+              `n:${n}`,
+              String(n),
+              RED_POCKETS.has(n) ? 'bg-red-800/80 text-red-100' : 'bg-zinc-900/90 text-zinc-200',
+              { gridColumn: String(col + 1), gridRow: String(row) }
+            );
+          })
+        )}
+        {spot('col:3', '2:1', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '14', gridRow: '1' })}
+        {spot('col:2', '2:1', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '14', gridRow: '2' })}
+        {spot('col:1', '2:1', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '14', gridRow: '3' })}
+        {spot('dozen:1', '1st 12', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '2 / span 4', gridRow: '4' })}
+        {spot('dozen:2', '2nd 12', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '6 / span 4', gridRow: '4' })}
+        {spot('dozen:3', '3rd 12', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '10 / span 4', gridRow: '4' })}
+        {spot('low', '1–18', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '2 / span 2', gridRow: '5' })}
+        {spot('even', 'EVEN', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '4 / span 2', gridRow: '5' })}
+        {spot('red', 'RED', 'bg-red-800/80 text-red-100', { gridColumn: '6 / span 2', gridRow: '5' })}
+        {spot('black', 'BLACK', 'bg-zinc-900/90 text-zinc-200', { gridColumn: '8 / span 2', gridRow: '5' })}
+        {spot('odd', 'ODD', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '10 / span 2', gridRow: '5' })}
+        {spot('high', '19–36', 'bg-emerald-900/70 text-emerald-100', { gridColumn: '12 / span 2', gridRow: '5' })}
+      </div>
+    </div>
+  );
+
+  const colorLabel = result ? (result.pocket === 0 ? 'GREEN' : RED_POCKETS.has(result.pocket) ? 'RED' : 'BLACK') : '';
 
   return (
     <div
@@ -561,7 +793,7 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
         role="dialog"
         aria-modal="true"
         aria-label="Wheel of Fortune"
-        className="glass-panel relative flex flex-col items-center gap-4 rounded-2xl border-amber-400/30 p-6 shadow-2xl"
+        className="glass-panel relative flex max-h-[95vh] w-[min(600px,calc(100vw-24px))] flex-col items-center gap-3 overflow-y-auto rounded-2xl border-amber-400/30 p-5 shadow-2xl"
       >
         <button
           type="button"
@@ -576,76 +808,122 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
           <RotateCw className="size-5" /> Wheel of Fortune
         </h2>
 
-        {spinError ? (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <p className="text-sm font-semibold text-red-300">{spinError}</p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border/60 px-4 py-1.5 text-xs font-bold text-foreground hover:bg-foreground/10"
-            >
-              Close
-            </button>
-          </div>
-        ) : (
-          <>
-            <canvas ref={canvasRef} className={outcome ? '' : 'animate-pulse'} />
-            {/* Minimal reward-tier legend under the wheel. */}
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {REWARD_TIERS.map((tier, i) => {
-                const won = revealed && outcome !== null && tierOf(outcome.pocket) === i;
-                return (
-                  <span
-                    key={tier.reward}
-                    className={cn(
-                      'rounded border px-2 py-0.5 font-mono text-[10px] tracking-tight transition-colors',
-                      won
-                        ? 'border-amber-400/60 bg-amber-400/10 text-foreground'
-                        : 'border-border/50 text-muted-foreground',
-                    )}
-                  >
-                    {tier.pockets.length === 0 ? (
-                      <span>rest</span>
-                    ) : (
-                      tier.pockets.map((n, j) => (
-                        <span key={n}>
-                          <span className={won ? '' : pocketTint(n)}>{n}</span>
-                          {j < tier.pockets.length - 1 && <span className="text-border">·</span>}
-                        </span>
-                      ))
-                    )}
-                    <span className="mx-1 text-border">→</span>
-                    <span className="text-amber-400/90">{tier.reward}</span>
-                  </span>
-                );
-              })}
-            </div>
-            {!outcome && (
-              <p className="font-mono text-xs text-muted-foreground">Placing bets… the wheel is warmed up.</p>
-            )}
-            {outcome && !revealed && (
-              <p className="font-mono text-xs text-muted-foreground">No more bets…</p>
-            )}
-            {revealed && outcome && (
-              <div className="flex w-full flex-col items-center gap-3 pb-1">
-                <p className="font-mono text-lg font-extrabold text-foreground">
-                  <span className={outcome.pocket === 0 ? 'text-emerald-400' : RED_POCKETS.has(outcome.pocket) ? 'text-red-400' : 'text-zinc-200'}>
-                    {outcome.pocket} {colorLabel}
-                  </span>
-                  <span className="mx-2 text-muted-foreground">·</span>
-                  <span className="text-amber-400">+{outcome.reward} 🌶️</span>
-                </p>
+        <canvas ref={canvasRef} className={phase === 'betting' ? '' : ''} />
+
+        {/* Payout reference (standard casino odds × 1.5). */}
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {[
+            [`Straight ×${PAYOUT_STRAIGHT}`, 'n:0'],
+            [`Dozen/Column ×${PAYOUT_DOZEN}`, 'dozen:1'],
+            [`Red/Black/Even/Odd/High/Low ×${PAYOUT_EVEN}`, 'red'],
+          ].map(([label, probe]) => {
+            const key = probe;
+            const won =
+              revealed &&
+              result !== null &&
+              result.wins.some((w) =>
+                key === 'n:0'
+                  ? w.key.startsWith('n:')
+                  : key === 'dozen:1'
+                    ? w.key.startsWith('dozen:') || w.key.startsWith('col:')
+                    : !w.key.startsWith('n:') && !w.key.startsWith('dozen:') && !w.key.startsWith('col:')
+              );
+            return (
+              <span
+                key={label}
+                className={cn(
+                  'rounded border px-2 py-0.5 font-mono text-[10px] tracking-tight transition-colors',
+                  won ? 'border-amber-400/60 bg-amber-400/10 text-foreground' : 'border-border/50 text-muted-foreground'
+                )}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
+
+        {spinError && (
+          <p className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300">
+            {spinError}
+          </p>
+        )}
+
+        {/* Betting phase: live board + controls. */}
+        {phase === 'betting' && (
+          <div className="flex w-full flex-col items-center gap-2">
+            {bettingBoard}
+            <div className="flex w-full items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={applyAndClose}
-                  disabled={collected}
-                  className="rounded-lg border border-amber-400/50 bg-amber-500/80 px-6 py-2 text-sm font-extrabold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+                  onClick={undoBet}
+                  disabled={staked === 0}
+                  className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-foreground/10 disabled:opacity-40"
                 >
-                  {collected ? 'Collected!' : 'Collect'}
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={clearBets}
+                  disabled={staked === 0}
+                  className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-foreground/10 disabled:opacity-40"
+                >
+                  Clear
                 </button>
               </div>
+              <p className="font-mono text-sm font-extrabold text-amber-400">
+                Staked <span className="tabular-nums">{staked}</span> 🌶️
+              </p>
+              <button
+                type="button"
+                onClick={doSpin}
+                disabled={staked === 0 || spinning}
+                className="rounded-lg border border-amber-400/50 bg-amber-500/80 px-6 py-1.5 text-sm font-extrabold text-white transition-colors hover:brightness-110 disabled:opacity-40"
+              >
+                {spinning ? 'No more bets…' : 'SPIN'}
+              </button>
+            </div>
+            <p className="text-center font-mono text-[10px] text-muted-foreground/70">
+              Click a spot to stack 1 🌶️ · right-click to remove one · zero kills outside bets
+            </p>
+          </div>
+        )}
+
+        {phase === 'spinning' && <p className="font-mono text-xs text-muted-foreground">No more bets…</p>}
+
+        {revealed && result && (
+          <div className="flex w-full flex-col items-center gap-2 pb-1">
+            <p className="font-mono text-lg font-extrabold text-foreground">
+              <span
+                className={
+                  result.pocket === 0 ? 'text-emerald-400' : RED_POCKETS.has(result.pocket) ? 'text-red-400' : 'text-zinc-200'
+                }
+              >
+                {result.pocket} {colorLabel}
+              </span>
+              <span className="mx-2 text-muted-foreground">·</span>
+              <span className={result.net > 0 ? 'text-amber-400' : result.net < 0 ? 'text-red-400' : 'text-muted-foreground'}>
+                {result.net > 0 ? `+${result.net}` : result.net} 🌶️
+              </span>
+            </p>
+            {result.wins.length > 0 && (
+              <p className="max-w-full text-center font-mono text-[11px] text-muted-foreground">
+                {result.wins
+                  .map((w) => `${betLabel(w.key)} ×${w.stake} → +${w.stake + w.profit}`)
+                  .join('  ·  ')}
+              </p>
             )}
-          </>
+            <p className="font-mono text-[10px] text-muted-foreground/70">
+              staked {result.staked} · returned {result.returned}
+            </p>
+            <button
+              type="button"
+              onClick={applyAndClose}
+              className="rounded-lg border border-amber-400/50 bg-amber-500/80 px-6 py-2 text-sm font-extrabold text-white transition-colors hover:brightness-110"
+            >
+              Collect
+            </button>
+          </div>
         )}
       </div>
     </div>

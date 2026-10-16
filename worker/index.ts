@@ -1178,32 +1178,78 @@ async function handleCardsCollection(env: Env, user: AuthUserRow): Promise<Respo
   return authJson({ collection: result.results ?? [] });
 }
 
-/** Casino roulette pocket layout (European single-zero wheel, clockwise from
- *  0) — shared reference for reward values; the client draws the same order. */
-const WHEEL_REWARDS: readonly number[] = (() => {
-  // All rewards are primes (closest to the former 250/50/25/10, lucky-leaning).
-  const rewards = new Array<number>(37).fill(11);
-  rewards[0] = 251; // green zero — jackpot
-  for (const n of [7, 17, 28, 35]) rewards[n] = 47;
-  for (const n of [9, 13, 19, 22, 31]) rewards[n] = 23;
-  return rewards;
+/** Roulette betting spots and their STANDARD casino payout odds ("to one"):
+ *  straight number 35, dozen/column 2, even-money chances 1. Winning bets pay
+ *  profit = stake × odds × 1.5 (the house's house-edge giveaway), rounded to
+ *  whole spice per bet; losing stakes are kept by the bank. Zero kills every
+ *  outside bet, exactly like a European table. */
+const WHEEL_BET_ODDS: Readonly<Record<string, number>> = (() => {
+  const odds: Record<string, number> = {};
+  for (let n = 0; n <= 36; n++) odds[`n:${n}`] = 35;
+  for (let d = 1; d <= 3; d++) {
+    odds[`dozen:${d}`] = 2;
+    odds[`col:${d}`] = 2;
+  }
+  for (const k of ['red', 'black', 'even', 'odd', 'low', 'high']) odds[k] = 1;
+  return odds;
 })();
 
-/** POST /api/store/wheel/spin { token } — consume a pre-paid spin token and
- *  award the spice for the server-chosen pocket. Server-authoritative: the
- *  pocket comes from crypto randomness here; the client animation merely
- *  replays the outcome. Tokens are single-use and bound to the buyer. */
+const WHEEL_RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+
+/** Whether a bet spot wins on the landed pocket. */
+function wheelBetWins(key: string, pocket: number): boolean {
+  if (key.startsWith('n:')) return Number(key.slice(2)) === pocket;
+  switch (key) {
+    case 'red': return pocket !== 0 && WHEEL_RED.has(pocket);
+    case 'black': return pocket !== 0 && !WHEEL_RED.has(pocket);
+    case 'even': return pocket !== 0 && pocket % 2 === 0;
+    case 'odd': return pocket % 2 === 1;
+    case 'low': return pocket >= 1 && pocket <= 18;
+    case 'high': return pocket >= 19 && pocket <= 36;
+    case 'dozen:1': return pocket >= 1 && pocket <= 12;
+    case 'dozen:2': return pocket >= 13 && pocket <= 24;
+    case 'dozen:3': return pocket >= 25 && pocket <= 36;
+    case 'col:1': return pocket !== 0 && pocket % 3 === 1;
+    case 'col:2': return pocket !== 0 && pocket % 3 === 2;
+    case 'col:3': return pocket !== 0 && pocket % 3 === 0;
+    default: return false;
+  }
+}
+
+/** POST /api/store/wheel/spin { token, bets } — consume a pre-paid spin token,
+ *  take the staked spice, draw the pocket with crypto randomness and settle
+ *  every bet with standard roulette odds × 1.5. Server-authoritative: the
+ *  client animation merely replays the outcome. Tokens are single-use. */
 async function handleWheelSpin(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
-  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
-  let payload: { token?: unknown };
+  if (contentLength > 8_192) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { token?: unknown; bets?: unknown };
   try {
-    payload = (await request.json()) as { token?: unknown };
+    payload = (await request.json()) as { token?: unknown; bets?: unknown };
   } catch {
     return authJson({ error: 'Invalid JSON body' }, 400);
   }
   const token = String(payload.token ?? '');
   if (!token) return authJson({ error: 'Missing spin token' }, 400);
+
+  // Parse the betting board: { "n:17": 2, "red": 1, ... } — each unit is one
+  // spice. Reject unknown spots and absurd stakes.
+  const bets = new Map<string, number>();
+  if (payload.bets !== undefined && payload.bets !== null && typeof payload.bets === 'object') {
+    for (const [key, value] of Object.entries(payload.bets as Record<string, unknown>)) {
+      if (!(key in WHEEL_BET_ODDS)) return authJson({ error: `Unknown bet spot: ${key}` }, 400);
+      const units = Math.round(Number(value));
+      if (!Number.isFinite(units) || units < 1 || units > 200)
+        return authJson({ error: `Invalid stake on ${key}` }, 400);
+      bets.set(key, units);
+    }
+  }
+  if (bets.size === 0) return authJson({ error: 'Place at least one bet before spinning' }, 400);
+  if (bets.size > 24) return authJson({ error: 'Too many bet spots' }, 400);
+  const staked = [...bets.values()].reduce((a, b) => a + b, 0);
+  if (staked > 1_000) return authJson({ error: 'Total stake is capped at 1000 🌶️' }, 400);
+  if (Number(user.spice ?? 0) < staked)
+    return authJson({ error: 'Not enough spice for that stake' }, 400);
 
   await ensureSpiceSchema(env);
   const spin = await env.DB.prepare(
@@ -1218,24 +1264,34 @@ async function handleWheelSpin(request: Request, env: Env, user: AuthUserRow): P
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
   const pocket = buf[0] % 37;
-  const reward = WHEEL_REWARDS[pocket] ?? 10;
+
+  // Settle: winners return stake + profit (odds × 1.5, rounded per bet).
+  const wins: { key: string; stake: number; profit: number }[] = [];
+  let returned = 0;
+  for (const [key, stake] of bets) {
+    if (!wheelBetWins(key, pocket)) continue;
+    const profit = Math.round(stake * (WHEEL_BET_ODDS[key] ?? 0) * 1.5);
+    wins.push({ key, stake, profit });
+    returned += stake + profit;
+  }
+  const net = returned - staked;
   const now = Date.now();
 
-  // Consume the token and pay out atomically-ish; the conditional UPDATE is
+  // Consume the token and settle atomically-ish; the conditional UPDATE is
   // the guard against double-spin races.
   const consume = await env.DB.prepare(
     'UPDATE wheel_spins SET consumed = 1, pocket = ?2, reward = ?3, consumed_at = ?4 WHERE token = ?1 AND consumed = 0'
-  ).bind(token, pocket, reward, now).run();
+  ).bind(token, pocket, net, now).run();
   if (!consume.meta.changes)
     return authJson({ error: 'This spin has already been played' }, 409);
 
   await env.DB.batch([
-    env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
-      .bind(user.username, reward, now),
+    env.DB.prepare('UPDATE auth_users SET spice = spice - ?2 + ?3, updated_at = ?4 WHERE username = ?1')
+      .bind(user.username, staked, returned, now),
     env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'wheel', ?3, ?4)")
-      .bind(user.username, reward, `Roulette pocket ${pocket}`, now),
+      .bind(user.username, net, `Roulette pocket ${pocket} · staked ${staked} · returned ${returned}`, now),
   ]);
-  return authJson({ pocket, reward, spice: Number(user.spice ?? 0) + reward });
+  return authJson({ pocket, staked, returned, net, wins, spice: Number(user.spice ?? 0) - staked + returned });
 }
 
 interface AdminStorePayload {

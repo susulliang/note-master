@@ -216,13 +216,23 @@ export async function fetchCardCollection(): Promise<
   return out.collection;
 }
 
-/** Play a Wheel of Fortune spin — consumes the purchase token and returns the
- *  server-decided pocket, its spice reward, and the new balance. */
-export async function spinWheel(token: string): Promise<{ pocket: number; reward: number; spice: number }> {
+/** Play a Wheel of Fortune round — consumes the purchase token, stakes the
+ *  placed bets, and returns the landed pocket plus the settlement (standard
+ *  roulette odds × 1.5): what was staked, what came back, and the net delta. */
+export interface WheelSpinResult {
+  pocket: number;
+  staked: number;
+  returned: number;
+  net: number;
+  wins: { key: string; stake: number; profit: number }[];
+  spice: number;
+}
+
+export async function spinWheel(token: string, bets: Record<string, number>): Promise<WheelSpinResult> {
   const authToken = getStoredToken();
-  const out = await call<{ pocket: number; reward: number; spice: number }>('/api/store/wheel/spin', {
+  const out = await call<WheelSpinResult>('/api/store/wheel/spin', {
     method: 'POST',
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, bets }),
     token: authToken,
   });
   return out;
