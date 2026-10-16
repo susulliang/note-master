@@ -527,42 +527,55 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                       maxLength={200}
                     />
                     <div className="flex items-center justify-between gap-2">
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
-                        <input
-                          type="radio"
-                          checked={draft.category === 'other'}
-                          onChange={() => setDraft({ ...draft, category: 'other' })}
-                          className="accent-amber-500"
-                        />
-                        📦 Standard
-                      </label>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
-                        <input
-                          type="radio"
-                          checked={draft.category === 'food'}
-                          onChange={() => setDraft({ ...draft, category: 'food' })}
-                          className="accent-amber-500"
-                        />
-                        🐱 Food (feeds the cat)
-                      </label>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this launches the casino roulette — the ball lands on a spice reward">
-                        <input
-                          type="radio"
-                          checked={draft.category === 'wheel'}
-                          onChange={() => setDraft({ ...draft, category: 'wheel' })}
-                          className="accent-amber-500"
-                        />
-                        🎰 Wheel of Fortune
-                      </label>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this draws a random TCG card into the buyer's collection">
-                        <input
-                          type="radio"
-                          checked={draft.category === 'cards'}
-                          onChange={() => setDraft({ ...draft, category: 'cards' })}
-                          className="accent-amber-500"
-                        />
-                        🃏 Card draw
-                      </label>
+                      {draft.id && draft.id.startsWith('tcg-') ? (
+                        // Card-draw bundles are locked: the server forces
+                        // category 'cards' (and blocks deletion) for these ids.
+                        <span
+                          className="rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] font-bold text-amber-300"
+                          title="Card-draw products are permanent — category is locked so purchases always trigger the draw"
+                        >
+                          🃏 Card draw (locked)
+                        </span>
+                      ) : (
+                        <>
+                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                            <input
+                              type="radio"
+                              checked={draft.category === 'other'}
+                              onChange={() => setDraft({ ...draft, category: 'other' })}
+                              className="accent-amber-500"
+                            />
+                            📦 Standard
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                            <input
+                              type="radio"
+                              checked={draft.category === 'food'}
+                              onChange={() => setDraft({ ...draft, category: 'food' })}
+                              className="accent-amber-500"
+                            />
+                            🐱 Food (feeds the cat)
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this launches the casino roulette — the ball lands on a spice reward">
+                            <input
+                              type="radio"
+                              checked={draft.category === 'wheel'}
+                              onChange={() => setDraft({ ...draft, category: 'wheel' })}
+                              className="accent-amber-500"
+                            />
+                            🎰 Wheel of Fortune
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground" title="Buying this draws a random TCG card into the buyer's collection">
+                            <input
+                              type="radio"
+                              checked={draft.category === 'cards'}
+                              onChange={() => setDraft({ ...draft, category: 'cards' })}
+                              className="accent-amber-500"
+                            />
+                            🃏 Card draw
+                          </label>
+                        </>
+                      )}
                       <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                         <input
                           type="checkbox"

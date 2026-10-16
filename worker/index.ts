@@ -570,6 +570,11 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            'Draw from the Attack on Titan foil pool — Final Season + Vol. 1 & 2 sets merged, rarity set by market price. Results land in My Collection.',
            29, 1, 'cards', ?1, ?1)`
       ).bind(nowSeed).run();
+      // Heal any card-draw rows whose category was reset by an older admin
+      // save — the draw only fires when the category is 'cards'.
+      await env.DB.prepare(
+        `UPDATE store_products SET category = 'cards' WHERE id IN ('tcg-sds-card', 'tcg-aot-card', 'tcg-pokemon-rare')`
+      ).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -1199,6 +1204,10 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   if (payload.action === 'delete') {
     const id = String(payload.product?.id ?? '');
     if (!id) return authJson({ error: 'Missing product id' }, 400);
+    // The three card-draw bundles are infrastructure, not merchandise — they
+    // must stay (a purchase against a missing product used to eat spice with
+    // no card returned). Their category is locked the same way.
+    if (TCG_PRODUCT_SETS[id]) return authJson({ error: 'Card-draw products are permanent and cannot be deleted' }, 400);
     const del = await env.DB.prepare('DELETE FROM store_products WHERE id = ?1').bind(id).run();
     if (!del.meta.changes) return authJson({ error: 'Product not found' }, 404);
     return authJson({ ok: true });
@@ -1214,7 +1223,12 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   // Product image: a client-produced data URL (PNG keeps alpha, JPEG for
   // photos) — never larger than ~350 KB after the 256×256 downscale.
   const image = typeof p.image === 'string' && p.image ? p.image : null;
-  const category = p.category === 'food' ? 'food' : p.category === 'wheel' ? 'wheel' : 'other';
+  let category = p.category === 'food' ? 'food' : p.category === 'wheel' ? 'wheel' : p.category === 'cards' ? 'cards' : 'other';
+  // Card-draw products always stay 'cards' — an admin save via the generic
+  // form used to silently reset the category to 'other', which made purchases
+  // deduct spice without ever triggering the draw.
+  const id = typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID();
+  if (TCG_PRODUCT_SETS[id]) category = 'cards';
   if (image && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image))
     return authJson({ error: 'Image must be a base64 PNG or JPEG data URL' }, 400);
   if (image && image.length > 500_000)
@@ -1226,7 +1240,6 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
     return authJson({ error: 'Price must be 1–100000 spice' }, 400);
 
   const now = Date.now();
-  const id = typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO store_products (id, name, emoji, description, price, active, image, category, created_at, updated_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?8, ?8)
