@@ -123,6 +123,7 @@ const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
 const TicketTrackerPanel = lazy(() => import('@/components/TicketTrackerPanel'));
 const CaseTrakBoard = lazy(() => import('@/components/CaseTrakBoard'));
 const ShiftsWorkspace = lazy(() => import('@/components/ShiftsWorkspace'));
+const CommunePanel = lazy(() => import('@/components/CommunePanel'));
 const Dash = lazy(() => import('@/components/Dash'));
 const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 const SopPanel = lazy(() => import('@/components/SopPanel'));
@@ -844,7 +845,7 @@ export default function TicketNotesPage() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** Top-level work view: Call Notes flowchart (default), Case Trak board,
    *  KPI Dashboard, or the hidden Shifts roster. */
-  const [workView, setWorkView] = useState<'callNotes' | 'selfTest' | 'caseTrak' | 'dash' | 'shifts'>('callNotes');
+  const [workView, setWorkView] = useState<'callNotes' | 'selfTest' | 'commune' | 'caseTrak' | 'dash' | 'shifts'>('callNotes');
   // The Shifts roster workspace is HIDDEN by default — pressing Shift+S
   // reveals its rail pill and switches to it (kept out of the default UI;
   // it's an internal GZ-OPS roster, not part of the agent-facing flow).
@@ -938,9 +939,10 @@ export default function TicketNotesPage() {
       if (prev === 'caseTrak' && !trakVisible) return 'callNotes';
       if (prev === 'dash' && !dashVisible) return 'callNotes';
       if (prev === 'shifts' && !rosterVisible) return 'callNotes';
+      if (prev === 'commune' && !authUser) return 'callNotes'; // logged out
       return prev;
     });
-  }, [analyticsUnlocked, shiftsUnlocked, authPrivileges]);
+  }, [analyticsUnlocked, shiftsUnlocked, authPrivileges, authUser]);
   /** "[OVER24]" report batches pushed by the extension (popup button
    *  "Import Over 24h Report Cases"). Accumulates across imports so the
    *  Case Trak board can merge every batch whenever it mounts. */
@@ -2236,6 +2238,12 @@ Additional information (if needed): ${additional}`;
                   <ShiftsWorkspace />
                 </Suspense>
               }
+              communeContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Walking to the commune…</div>}>
+                  <CommunePanel />
+                </Suspense>
+              }
+              communeEnabled={!!authUser}
               shiftsEnabled={shiftsUnlocked || !!authPrivileges?.roster}
               analyticsEnabled={analyticsUnlocked}
               dashEnabled={analyticsUnlocked || !!authPrivileges?.dash}

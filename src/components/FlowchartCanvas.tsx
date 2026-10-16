@@ -1,5 +1,5 @@
 import { lazy, Suspense, memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, Users, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -104,6 +104,11 @@ interface FlowchartCanvasProps {
   /** Content rendered in the canvas area when activeView === 'shifts'
    *  (agent roster workspace — rail pill hidden until unlocked via Shift+S). */
   shiftsContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'commune'
+   *  (the agents' town square — visible to every logged-in user). */
+  communeContent?: React.ReactNode;
+  /** Reveal the Commune work-view pill in the left rail (logged-in users). */
+  communeEnabled?: boolean;
   /** Reveal the hidden Shifts work-view pill in the left rail. */
   shiftsEnabled?: boolean;
   /** Reveal the hidden Case Trak + KPI Dashboard pills in the left rail
@@ -126,7 +131,7 @@ interface FlowchartCanvasProps {
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
-export type WorkView = 'callNotes' | 'selfTest' | 'caseTrak' | 'dash' | 'shifts';
+export type WorkView = 'callNotes' | 'selfTest' | 'commune' | 'caseTrak' | 'dash' | 'shifts';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -426,6 +431,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   dashContent,
   selfTestContent,
   shiftsContent,
+  communeContent,
+  communeEnabled = false,
   shiftsEnabled = false,
   analyticsEnabled = false,
   dashEnabled,
@@ -443,11 +450,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // (activated with Shift+S or a Roster privilege grant).
   const railViews = useMemo<WorkView[]>(() => {
     const views: WorkView[] = ['callNotes', 'selfTest'];
+    if (communeEnabled) views.push('commune'); // town square — every logged-in user
     if (trakEnabled ?? analyticsEnabled) views.push('caseTrak');
     if (dashEnabled ?? analyticsEnabled) views.push('dash');
     if (shiftsEnabled) views.push('shifts');
     return views;
-  }, [analyticsEnabled, dashEnabled, trakEnabled, shiftsEnabled]);
+  }, [analyticsEnabled, dashEnabled, trakEnabled, shiftsEnabled, communeEnabled]);
 
   // Pull-tab bookmark panels — NONE left: the 24H tracker moved into the
   // copilot drawer (v0.2.0), so the left-edge pull-tab layer is now empty.
@@ -1076,6 +1084,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         </div>
       )}
 
+      {/* COMMUNE — the agents' town square (visible to every logged-in user):
+          a walk-around canvas world with NPC chit-chat, admin banners and
+          personal showcase stubs. */}
+      {activeView === 'commune' && communeEnabled && (
+        <div className="h-full min-h-full w-full pl-[92px]">
+          {communeContent}
+        </div>
+      )}
+
         {/* Unified left rail — ONE floating vertical pill spanning the full
             page height. Work-view tabs + bookmarks up top, global toolbar
             controls portaled into the bottom slot.
@@ -1120,31 +1137,37 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                     ? 'Call Notes — active call workspace'
                     : view === 'selfTest'
                       ? 'Self Test — weekly news knowledge quizzes'
-                      : view === 'caseTrak'
-                        ? 'Case Trak Board — case lifecycle stages'
-                        : view === 'dash'
-                          ? 'KPI Dashboard — AMR Contact Center monthly metrics'
-                          : 'Shifts — service agent roster (hidden workspace, Shift+S)';
+                      : view === 'commune'
+                        ? 'Commune — agents town square'
+                        : view === 'caseTrak'
+                          ? 'Case Trak Board — case lifecycle stages'
+                          : view === 'dash'
+                            ? 'KPI Dashboard — AMR Contact Center monthly metrics'
+                            : 'Shifts — service agent roster (hidden workspace, Shift+S)';
                 const short =
                   view === 'callNotes'
                     ? 'Notes'
                     : view === 'selfTest'
                       ? 'Test'
-                      : view === 'caseTrak'
-                        ? 'Trak'
-                        : view === 'dash'
-                          ? 'Dash'
-                          : 'Shifts';
+                      : view === 'commune'
+                        ? 'Town'
+                        : view === 'caseTrak'
+                          ? 'Trak'
+                          : view === 'dash'
+                            ? 'Dash'
+                            : 'Shifts';
                 const Icon =
                   view === 'callNotes'
                     ? FilePen
                     : view === 'selfTest'
                       ? GraduationCap
-                      : view === 'caseTrak'
-                        ? LayoutGrid
-                        : view === 'dash'
-                          ? BarChart3
-                          : CalendarDays;
+                      : view === 'commune'
+                        ? Users
+                        : view === 'caseTrak'
+                          ? LayoutGrid
+                          : view === 'dash'
+                            ? BarChart3
+                            : CalendarDays;
                 return (
                   <button
                     key={view}
