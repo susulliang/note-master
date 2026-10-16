@@ -140,7 +140,7 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
         { role: 'system', content: persona.system_prompt.join('\n') },
         ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
       ];
-      let raw = await kittyChat([...baseMessages, { role: 'user', content: choice }], 3_000);
+      let raw = await kittyChat([...baseMessages, { role: 'user', content: choice }], 8_192);
       let next = parseTurn(raw);
       if (!next) {
         // One corrective retry — ask for the complete JSON object again.
@@ -151,7 +151,7 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
             { role: 'assistant', content: raw.slice(-1_000) },
             { role: 'user', content: 'Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with gb_message, agent_choices (all 4), and status.' },
           ],
-          3_000
+          8_192
         );
         next = parseTurn(raw);
       }

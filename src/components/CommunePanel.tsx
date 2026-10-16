@@ -14,7 +14,7 @@
  *   • Bulletin board (admin banners), showcase stall + challenge tent stubs.
  *
  * NEXT-BOARD ROADMAP (deliberate hook points, see the panels' stubs):
- *   1. NPC challenges — real case-study quizzes handed out at the tent.
+ *   1. NPC challenges — walk up to a standing NPC (GB Poolius) and press E.
  *   2. Agent chit-chat — real multi-user presence + chat (D1 presence sync:
  *      the player/NPC entity model below is already the wire shape).
  *   3. Delivery secrets / open conversations — proximity-gated chat channels.
@@ -49,7 +49,6 @@ const PLAZA = { x: 800, y: 620, r: 300 };
 const FOUNTAIN = { x: 800, y: 600, r: 96 }; // collision circle
 const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
-const TENT = { x: 1200, y: 730, w: 180, h: 160 }; // challenge tent
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
 type PanelKind = PropPanelKind | 'loadout' | 'agent' | null;
@@ -89,11 +88,6 @@ const COMMUNE_PROPS: CommuneProp[] = [
     kind: 'showcase', label: 'Showcase Stall', x: STALL.x + 40, y: STALL.y, range: 110,
     hitbox: { x: STALL.x - STALL.w / 2, y: STALL.y - STALL.h / 2, w: STALL.w, h: STALL.h },
     description: 'A place to show off favorite cards, milestones, and personal collections.',
-  },
-  {
-    kind: 'challenges', label: 'Challenge Tent', x: TENT.x - 40, y: TENT.y, range: 110,
-    hitbox: { x: TENT.x - TENT.w / 2, y: TENT.y - TENT.h / 2, w: TENT.w, h: TENT.h },
-    description: 'Step inside the tent and take on an NPC customer challenge — talk them down to earn spice.',
   },
 ];
 /** Solid footprints (building walls incl. roof silhouette + props). */
@@ -169,9 +163,9 @@ const NPCS = [
   { name: 'Waffle', hue: 330, home: { x: 1050, y: 470 } },
 ];
 
-/** GB Poolius — the standing challenge NPC in front of the challenge tent.
+/** GB Poolius — the standing challenge NPC (formerly the challenge tent).
  *  No waypoint / line schedule: he paces in place, waiting for agents. */
-const GB_NPC = { name: 'GB Poolius', hue: 0, x: 1160, y: 790 };
+const GB_NPC = { name: 'GB Poolius', hue: 0, x: 1200, y: 800 };
 const GB_INTERACT_RANGE = 92;
 
 const NPC_LINES = [
@@ -179,7 +173,6 @@ const NPC_LINES = [
   'Meet at the fountain?',
   'I almost beat the spin wheel yesterday…',
   'Have you hung a banner yet?',
-  'The challenge tent is coming — real cases!',
   'Show your cards at the showcase stall!',
   'Lovely day in the commune ☀',
   'brb, feeding my cat',
@@ -277,6 +270,7 @@ export default function CommunePanel() {
   const [banners, setBanners] = useState<Banner[]>(loadBanners);
   const [bannerDraft, setBannerDraft] = useState('');
   const [chatDraft, setChatDraft] = useState('');
+  const [chatFocused, setChatFocused] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
 
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
@@ -703,19 +697,17 @@ export default function CommunePanel() {
           ? 'reading the banners'
           : nearKind === 'showcase'
             ? 'browsing showcases'
-            : nearKind === 'challenges'
-              ? 'at the challenge tent'
-        : nearKind === 'townhall'
+            : nearKind === 'townhall'
           ? 'visiting town hall'
         : nearKind === 'store'
           ? 'at the store'
         : nearKind === 'arcade'
           ? 'at the arcade'
-              : player.moving
-                ? 'wandering'
-                : Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < PLAZA.r
-                  ? 'resting by the fountain'
-                  : 'hanging out';
+          : player.moving
+            ? 'wandering'
+            : Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < PLAZA.r
+              ? 'resting by the fountain'
+              : 'hanging out';
 
       /* remote agents: lerp toward their last reported position */
       const remoteViews: RemoteView[] = [];
@@ -874,25 +866,41 @@ export default function CommunePanel() {
         <Palette className="size-3.5" /> <span>Loadout</span>
       </button>
 
-      {/* Chat bar */}
-      <div className="glass-panel absolute bottom-3 left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl p-2 shadow-xl">
+      {/* Chat bar — ghost glass while idle; opaque only while typing */}
+      <div
+        className={cn(
+          'absolute bottom-3 left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl border p-2 shadow-xl backdrop-blur-md transition-all duration-200',
+          chatFocused || chatDraft ? 'border-white/30 bg-card/95' : 'border-white/35 bg-transparent'
+        )}
+      >
         <input
           value={chatDraft}
           onChange={(e) => setChatDraft(e.target.value)}
-          onFocus={() => (chatFocusedRef.current = true)}
-          onBlur={() => (chatFocusedRef.current = false)}
+          onFocus={() => {
+            chatFocusedRef.current = true;
+            setChatFocused(true);
+          }}
+          onBlur={() => {
+            chatFocusedRef.current = false;
+            setChatFocused(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') speak();
             e.stopPropagation();
           }}
           placeholder={`Say something to the square, ${username}…`}
           maxLength={90}
-          className="glass-field h-10 min-w-0 flex-1 rounded-xl border border-border/70 bg-background/75 px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="h-10 min-w-0 flex-1 rounded-xl bg-transparent px-3.5 text-sm text-foreground placeholder:text-foreground/60 focus-visible:outline-none"
         />
         <button
           type="button"
           onClick={speak}
-          className="glass-btn h-10 rounded-xl border border-primary/40 bg-primary px-4 text-xs font-bold text-primary-foreground shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className={cn(
+            'h-10 rounded-xl border px-4 text-xs font-bold shadow-sm transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            chatFocused || chatDraft
+              ? 'border-primary/40 bg-primary text-primary-foreground hover:brightness-105'
+              : 'border-white/35 bg-white/10 text-foreground/90 hover:bg-white/20'
+          )}
         >
           Speak
         </button>
@@ -923,7 +931,7 @@ export default function CommunePanel() {
             <X className="size-4" />
           </button>
 
-          {activeProp && !['banners', 'showcase', 'challenges'].includes(activeProp.kind) && (
+          {activeProp && !['banners', 'showcase'].includes(activeProp.kind) && (
             <div className="pr-7">
               <div className="flex items-center gap-2.5">
                 <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
@@ -1512,60 +1520,6 @@ function draw(
       ctx.font = 'bold 10px ui-monospace, monospace';
       ctx.textAlign = 'center';
       ctx.fillText('SHOWCASE', sx, sy + 79);
-    },
-  });
-
-  /* challenge tent */
-  items.push({
-    y: TENT.y + TENT.h / 2,
-    fn: () => {
-      const tx = TENT.x;
-      const ty = TENT.y;
-      // canopy cone
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - 96);
-      ctx.lineTo(tx + TENT.w / 2, ty + 26);
-      ctx.lineTo(tx - TENT.w / 2, ty + 26);
-      ctx.closePath();
-      ctx.fillStyle = '#d49a5b';
-      ctx.fill();
-      // stripes
-      ctx.fillStyle = 'rgba(255,255,255,0.28)';
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - 96);
-      ctx.lineTo(tx + TENT.w / 6, ty + 26);
-      ctx.lineTo(tx - TENT.w / 6, ty + 26);
-      ctx.closePath();
-      ctx.fill();
-      // flag
-      ctx.strokeStyle = '#7a4a22';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - 96);
-      ctx.lineTo(tx, ty - 122);
-      ctx.stroke();
-      ctx.fillStyle = '#d97757';
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - 122);
-      ctx.lineTo(tx + 26, ty - 114);
-      ctx.lineTo(tx, ty - 106);
-      ctx.closePath();
-      ctx.fill();
-      // opening
-      ctx.fillStyle = '#5b3a1e';
-      ctx.beginPath();
-      ctx.moveTo(tx - 34, ty + 26);
-      ctx.lineTo(tx, ty - 30);
-      ctx.lineTo(tx + 34, ty + 26);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      roundRect(ctx, tx - 62, ty + 34, 124, 18, 9);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('CHALLENGES', tx, ty + 47);
     },
   });
 
