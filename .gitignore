@@ -99,3 +99,6 @@ src-tauri/gen/
 .wrangler/
 .vercel
 .env*
+
+public/assets/cat/.tmp/
+public/assets/cat/hunao-eating-sprites/
