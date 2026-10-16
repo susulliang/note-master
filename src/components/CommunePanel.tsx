@@ -21,9 +21,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Megaphone, Trophy, Users, X } from 'lucide-react';
+import { Megaphone, Palette, Trophy, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import {
+  fetchCardCollection,
+  syncCommune,
+  type CommuneAgent,
+  type CommuneLoadout,
+  type CommunePet,
+} from '@/lib/auth-client';
+import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
+import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
+import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
 
 /* ── world layout ──────────────────────────────────────────────────────────── */
 
@@ -77,7 +87,7 @@ const NPC_LINES = [
   'brb, feeding my cat',
 ];
 
-type PanelKind = 'banners' | 'showcase' | 'challenges' | null;
+type PanelKind = 'banners' | 'showcase' | 'challenges' | 'loadout' | 'agent' | null;
 
 /** Deterministic hue from a username so each agent wears their own color. */
 function hueOf(name: string): number {
@@ -94,12 +104,29 @@ interface Agent {
   name: string;
   hue: number;
   says: Speech | null;
+  /** Status line rendered under the name tag (remote agents). */
+  status?: string;
+  /** Admin badge (gold star). */
+  admin?: boolean;
   /** NPC-only: current waypoint + pause state. */
   target?: { x: number; y: number };
   pauseUntil?: number;
   nextLineAt?: number;
   moving?: boolean;
   bobPhase?: number;
+}
+
+/** Interpolated view of a remote agent for the draw loop. */
+interface RemoteView {
+  x: number;
+  y: number;
+  name: string;
+  hue: number;
+  phrase: string | null;
+  status?: string;
+  admin?: boolean;
+  moving: boolean;
+  bobPhase: number;
 }
 
 export default function CommunePanel() {
@@ -126,6 +153,26 @@ export default function CommunePanel() {
   panelRef.current = panel;
   const chatFocusedRef = useRef(false);
 
+  /* ── live presence (other agents) ─────────────────────────────────────────── */
+  const [others, setOthers] = useState<CommuneAgent[]>([]);
+  const [selected, setSelected] = useState<CommuneAgent | null>(null);
+  const selectedRef = useRef<CommuneAgent | null>(null);
+  selectedRef.current = selected;
+  /** Interpolated remote walkers, keyed by username. */
+  const remoteRef = useRef(
+    new Map<string, { rx: number; ry: number; tx: number; ty: number; agent: CommuneAgent; moving: boolean; bobPhase: number }>()
+  );
+  /** My current status, updated by the draw loop, sent by the poll. */
+  const statusRef = useRef('hanging out');
+
+  /* ── my loadout ───────────────────────────────────────────────────────────── */
+  const [loadout, setLoadout] = useState<CommuneLoadout>({ cards: [], pet: null, phrase: '' });
+  const loadoutTouchedRef = useRef(false);
+  const loadoutDirtyRef = useRef(false);
+  const [petChoices, setPetChoices] = useState<CommunePet[]>([]);
+  const [ownedCards, setOwnedCards] = useState<TcgManifestCard[] | null>(null);
+  const [cardIndex, setCardIndex] = useState<Map<string, TcgManifestCard> | null>(null);
+
   /* ── banners ─────────────────────────────────────────────────────────────── */
 
   const persistBanners = useCallback((next: Banner[]) => {
@@ -144,6 +191,121 @@ export default function CommunePanel() {
     persistBanners([...banners, { id: `${Date.now()}`, text, author: username, at: Date.now(), hue: hueOf(username) }]);
     setBannerDraft('');
   }, [bannerDraft, banners, persistBanners, username]);
+
+  /* ── loadout editor data (pets + owned cards) ────────────────────────────── */
+
+  // My six cats with their local per-cat stats (D1-synced snapshots cached in
+  // localStorage by use-cat-pet).
+  useEffect(() => {
+    if (panel !== 'loadout' || petChoices.length) return;
+    const list = CAT_CHOICES.map((c) => {
+      let st: ReturnType<typeof loadState> = null;
+      try {
+        st = loadState(window.localStorage.getItem(petStorageKey(username, c.id as CatId)));
+      } catch {
+        st = null;
+      }
+      return { id: c.id, name: c.name, stage: st ? stageFor(st.xp).name : 'Kitten', mood: st?.mood ?? 60, xp: st?.xp ?? 0 };
+    });
+    setPetChoices(list);
+  }, [panel, petChoices.length, username]);
+
+  // Card id → manifest card index (all collections) + my owned pool for picking.
+  useEffect(() => {
+    if ((panel !== 'loadout' && panel !== 'agent') || cardIndex) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const manifests = await Promise.all(TCG_COLLECTIONS.map((c) => loadTcgManifest(c.id)));
+        const idx = new Map<string, TcgManifestCard>();
+        for (const m of manifests) for (const card of m.cards) idx.set(card.id, card);
+        if (cancelled) return;
+        setCardIndex(idx);
+        if (panel === 'loadout') {
+          const col = await fetchCardCollection();
+          if (cancelled) return;
+          const ids = new Set(col.map((r) => r.cardId));
+          setOwnedCards([...idx.values()].filter((c) => ids.has(c.id)));
+        }
+      } catch {
+        /* editor simply shows empty pickers when offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, cardIndex]);
+
+  const toggleLoadoutCard = (id: string) => {
+    setLoadout((l) => ({
+      ...l,
+      cards: l.cards.includes(id) ? l.cards.filter((c) => c !== id) : [...l.cards, id].slice(-3),
+    }));
+  };
+
+  const saveLoadout = async () => {
+    loadoutTouchedRef.current = true;
+    loadoutDirtyRef.current = true;
+    setPanel(null);
+    const p = playerRef.current;
+    try {
+      const out = await syncCommune(Math.round(p.x), Math.round(p.y), statusRef.current, loadout);
+      setOthers(out.others);
+    } catch {
+      /* next presence tick will retry */
+    }
+  };
+
+  /* ── presence poll — one round-trip every 2.5s while the commune is open ─── */
+  useEffect(() => {
+    if (!user) return;
+    let stopped = false;
+    const tick = async () => {
+      const p = playerRef.current;
+      try {
+        const out = await syncCommune(
+          Math.round(p.x),
+          Math.round(p.y),
+          statusRef.current,
+          loadoutDirtyRef.current ? loadout : undefined
+        );
+        if (stopped) return;
+        loadoutDirtyRef.current = false;
+        // First server echo fills the editor (until the user edits locally).
+        if (!loadoutTouchedRef.current && out.me) setLoadout(out.me);
+        const seen = new Set<string>();
+        for (const a of out.others) {
+          seen.add(a.username);
+          const r = remoteRef.current.get(a.username);
+          if (r) {
+            r.tx = a.x;
+            r.ty = a.y;
+            r.agent = a;
+          } else {
+            remoteRef.current.set(a.username, { rx: a.x, ry: a.y, tx: a.x, ty: a.y, agent: a, moving: false, bobPhase: Math.random() * 10 });
+          }
+        }
+        for (const key of [...remoteRef.current.keys()]) {
+          if (!seen.has(key)) remoteRef.current.delete(key);
+        }
+        setOthers(out.others);
+        const sel = selectedRef.current;
+        if (sel) {
+          const fresh = out.others.find((o) => o.username === sel.username) ?? null;
+          setSelected(fresh);
+          if (!fresh) setPanel(null); // they walked away / went offline
+        }
+      } catch {
+        /* offline — keep showing the last known square */
+      }
+    };
+    void tick();
+    const iv = window.setInterval(() => void tick(), 2500);
+    return () => {
+      stopped = true;
+      window.clearInterval(iv);
+    };
+  }, [user, loadout]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -289,11 +451,50 @@ export default function CommunePanel() {
       cam.x = Math.min(Math.max(player.x - vw / 2, 0), Math.max(0, WORLD_W - vw));
       cam.y = Math.min(Math.max(player.y - vh / 2, 0), Math.max(0, WORLD_H - vh));
 
-      /* interactable prompt */
+      /* interactable prompt + my status line */
       const nearKind = proximity(player.x, player.y);
       setPrompt(nearKind ? `E — ${PROP_LABEL[nearKind]}` : null);
+      statusRef.current = player.says
+        ? 'chatting'
+        : nearKind === 'banners'
+          ? 'reading the banners'
+          : nearKind === 'showcase'
+            ? 'browsing showcases'
+            : nearKind === 'challenges'
+              ? 'at the challenge tent'
+              : player.moving
+                ? 'wandering'
+                : Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < PLAZA.r
+                  ? 'resting by the fountain'
+                  : 'hanging out';
 
-      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners);
+      /* remote agents: lerp toward their last reported position */
+      const remoteViews: RemoteView[] = [];
+      for (const r of remoteRef.current.values()) {
+        const dx = r.tx - r.rx;
+        const dy = r.ty - r.ry;
+        const d = Math.hypot(dx, dy);
+        r.moving = d > 3;
+        if (d > 0.5) {
+          const k = Math.min(1, dt * 3.5);
+          r.rx += dx * k;
+          r.ry += dy * k;
+        }
+        if (r.moving) r.bobPhase += dt * 9;
+        remoteViews.push({
+          x: r.rx,
+          y: r.ry,
+          name: r.agent.username,
+          hue: hueOf(r.agent.username),
+          phrase: r.agent.loadout?.phrase || null,
+          status: r.agent.status,
+          admin: r.agent.isAdmin,
+          moving: r.moving,
+          bobPhase: r.bobPhase,
+        });
+      }
+
+      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews);
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
@@ -313,6 +514,15 @@ export default function CommunePanel() {
     const rect = canvas.getBoundingClientRect();
     const wx = e.clientX - rect.left + camRef.current.x;
     const wy = e.clientY - rect.top + camRef.current.y;
+    // Clicking another agent opens their card (loadout: phrase, cards, pet).
+    for (const r of remoteRef.current.values()) {
+      if (Math.hypot(wx - r.rx, wy - r.ry) < 34) {
+        const agent = others.find((o) => o.username === r.agent.username) ?? r.agent;
+        setSelected(agent);
+        setPanel('agent');
+        return;
+      }
+    }
     // Props open their panel when clicked directly.
     const hitProp =
       (wx >= BOARD.x - BOARD.w / 2 && wx <= BOARD.x + BOARD.w / 2 && wy >= BOARD.y - BOARD.h / 2 && wy <= BOARD.y + BOARD.h / 2 && 'banners') ||
@@ -349,6 +559,21 @@ export default function CommunePanel() {
           {prompt}
         </div>
       )}
+
+      {/* Loadout editor button */}
+      <button
+        type="button"
+        onClick={() => setPanel(panel === 'loadout' ? null : 'loadout')}
+        className={cn(
+          'absolute right-4 top-4 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold backdrop-blur transition-colors',
+          panel === 'loadout'
+            ? 'border-amber-300/60 bg-amber-500/80 text-white'
+            : 'border-white/20 bg-black/40 text-amber-200 hover:bg-black/60'
+        )}
+        title="Edit what other agents see: cards, pet, phrase"
+      >
+        <Palette className="size-3.5" /> Loadout
+      </button>
 
       {/* Chat bar */}
       <div className="absolute bottom-4 left-1/2 flex w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2">
@@ -479,6 +704,183 @@ export default function CommunePanel() {
               </div>
             </div>
           )}
+
+          {panel === 'loadout' && (
+            <div>
+              <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
+                <Palette className="size-4 text-amber-400" /> My Loadout
+              </h3>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                What other agents see when they click you: up to 3 collection cards, one pet, one phrase.
+              </p>
+
+              {/* Signature phrase */}
+              <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Signature phrase</p>
+              <input
+                value={loadout.phrase}
+                onChange={(e) => setLoadout((l) => ({ ...l, phrase: e.target.value }))}
+                onKeyDown={(e) => e.stopPropagation()}
+                maxLength={80}
+                placeholder="e.g. Greetings from the north stall ☕"
+                className="h-8 w-full rounded-lg border border-border/60 bg-background/40 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-amber-300/60 focus:outline-none"
+              />
+
+              {/* Pet selector */}
+              <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Displayed pet</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {petChoices.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setLoadout((l) => ({ ...l, pet: l.pet?.id === p.id ? null : { ...p } }))}
+                    className={cn(
+                      'rounded-lg border px-1.5 py-1.5 text-center transition-colors',
+                      loadout.pet?.id === p.id
+                        ? 'border-amber-300/70 bg-amber-400/15'
+                        : 'border-border/50 bg-background/20 hover:bg-background/40'
+                    )}
+                  >
+                    <p className="text-[11px] font-extrabold text-foreground">{p.name}</p>
+                    <p className="text-[9px] text-muted-foreground">
+                      {p.stage} · Mood {p.mood}
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Card slots */}
+              <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                Collection cards ({loadout.cards.length}/3)
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[0, 1, 2].map((i) => {
+                  const id = loadout.cards[i];
+                  const card = id ? cardIndex?.get(id) : undefined;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => id && toggleLoadoutCard(id)}
+                      className={cn(
+                        'relative aspect-[5/7] overflow-hidden rounded-lg border bg-white/5',
+                        card ? rarityStyle(card.rarity).border : 'border-dashed border-border/50'
+                      )}
+                      title={card ? `${card.name} — click to remove` : 'Pick a card below'}
+                    >
+                      {card ? (
+                        <>
+                          <img src={card.image} alt={card.name} className="size-full object-cover" />
+                          <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1 text-[8px] font-bold text-white">
+                            {card.rarity}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="flex size-full items-center justify-center font-mono text-xs text-muted-foreground/50">+</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {ownedCards && ownedCards.length > 0 && (
+                <div className="custom-scrollbar mt-2 grid max-h-36 grid-cols-5 gap-1 overflow-y-auto rounded-lg border border-border/40 bg-background/20 p-1.5">
+                  {ownedCards.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => toggleLoadoutCard(c.id)}
+                      className={cn(
+                        'relative aspect-[5/7] overflow-hidden rounded border transition-transform hover:scale-105',
+                        loadout.cards.includes(c.id) ? 'border-amber-300 ring-1 ring-amber-300/60' : 'border-transparent'
+                      )}
+                      title={`${c.name} — ${c.rarity}`}
+                    >
+                      <img src={c.image} alt={c.name} className="size-full object-cover" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {ownedCards && ownedCards.length === 0 && (
+                <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+                  No cards yet — draw some from the Spice Store.
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void saveLoadout()}
+                className="mt-3 h-9 w-full rounded-lg border border-amber-400/50 bg-amber-500/80 text-sm font-extrabold text-white transition hover:brightness-110"
+              >
+                Save loadout
+              </button>
+            </div>
+          )}
+
+          {panel === 'agent' && selected && (
+            <div>
+              <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
+                {selected.isAdmin && <span className="text-amber-400">★</span>}
+                {selected.username}
+              </h3>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {selected.status || 'hanging out'} · seen {Math.max(1, Math.round(selected.seenAgo / 1000))}s ago
+              </p>
+              {selected.loadout?.phrase && (
+                <blockquote className="mt-2 rounded-lg border-l-4 border-amber-400/60 bg-amber-400/10 px-3 py-2 text-xs italic text-foreground">
+                  “{selected.loadout.phrase}”
+                </blockquote>
+              )}
+              {selected.loadout && selected.loadout.cards.length > 0 && (
+                <>
+                  <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Collection cards</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {selected.loadout.cards.map((id) => {
+                      const card = cardIndex?.get(id);
+                      return card ? (
+                        <div
+                          key={id}
+                          className={cn('relative aspect-[5/7] overflow-hidden rounded-lg border bg-white/5', rarityStyle(card.rarity).border)}
+                          title={`${card.name} — ${card.rarity}`}
+                        >
+                          <img src={card.image} alt={card.name} className="size-full object-cover" />
+                          <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1 text-[8px] font-bold text-white">
+                            {card.rarity}
+                          </span>
+                        </div>
+                      ) : (
+                        <div key={id} className="flex aspect-[5/7] items-center justify-center rounded-lg border border-dashed border-border/50 font-mono text-xs text-muted-foreground/50">
+                          ???
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {selected.loadout?.pet && (
+                <>
+                  <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Pet</p>
+                  <div className="rounded-lg border border-border/50 bg-background/20 px-3 py-2">
+                    <p className="text-xs font-extrabold text-foreground">
+                      {selected.loadout.pet.name} <span className="font-normal text-muted-foreground">· {selected.loadout.pet.stage}</span>
+                    </p>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-background/60">
+                      <div
+                        className="h-full rounded-full bg-emerald-400"
+                        style={{ width: `${Math.round(selected.loadout.pet.mood)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Mood {Math.round(selected.loadout.pet.mood)}/100 · Bond XP {selected.loadout.pet.xp}
+                    </p>
+                  </div>
+                </>
+              )}
+              {!selected.loadout?.phrase && !selected.loadout?.cards.length && !selected.loadout?.pet && (
+                <p className="mt-3 rounded-lg border border-dashed border-border/60 p-3 text-center text-xs text-muted-foreground">
+                  {selected.username} hasn't set up a loadout yet.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -525,7 +927,8 @@ function draw(
   t: number,
   player: Agent,
   npcs: Agent[],
-  banners: Banner[]
+  banners: Banner[],
+  remotes: RemoteView[]
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, vw, vh);
@@ -811,8 +1214,21 @@ function draw(
     });
   }
 
-  /* entities */
+  /* entities — remotes reveal their loadout phrase when you walk close */
   for (const npc of npcs) items.push({ y: npc.y, fn: () => drawAgent(ctx, npc, t) });
+  for (const r of remotes) {
+    items.push({
+      y: r.y,
+      fn: () => {
+        const near = !!r.phrase && Math.hypot(r.x - player.x, r.y - player.y) < 170;
+        drawAgent(
+          ctx,
+          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, moving: r.moving, bobPhase: r.bobPhase },
+          t
+        );
+      },
+    });
+  }
   items.push({ y: player.y, fn: () => drawAgent(ctx, player, t, true) });
 
   items.sort((a, b) => a.y - b.y);
@@ -881,7 +1297,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   ctx.arc(x + 10, y - 18, 2.6, 0, Math.PI * 2);
   ctx.fill();
 
-  // player ring + name tag
+  // player ring + name tag (+ admin star, + status line for remote agents)
   if (isPlayer) {
     ctx.beginPath();
     ctx.ellipse(a.x, a.y + 20, 30, 11, 0, 0, Math.PI * 2);
@@ -891,12 +1307,18 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   }
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.textAlign = 'center';
-  const w = ctx.measureText(a.name).width + 14;
+  const tag = (a.admin ? '★ ' : '') + a.name;
+  const w = ctx.measureText(tag).width + 14;
   roundRect(ctx, x - w / 2, y + 24, w, 17, 8);
   ctx.fillStyle = isPlayer ? 'rgba(255,215,64,0.92)' : 'rgba(0,0,0,0.55)';
   ctx.fill();
   ctx.fillStyle = isPlayer ? '#1a1a1a' : '#fff';
-  ctx.fillText(a.name, x, y + 36);
+  ctx.fillText(tag, x, y + 36);
+  if (a.status && !isPlayer) {
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillText(a.status, x, y + 48);
+  }
 
   // speech bubble
   if (a.says) {

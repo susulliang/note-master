@@ -549,6 +549,27 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            PRIMARY KEY (username, card_id)
          )`
       ).run();
+      // COMMUNE town square — live agent presence (pruned continuously) and
+      // the per-agent display loadout (3 cards + a pet + a phrase).
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_presence (
+           username TEXT PRIMARY KEY,
+           is_admin INTEGER NOT NULL DEFAULT 0,
+           x REAL NOT NULL,
+           y REAL NOT NULL,
+           status TEXT NOT NULL DEFAULT '',
+           seen_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_loadout (
+           username TEXT PRIMARY KEY,
+           cards TEXT NOT NULL DEFAULT '[]',
+           pet TEXT NOT NULL DEFAULT '',
+           phrase TEXT NOT NULL DEFAULT '',
+           updated_at INTEGER NOT NULL
+         )`
+      ).run();
       // Seed the SDS card-draw store item (id-stable; price/edits via admin).
       const nowSeed = Date.now();
       await env.DB.prepare(
@@ -1178,6 +1199,105 @@ async function handleCardsCollection(env: Env, user: AuthUserRow): Promise<Respo
   return authJson({ collection: result.results ?? [] });
 }
 
+/** One round-trip COMMUNE presence tick: upsert the caller's position +
+ *  status (and loadout when included), prune stale walkers, and return every
+ *  other live agent with their display loadout attached. */
+async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 8_192) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { x?: unknown; y?: unknown; status?: unknown; loadout?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const x = Math.max(-100, Math.min(5000, Number(payload.x) || 0));
+  const y = Math.max(-100, Math.min(5000, Number(payload.y) || 0));
+  const status = String(payload.status ?? '').slice(0, 40);
+  const now = Date.now();
+
+  // Optional loadout push — up to 3 card ids, one pet snapshot, one phrase.
+  let cardsJson: string | null = null;
+  let petJson: string | null = null;
+  let phrase: string | null = null;
+  if (payload.loadout && typeof payload.loadout === 'object') {
+    const lo = payload.loadout as { cards?: unknown; pet?: unknown; phrase?: unknown };
+    const cards = Array.isArray(lo.cards)
+      ? lo.cards.filter((c): c is string => typeof c === 'string' && c.length <= 64).slice(0, 3)
+      : [];
+    cardsJson = JSON.stringify(cards);
+    let pet = '';
+    if (lo.pet && typeof lo.pet === 'object') {
+      const p = lo.pet as Record<string, unknown>;
+      pet = JSON.stringify({
+        id: String(p.id ?? '').slice(0, 32),
+        name: String(p.name ?? '').slice(0, 24),
+        stage: String(p.stage ?? '').slice(0, 16),
+        mood: Math.max(0, Math.min(100, Number(p.mood) || 0)),
+        xp: Math.max(0, Math.min(100000, Number(p.xp) || 0)),
+      });
+    }
+    petJson = pet;
+    phrase = String(lo.phrase ?? '').slice(0, 80);
+  }
+
+  await ensureSpiceSchema(env);
+  const stmts = [
+    env.DB.prepare(
+      `INSERT INTO commune_presence (username, is_admin, x, y, status, seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(username) DO UPDATE SET is_admin = ?2, x = ?3, y = ?4, status = ?5, seen_at = ?6`
+    ).bind(user.username, user.isAdmin ? 1 : 0, x, y, status, now),
+  ];
+  if (cardsJson !== null) {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO commune_loadout (username, cards, pet, phrase, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(username) DO UPDATE SET cards = ?2, pet = ?3, phrase = ?4, updated_at = ?5`
+      ).bind(user.username, cardsJson, petJson ?? '', phrase ?? '', now)
+    );
+  }
+  stmts.push(env.DB.prepare('DELETE FROM commune_presence WHERE seen_at < ?1').bind(now - 30_000));
+  await env.DB.batch(stmts);
+
+  const rows = await env.DB.prepare(
+    `SELECT p.username AS username, p.is_admin AS isAdmin, p.x AS x, p.y AS y,
+            p.status AS status, p.seen_at AS seenAt, l.cards AS cards, l.pet AS pet, l.phrase AS phrase
+     FROM commune_presence p LEFT JOIN commune_loadout l ON l.username = p.username
+     WHERE p.seen_at >= ?1 AND p.username != ?2`
+  ).bind(now - 30_000, user.username).all<{ username: string; isAdmin: number; x: number; y: number; status: string; seenAt: number; cards: string | null; pet: string | null; phrase: string | null }>();
+
+  const own = await env.DB.prepare('SELECT cards, pet, phrase FROM commune_loadout WHERE username = ?1')
+    .bind(user.username).first<{ cards: string; pet: string; phrase: string }>();
+
+  const parseLoadout = (cards: string | null, pet: string | null, ph: string | null) => {
+    if (!cards && !ph) return null;
+    let cardIds: string[] = [];
+    try {
+      cardIds = cards ? (JSON.parse(cards) as string[]) : [];
+    } catch {
+      cardIds = [];
+    }
+    let petOut: unknown = null;
+    try {
+      petOut = pet ? JSON.parse(pet) : null;
+    } catch {
+      petOut = null;
+    }
+    return { cards: cardIds, pet: petOut, phrase: ph ?? '' };
+  };
+
+  const others = (rows.results ?? []).map((r) => ({
+    username: r.username,
+    isAdmin: r.isAdmin === 1,
+    x: r.x,
+    y: r.y,
+    status: r.status,
+    seenAgo: now - r.seenAt,
+    loadout: parseLoadout(r.cards, r.pet, r.phrase),
+  }));
+  return authJson({ others, me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null) });
+}
+
 /** Roulette betting spots and their STANDARD casino payout odds ("to one"):
  *  straight number 35, dozen/column 2, even-money chances 1. Winning bets pay
  *  profit = stake × odds × 1.5 (the house's house-edge giveaway), rounded to
@@ -1490,6 +1610,12 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCardsCollection(env, user);
   }
+  // COMMUNE live presence + loadouts (any logged-in user).
+  if (path === '/api/commune/sync' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneSync(request, env, user);
+  }
 
   // Admin routes — bearer must belong to an is_admin account.
   const admin = await authBearerUser(request, env);
@@ -1693,6 +1819,7 @@ export default {
       url.pathname.startsWith('/api/pet') ||
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/cards') ||
+      url.pathname.startsWith('/api/commune') ||
       url.pathname.startsWith('/api/spice') ||
       url.pathname.startsWith('/api/amr-templates') ||
       url.pathname.startsWith('/api/sop') ||

@@ -216,6 +216,52 @@ export async function fetchCardCollection(): Promise<
   return out.collection;
 }
 
+/* ── COMMUNE town square — live presence + display loadout ────────────────── */
+
+/** Pet snapshot embedded in a loadout (stats frozen at save time). */
+export interface CommunePet {
+  id: string;
+  name: string;
+  stage: string;
+  mood: number;
+  xp: number;
+}
+
+export interface CommuneLoadout {
+  /** Up to 3 TCG card ids from the agent's collection. */
+  cards: string[];
+  pet: CommunePet | null;
+  phrase: string;
+}
+
+/** Another agent currently walking the square. */
+export interface CommuneAgent {
+  username: string;
+  isAdmin: boolean;
+  x: number;
+  y: number;
+  status: string;
+  seenAgo: number;
+  loadout: CommuneLoadout | null;
+}
+
+/** Presence tick: report my position/status (and loadout when included),
+ *  receive everyone else. Called every ~2.5s while the Commune is open. */
+export async function syncCommune(
+  x: number,
+  y: number,
+  status: string,
+  loadout?: CommuneLoadout
+): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null }> {
+  const token = getStoredToken();
+  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null }>('/api/commune/sync', {
+    method: 'POST',
+    body: JSON.stringify(loadout ? { x, y, status, loadout } : { x, y, status }),
+    token,
+  });
+  return out;
+}
+
 /** Play a Wheel of Fortune round — consumes the purchase token, stakes the
  *  placed bets, and returns the landed pocket plus the settlement (standard
  *  roulette odds × 1.5): what was staked, what came back, and the net delta. */
