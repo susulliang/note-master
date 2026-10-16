@@ -14,9 +14,7 @@ import { kittyChat } from '@/lib/kitty-help';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { NPC_PERSONAS } from '@/data/npc-personas';
 
-const PERSONA_ID = 'gb_poolius';
-
-/** Crazy-Dave-style gargle gibberish played while GB "speaks". */
+/** Crazy-Dave-style gargle gibberish played while the NPC "speaks". */
 const GARGLE_TRACKS = ['/assets/npc/crazydavelong2.mp3', '/assets/npc/crazydavelong3.mp3'];
 
 /** Best-effort JSON extraction from an LLM reply (handles code fences and
@@ -32,17 +30,17 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
   }
 }
 
-function parseTurn(raw: string): ChallengeTurn | null {
+function parseTurn(raw: string, messageKey: string): ChallengeTurn | null {
   const parsed = extractJsonObject(raw);
   if (parsed) {
-    const gb = String(parsed.gb_message ?? '').trim();
+    const msg = String(parsed[messageKey] ?? '').trim();
     const choices = Array.isArray(parsed.agent_choices)
       ? parsed.agent_choices.map((c) => String(c).trim()).filter(Boolean)
       : [];
-    if (gb && choices.length > 0) {
+    if (msg && choices.length > 0) {
       const rawStars = Number(parsed.stars);
       return {
-        gb_message: gb,
+        message: msg,
         agent_choices: choices,
         status: parsed.status === 'success' || parsed.status === 'fail' ? parsed.status : 'ongoing',
         stars:
@@ -52,23 +50,23 @@ function parseTurn(raw: string): ChallengeTurn | null {
       };
     }
   }
-  return salvageTruncatedTurn(raw);
+  return salvageTruncatedTurn(raw, messageKey);
 }
 
 /** Salvage a truncated reply: long rambles can hit the token cap and cut the
- *  JSON mid-object. Pull the gb_message string and whatever choices made it
+ *  JSON mid-object. Pull the NPC message string and whatever choices made it
  *  out before the cut; the turn stays 'ongoing'. */
-function salvageTruncatedTurn(raw: string): ChallengeTurn | null {
-  const msgMatch = raw.match(/"gb_message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+function salvageTruncatedTurn(raw: string, messageKey: string): ChallengeTurn | null {
+  const msgMatch = raw.match(new RegExp(`"${messageKey}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
   if (!msgMatch) return null;
-  let gb: string;
+  let message: string;
   try {
-    gb = JSON.parse(`"${msgMatch[1]}"`) as string;
+    message = JSON.parse(`"${msgMatch[1]}"`) as string;
   } catch {
     return null;
   }
-  if (!gb.trim()) return null;
-  // Whatever choice strings appeared after the gb_message are the choices.
+  if (!message.trim()) return null;
+  // Whatever choice strings appeared after the message are the choices.
   const after = raw.slice((msgMatch.index ?? 0) + msgMatch[0].length);
   const choiceMatches = after.matchAll(/"((?:[^"\\]|\\.)+)"\s*(?=,|\])/g);
   const choices: string[] = [];
@@ -81,7 +79,7 @@ function salvageTruncatedTurn(raw: string): ChallengeTurn | null {
     }
   }
   if (choices.length === 0) return null;
-  return { gb_message: gb.trim(), agent_choices: choices, status: 'ongoing' };
+  return { message: message.trim(), agent_choices: choices, status: 'ongoing' };
 }
 
 /** The NPC's end-of-call satisfaction rating (0–5 stars). */
@@ -97,11 +95,14 @@ function StarRow({ stars }: { stars: number }) {
 }
 
 interface ChallengePanelProps {
+  /** Which persona to run — key into NPC_PERSONAS. */
+  personaId: string;
   onSpiceChange: (spice: number) => void;
   onClose: () => void;
 }
 
-export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePanelProps) {
+export default function ChallengePanel({ personaId, onSpiceChange, onClose }: ChallengePanelProps) {
+  const persona = NPC_PERSONAS[personaId] ?? NPC_PERSONAS.gb_poolius;
   const [log, setLog] = useState<ChallengeMessage[]>([]);
   const [turn, setTurn] = useState<ChallengeTurn | null>(null);
   const [awarded, setAwarded] = useState<number | null>(null);
@@ -237,12 +238,16 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     setBusy(true);
     setError(null);
     setAwarded(null);
-    const persona = NPC_PERSONAS[PERSONA_ID];
-    setLog([{ role: 'npc', content: persona.initial_output.gb_message }]);
-    setTurn(persona.initial_output);
+    const initial = persona.data.initial_output;
+    setLog([{ role: 'npc', content: String(initial[persona.messageKey] ?? '') }]);
+    setTurn({
+      message: String(initial[persona.messageKey] ?? ''),
+      agent_choices: Array.isArray(initial.agent_choices) ? initial.agent_choices.map(String) : [],
+      status: 'ongoing',
+    });
     setBusy(false);
     speak();
-  }, [speak]);
+  }, [speak, persona]);
 
   useEffect(() => {
     void restart();
@@ -258,16 +263,15 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     if (busy || !turn || turn.status !== 'ongoing') return;
     setBusy(true);
     setError(null);
-    const persona = NPC_PERSONAS[PERSONA_ID];
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
     try {
       const baseMessages = [
-        { role: 'system', content: persona.system_prompt.join('\n') },
+        { role: 'system', content: persona.data.system_prompt.join('\n') },
         ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
       ];
       let raw = await kittyChat([...baseMessages, { role: 'user', content: choice }], 8_192);
-      let next = parseTurn(raw);
+      let next = parseTurn(raw, persona.messageKey);
       if (!next) {
         // One corrective retry — ask for the complete JSON object again.
         raw = await kittyChat(
@@ -275,18 +279,18 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
             ...baseMessages,
             { role: 'user', content: choice },
             { role: 'assistant', content: raw.slice(-1_000) },
-            { role: 'user', content: 'Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with gb_message, agent_choices (all 4), and status.' },
+            { role: 'user', content: `Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with ${persona.messageKey}, agent_choices (all 4), and status.` },
           ],
           8_192
         );
-        next = parseTurn(raw);
+        next = parseTurn(raw, persona.messageKey);
       }
       if (!next) throw new Error('The challenge engine returned an invalid turn');
-      setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: next.gb_message }]);
+      setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: next.message }]);
       setTurn(next);
       speak();
       if (next.status === 'success') {
-        const out = await awardChallenge(PERSONA_ID);
+        const out = await awardChallenge(personaId);
         if (out.awarded > 0) {
           setAwarded(out.awarded);
           onSpiceChange(out.spice);
@@ -308,17 +312,15 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="NPC Challenge — GB Poolius"
+        aria-label={`NPC Challenge — ${persona.name}`}
         className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-md"
       >
         {/* header */}
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           <Trophy className="size-4 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
-            <h3 className="font-mono text-sm font-extrabold text-foreground">NPC Challenge — GB Poolius</h3>
-            <p className="text-[11px] text-muted-foreground">
-              A furious pool-robot owner on the line. Talk him down — pick one reply per turn.
-            </p>
+            <h3 className="font-mono text-sm font-extrabold text-foreground">NPC Challenge — {persona.name}</h3>
+            <p className="text-[11px] text-muted-foreground">{persona.blurb}</p>
           </div>
           <span
             className={cn(
@@ -362,19 +364,19 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
                     : 'rounded-bl-sm border-border/60 bg-background/60 text-foreground'
                 )}
               >
-                {m.role === 'npc' && <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">GB Poolius</p>}
+                {m.role === 'npc' && <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">{persona.name}</p>}
                 <span className={cn('leading-relaxed', m.role === 'npc' ? 'text-sm' : 'text-xs')}>{m.content}</span>
               </div>
             </div>
           ))}
           {busy && (
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> GB Poolius is thinking…
+              <Loader2 className="size-3.5 animate-spin" /> {persona.name} is thinking…
             </div>
           )}
           {!busy && speaking && (
             <div className="flex items-center gap-2 text-[11px] font-semibold text-accent">
-              <Volume2 className="size-3.5 animate-pulse" /> GB Poolius is speaking
+              <Volume2 className="size-3.5 animate-pulse" /> {persona.name} is speaking
               <span className="flex items-end gap-0.5" aria-hidden>
                 {[0, 1, 2].map((i) => (
                   <span

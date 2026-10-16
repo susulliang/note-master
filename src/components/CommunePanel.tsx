@@ -160,10 +160,13 @@ const NPCS = [
   { name: 'Mocha', hue: 25, home: { x: 620, y: 760 } },
 ];
 
-/** GB Poolius — the standing challenge NPC (formerly the challenge tent).
- *  No waypoint / line schedule: he paces in place, waiting for agents. */
-const GB_NPC = { name: 'GB Poolius', hue: 0, x: 1200, y: 800 };
-const GB_INTERACT_RANGE = 92;
+/** Standing challenge NPCs — walk up and press E to start their chat.
+ *  Each runs its own persona (worker/npc/*.json, see npc-personas.ts). */
+const CHALLENGE_NPCS = [
+  { personaId: 'gb_poolius', name: 'GB Poolius', hue: 0, x: 1200, y: 800 },
+  { personaId: 'topus_hundrius', name: 'Topus Hundrius', hue: 45, x: 960, y: 800 },
+];
+const CHALLENGE_INTERACT_RANGE = 92;
 
 const NPC_LINES = [
   'Fresh banners on the board!',
@@ -264,6 +267,8 @@ export default function CommunePanel() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [panel, setPanel] = useState<PanelKind>(null);
+  /** Which challenge NPC's chat the E-key opened. */
+  const [challengePersona, setChallengePersona] = useState('gb_poolius');
   const [banners, setBanners] = useState<Banner[]>(loadBanners);
   const [bannerDraft, setBannerDraft] = useState('');
   const [chatDraft, setChatDraft] = useState('');
@@ -275,8 +280,8 @@ export default function CommunePanel() {
   playerRef.current.hue = hueOf(username);
   const npcsRef = useRef<Agent[]>([
     ...NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 })),
-    // GB Poolius stands outside the challenge tent (no target/line timer).
-    { x: GB_NPC.x, y: GB_NPC.y, name: GB_NPC.name, hue: GB_NPC.hue, says: null, bobPhase: Math.random() * 10 },
+    // Challenge NPCs stand in place (no target/line timer).
+    ...CHALLENGE_NPCS.map((c) => ({ x: c.x, y: c.y, name: c.name, hue: c.hue, says: null, bobPhase: Math.random() * 10 })),
   ]);
   const keysRef = useRef<Set<string>>(new Set());
   const clickTargetRef = useRef<{ x: number; y: number } | null>(null);
@@ -506,11 +511,13 @@ export default function CommunePanel() {
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyE') {
         if (panelRef.current) return;
-        // Talk to GB Poolius first (he stands by the challenge tent).
+        // Talk to the nearest challenge NPC first.
         const p = playerRef.current;
-        if (Math.hypot(p.x - GB_NPC.x, p.y - GB_NPC.y) < GB_INTERACT_RANGE) {
+        const npc = CHALLENGE_NPCS.find((c) => Math.hypot(p.x - c.x, p.y - c.y) < CHALLENGE_INTERACT_RANGE);
+        if (npc) {
           e.preventDefault();
           clickTargetRef.current = null;
+          setChallengePersona(npc.personaId);
           setPanel('challenges');
           return;
         }
@@ -679,8 +686,14 @@ export default function CommunePanel() {
 
       /* interactable prompt + my status line */
       const nearProp = nearestProp(player.x, player.y);
-      const nearGb = Math.hypot(player.x - GB_NPC.x, player.y - GB_NPC.y) < GB_INTERACT_RANGE;
-      const nextPrompt = nearGb ? 'E  Talk to GB Poolius' : nearProp ? `E  ${nearProp.label}` : null;
+      const nearChallengeNpc = CHALLENGE_NPCS.find(
+        (c) => Math.hypot(player.x - c.x, player.y - c.y) < CHALLENGE_INTERACT_RANGE
+      );
+      const nextPrompt = nearChallengeNpc
+        ? `E  Talk to ${nearChallengeNpc.name}`
+        : nearProp
+          ? `E  ${nearProp.label}`
+          : null;
       if (promptRef.current !== nextPrompt) {
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
@@ -688,8 +701,8 @@ export default function CommunePanel() {
       const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.says
         ? 'chatting'
-        : nearGb
-          ? 'talking with GB Poolius'
+        : nearChallengeNpc
+          ? `talking with ${nearChallengeNpc.name}`
           : nearKind === 'banners'
           ? 'reading the banners'
           : nearKind === 'showcase'
@@ -908,7 +921,9 @@ export default function CommunePanel() {
       {panel === 'store' && (
         <StorePanel spice={user?.spice ?? 0} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
       )}
-      {panel === 'challenges' && <ChallengePanel onSpiceChange={setSpice} onClose={() => setPanel(null)} />}
+      {panel === 'challenges' && (
+        <ChallengePanel personaId={challengePersona} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
+      )}
       {panel && panel !== 'store' && panel !== 'challenges' && (
         <div
           role="dialog"

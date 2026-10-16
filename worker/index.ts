@@ -11,17 +11,19 @@
 
 import { TCG_SETS } from './tcg-manifest.gen';
 import GB_POOLIUS from './npc/GB_Poolius.json';
+import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
   system_prompt: string[];
-  initial_output: { gb_message: string; agent_choices: string[]; status: string };
+  initial_output: Record<string, unknown>;
 }
 
 /** Persona registry — id → persona. Also seeded into the eco-data D1
  *  `npc_personas` table on first use (see ensureNpcSchema). */
-const NPC_PERSONAS: Record<string, NpcPersona> = {
-  'gb_poolius': GB_POOLIUS as unknown as NpcPersona,
+const NPC_PERSONAS: Record<string, { persona: NpcPersona; name: string }> = {
+  'gb_poolius': { persona: GB_POOLIUS as unknown as NpcPersona, name: 'GB Poolius' },
+  'topus_hundrius': { persona: TOPUS_HUNDRIUS as unknown as NpcPersona, name: 'Topus Hundrius' },
 };
 
 const CHALLENGE_SUCCESS_SPICE = 5;
@@ -1434,11 +1436,11 @@ async function ensureNpcSchema(env: Env): Promise<void> {
          )`
       ).run();
       const now = Date.now();
-      for (const [id, persona] of Object.entries(NPC_PERSONAS)) {
+      for (const [id, entry] of Object.entries(NPC_PERSONAS)) {
         await env.DB.prepare(
           `INSERT INTO npc_personas (id, name, data, created_at) VALUES (?1, ?2, ?3, ?4)
            ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data`
-        ).bind(id, 'gb_poolius' === id ? 'GB Poolius' : id, JSON.stringify(persona), now).run();
+        ).bind(id, entry.name, JSON.stringify(entry.persona), now).run();
       }
     })();
   }

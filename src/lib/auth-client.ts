@@ -284,7 +284,8 @@ export async function pickSpiceDrop(id: number): Promise<{ picked: boolean; spic
 /* ── NPC challenge (remote DeepSeek roleplay) ──────────────────────────────── */
 
 export interface ChallengeTurn {
-  gb_message: string;
+  /** The NPC's line (field name varies per persona — see npc-personas.ts). */
+  message: string;
   agent_choices: string[];
   status: 'ongoing' | 'success' | 'fail';
   /** End-of-call satisfaction rating the NPC hands out (0–5 stars). */
