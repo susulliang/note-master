@@ -20,6 +20,7 @@ import {
   type QuizQuestion,
   type TestSuite,
 } from '@/data/self-tests';
+import { submitTestAward } from '@/lib/auth-client';
 import { loadNewsIndex, type NewsItem } from '@/utils/newsData';
 
 type Phase = 'menu' | 'name' | 'quiz' | 'result';
@@ -245,7 +246,7 @@ function FireworkBurst() {
 }
 
 export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTestWorkspaceProps) {
-  const { user: authUser } = useAuth();
+  const { user: authUser, refresh } = useAuth();
   const [progress, setProgress] = useState<SelfTestProgress>(() => loadSelfTestProgress());
   const [phase, setPhase] = useState<Phase>('menu');
   const [activeSuite, setActiveSuite] = useState<TestSuite | null>(null);
@@ -356,11 +357,21 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
       });
       const data = (await res.json()) as { success?: boolean };
       if (!res.ok || !data.success) throw new Error(`Submission failed (${res.status})`);
+      // Logged-in takers earn spice for the run (10 base + score bonuses).
+      if (authUser?.username) {
+        try {
+          const award = await submitTestAward(suite.id, pct);
+          refresh();
+          onCatThought?.(`+${award.awarded} 🌶️ for that run! 🎉`, 6000);
+        } catch {
+          // Award is best-effort (cooldowns etc.) — never fail the report.
+        }
+      }
       setSubmitState('ok');
     } catch {
       setSubmitState('error');
     }
-  }, []);
+  }, [authUser?.username, onCatThought, refresh]);
 
   const openNameEntry = useCallback(
     (suite: TestSuite) => {

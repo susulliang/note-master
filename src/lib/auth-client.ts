@@ -171,6 +171,18 @@ export async function submitQaAward(scorePct: number): Promise<{ awarded: number
   return out;
 }
 
+/** Report a completed self-test run (suite id + final score 0–100). Awards
+ *  10 base spice with stacked score bonuses; throttled server-side. */
+export async function submitTestAward(suiteId: string, scorePct: number): Promise<{ awarded: number; spice: number }> {
+  const token = getStoredToken();
+  const out = await call<{ awarded: number; spice: number }>('/api/spice/test', {
+    method: 'POST',
+    body: JSON.stringify({ suiteId, scorePct }),
+    token,
+  });
+  return out;
+}
+
 /** Active store products available for purchase. */
 export async function listStore(): Promise<StoreProduct[]> {
   const token = getStoredToken();

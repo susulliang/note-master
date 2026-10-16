@@ -340,11 +340,15 @@ async function handleAuthRegister(request: Request, env: Env): Promise<Response>
   const hash = await authHashPassword(payload.password, salt);
   const now = Date.now();
   const isAdmin = AUTH_ADMIN_USERNAMES.has(username.toLowerCase()) ? 1 : 0;
+  // New accounts start with SHIFTS/roster only — DASH and TRAK are unlocked
+  // per-user by an admin. Admin usernames keep everything from day one.
+  const dashVisible = isAdmin;
+  const trakVisible = isAdmin;
   const insert = await env.DB.prepare(
     `INSERT INTO auth_users (username, hash, is_admin, dash_visible, roster_visible, trak_visible, created_at, updated_at)
-     VALUES (?, ?, ?, 1, 1, 1, ?, ?)`,
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
   )
-    .bind(username, hash, isAdmin, now, now)
+    .bind(username, hash, isAdmin, dashVisible, trakVisible, now, now)
     .run();
   if (!insert.success) return authJson({ error: 'Registration failed' }, 500);
 
@@ -634,6 +638,58 @@ async function handleSpiceQa(request: Request, env: Env, user: AuthUserRow): Pro
       .bind(user.username, award, now),
     env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'qa', ?3, ?4)")
       .bind(user.username, award, `qa:${scorePct}`, now),
+  ]);
+  return authJson({ awarded: award, spice: Number(user.spice ?? 0) + award });
+}
+
+/** Spice for a completed self-test suite run: 10 base, +10 over 70, +20
+ *  over 80, +30 over 90, and +30 more for a perfect 100 (stacking). */
+function testSpiceAward(scorePct: number): number {
+  let award = 10;
+  if (scorePct > 70) award += 10;
+  if (scorePct > 80) award += 20;
+  if (scorePct > 90) award += 30;
+  if (scorePct === 100) award += 30;
+  return award;
+}
+
+/** POST /api/spice/test { suiteId, scorePct } — award spice for a completed
+ *  self-test run. Server-side: the client reports the suite + final score;
+ *  a 3-minute cooldown (mirrors QA awards) throttles repeat-attempt farming. */
+async function handleSpiceTest(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { suiteId?: unknown; scorePct?: unknown };
+  try {
+    payload = (await request.json()) as { suiteId?: unknown; scorePct?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const suiteId = typeof payload.suiteId === 'string' ? payload.suiteId.trim() : '';
+  const scorePct = Math.round(Number(payload.scorePct));
+  if (!suiteId || suiteId.length > 120) return authJson({ error: 'Invalid suite id' }, 400);
+  if (!Number.isFinite(scorePct) || scorePct < 0 || scorePct > 100)
+    return authJson({ error: 'Invalid score' }, 400);
+
+  await ensureSpiceSchema(env);
+
+  // One test award per 3 minutes across all suites — repeat attempts are
+  // allowed for practice, but only pace-limited for spice.
+  const last = await env.DB.prepare(
+    "SELECT created_at FROM spice_ledger WHERE username = ?1 AND reason = 'test' ORDER BY created_at DESC LIMIT 1"
+  )
+    .bind(user.username)
+    .first<{ created_at: number }>();
+  if (last && Date.now() - Number(last.created_at) < 180_000)
+    return authJson({ error: 'Test award cooldown — try again in a few minutes' }, 429);
+
+  const award = testSpiceAward(scorePct);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
+      .bind(user.username, award, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'test', ?3, ?4)")
+      .bind(user.username, award, `test:${suiteId}:${scorePct}`, now),
   ]);
   return authJson({ awarded: award, spice: Number(user.spice ?? 0) + award });
 }
@@ -1306,6 +1362,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleSpiceQa(request, env, user);
+  }
+
+  // Self-test suite award — any logged-in user, one award per few minutes.
+  if (path === '/api/spice/test' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleSpiceTest(request, env, user);
   }
 
   // Cat companion pet state — read/save the caller's own blob.
