@@ -4,12 +4,14 @@
  * fountain, the bulletin board, the showcase stall and the challenge tent,
  * chit-chat with villager NPCs and each other via speech bubbles.
  *
- * SCAFFOLD SCOPE (local-only; no server state yet):
- *   • Player movement — WASD/arrow keys or click-to-move, camera follows.
- *   • Villager NPCs — waypoint wandering + ambient chit-chat bubbles.
- *   • Player chat — type at the bottom, speak in a bubble.
- *   • Bulletin board — admin banners (localStorage `__app_commune_banners`).
- *   • Showcase stall + challenge tent — stub panels describing the roadmap.
+ * LIVE SCOPE:
+ *   • Pixel-art town — the static map (town hall, café, arcade, houses, pond,
+ *     paths, lamps, fences, flowers) is baked once into an offscreen canvas.
+ *   • Pixel human sprites for the player, villager NPCs and remote agents.
+ *   • Live presence — other agents walk around in real time (D1, 2.5s poll).
+ *   • Loadouts — up to 3 collection cards from your inventory, one pet
+ *     snapshot, one phrase (revealed when someone walks close).
+ *   • Bulletin board (admin banners), showcase stall + challenge tent stubs.
  *
  * NEXT-BOARD ROADMAP (deliberate hook points, see the panels' stubs):
  *   1. NPC challenges — real case-study quizzes handed out at the tent.
@@ -44,6 +46,25 @@ const FOUNTAIN = { x: 800, y: 600, r: 96 }; // collision circle
 const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const TENT = { x: 1200, y: 730, w: 180, h: 160 }; // challenge tent
+const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
+/** Solid footprints (building walls incl. roof silhouette + props). */
+const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
+  { x: 650, y: 96, w: 300, h: 134 }, // town hall
+  { x: 161, y: 206, w: 170, h: 184 }, // café
+  { x: 1245, y: 206, w: 170, h: 184 }, // arcade
+  { x: 155, y: 864, w: 150, h: 176 }, // west house
+  { x: 1295, y: 864, w: 150, h: 176 }, // east house
+  { x: 736, y: 312, w: 128, h: 36 }, // bulletin board posts
+  { x: 330, y: 742, w: 140, h: 36 }, // showcase counter
+  { x: 90, y: 1062, w: 246, h: 18 }, // west fence
+  { x: 1310, y: 1062, w: 216, h: 18 }, // east fence
+];
+/** Oaks drawn dynamically (y-sorted with agents). */
+const TREES: [number, number][] = [
+  [480, 208], [1120, 208], [560, 260], [1040, 260],
+  [64, 470], [1536, 470], [64, 872], [1536, 872],
+  [600, 1128], [1000, 1128],
+];
 const SPEED = 240; // player px/s
 const NPC_SPEED = 90;
 const INTERACT_RANGE = 110;
@@ -210,7 +231,8 @@ export default function CommunePanel() {
     setPetChoices(list);
   }, [panel, petChoices.length, username]);
 
-  // Card id → manifest card index (all collections) + my owned pool for picking.
+  // Card id → manifest card index (all collections) — resolves any card id
+  // for rendering (loadout slots + other agents' inspect panels).
   useEffect(() => {
     if ((panel !== 'loadout' && panel !== 'agent') || cardIndex) return;
     let cancelled = false;
@@ -219,14 +241,7 @@ export default function CommunePanel() {
         const manifests = await Promise.all(TCG_COLLECTIONS.map((c) => loadTcgManifest(c.id)));
         const idx = new Map<string, TcgManifestCard>();
         for (const m of manifests) for (const card of m.cards) idx.set(card.id, card);
-        if (cancelled) return;
-        setCardIndex(idx);
-        if (panel === 'loadout') {
-          const col = await fetchCardCollection();
-          if (cancelled) return;
-          const ids = new Set(col.map((r) => r.cardId));
-          setOwnedCards([...idx.values()].filter((c) => ids.has(c.id)));
-        }
+        if (!cancelled) setCardIndex(idx);
       } catch {
         /* editor simply shows empty pickers when offline */
       }
@@ -235,6 +250,30 @@ export default function CommunePanel() {
       cancelled = true;
     };
   }, [panel, cardIndex]);
+
+  // My inventory — the pool the loadout picker draws from. Loaded whenever
+  // the loadout editor opens (independent of cardIndex so it can't be
+  // skipped by an earlier agent-panel visit).
+  useEffect(() => {
+    if (panel !== 'loadout' || ownedCards) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const manifests = await Promise.all(TCG_COLLECTIONS.map((c) => loadTcgManifest(c.id)));
+        const idx = new Map<string, TcgManifestCard>();
+        for (const m of manifests) for (const card of m.cards) idx.set(card.id, card);
+        const col = await fetchCardCollection();
+        if (cancelled) return;
+        const ids = new Set(col.map((r) => r.cardId));
+        setOwnedCards([...idx.values()].filter((c) => ids.has(c.id)));
+      } catch {
+        /* picker stays empty when offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, ownedCards]);
 
   const toggleLoadoutCard = (id: string) => {
     setLoadout((l) => ({
@@ -516,7 +555,7 @@ export default function CommunePanel() {
     const wy = e.clientY - rect.top + camRef.current.y;
     // Clicking another agent opens their card (loadout: phrase, cards, pet).
     for (const r of remoteRef.current.values()) {
-      if (Math.hypot(wx - r.rx, wy - r.ry) < 34) {
+      if (Math.hypot(wx - r.rx, wy - (r.ry - 30)) < 42) {
         const agent = others.find((o) => o.username === r.agent.username) ?? r.agent;
         setSelected(agent);
         setPanel('agent');
@@ -751,6 +790,7 @@ export default function CommunePanel() {
               {/* Card slots */}
               <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                 Collection cards ({loadout.cards.length}/3)
+                {ownedCards && <span className="normal-case"> · {ownedCards.length} in your inventory</span>}
               </p>
               <div className="grid grid-cols-3 gap-1.5">
                 {[0, 1, 2].map((i) => {
@@ -898,17 +938,48 @@ export default function CommunePanel() {
 
 /* ── movement ─────────────────────────────────────────────────────────────── */
 
-/** Move to (nx, ny) with world bounds + fountain collision (slide along). */
+/** Move to (nx, ny) with world bounds, fountain/pond ellipses and the solid
+ *  building footprints (slide along the nearest edge). */
 function moveWithCollision(a: Agent, nx: number, ny: number) {
-  const R = 26;
+  const R = 24;
   nx = Math.min(Math.max(nx, R), WORLD_W - R);
   ny = Math.min(Math.max(ny, R + 120), WORLD_H - R);
-  const d = Math.hypot(nx - FOUNTAIN.x, ny - FOUNTAIN.y);
-  if (d < FOUNTAIN.r + R) {
-    // Push out of the fountain circle.
-    const ang = Math.atan2(ny - FOUNTAIN.y, nx - FOUNTAIN.x);
-    nx = FOUNTAIN.x + Math.cos(ang) * (FOUNTAIN.r + R);
-    ny = FOUNTAIN.y + Math.sin(ang) * (FOUNTAIN.r + R);
+  // Circular fountain + elliptical pond: push out radially.
+  for (const circ of [{ x: FOUNTAIN.x, y: FOUNTAIN.y, r: FOUNTAIN.r }] as const) {
+    const d = Math.hypot(nx - circ.x, ny - circ.y);
+    if (d < circ.r + R) {
+      const ang = Math.atan2(ny - circ.y, nx - circ.x);
+      nx = circ.x + Math.cos(ang) * (circ.r + R);
+      ny = circ.y + Math.sin(ang) * (circ.r + R);
+    }
+  }
+  {
+    const ex = (nx - POND_C.x) / (POND_C.rx + R);
+    const ey = (ny - POND_C.y) / (POND_C.ry + R);
+    const d2 = ex * ex + ey * ey;
+    if (d2 < 1) {
+      const d = Math.sqrt(d2) || 1e-6;
+      nx = POND_C.x + (ex / d) * (POND_C.rx + R);
+      ny = POND_C.y + (ey / d) * (POND_C.ry + R);
+    }
+  }
+  // Rect buildings: push out along the smallest penetration axis.
+  for (const s of SOLID_RECTS) {
+    const l = s.x - R;
+    const r2 = s.x + s.w + R;
+    const tp = s.y - R;
+    const bt = s.y + s.h + R;
+    if (nx > l && nx < r2 && ny > tp && ny < bt) {
+      const dl = nx - l;
+      const dr = r2 - nx;
+      const dtp = ny - tp;
+      const db = bt - ny;
+      const m = Math.min(dl, dr, dtp, db);
+      if (m === dl) nx = l;
+      else if (m === dr) nx = r2;
+      else if (m === dtp) ny = tp;
+      else ny = bt;
+    }
   }
   a.x = nx;
   a.y = ny;
@@ -935,87 +1006,25 @@ function draw(
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
 
-  /* grass */
-  ctx.fillStyle = '#77b255';
-  ctx.fillRect(cam.x, cam.y, vw, vh);
-  // soft grass patches
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  for (let i = 0; i < 40; i++) {
-    const px = ((i * 397) % WORLD_W);
-    const py = ((i * 613) % WORLD_H);
-    ctx.beginPath();
-    ctx.ellipse(px, py, 60 + (i % 5) * 22, 24 + (i % 3) * 10, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  /* baked pixel town (grass, paths, plaza, buildings, pond, lamps, decor) */
+  ctx.drawImage(getTownLayer(), 0, 0);
 
-  /* dirt paths from plaza to each prop */
-  ctx.strokeStyle = '#d9b380';
-  ctx.lineWidth = 46;
-  ctx.lineCap = 'round';
-  for (const [tx, ty] of [
-    [BOARD.x, BOARD.y + 90],
-    [STALL.x + 40, STALL.y],
-    [TENT.x - 40, TENT.y],
-  ] as const) {
-    ctx.beginPath();
-    ctx.moveTo(PLAZA.x, PLAZA.y);
-    ctx.quadraticCurveTo((PLAZA.x + tx) / 2 + 60, (PLAZA.y + ty) / 2, tx, ty);
-    ctx.stroke();
-  }
-
-  /* plaza cobbles */
-  ctx.beginPath();
-  ctx.ellipse(PLAZA.x, PLAZA.y, PLAZA.r, PLAZA.r * 0.72, 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#e7d7ae';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(160,130,80,0.25)';
+  /* fountain water ripples — the basin itself is baked */
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
   ctx.lineWidth = 2;
-  for (let r = 60; r <= PLAZA.r; r += 60) {
+  for (let k = 0; k < 3; k++) {
+    const ph = (t * 0.5 + k / 3) % 1;
+    ctx.globalAlpha = 1 - ph;
     ctx.beginPath();
-    ctx.ellipse(PLAZA.x, PLAZA.y, r, r * 0.72, 0, 0, Math.PI * 2);
+    ctx.ellipse(FOUNTAIN.x, FOUNTAIN.y, 18 + ph * (FOUNTAIN.r - 30), (18 + ph * (FOUNTAIN.r - 30)) * 0.62, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 
   /* y-sorted drawables */
   type D = { y: number; fn: () => void };
   const items: D[] = [];
-
-  /* fountain */
-  items.push({
-    y: FOUNTAIN.y + FOUNTAIN.r * 0.7,
-    fn: () => {
-      ctx.beginPath();
-      ctx.ellipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r + 16, (FOUNTAIN.r + 16) * 0.62, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#b9bec9';
-      ctx.fill();
-      ctx.strokeStyle = '#8f96a3';
-      ctx.lineWidth = 5;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.ellipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 6, (FOUNTAIN.r - 6) * 0.62, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#4fb3e8';
-      ctx.fill();
-      // animated ripples
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      for (let k = 0; k < 3; k++) {
-        const ph = (t * 0.5 + k / 3) % 1;
-        ctx.globalAlpha = 1 - ph;
-        ctx.beginPath();
-        ctx.ellipse(FOUNTAIN.x, FOUNTAIN.y, 18 + ph * (FOUNTAIN.r - 30), (18 + ph * (FOUNTAIN.r - 30)) * 0.62, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      // center statue
-      ctx.beginPath();
-      ctx.ellipse(FOUNTAIN.x, FOUNTAIN.y - 26, 14, 22, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#cfd4dd';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(FOUNTAIN.x, FOUNTAIN.y - 52, 11, 0, Math.PI * 2);
-      ctx.fillStyle = '#cfd4dd';
-      ctx.fill();
-    },
-  });
+  for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
 
   /* bulletin board (banners) */
   items.push({
@@ -1161,59 +1170,6 @@ function draw(
     },
   });
 
-  /* trees + flowers + houses (background dressing) */
-  for (const [tx, ty] of [
-    [180, 420], [300, 980], [1420, 420], [1300, 990], [620, 250], [1000, 250], [90, 760], [1520, 760],
-  ] as const) {
-    items.push({
-      y: ty,
-      fn: () => {
-        ctx.fillStyle = '#7a4a22';
-        ctx.fillRect(tx - 7, ty - 30, 14, 40);
-        ctx.beginPath();
-        ctx.arc(tx, ty - 52, 34, 0, Math.PI * 2);
-        ctx.arc(tx - 24, ty - 34, 24, 0, Math.PI * 2);
-        ctx.arc(tx + 24, ty - 34, 24, 0, Math.PI * 2);
-        ctx.fillStyle = '#4c9a3f';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(tx - 8, ty - 60, 16, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        ctx.fill();
-      },
-    });
-  }
-  for (const [hx, hy, hue] of [
-    [300, 200, 210], [1300, 200, 20],
-  ] as const) {
-    items.push({
-      y: hy,
-      fn: () => {
-        roundRect(ctx, hx - 90, hy - 50, 180, 110, 12);
-        ctx.fillStyle = `hsl(${hue} 45% 82%)`;
-        ctx.fill();
-        // round roof
-        ctx.beginPath();
-        ctx.moveTo(hx - 104, hy - 48);
-        ctx.quadraticCurveTo(hx, hy - 150, hx + 104, hy - 48);
-        ctx.closePath();
-        ctx.fillStyle = `hsl(${hue} 60% 52%)`;
-        ctx.fill();
-        // door + window
-        roundRect(ctx, hx - 18, hy + 6, 36, 54, 6);
-        ctx.fillStyle = '#8a5a33';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(hx - 40, hy + 6, 14, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffe9a8';
-        ctx.fill();
-        ctx.strokeStyle = '#8a5a33';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      },
-    });
-  }
-
   /* entities — remotes reveal their loadout phrase when you walk close */
   for (const npc of npcs) items.push({ y: npc.y, fn: () => drawAgent(ctx, npc, t) });
   for (const r of remotes) {
@@ -1237,71 +1193,84 @@ function draw(
   ctx.restore();
 }
 
-/** A chibi commune citizen: capsule body, round head, cat ears, name tag. */
+/* ── pixel people ─────────────────────────────────────────────────────────── */
+
+const SP_P = 4; // sprite pixel size (each art pixel = 4 canvas px)
+
+/** 12×19 pixel human, front view. h/hair · H/highlight · S/skin · E/eye ·
+ *  B/shirt · b/hem · s/sleeve · a/hand · P/pants · F/shoes. */
+const HUMAN_STAND = [
+  '...HHHHHH...',
+  '..hhhhhhhh..',
+  '..hhhhhhhh..',
+  '..hSSSSSSh..',
+  '..SESSSSES..',
+  '..SSSSSSSS..',
+  '...SSSSSS...',
+  '....SSSS....',
+  '.sBBBBBBBBs.',
+  '.sBBBBBBBBs.',
+  '.aBBBBBBBBa.',
+  '..BBBBBBBB..',
+  '..bbbbbbbb..',
+  '..PPPPPPPP..',
+  '..PPP..PPP..',
+  '..PPP..PPP..',
+  '..PPP..PPP..',
+  '..FFF..FFF..',
+  '..FFF..FFF..',
+];
+
+/** Walk frame — legs apart. */
+const HUMAN_WALK = [
+  ...HUMAN_STAND.slice(0, 14),
+  '.PPP....PPP.',
+  '.PPP....PPP.',
+  '.PPP....PPP.',
+  '.FFF....FFF.',
+  '.FFF....FFF.',
+];
+
+/** A little pixel human — hair + shirt tinted by the agent's hue, a 2-frame
+ *  walk cycle, gold name tag for the player, status line for remote agents. */
 function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer = false) {
-  const bob = a.moving ? Math.sin(a.bobPhase ?? 0) * 3 : Math.sin(t * 2 + (a.bobPhase ?? 0)) * 1.2;
-  const x = a.x;
-  const y = a.y + bob;
+  const bob = a.moving ? Math.sin((a.bobPhase ?? 0) / 1.6) * 2.4 : Math.sin(t * 2 + (a.bobPhase ?? 0)) * 1.2;
+  const feet = a.y + bob;
 
-  // shadow (unbobbed)
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
-  ctx.ellipse(a.x, a.y + 20, 24, 9, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fill();
-
-  // body capsule
-  roundRect(ctx, x - 17, y - 8, 34, 30, 15);
-  ctx.fillStyle = `hsl(${a.hue} 62% 55%)`;
-  ctx.fill();
-  ctx.strokeStyle = `hsl(${a.hue} 62% 40%)`;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  // belly
-  ctx.beginPath();
-  ctx.ellipse(x, y + 8, 9, 7, 0, 0, Math.PI * 2);
-  ctx.fillStyle = `hsl(${a.hue} 70% 82%)`;
+  ctx.ellipse(a.x, a.y + 4, 19, 7, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // head
-  ctx.beginPath();
-  ctx.arc(x, y - 22, 16, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffe3c2';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-  ctx.stroke();
-  // cat ears
-  for (const s of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(x + s * 6, y - 34);
-    ctx.lineTo(x + s * 14, y - 46);
-    ctx.lineTo(x + s * 15, y - 30);
-    ctx.closePath();
-    ctx.fillStyle = `hsl(${a.hue} 62% 55%)`;
-    ctx.fill();
+  const hair = `hsl(${a.hue} 42% 30%)`;
+  const hairHi = `hsl(${a.hue} 48% 42%)`;
+  const skin = '#eec39a';
+  const eye = '#33251b';
+  const shirt = `hsl(${a.hue} 60% 52%)`;
+  const shirtSh = `hsl(${a.hue} 60% 38%)`;
+  const pants = '#3f4a63';
+  const shoe = '#2a2d38';
+  const palette: Record<string, string> = { h: hair, H: hairHi, S: skin, E: eye, B: shirt, b: shirtSh, s: shirtSh, a: skin, P: pants, F: shoe };
+
+  const tpl = a.moving && Math.floor((a.bobPhase ?? 0) / 3) % 2 === 1 ? HUMAN_WALK : HUMAN_STAND;
+  const ox = Math.round(a.x) - (tpl[0].length * SP_P) / 2;
+  const oy = Math.round(feet) - tpl.length * SP_P;
+  for (let r = 0; r < tpl.length; r++) {
+    const row = tpl[r];
+    for (let c = 0; c < row.length; c++) {
+      const ch = row[c];
+      if (ch === '.') continue;
+      ctx.fillStyle = palette[ch] ?? skin;
+      ctx.fillRect(ox + c * SP_P, oy + r * SP_P, SP_P, SP_P);
+    }
   }
-  // face
-  ctx.fillStyle = '#3a2a20';
-  ctx.beginPath();
-  ctx.arc(x - 5.5, y - 23, 2.1, 0, Math.PI * 2);
-  ctx.arc(x + 5.5, y - 23, 2.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#3a2a20';
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.arc(x, y - 18, 3.4, 0.15 * Math.PI, 0.85 * Math.PI);
-  ctx.stroke();
-  // cheeks
-  ctx.fillStyle = 'rgba(240,130,130,0.4)';
-  ctx.beginPath();
-  ctx.arc(x - 10, y - 18, 2.6, 0, Math.PI * 2);
-  ctx.arc(x + 10, y - 18, 2.6, 0, Math.PI * 2);
-  ctx.fill();
 
   // player ring + name tag (+ admin star, + status line for remote agents)
   if (isPlayer) {
     ctx.beginPath();
-    ctx.ellipse(a.x, a.y + 20, 30, 11, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,215,64,0.8)';
+    ctx.ellipse(a.x, a.y + 4, 26, 10, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,215,64,0.85)';
     ctx.lineWidth = 2.5;
     ctx.stroke();
   }
@@ -1309,21 +1278,39 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   ctx.textAlign = 'center';
   const tag = (a.admin ? '★ ' : '') + a.name;
   const w = ctx.measureText(tag).width + 14;
-  roundRect(ctx, x - w / 2, y + 24, w, 17, 8);
+  roundRect(ctx, a.x - w / 2, a.y + 12, w, 17, 8);
   ctx.fillStyle = isPlayer ? 'rgba(255,215,64,0.92)' : 'rgba(0,0,0,0.55)';
   ctx.fill();
   ctx.fillStyle = isPlayer ? '#1a1a1a' : '#fff';
-  ctx.fillText(tag, x, y + 36);
+  ctx.fillText(tag, a.x, a.y + 24);
   if (a.status && !isPlayer) {
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText(a.status, x, y + 48);
+    ctx.fillText(a.status, a.x, a.y + 37);
   }
 
-  // speech bubble
+  // speech bubble above the head
   if (a.says) {
-    drawBubble(ctx, x, y - 58, a.says.text);
+    drawBubble(ctx, a.x, oy - 10, a.says.text);
   }
+}
+
+/** Chunky pixel oak (dynamic so it y-sorts with the agents). */
+function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(x, groundY + 2, 30, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const q = (px: number, py: number, w: number, h: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(px / 4) * 4, Math.round(py / 4) * 4, Math.round(w / 4) * 4, Math.round(h / 4) * 4);
+  };
+  q(x - 8, groundY - 40, 16, 40, '#7a4a22');
+  q(x, groundY - 40, 8, 40, '#683d1a');
+  q(x - 44, groundY - 100, 88, 32, '#3f8f3a');
+  q(x - 34, groundY - 126, 68, 28, '#4aa044');
+  q(x - 20, groundY - 148, 40, 24, '#57b14e');
+  q(x - 16, groundY - 142, 14, 8, 'rgba(255,255,255,0.18)');
 }
 
 function drawBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string) {
@@ -1369,4 +1356,288 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+/* ── pixel town map (baked once to an offscreen canvas) ───────────────────── */
+
+const BG = 8; // bake grid — every static element snaps to these chunky pixels
+
+let townLayer: HTMLCanvasElement | null = null;
+
+/** Tiny seeded PRNG so the bake is identical on every machine/tab. */
+function bakeRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Bake the static town: grass, hedge border, dirt paths, plaza, fountain,
+ *  pond, town hall, café, arcade, two houses, fences, lamps, bushes, flowers.
+ *  Drawn on an 8px grid for a chunky pixel-art look; cached module-level. */
+function getTownLayer(): HTMLCanvasElement {
+  if (townLayer) return townLayer;
+  const cv = document.createElement('canvas');
+  cv.width = WORLD_W;
+  cv.height = WORLD_H;
+  const g = cv.getContext('2d')!;
+  const rand = bakeRng(20260416);
+
+  const px = (x: number, y: number, w: number, h: number, color: string) => {
+    g.fillStyle = color;
+    g.fillRect(Math.round(x / BG) * BG, Math.round(y / BG) * BG, Math.max(BG, Math.round(w / BG) * BG), Math.max(BG, Math.round(h / BG) * BG));
+  };
+
+  const pxEllipse = (cx: number, cy: number, rx: number, ry: number, color: string) => {
+    g.fillStyle = color;
+    for (let y = Math.floor((cy - ry) / BG) * BG; y <= cy + ry; y += BG) {
+      for (let x = Math.floor((cx - rx) / BG) * BG; x <= cx + rx; x += BG) {
+        const dx = x + BG / 2 - cx;
+        const dy = y + BG / 2 - cy;
+        if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1) g.fillRect(x, y, BG, BG);
+      }
+    }
+  };
+
+  /* grass base — two-tone dithered pattern */
+  const tile = document.createElement('canvas');
+  tile.width = 32;
+  tile.height = 32;
+  const tg = tile.getContext('2d')!;
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      tg.fillStyle = (i + j) % 2 ? '#6fb254' : '#77bb5c';
+      tg.fillRect(i * 8, j * 8, 8, 8);
+    }
+  }
+  tg.fillStyle = '#639e4b';
+  tg.fillRect(8, 16, 8, 8);
+  tg.fillRect(24, 0, 8, 8);
+  g.fillStyle = g.createPattern(tile, 'repeat')!;
+  g.fillRect(0, 0, WORLD_W, WORLD_H);
+
+  /* hedge border + corner bushes */
+  px(0, 0, WORLD_W, 16, '#3c7a35');
+  px(0, WORLD_H - 16, WORLD_W, 16, '#3c7a35');
+  px(0, 0, 16, WORLD_H, '#3c7a35');
+  px(WORLD_W - 16, 0, 16, WORLD_H, '#3c7a35');
+  for (const [bx, by] of [[40, 40], [1560, 40], [40, 1160], [1560, 1160]] as const) {
+    pxEllipse(bx, by, 40, 28, '#35803b');
+  }
+
+  /* dirt paths (quadratic curves sampled into grid-aligned slabs) */
+  const PATHS: [number, number, number, number, number, number][] = [
+    [800, 600, 800, 480, 800, 400], // north → bulletin board
+    [800, 640, 620, 700, 450, 730], // west → showcase stall
+    [800, 640, 980, 700, 1150, 730], // east → challenge tent
+    [800, 700, 800, 900, 800, 1150], // south → hedge gate
+  ];
+  const pathPts: [number, number][] = [];
+  for (const [x0, y0, cx, cy, x1, y1] of PATHS) {
+    for (let i = 0; i <= 90; i++) {
+      const t = i / 90;
+      const u = 1 - t;
+      const wx = u * u * x0 + 2 * u * t * cx + t * t * x1;
+      const wy = u * u * y0 + 2 * u * t * cy + t * t * y1;
+      pathPts.push([wx, wy]);
+      px(wx - 20, wy - 20, 40, 40, '#d9b47c');
+    }
+  }
+  for (let i = 0; i < 260; i++) {
+    const [wx, wy] = pathPts[Math.floor(rand() * pathPts.length)];
+    px(wx - 20 + rand() * 40, wy - 20 + rand() * 40, 8, 8, rand() < 0.5 ? '#c9a266' : '#e8cd96');
+  }
+
+  /* plaza cobbles + fountain */
+  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r + 14, PLAZA.r * 0.72 + 14, '#b89a63');
+  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r, PLAZA.r * 0.72, '#e6d6a8');
+  for (let i = 0; i < 420; i++) {
+    const a = rand() * Math.PI * 2;
+    const rr = Math.sqrt(rand());
+    const wx = PLAZA.x + Math.cos(a) * rr * PLAZA.r;
+    const wy = PLAZA.y + Math.sin(a) * rr * PLAZA.r * 0.72;
+    g.fillStyle = rand() < 0.6 ? '#d4c190' : '#efe2ba';
+    g.fillRect(Math.round(wx / BG) * BG, Math.round(wy / BG) * BG, BG, BG);
+  }
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r + 16, (FOUNTAIN.r + 16) * 0.62, '#c8cdd6');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r, FOUNTAIN.r * 0.62, '#8f96a3');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 6, (FOUNTAIN.r - 6) * 0.62, '#5aa7d8');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 26, (FOUNTAIN.r - 26) * 0.62, '#63b2e6');
+  for (let i = 0; i < 36; i++) {
+    const a = rand() * Math.PI * 2;
+    const rr = Math.sqrt(rand()) * (FOUNTAIN.r - 30);
+    g.fillStyle = '#8fd0f0';
+    g.fillRect(Math.round((FOUNTAIN.x + Math.cos(a) * rr) / BG) * BG, Math.round((FOUNTAIN.y + Math.sin(a) * rr * 0.6) / BG) * BG, BG, BG);
+  }
+  px(FOUNTAIN.x - 8, FOUNTAIN.y - 64, 16, 44, '#c8cdd6'); // pedestal
+  px(FOUNTAIN.x - 16, FOUNTAIN.y - 72, 32, 10, '#d4d9e2');
+  px(FOUNTAIN.x - 7, FOUNTAIN.y - 96, 14, 26, '#d4d9e2'); // statue body
+  px(FOUNTAIN.x - 5, FOUNTAIN.y - 110, 10, 14, '#d4d9e2'); // statue head
+
+  /* pond */
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx + 16, POND_C.ry + 16, '#d3c48c');
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx, POND_C.ry, '#4f9fd8');
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx - 18, POND_C.ry - 14, '#63b2e6');
+  for (let i = 0; i < 40; i++) {
+    const a = rand() * Math.PI * 2;
+    const rr = Math.sqrt(rand());
+    g.fillStyle = '#8fd0f0';
+    g.fillRect(Math.round((POND_C.x + Math.cos(a) * rr * POND_C.rx) / BG) * BG, Math.round((POND_C.y + Math.sin(a) * rr * POND_C.ry) / BG) * BG, BG, BG);
+  }
+  px(120, 616, 20, 12, '#3f9a46'); // lily pads
+  px(124, 620, 8, 4, '#57b45c');
+  px(206, 664, 20, 12, '#3f9a46');
+  px(210, 668, 8, 4, '#57b45c');
+  for (const [rx2, ry2] of [[58, 566], [76, 552], [258, 586]] as const) {
+    px(rx2, ry2 - 14, 4, 18, '#2e7d38'); // reeds
+    px(rx2 - 2, ry2 - 20, 8, 6, '#3f9a46');
+  }
+
+  /* shared building pieces */
+  const bakeWindows = (x: number, y: number) => {
+    px(x - 2, y - 2, 28, 28, '#5b4632');
+    px(x, y, 24, 24, '#bfe6f5');
+    px(x + 10, y, 4, 24, '#5b4632');
+    px(x, y + 10, 24, 4, '#5b4632');
+    px(x + 2, y + 2, 6, 4, '#eaf7fc');
+  };
+  const bakeRoof = (cx: number, baseY: number, w: number, color: string, colorShade: string) => {
+    for (let i = 0; i < 7; i++) {
+      const rw = Math.round(w * (1 - i / 9));
+      px(cx - rw / 2, baseY - 8 * (i + 1), rw, 8, i % 2 ? color : colorShade);
+    }
+    px(cx - w / 2 - 8, baseY - 6, w + 16, 8, colorShade);
+  };
+
+  /* TOWN HALL (north, behind the bulletin board) */
+  {
+    const cx = 800, gy = 230, w = 300, top = gy - 120;
+    px(cx - w / 2, top, w, 120, '#ddd3c0');
+    px(cx - w / 2, top, w, 8, '#cfc3ac');
+    px(cx - w / 2, gy - 10, w, 10, '#b8ab90');
+    bakeRoof(cx, top, w, '#7d8aa0', '#6b778c');
+    px(cx - 64, top - 98, 6, 42, '#8a5a33'); // flag poles
+    px(cx - 58, top - 96, 26, 16, '#e05555');
+    px(cx + 58, top - 98, 6, 42, '#8a5a33');
+    px(cx + 64, top - 96, 26, 16, '#3f8f3a');
+    px(cx - 70, top + 14, 140, 24, '#4a4034'); // sign band
+    g.fillStyle = '#f2e6c8';
+    g.font = 'bold 14px ui-monospace, monospace';
+    g.textAlign = 'center';
+    g.fillText('TOWN HALL', cx, top + 31);
+    bakeWindows(cx - 110, top + 46);
+    bakeWindows(cx + 82, top + 46);
+    px(cx - 46, gy - 62, 14, 62, '#cfc3ac'); // columns
+    px(cx + 32, gy - 62, 14, 62, '#cfc3ac');
+    px(cx - 20, gy - 56, 40, 56, '#7a4a2a'); // door
+    px(cx + 10, gy - 30, 6, 6, '#e8c86a');
+  }
+
+  /* CAFÉ (west-north) */
+  {
+    const cx = 270, gy = 390, w = 170, top = gy - 104;
+    px(cx - w / 2, top, w, 104, '#efdcb4');
+    px(cx - w / 2, gy - 10, w, 10, '#d9c398');
+    bakeRoof(cx, top, w, '#c05a4c', '#a84a3e');
+    bakeWindows(cx - 56, gy - 66);
+    bakeWindows(cx + 26, gy - 66);
+    px(cx - 16, gy - 48, 32, 48, '#7a4a2a');
+    px(cx + 8, gy - 26, 6, 6, '#e8c86a');
+    for (let i = 0; i < 10; i++) px(cx - w / 2 + 4 + i * 16, gy - 84, 16, 14, i % 2 ? '#f7f3ea' : '#e05555'); // awning
+    px(cx - 30, gy - 84, 60, 14, '#4a4034');
+    g.fillStyle = '#ffd98a';
+    g.font = 'bold 10px ui-monospace, monospace';
+    g.textAlign = 'center';
+    g.fillText('CAFE', cx, gy - 73);
+  }
+
+  /* ARCADE (east-north) */
+  {
+    const cx = 1330, gy = 390, w = 170, top = gy - 104;
+    px(cx - w / 2, top, w, 104, '#4d5370');
+    px(cx - w / 2, gy - 10, w, 10, '#3c4158');
+    bakeRoof(cx, top, w, '#323750', '#2a2f44');
+    px(cx - 62, top + 12, 124, 24, '#23273a'); // neon sign
+    g.fillStyle = '#7ef3ff';
+    g.font = 'bold 14px ui-monospace, monospace';
+    g.textAlign = 'center';
+    g.fillText('ARCADE', cx, top + 30);
+    for (let i = 0; i < 12; i++) px(cx - 62 + i * 11, top + 40, 4, 4, i % 2 ? '#ff7ad9' : '#7ef3ff');
+    px(cx - 56, gy - 60, 24, 24, '#3c4158'); // glowing windows
+    px(cx - 54, gy - 58, 20, 20, '#ffd76e');
+    px(cx + 32, gy - 60, 24, 24, '#3c4158');
+    px(cx + 34, gy - 58, 20, 20, '#ffd76e');
+    px(cx - 16, gy - 48, 32, 48, '#23273a');
+    px(cx + 8, gy - 26, 6, 6, '#ff7ad9');
+  }
+
+  /* houses (south corners) */
+  const bakeHouseSmall = (cx: number) => {
+    const gy = 1040, w = 150, top = gy - 96;
+    px(cx - w / 2, top, w, 96, '#e3d6b6');
+    px(cx - w / 2, gy - 10, w, 10, '#cbbb96');
+    bakeRoof(cx, top, w, '#8a6f4e', '#75603f');
+    bakeWindows(cx - 52, gy - 62);
+    bakeWindows(cx + 24, gy - 62);
+    px(cx - 15, gy - 44, 30, 44, '#7a4a2a');
+    px(cx + 7, gy - 24, 5, 5, '#e8c86a');
+    px(cx - 56, gy - 36, 28, 8, '#8a5a33'); // flower boxes
+    for (let i = 0; i < 4; i++) px(cx - 54 + i * 7, gy - 42, 5, 6, i % 2 ? '#ffd24a' : '#f05a5a');
+    px(cx + 20, gy - 36, 28, 8, '#8a5a33');
+    for (let i = 0; i < 4; i++) px(cx + 22 + i * 7, gy - 42, 5, 6, i % 2 ? '#e88ac2' : '#f8f4ec');
+  };
+  bakeHouseSmall(230);
+  bakeHouseSmall(1370);
+
+  /* fences in front of the houses */
+  const fence = (x0: number, x1: number, y: number) => {
+    for (let x = x0; x <= x1; x += 32) px(x, y - 20, 6, 20, '#9c7647');
+    px(x0, y - 16, x1 - x0 + 6, 4, '#b08a55');
+    px(x0, y - 8, x1 - x0 + 6, 4, '#b08a55');
+  };
+  fence(90, 330, 1080);
+  fence(1310, 1520, 1080);
+
+  /* lamp posts */
+  const lamp = (x: number, y: number) => {
+    g.fillStyle = 'rgba(255,224,138,0.16)';
+    g.beginPath();
+    g.arc(x, y - 51, 26, 0, Math.PI * 2);
+    g.fill();
+    px(x - 3, y - 46, 7, 46, '#3a3f4a');
+    px(x - 9, y - 60, 19, 16, '#2f333d');
+    px(x - 5, y - 56, 11, 9, '#ffe08a');
+  };
+  lamp(712, 500);
+  lamp(888, 500);
+  lamp(576, 668);
+  lamp(1024, 668);
+  lamp(712, 940);
+  lamp(888, 940);
+
+  /* bushes + flower patches */
+  for (const [bx, by] of [[648, 224], [952, 224], [336, 428], [1204, 428], [536, 772], [1064, 772]] as const) {
+    pxEllipse(bx, by, 26, 18, '#35803b');
+    px(bx - 10, by - 10, 8, 5, '#4aa044');
+  }
+  const flowerColors = ['#f05a5a', '#ffd24a', '#f8f4ec', '#e88ac2'];
+  for (const [fx, fy] of [
+    [620, 540], [980, 540], [648, 748], [952, 748],
+    [392, 292], [168, 452], [1216, 292], [1436, 452],
+    [150, 996], [1452, 996], [700, 1120], [900, 1120],
+    [520, 800], [1080, 800],
+  ] as const) {
+    for (let i = 0; i < 7; i++) {
+      const dx = Math.round((rand() * 56 - 28) / BG) * BG;
+      const dy = Math.round((rand() * 28 - 14) / BG) * BG;
+      px(fx + dx, fy + dy, 6, 6, flowerColors[Math.floor(rand() * flowerColors.length)]);
+    }
+  }
+
+  townLayer = cv;
+  return cv;
 }
