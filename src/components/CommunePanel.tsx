@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
   DEFAULT_AVATAR,
+  communeInteract,
   fetchCardCollection,
   pickSpiceDrop,
   syncCommune,
@@ -305,6 +306,18 @@ export default function CommunePanel() {
   const [banners, setBanners] = useState<Banner[]>(loadBanners);
   const [bannerDraft, setBannerDraft] = useState('');
   const [chatDraft, setChatDraft] = useState('');
+  /* ── agent→agent interactions ──────────────────────────────────────────────── */
+  /** Direct-chat target (set by bumping into them with E) — messages go to them. */
+  const [messaging, setMessaging] = useState<string | null>(null);
+  const messagingRef = useRef<string | null>(null);
+  messagingRef.current = messaging;
+  /** Banners popped by direct messages from other agents. */
+  const [inbox, setInbox] = useState<{ from: string; message: string }[]>([]);
+  /** Hand-holding: { partner, lead } — the first agent to press H leads. */
+  const [hands, setHands] = useState<{ partner: string; lead: boolean } | null>(null);
+  const handsRef = useRef<{ partner: string; lead: boolean } | null>(null);
+  /** Bump screen-shake end timestamp (ms). */
+  const shakeUntilRef = useRef(0);
   const [chatFocused, setChatFocused] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
 
@@ -498,6 +511,24 @@ export default function CommunePanel() {
         if (stopped) return;
         loadoutDirtyRef.current = false;
         dropsRef.current = out.drops.filter((d) => !pickingRef.current.has(d.id));
+        // Agent→agent signals: bump shake, direct-message banner, hand-holding.
+        for (const s of out.signals) {
+          if (s.kind === 'bump') {
+            shakeUntilRef.current = Date.now() + 700;
+          } else if (s.kind === 'chat') {
+            setInbox((b) => [...b.slice(-4), { from: s.from, message: s.message }]);
+          } else if (s.kind === 'hands') {
+            if (!handsRef.current) {
+              handsRef.current = { partner: s.from, lead: false };
+              setHands(handsRef.current);
+            }
+          } else if (s.kind === 'hands_release') {
+            if (handsRef.current?.partner === s.from) {
+              handsRef.current = null;
+              setHands(null);
+            }
+          }
+        }
         // First server echo fills the editor (until the user edits locally).
         // A saved loadout without a pet keeps the locally carried companion.
         if (!loadoutTouchedRef.current && out.me) {
@@ -566,12 +597,57 @@ export default function CommunePanel() {
           setPanel('challenges');
           return;
         }
+        // Bump into the nearest agent — opens a direct chat + shakes their screen.
+        let bumpName: string | null = null;
+        let bumpDist = 64;
+        for (const r of remoteRef.current.values()) {
+          const d = Math.hypot(p.x - r.rx, p.y - r.ry);
+          if (d < bumpDist) {
+            bumpDist = d;
+            bumpName = r.agent.username;
+          }
+        }
+        if (bumpName) {
+          e.preventDefault();
+          clickTargetRef.current = null;
+          setMessaging(bumpName);
+          void communeInteract(bumpName, 'bump');
+          return;
+        }
         // Interact with the nearest prop.
         const near = proximity(p.x, p.y);
         if (near) {
           e.preventDefault();
           clickTargetRef.current = null;
           setPanel(near);
+        }
+        return;
+      }
+      if (e.code === 'KeyH') {
+        if (panelRef.current) return;
+        const held = handsRef.current;
+        if (held) {
+          // Release — either partner can let go.
+          handsRef.current = null;
+          setHands(null);
+          void communeInteract(held.partner, 'hands_release');
+        } else {
+          // Hold hands with the nearest agent (first presser leads).
+          const p = playerRef.current;
+          let partner: string | null = null;
+          let pd = 90;
+          for (const r of remoteRef.current.values()) {
+            const d = Math.hypot(p.x - r.rx, p.y - r.ry);
+            if (d < pd) {
+              pd = d;
+              partner = r.agent.username;
+            }
+          }
+          if (partner) {
+            handsRef.current = { partner, lead: true };
+            setHands(handsRef.current);
+            void communeInteract(partner, 'hands');
+          }
         }
         return;
       }
@@ -651,7 +727,24 @@ export default function CommunePanel() {
 
       /* update player */
       const player = playerRef.current;
-      if (!panelRef.current && !chatFocusedRef.current) {
+      const hands = handsRef.current;
+      if (hands && !hands.lead) {
+        // Follower: glide along beside the leader (their last synced position).
+        const leader = remoteRef.current.get(hands.partner);
+        if (leader) {
+          const tx = leader.rx - 22;
+          const ty = leader.ry + 6;
+          const d = Math.hypot(tx - player.x, ty - player.y);
+          player.moving = d > 10;
+          if (d > 2) {
+            const step = Math.min(SPEED * 1.35 * dt, d);
+            moveWithCollision(player, player.x + ((tx - player.x) / d) * step, player.y + ((ty - player.y) / d) * step);
+            player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
+          }
+        } else {
+          player.moving = false;
+        }
+      } else if (!panelRef.current && !chatFocusedRef.current) {
         const k = keysRef.current;
         let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
         let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
@@ -734,11 +827,27 @@ export default function CommunePanel() {
       const nearChallengeNpc = CHALLENGE_NPCS.find(
         (c) => Math.hypot(player.x - c.x, player.y - c.y) < CHALLENGE_INTERACT_RANGE
       );
-      const nextPrompt = nearChallengeNpc
-        ? `E  Talk to ${nearChallengeNpc.name}`
-        : nearProp
-          ? `E  ${nearProp.label}`
-          : null;
+      let nearAgentName: string | null = null;
+      if (!nearChallengeNpc) {
+        let ad = 64;
+        for (const r of remoteRef.current.values()) {
+          const d = Math.hypot(player.x - r.rx, player.y - r.ry);
+          if (d < ad) {
+            ad = d;
+            nearAgentName = r.agent.username;
+          }
+        }
+      }
+      const held = handsRef.current;
+      const nextPrompt = held
+        ? `H  Let go of ${held.partner}'s hand`
+        : nearChallengeNpc
+          ? `E  Talk to ${nearChallengeNpc.name}`
+          : nearAgentName
+            ? `E  Bump into ${nearAgentName}`
+            : nearProp
+              ? `E  ${nearProp.label}`
+              : null;
       if (promptRef.current !== nextPrompt) {
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
@@ -807,7 +916,9 @@ export default function CommunePanel() {
         now,
         dt
       );
-      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current);
+      // Bump shake — jitter the camera for a moment when someone bumps us.
+      const shakeCam = now < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
+      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current);
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -869,6 +980,7 @@ export default function CommunePanel() {
     if (!text) return;
     playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
     setChatDraft('');
+    if (messagingRef.current) void communeInteract(messagingRef.current, 'chat', text);
   };
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
@@ -922,13 +1034,63 @@ export default function CommunePanel() {
         <Palette className="size-3.5" /> <span>Loadout</span>
       </button>
 
-      {/* Chat bar — ghost glass while idle; opaque only while typing */}
+      {/* Direct-message banners (from bumps / hand-holds) */}
+      {inbox.length > 0 && (
+        <div className="absolute left-1/2 top-16 z-30 flex w-[min(460px,calc(100%-24px))] -translate-x-1/2 flex-col gap-2">
+          {inbox.map((b, i) => (
+            <div
+              key={`${b.from}-${i}`}
+              className="flex items-start gap-2 rounded-xl border border-primary/50 bg-card/95 px-3 py-2 shadow-xl backdrop-blur-xl animate-in fade-in"
+            >
+              <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-primary/15 text-[11px] font-bold text-primary">
+                {b.from.slice(0, 1).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary">{b.from}</p>
+                <p className="break-words text-xs text-foreground">{b.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInbox((list) => list.filter((_, j) => j !== i))}
+                className="rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                aria-label="Dismiss message"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Hand-holding indicator */}
+      {hands && (
+        <div className="pointer-events-none absolute bottom-[7.25rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-full border border-primary/50 bg-primary/15 px-3 py-1 text-[11px] font-bold text-primary shadow-lg backdrop-blur-xl">
+          🤝 {hands.lead ? 'Leading' : 'Following'} {hands.partner} — press H to let go
+        </div>
+      )}
+
+      {/* Chat bar — ghost glass while idle; opaque only while typing; green while
+          direct-messaging an agent (after bumping into them with E) */}
       <div
         className={cn(
           'absolute bottom-3 left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl border p-2 shadow-xl backdrop-blur-md transition-all duration-200',
-          chatFocused || chatDraft ? 'border-white/30 bg-card/95' : 'border-white/35 bg-transparent'
+          messaging
+            ? 'border-primary/70 bg-card/95'
+            : chatFocused || chatDraft
+              ? 'border-white/30 bg-card/95'
+              : 'border-white/35 bg-transparent'
         )}
       >
+        {messaging && (
+          <button
+            type="button"
+            onClick={() => setMessaging(null)}
+            className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-2 py-1 text-[10px] font-bold text-primary transition hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            title="Stop messaging this agent"
+          >
+            → {messaging} <X className="size-3" />
+          </button>
+        )}
         <input
           value={chatDraft}
           onChange={(e) => setChatDraft(e.target.value)}
@@ -944,7 +1106,7 @@ export default function CommunePanel() {
             if (e.key === 'Enter') speak();
             e.stopPropagation();
           }}
-          placeholder={`Say something to the square, ${username}…`}
+          placeholder={messaging ? `Send a message to ${messaging}…` : `Say something to the square, ${username}…`}
           maxLength={90}
           className="h-10 min-w-0 flex-1 rounded-xl bg-transparent px-3.5 text-sm text-foreground placeholder:text-foreground/60 focus-visible:outline-none"
         />

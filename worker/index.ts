@@ -594,6 +594,20 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
       } catch {
         /* column already exists */
       }
+      // Agent→agent interaction signals (bump shake, direct chat, hand-holding).
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_signals (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           from_user TEXT NOT NULL,
+           to_user TEXT NOT NULL,
+           kind TEXT NOT NULL,
+           payload TEXT NOT NULL DEFAULT '',
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        'CREATE INDEX IF NOT EXISTS idx_commune_signals_to ON commune_signals (to_user, created_at)'
+      ).run();
       // COMMUNE spice drops — spice piles scattered around the town square;
       // the first agent to walk over one claims it (+1 spice).
       await env.DB.prepare(
@@ -1358,6 +1372,16 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     return { cards: cardIds, pet: petOut, phrase: ph ?? '', avatar: avatarOut };
   };
 
+  // Deliver (and clear) interaction signals addressed to me — last 15s only.
+  const signalRows = await env.DB.prepare(
+    'SELECT id, from_user, kind, payload FROM commune_signals WHERE to_user = ?1 AND created_at >= ?2 ORDER BY id LIMIT 20'
+  ).bind(user.username, now - 15_000).all<{ id: number; from_user: string; kind: string; payload: string }>();
+  if (signalRows.results?.length) {
+    await env.DB.prepare(
+      `DELETE FROM commune_signals WHERE id IN (${signalRows.results.map((_, i) => `?${i + 1}`).join(', ')})`
+    ).bind(...signalRows.results.map((r) => r.id)).run();
+  }
+
   const others = (rows.results ?? []).map((r) => ({
     username: r.username,
     isAdmin: r.isAdmin === 1,
@@ -1371,6 +1395,7 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     others,
     me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null, own?.avatar ?? null),
     drops: (dropRows.results ?? []).map((d) => ({ id: d.id, x: d.x, y: d.y })),
+    signals: (signalRows.results ?? []).map((s) => ({ from: s.from_user, kind: s.kind, message: s.payload })),
   });
 }
 
@@ -1507,6 +1532,32 @@ async function handleChallengeAward(request: Request, env: Env, user: AuthUserRo
     ).bind(user.username, CHALLENGE_SUCCESS_SPICE, personaId, now),
   ]);
   return authJson({ awarded: CHALLENGE_SUCCESS_SPICE, spice: Number(user.spice ?? 0) + CHALLENGE_SUCCESS_SPICE });
+}
+
+/* ── COMMUNE agent→agent signals ───────────────────────────────────────────── */
+
+/** POST /api/commune/interact { target, kind, message? } — queue a signal for
+ *  another agent; they receive it on their next presence sync (and it is
+ *  deleted on delivery). kinds: 'bump' (screen shake), 'chat' (direct message
+ *  banner), 'hands' (start hand-holding, sender leads), 'hands_release'. */
+async function handleCommuneInteract(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  let payload: { target?: unknown; kind?: unknown; message?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON' }, 400);
+  }
+  const target = String(payload.target ?? '').trim();
+  const kind = String(payload.kind ?? '');
+  const message = String(payload.message ?? '').slice(0, 140);
+  if (!target || target === user.username) return authJson({ error: 'Invalid target' }, 400);
+  if (!['bump', 'chat', 'hands', 'hands_release'].includes(kind)) return authJson({ error: 'Invalid kind' }, 400);
+  if (kind === 'chat' && !message.trim()) return authJson({ error: 'Message required' }, 400);
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO commune_signals (from_user, to_user, kind, payload, created_at) VALUES (?1, ?2, ?3, ?4, ?5)'
+  ).bind(user.username, target, kind, message, now).run();
+  return authJson({ ok: true });
 }
 
 /** Roulette betting spots and their STANDARD casino payout odds ("to one"):
@@ -1831,6 +1882,12 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSpicePick(request, env, user);
+  }
+  // Agent→agent interaction signals (bump / direct chat / hand-holding).
+  if (path === '/api/commune/interact' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneInteract(request, env, user);
   }
   // NPC challenge success award (roleplay runs client-side via DeepSeek).
   if (path === '/api/commune/challenge/award' && request.method === 'POST') {

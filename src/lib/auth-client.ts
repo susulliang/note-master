@@ -264,6 +264,13 @@ export interface CommuneAgent {
   loadout: CommuneLoadout | null;
 }
 
+/** Agent→agent interaction signal delivered via the presence sync. */
+export interface CommuneSignal {
+  from: string;
+  kind: 'bump' | 'chat' | 'hands' | 'hands_release';
+  message: string;
+}
+
 /** Presence tick: report my position/status (and loadout when included),
  *  receive everyone else plus unclaimed spice drops. Called every ~8s while
  *  the Commune is open. */
@@ -272,14 +279,25 @@ export async function syncCommune(
   y: number,
   status: string,
   loadout?: CommuneLoadout
-): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[] }> {
+): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[]; signals: CommuneSignal[] }> {
   const token = getStoredToken();
-  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[] }>('/api/commune/sync', {
+  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[]; signals?: CommuneSignal[] }>('/api/commune/sync', {
     method: 'POST',
     body: JSON.stringify(loadout ? { x, y, status, loadout } : { x, y, status }),
     token,
   });
-  return { drops: out.drops ?? [], others: out.others, me: out.me };
+  return { drops: out.drops ?? [], others: out.others, me: out.me, signals: out.signals ?? [] };
+}
+
+/** Send an interaction signal to another agent (bump shake, direct chat
+ *  banner, hand-holding start/stop). Delivered on their next presence sync. */
+export async function communeInteract(target: string, kind: CommuneSignal['kind'], message = ''): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/commune/interact', {
+    method: 'POST',
+    body: JSON.stringify({ target, kind, message }),
+    token,
+  });
 }
 
 /** A spice pile scattered on the town square — first agent to walk over it
