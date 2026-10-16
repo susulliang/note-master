@@ -570,10 +570,18 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            'Draw from the Attack on Titan foil pool — Final Season + Vol. 1 & 2 sets merged, rarity set by market price. Results land in My Collection.',
            29, 1, 'cards', ?1, ?1)`
       ).bind(nowSeed).run();
+      // Seed the Resident Evil character draw (19 spice).
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO store_products
+           (id, name, emoji, description, price, active, category, created_at, updated_at)
+         VALUES ('tcg-re-card', 'Resident Evil — Draw a Card', '🧟',
+           'Draw a Character card from the Resident Evil Deck-Building Game — all 10 Premier survivors & villains, Wesker included. Results land in My Collection.',
+           19, 1, 'cards', ?1, ?1)`
+      ).bind(nowSeed).run();
       // Heal any card-draw rows whose category was reset by an older admin
       // save — the draw only fires when the category is 'cards'.
       await env.DB.prepare(
-        `UPDATE store_products SET category = 'cards' WHERE id IN ('tcg-sds-card', 'tcg-aot-card', 'tcg-pokemon-rare')`
+        `UPDATE store_products SET category = 'cards' WHERE id IN ('tcg-sds-card', 'tcg-aot-card', 'tcg-re-card', 'tcg-pokemon-rare')`
       ).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
@@ -1077,6 +1085,7 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
 const TCG_PRODUCT_SETS: Readonly<Record<string, string>> = {
   'tcg-sds-card': 'sds',
   'tcg-aot-card': 'aot',
+  'tcg-re-card': 're',
   'tcg-pokemon-rare': 'pokemon',
 };
 

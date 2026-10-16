@@ -41,6 +41,17 @@ const SDS_TIERS = [
   { max: Infinity, rarity: 'Secret Rare', weight: 0.5 },
 ];
 
+// Resident Evil (Premier) — 10-card character pool; fandom has no market
+// prices, so chase desirability maps to the fixed prices in RE_CARDS.
+const RE_TIERS = [
+  { max: 3, rarity: 'Common', weight: 30 },
+  { max: 5, rarity: 'Uncommon', weight: 25 },
+  { max: 9, rarity: 'Rare', weight: 22 },
+  { max: 14, rarity: 'Super Rare', weight: 13 },
+  { max: 25, rarity: 'Ultra Rare', weight: 7 },
+  { max: Infinity, rarity: 'Secret Rare', weight: 3 },
+];
+
 // Attack on Titan foils — the whole pool is foil-grade with a long price tail
 // (SSP chase cards reach $300). Ladder mirrors that spread.
 const AOT_TIERS = [
@@ -133,6 +144,72 @@ async function fetchAot() {
   const seen = new Map();
   for (const c of all) if (!seen.has(c.id)) seen.set(c.id, c);
   return [...seen.values()];
+}
+
+// ── Resident Evil (fandom wiki, via Wayback Machine) ─────────────────────────
+// residentevil.fandom.com is Cloudflare-gated from build machines, so pages
+// and card scans are fetched through web.archive.org. The Deck-Building-Game
+// card list is curated: the 10 Premier Character (CH) cards only. Fandom has
+// no market prices, so chase desirability sets a fixed price → rarity ladder.
+
+const RE_CARDS = [
+  { name: 'Albert Wesker', ch: 'CH-001', price: 25 },
+  { name: 'Leon S. Kennedy', ch: 'CH-002', price: 15 },
+  { name: 'Claire Redfield', ch: 'CH-003', price: 6 },
+  { name: 'Sheva Alomar', ch: 'CH-004', price: 4.5 },
+  { name: 'Barry Burton', ch: 'CH-005', price: 4 },
+  { name: 'Ada Wong', ch: 'CH-006', price: 8.5 },
+  { name: 'Jack Krauser', ch: 'CH-007', price: 7.5 },
+  { name: 'Chris Redfield', ch: 'CH-008', price: 10 },
+  { name: 'Jill Valentine', ch: 'CH-009', price: 12 },
+  { name: 'Rebecca Chambers', ch: 'CH-010', price: 2.5 },
+];
+
+async function waybackSnapshotUrl(wikiPath) {
+  const api = `https://archive.org/wayback/available?url=${encodeURIComponent(`residentevil.fandom.com${wikiPath}`)}`;
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const json = await fetch(api, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then((r) => r.json());
+      const snap = json?.archived_snapshots?.closest;
+      if (snap?.available && snap.url) return snap.url;
+      return null;
+    } catch {
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  return null;
+}
+
+async function fetchRe() {
+  const cards = [];
+  for (const c of RE_CARDS) {
+    const wikiPath = `/wiki/${c.name.replace(/ /g, '_')}_(${c.ch})`;
+    const snap = await waybackSnapshotUrl(wikiPath);
+    if (!snap) {
+      console.warn(`[re] no archive for ${c.name} — skipped`);
+      continue;
+    }
+    const html = await fetch(snap, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then((r) => r.text());
+    // Card scan extraction: the infobox card image is a full-size
+    // (…/revision/latest?cb=…) residentevil-wiki image proxied through
+    // web.archive's im_ rewriter. Prefer the file whose name carries the
+    // card serial; some pages name the file without it (e.g. Ada-secon_DBG),
+    // so fall back to the first non-chrome image (site logos/favicons aside).
+    const chrome = /site-logo|site-favicon|favicon|question_book/i;
+    const all = [
+      ...html.matchAll(
+        /https?:\/\/web\.archive\.org\/web\/\d+im_\/https?:\/\/static\.wikia\.nocookie\.net\/residentevil\/images\/[^"'\s]+?\/revision\/latest\?[^"'\s]*/gi
+      ),
+    ].map((m) => m[0]);
+    const img = all.find((u) => u.includes(c.ch)) ?? all.find((u) => !chrome.test(u));
+    if (!img) {
+      console.warn(`[re] no card image in archive of ${c.name} — skipped`);
+      continue;
+    }
+    cards.push({ id: c.ch.toLowerCase(), code: c.ch, name: `${c.name} (Premier)`, price: c.price, image: img });
+    console.log(`[re] ${c.ch} ${c.name}`);
+  }
+  return cards;
 }
 
 // ── Pokémon (pokemontcg.io v2) — curated rare pool ───────────────────────────
@@ -267,6 +344,13 @@ const COLLECTIONS = [
     source: SDS_SOURCE,
     tiers: SDS_TIERS,
     fetch: fetchSds,
+  },
+  {
+    id: 're',
+    label: 'Resident Evil',
+    source: 'https://residentevil.fandom.com/wiki/Albert_Wesker_(CH-001)',
+    tiers: RE_TIERS,
+    fetch: fetchRe,
   },
   {
     id: 'aot',

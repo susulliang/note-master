@@ -28,6 +28,7 @@ export interface TcgManifest {
 export const TCG_COLLECTIONS = [
   { id: 'sds', label: 'The Seven Deadly Sins' },
   { id: 'aot', label: 'Attack on Titan' },
+  { id: 're', label: 'Resident Evil' },
   { id: 'pokemon', label: 'Pokémon Rare Bundles' },
 ] as const;
 
@@ -63,6 +64,7 @@ export function collectionOfProduct(productId: string): TcgCollectionId {
 export const PRODUCT_OF_COLLECTION: Record<TcgCollectionId, string> = {
   sds: 'tcg-sds-card',
   aot: 'tcg-aot-card',
+  re: 'tcg-re-card',
   pokemon: 'tcg-pokemon-rare',
 };
 
@@ -70,6 +72,7 @@ export const PRODUCT_OF_COLLECTION: Record<TcgCollectionId, string> = {
 export const DRAW_PRICE: Record<TcgCollectionId, number> = {
   sds: 9,
   aot: 29,
+  re: 19,
   pokemon: 99,
 };
 
