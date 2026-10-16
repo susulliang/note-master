@@ -1150,7 +1150,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                     : view === 'selfTest'
                       ? 'Test'
                       : view === 'commune'
-                        ? 'Town'
+                        ? 'Commune'
                         : view === 'caseTrak'
                           ? 'Trak'
                           : view === 'dash'

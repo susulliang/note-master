@@ -33,9 +33,10 @@ import {
   type CommuneLoadout,
   type CommunePet,
 } from '@/lib/auth-client';
-import { CAT_CHOICES, normalizeCatId, type CatId } from '@/lib/cat-sprites';
+import { CAT_CHOICES, CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
 import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
+import StorePanel from '@/components/StorePanel';
 
 /* ── world layout ──────────────────────────────────────────────────────────── */
 
@@ -47,7 +48,7 @@ const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const TENT = { x: 1200, y: 730, w: 180, h: 160 }; // challenge tent
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
-type PropPanelKind = 'townhall' | 'cafe' | 'arcade' | 'banners' | 'showcase' | 'challenges';
+type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
 type PanelKind = PropPanelKind | 'loadout' | 'agent' | null;
 
 interface CommuneProp {
@@ -67,9 +68,9 @@ const COMMUNE_PROPS: CommuneProp[] = [
     description: 'The heart of the square. Stop by to see what the community is building together.',
   },
   {
-    kind: 'cafe', label: 'Café', x: 270, y: 420, range: 102,
+    kind: 'store', label: 'Store', x: 270, y: 420, range: 102,
     hitbox: { x: 185, y: 206, w: 170, h: 184 },
-    description: 'A quiet corner for a coffee, a chat, and a little break between cases.',
+    description: 'The Spice Store — spend your hard-earned spice on treats, cards, and goodies.',
   },
   {
     kind: 'arcade', label: 'Arcade', x: 1330, y: 420, range: 102,
@@ -95,7 +96,7 @@ const COMMUNE_PROPS: CommuneProp[] = [
 /** Solid footprints (building walls incl. roof silhouette + props). */
 const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 650, y: 96, w: 300, h: 134 }, // town hall
-  { x: 161, y: 206, w: 170, h: 184 }, // café
+  { x: 161, y: 206, w: 170, h: 184 }, // store (west building)
   { x: 1245, y: 206, w: 170, h: 184 }, // arcade
   { x: 155, y: 864, w: 150, h: 176 }, // west house
   { x: 1295, y: 864, w: 150, h: 176 }, // east house
@@ -121,6 +122,31 @@ interface Banner {
 }
 
 const BANNERS_KEY = '__app_commune_banners';
+
+/** The cat this agent already carries as their workspace companion (the
+ *  "Cat companion" pick in Settings) — the loadout defaults to it so the
+ *  square shows the same pet without manual setup. */
+function carriedPet(username: string): CommunePet {
+  let id: CatId;
+  try {
+    id = normalizeCatId(window.localStorage.getItem(CAT_SELECTION_STORAGE_KEY));
+  } catch {
+    id = 'hunao';
+  }
+  let st: ReturnType<typeof loadState> = null;
+  try {
+    st = loadState(window.localStorage.getItem(petStorageKey(username, id)));
+  } catch {
+    st = null;
+  }
+  return {
+    id,
+    name: CAT_CHOICES.find((c) => c.id === id)?.name ?? id,
+    stage: st ? stageFor(st.xp).name : 'Kitten',
+    mood: st?.mood ?? 60,
+    xp: st?.xp ?? 0,
+  };
+}
 
 function loadBanners(): Banner[] {
   try {
@@ -233,7 +259,7 @@ interface PixelPetView {
 }
 
 export default function CommunePanel() {
-  const { user } = useAuth();
+  const { user, setSpice } = useAuth();
   const username = user?.username ?? 'Guest';
   const isAdmin = !!user?.isAdmin;
 
@@ -272,7 +298,7 @@ export default function CommunePanel() {
   const statusRef = useRef('hanging out');
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
-  const [loadout, setLoadout] = useState<CommuneLoadout>({ cards: [], pet: null, phrase: '' });
+  const [loadout, setLoadout] = useState<CommuneLoadout>(() => ({ cards: [], pet: carriedPet(username), phrase: '' }));
   const loadoutRef = useRef(loadout);
   loadoutRef.current = loadout;
   playerRef.current.pet = loadout.pet;
@@ -383,7 +409,7 @@ export default function CommunePanel() {
     }
   };
 
-  /* ── presence poll — one round-trip every 2.5s while the commune is open ─── */
+  /* ── presence poll — one round-trip every 8s while the commune is open ────── */
   useEffect(() => {
     if (!user) return;
     let stopped = false;
@@ -399,7 +425,14 @@ export default function CommunePanel() {
         if (stopped) return;
         loadoutDirtyRef.current = false;
         // First server echo fills the editor (until the user edits locally).
-        if (!loadoutTouchedRef.current && out.me) setLoadout(out.me);
+        // A saved loadout without a pet keeps the locally carried companion.
+        if (!loadoutTouchedRef.current && out.me) {
+          if (out.me.pet) setLoadout(out.me);
+          else {
+            setLoadout({ ...out.me, pet: loadoutRef.current.pet });
+            loadoutDirtyRef.current = true; // sync the auto-picked pet on the next poll
+          }
+        }
         const seen = new Set<string>();
         for (const a of out.others) {
           seen.add(a.username);
@@ -427,7 +460,7 @@ export default function CommunePanel() {
       }
     };
     void tick();
-    const iv = window.setInterval(() => void tick(), 2500);
+    const iv = window.setInterval(() => void tick(), 8000);
     return () => {
       stopped = true;
       window.clearInterval(iv);
@@ -626,8 +659,8 @@ export default function CommunePanel() {
               ? 'at the challenge tent'
         : nearKind === 'townhall'
           ? 'visiting town hall'
-        : nearKind === 'cafe'
-          ? 'at the café'
+        : nearKind === 'store'
+          ? 'at the store'
         : nearKind === 'arcade'
           ? 'at the arcade'
               : player.moving
@@ -818,7 +851,11 @@ export default function CommunePanel() {
       </div>
 
       {/* ── panels ──────────────────────────────────────────────────────────── */}
-      {panel && (
+      {/* The Store is its own centered modal (same one as Settings). */}
+      {panel === 'store' && (
+        <StorePanel spice={user?.spice ?? 0} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
+      )}
+      {panel && panel !== 'store' && (
         <div
           role="dialog"
           aria-modal="false"
@@ -1965,7 +2002,7 @@ function getTownLayer(): HTMLCanvasElement {
     g.fillStyle = '#f2dfb8';
     g.font = 'bold 10px ui-monospace, monospace';
     g.textAlign = 'center';
-    g.fillText('CAFE', cx, gy - 73);
+    g.fillText('STORE', cx, gy - 73);
   }
 
   /* ARCADE (east-north) */
