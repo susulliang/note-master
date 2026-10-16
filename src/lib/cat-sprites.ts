@@ -46,6 +46,15 @@ export const CAT_CHOICES = [
     sprite: '/assets/cat/ailu-sprites.png',
     sleepSprite: '/assets/cat/ailu-falling-asleep.png',
   },
+  {
+    id: 'bella',
+    name: 'Bella',
+    coat: 'Calico',
+    tint: 'text-orange-300',
+    swatch: 'bg-orange-400',
+    sprite: '/assets/cat/bella-sprites.png',
+    sleepSprite: '/assets/cat/bella-falling-asleep.png',
+  },
 ] as const;
 
 export type CatId = (typeof CAT_CHOICES)[number]['id'];
