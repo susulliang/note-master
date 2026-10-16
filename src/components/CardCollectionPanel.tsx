@@ -1,15 +1,16 @@
 /**
- * CardCollectionPanel — "My Collection" viewer for TCG card pulls. Shows the
- * full Seven Deadly Sins set as a grid: owned cards render their art with a
- * duplicate-count badge, unowned cards render a dark silhouette placeholder
- * (art blurred + hidden) so the set is browsable without spoiling details.
+ * CardCollectionPanel — "My Collection" viewer for TCG card pulls, with a
+ * tab per collection. Each tab shows the user's OWNED cards (with duplicate
+ * counts) followed by exactly ONE dark "???" slot summarising what's still
+ * uncollected — the full set is browsable via click-to-zoom on owned cards,
+ * but we don't render 200+ empty placeholders.
  */
 
 import { useEffect, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchCardCollection } from '@/lib/auth-client';
-import { loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
+import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgCollectionId, type TcgManifestCard } from '@/lib/tcg-manifest';
 
 interface CardCollectionPanelProps {
   onClose: () => void;
@@ -22,31 +23,46 @@ interface ColRow {
   lastAcquired: number;
 }
 
+/** Per-collection cached view data (null while loading, absent = not loaded). */
+interface ColData {
+  cards: TcgManifestCard[];
+  owned: Map<string, number>;
+}
+
 export default function CardCollectionPanel({ onClose }: CardCollectionPanelProps) {
-  const [manifest, setManifest] = useState<Awaited<ReturnType<typeof loadTcgManifest>> | null>(null);
-  const [owned, setOwned] = useState<Map<string, number> | null>(null);
+  const [active, setActive] = useState<TcgCollectionId>(TCG_COLLECTIONS[0].id);
+  /** cards + owned map per collection, loaded per tab (cached by manifest). */
+  const [data, setData] = useState<{ [collection: string]: ColData | null }>({});
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TcgManifestCard | null>(null);
 
+  // Load the active collection's manifest + the user's pull rows.
   useEffect(() => {
+    if (data[active] !== undefined) return; // already loaded / loading
     let cancelled = false;
+    setData((d) => ({ ...d, [active]: null }));
     void (async () => {
       try {
-        const [m, col] = await Promise.all([loadTcgManifest(), fetchCardCollection()]);
+        const [manifest, col] = await Promise.all([loadTcgManifest(active), fetchCardCollection()]);
         if (cancelled) return;
-        setManifest(m);
-        setOwned(new Map(col.map((row) => [row.cardId, row.qty])));
+        const ids = new Set(manifest.cards.map((c) => c.id));
+        const owned = new Map(col.filter((row) => ids.has(row.cardId)).map((row) => [row.cardId, row.qty]));
+        setData((d) => ({ ...d, [active]: { cards: manifest.cards, owned } }));
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load your collection');
+        if (!cancelled) {
+          setData((d) => ({ ...d, [active]: { cards: [], owned: new Map() } }));
+          setError(err instanceof Error ? err.message : 'Failed to load your collection');
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [active, data]);
 
-  const cards = manifest?.cards ?? [];
-  const ownedCount = owned ? cards.filter((c) => (owned.get(c.id) ?? 0) > 0).length : 0;
+  const current = data[active] ?? null;
+  const ownedCards = current ? current.cards.filter((c) => (current.owned.get(c.id) ?? 0) > 0) : [];
+  const uncollected = current ? current.cards.length - ownedCards.length : 0;
 
   return (
     <div
@@ -75,10 +91,30 @@ export default function CardCollectionPanel({ onClose }: CardCollectionPanelProp
 
         <div className="mb-3 flex items-baseline gap-3">
           <h2 className="font-mono text-lg font-extrabold tracking-tight text-foreground">My Collection</h2>
-          <p className="text-xs text-muted-foreground">The Seven Deadly Sins</p>
-          <span className="ml-auto rounded-full border border-amber-400/40 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-extrabold tabular-nums text-amber-400">
-            {owned ? `${ownedCount} / ${cards.length}` : '…'}
-          </span>
+        </div>
+
+        {/* Collection tabs */}
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {TCG_COLLECTIONS.map((c) => {
+            const d = data[c.id];
+            const count = d ? d.cards.filter((card) => (d.owned.get(card.id) ?? 0) > 0).length : 0;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setActive(c.id)}
+                className={cn(
+                  'rounded-lg border px-3 py-1.5 text-[11px] font-bold transition-colors',
+                  active === c.id
+                    ? 'border-amber-400/60 bg-amber-500/20 text-amber-300'
+                    : 'border-border/50 bg-background/30 text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {c.label}
+                {d && <span className="ml-1.5 tabular-nums opacity-70">{count}/{d.cards.length}</span>}
+              </button>
+            );
+          })}
         </div>
 
         {error && (
@@ -88,48 +124,56 @@ export default function CardCollectionPanel({ onClose }: CardCollectionPanelProp
         )}
 
         <div className="custom-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-          {(!manifest || !owned) && !error && (
+          {!current && (
             <div className="flex items-center justify-center py-12 text-muted-foreground">
               <Loader2 className="size-6 animate-spin" />
             </div>
           )}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2">
-            {manifest &&
-              owned &&
-              cards.map((card) => {
-                const qty = owned.get(card.id) ?? 0;
-                const has = qty > 0;
+          {current && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2">
+              {ownedCards.map((card) => {
+                const qty = current.owned.get(card.id) ?? 0;
                 const st = rarityStyle(card.rarity);
                 return (
                   <button
                     key={card.id}
                     type="button"
-                    onClick={() => has && setSelected(card)}
+                    onClick={() => setSelected(card)}
                     className={cn(
                       'relative aspect-[5/7] overflow-hidden rounded-lg border bg-white/5 transition-transform',
-                      has ? cn(st.border, 'hover:scale-[1.04] cursor-zoom-in') : 'border-border/40 opacity-45',
-                      selected?.id === card.id && 'ring-2 ring-amber-300/70'
+                      st.border,
+                      'cursor-zoom-in hover:scale-[1.04]'
                     )}
-                    title={has ? `${card.name} — ${card.rarity}` : 'Not collected yet'}
+                    title={`${card.name} — ${card.rarity}`}
                   >
-                    {has ? (
-                      <>
-                        <img src={card.image} alt={card.name} className="size-full object-cover" loading="lazy" />
-                        {qty > 1 && (
-                          <span className="absolute bottom-1 right-1 rounded-md border border-white/20 bg-black/70 px-1.5 text-[10px] font-black tabular-nums text-white">
-                            ×{qty}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <div className="flex size-full items-center justify-center">
-                        <span className="font-mono text-[9px] font-bold text-muted-foreground/60">???</span>
-                      </div>
+                    <img src={card.image} alt={card.name} className="size-full object-cover" loading="lazy" />
+                    {qty > 1 && (
+                      <span className="absolute bottom-1 right-1 rounded-md border border-white/20 bg-black/70 px-1.5 text-[10px] font-black tabular-nums text-white">
+                        ×{qty}
+                      </span>
                     )}
                   </button>
                 );
               })}
-          </div>
+              {/* Single "not collected yet" slot — never a wall of empties. */}
+              {uncollected > 0 && (
+                <div
+                  className="flex aspect-[5/7] items-center justify-center rounded-lg border border-dashed border-border/50 bg-background/20"
+                  title={`${uncollected} more to collect`}
+                >
+                  <div className="text-center">
+                    <p className="font-mono text-sm font-black text-muted-foreground/60">???</p>
+                    <p className="mt-0.5 text-[9px] font-bold text-muted-foreground/50">+{uncollected} more</p>
+                  </div>
+                </div>
+              )}
+              {ownedCards.length === 0 && uncollected === 0 && (
+                <p className="col-span-full py-8 text-center text-sm text-muted-foreground">
+                  Nothing here yet — draw cards from the Spice Store.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <p className="mt-2 shrink-0 text-center text-[10px] text-muted-foreground/70">
@@ -157,7 +201,7 @@ export default function CardCollectionPanel({ onClose }: CardCollectionPanelProp
                     {selected.rarity}
                   </span>
                   <span className="text-muted-foreground">Market ${selected.price.toFixed(2)}</span>
-                  <span className="text-muted-foreground/70">×{owned?.get(selected.id) ?? 0} owned</span>
+                  <span className="text-muted-foreground/70">×{current?.owned.get(selected.id) ?? 0} owned</span>
                 </div>
               </div>
               <button

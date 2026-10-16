@@ -9,7 +9,7 @@
 
 /// <reference path="./worker-configuration.d.ts" />
 
-import { TCG_CARDS, TCG_TIER_WEIGHTS } from './tcg-manifest.gen';
+import { TCG_SETS } from './tcg-manifest.gen';
 
 interface TestResultSummary {
   totalSubmissions: number;
@@ -554,6 +554,14 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            'Open a pack from the Seven Deadly Sins TCG set — 249 cards, rarity set by market price. Results land in My Collection.',
            9, 1, 'cards', ?1, ?1)`
       ).bind(nowSeed).run();
+      // Seed the Pokémon Rare Bundles draw (premium tier, 99 spice).
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO store_products
+           (id, name, emoji, description, price, active, category, created_at, updated_at)
+         VALUES ('tcg-pokemon-rare', 'Pokémon Rare Bundles — Draw a Card', '🃏',
+           'Premium Pokémon draw — a curated pool of 150 rare & illustration cards across every era, chase cards included. Results land in My Collection.',
+           99, 1, 'cards', ?1, ?1)`
+      ).bind(nowSeed).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -1039,35 +1047,46 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
   // it in the collection, and return it immediately — the client animation is
   // a pure reveal of this outcome.
   if (product.category === 'cards') {
-    const card = pickTcgCard();
+    const setId = TCG_PRODUCT_SETS[product.id] ?? 'sds';
+    const card = pickTcgCard(setId);
     await env.DB.prepare(
       `INSERT INTO card_collection (username, card_id, qty, first_acquired, last_acquired)
        VALUES (?1, ?2, 1, ?3, ?3)
        ON CONFLICT (username, card_id) DO UPDATE SET qty = qty + 1, last_acquired = ?3`
     ).bind(user.username, card.id, now).run();
-    return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product), card });
+    return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product), card: { ...card, collection: setId } });
   }
   return authJson({ ok: true, spice: Number(user.spice ?? 0) - price, product: storeProductPublic(product) });
 }
 
-/** Rarity-weighted card pick from the baked SDS pool (crypto random). */
-function pickTcgCard(): (typeof TCG_CARDS)[number] {
-  const tierIds = new Map<string, (typeof TCG_CARDS)[number][]>();
-  for (const card of TCG_CARDS) {
+/** Store product id → TCG collection. Register new collections here (matches
+ *  the seeded product ids in ensureSpiceSchema). */
+const TCG_PRODUCT_SETS: Readonly<Record<string, string>> = {
+  'tcg-sds-card': 'sds',
+  'tcg-pokemon-rare': 'pokemon',
+};
+
+/** Rarity-weighted card pick from a baked collection pool (crypto random). */
+function pickTcgCard(setId: string): (typeof TCG_SETS)[string]['cards'][number] {
+  const set = TCG_SETS[setId] ?? TCG_SETS.sds;
+  const tierIds = new Map<string, (typeof set.cards)[number][]>();
+  for (const card of set.cards) {
     const list = tierIds.get(card.rarity) ?? [];
     list.push(card);
     tierIds.set(card.rarity, list);
   }
-  const total = Object.values(TCG_TIER_WEIGHTS).reduce((a, b) => a + b, 0);
+  const weights: Record<string, number> = {};
+  for (const tier of set.tiers) weights[tier.rarity] = tier.weight;
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
   let roll = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * total;
-  for (const [tier, weight] of Object.entries(TCG_TIER_WEIGHTS)) {
+  for (const [tier, weight] of Object.entries(weights)) {
     roll -= weight;
     if (roll > 0) continue;
     const list = tierIds.get(tier);
     if (!list?.length) continue;
     return list[crypto.getRandomValues(new Uint32Array(1))[0] % list.length];
   }
-  const commons = tierIds.get('Common') ?? TCG_CARDS;
+  const commons = tierIds.get('Common') ?? [...set.cards];
   return commons[crypto.getRandomValues(new Uint32Array(1))[0] % commons.length];
 }
 

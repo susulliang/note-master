@@ -1,8 +1,9 @@
 /**
- * TCG manifest loader + rarity styling — the Seven Deadly Sins card pack
- * (scraped by scripts/build-tcg-pack.mjs) ships as a static manifest plus
- * 249 compressed webp images under /assets/tcg. The manifest is fetched
- * once per session and cached in-module.
+ * TCG manifest loader + rarity styling — card collections ship as static
+ * manifests (plus compressed webp images) under /assets/tcg/<collection>/.
+ * Adding a new collection = run scripts/build-tcg-packs.mjs with a new entry
+ * and append it to TCG_COLLECTIONS here; the UI (store draw + My Collection
+ * tabs) picks it up automatically.
  */
 
 export interface TcgManifestCard {
@@ -16,31 +17,60 @@ export interface TcgManifestCard {
 
 export interface TcgManifest {
   set: string;
+  collection: string;
   source: string;
   builtAt: string;
   tierWeights: Record<string, number>;
   cards: TcgManifestCard[];
 }
 
-let manifestCache: Promise<TcgManifest> | null = null;
+/** Collections available in the app (order = tab order in My Collection). */
+export const TCG_COLLECTIONS = [
+  { id: 'sds', label: 'The Seven Deadly Sins' },
+  { id: 'pokemon', label: 'Pokémon Rare Bundles' },
+] as const;
 
-/** Fetch (and memoize) the card manifest. Rejects on network failure. */
-export function loadTcgManifest(): Promise<TcgManifest> {
-  if (!manifestCache) {
-    manifestCache = fetch('/assets/tcg/manifest.json')
+export type TcgCollectionId = (typeof TCG_COLLECTIONS)[number]['id'];
+
+const manifestCache = new Map<string, Promise<TcgManifest>>();
+
+/** Fetch (and memoize) a collection's card manifest. Rejects on failure. */
+export function loadTcgManifest(collection: TcgCollectionId): Promise<TcgManifest> {
+  let cached = manifestCache.get(collection);
+  if (!cached) {
+    cached = fetch(`/assets/tcg/${collection}/manifest.json`)
       .then((res) => {
         if (!res.ok) throw new Error(`Card manifest unavailable (${res.status})`);
         return res.json() as Promise<TcgManifest>;
       })
       .catch((err) => {
-        manifestCache = null; // allow retry after a failure
+        manifestCache.delete(collection); // allow retry after a failure
         throw err;
       });
+    manifestCache.set(collection, cached);
   }
-  return manifestCache;
+  return cached;
 }
 
-/** Rarity → display styling, CS:GO-style tier ladder (site price = rarity). */
+/** Collection id from a store product id (convention: tcg-<collection>-…). */
+export function collectionOfProduct(productId: string): TcgCollectionId {
+  const known = TCG_COLLECTIONS.find((c) => productId === `tcg-${c.id}-card` || productId.startsWith(`tcg-${c.id}`));
+  return known?.id ?? 'sds';
+}
+
+/** Store product id per collection (for Draw-again flows). */
+export const PRODUCT_OF_COLLECTION: Record<TcgCollectionId, string> = {
+  sds: 'tcg-sds-card',
+  pokemon: 'tcg-pokemon-rare',
+};
+
+/** Spice price per collection draw (mirrors the seeded store products). */
+export const DRAW_PRICE: Record<TcgCollectionId, number> = {
+  sds: 9,
+  pokemon: 99,
+};
+
+/** Rarity → display styling, CS:GO-style tier ladder (price = rarity). */
 export const TCG_RARITY_STYLES: Record<string, { label: string; text: string; border: string; glow: string; chip: string }> = {
   Common: { label: 'Common', text: 'text-slate-300', border: 'border-slate-400/50', glow: 'shadow-[0_0_24px_-4px_rgba(148,163,184,0.65)]', chip: 'bg-slate-500/25 text-slate-200 border-slate-400/40' },
   Uncommon: { label: 'Uncommon', text: 'text-sky-300', border: 'border-sky-400/60', glow: 'shadow-[0_0_28px_-4px_rgba(56,189,248,0.75)]', chip: 'bg-sky-500/25 text-sky-200 border-sky-400/40' },

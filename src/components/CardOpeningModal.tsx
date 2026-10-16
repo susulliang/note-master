@@ -11,7 +11,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { purchaseItem, type TcgCard } from '@/lib/auth-client';
-import { loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
+import { collectionOfProduct, loadTcgManifest, rarityStyle, PRODUCT_OF_COLLECTION, DRAW_PRICE, type TcgManifestCard, type TcgCollectionId } from '@/lib/tcg-manifest';
+import { sfxStart, sfxTick, sfxLand, sfxReveal } from '@/lib/card-sfx';
 
 interface CardOpeningModalProps {
   /** The server-decided card from the first purchase. */
@@ -57,7 +58,7 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
   // Load manifest (cards for the ticker + ownership check for the reveal).
   useEffect(() => {
     let cancelled = false;
-    loadTcgManifest()
+    loadTcgManifest(collectionOfProduct(card.collection ? `tcg-${card.collection}` : 'tcg-sds-card'))
       .then((m) => {
         if (cancelled) return;
         setManifest(m);
@@ -74,7 +75,8 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
   }, [card]);
 
   // Kick the spin once the strip exists: transition target computed from the
-  // winner slot so the card stops under the marker.
+  // winner slot so the card stops under the marker. The ticker tick rate
+  // follows the strip's deceleration for the roll sound.
   useEffect(() => {
     if (phase !== 'spinning' || !manifest || !strip.length) return;
     const el = trackRef.current;
@@ -84,9 +86,31 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
     const target = WIN_INDEX * ITEM_W + ITEM_W / 2 - start;
     el.style.transition = `transform ${SPIN_MS}ms cubic-bezier(0.12, 0.8, 0.16, 1)`;
     el.style.transform = `translateX(-${target}px)`;
-    const timer = window.setTimeout(() => setPhase('revealed'), SPIN_MS + 150);
-    return () => window.clearTimeout(timer);
-  }, [phase, manifest, strip]);
+    // Ticker ticks: fast at first, spacing stretches as the strip slows.
+    sfxStart();
+    const TICK_TOTAL = 46;
+    let tick = 0;
+    let tickTimer = 0;
+    const scheduleNext = () => {
+      tick += 1;
+      if (tick > TICK_TOTAL) return;
+      const progress = tick / TICK_TOTAL;
+      const ease = 0.12 + 0.88 * progress ** 3; // mirrors the deceleration
+      sfxTick(1 - progress);
+      tickTimer = window.setTimeout(scheduleNext, 55 + ease * 320);
+    };
+    tickTimer = window.setTimeout(scheduleNext, 60);
+    const landTimer = window.setTimeout(() => sfxLand(), SPIN_MS);
+    const timer = window.setTimeout(() => {
+      sfxReveal(won.rarity);
+      setPhase('revealed');
+    }, SPIN_MS + 150);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(landTimer);
+      window.clearTimeout(tickTimer);
+    };
+  }, [phase, manifest, strip, won.rarity]);
 
   // New-card flag: ownership before this pull (for the "NEW!" badge).
   useEffect(() => {
@@ -111,7 +135,8 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
     setError(null);
     setPhase('drawing');
     try {
-      const out = await purchaseItem('tcg-sds-card');
+      const productId = PRODUCT_OF_COLLECTION[collectionOfProduct(`tcg-${won.collection ?? 'sds'}`)] ?? 'tcg-sds-card';
+      const out = await purchaseItem(productId);
       onSpiceChange(out.spice);
       if (!out.card) throw new Error('Draw failed — no card returned');
       setWon(out.card);
@@ -121,12 +146,13 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
       setError(err instanceof Error ? err.message : 'Draw failed');
       setPhase('revealed');
     }
-  }, [phase, onSpiceChange, onCardWon]);
+  }, [phase, onSpiceChange, onCardWon, won.collection]);
 
   const style = rarityStyle(won.rarity);
   const spinning = phase === 'spinning';
   const drawing = phase === 'drawing';
   const revealed = phase === 'revealed';
+  const drawPrice = DRAW_PRICE[(won.collection ?? 'sds') as TcgCollectionId] ?? 9;
 
   return (
     <div
@@ -204,19 +230,19 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
             <button
               type="button"
               onClick={() => void drawAgain()}
-              disabled={spice < 9 || drawing}
+              disabled={spice < drawPrice || drawing}
               className={cn(
                 'rounded-xl border px-5 py-2.5 text-sm font-black transition-all',
-                spice >= 9 && !drawing
+                spice >= drawPrice && !drawing
                   ? 'border-amber-300/60 bg-amber-400/90 text-black hover:brightness-110 active:scale-95'
                   : 'border-border/60 bg-muted/40 text-muted-foreground'
               )}
-              title={spice >= 9 ? 'Draw another card (9 🌶️)' : 'Need 9 spice'}
+              title={spice >= drawPrice ? `Draw another card (${drawPrice} 🌶️)` : `Need ${drawPrice} spice`}
             >
               {drawing ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
-                'Draw again — 9 🌶️'
+                `Draw again — ${drawPrice} 🌶️`
               )}
             </button>
             <button

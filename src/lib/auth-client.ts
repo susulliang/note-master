@@ -32,6 +32,8 @@ export interface TcgCard {
   price: number;
   rarity: string;
   image: string;
+  /** Which collection the card belongs to (sds, pokemon, …). */
+  collection?: string;
 }
 
 const TOKEN_KEY = 'ecovacs_auth_token';
