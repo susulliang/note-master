@@ -7,13 +7,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, Trophy, X } from 'lucide-react';
+import { Loader2, RefreshCw, Trophy, Volume2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
 import { kittyChat } from '@/lib/kitty-help';
 import { NPC_PERSONAS } from '@/data/npc-personas';
 
 const PERSONA_ID = 'gb_poolius';
+
+/** Crazy-Dave-style gargle gibberish played while GB "speaks". */
+const GARGLE_TRACKS = ['/assets/npc/crazydavelong2.mp3', '/assets/npc/crazydavelong3.mp3'];
 
 /** Best-effort JSON extraction from an LLM reply (handles code fences and
  *  stray prose around the JSON object). */
@@ -53,8 +56,24 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
   const [turn, setTurn] = useState<ChallengeTurn | null>(null);
   const [awarded, setAwarded] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /** Play a random gargle track while GB talks over his message. */
+  const speak = useCallback(() => {
+    audioRef.current?.pause();
+    const audio = new Audio(GARGLE_TRACKS[Math.floor(Math.random() * GARGLE_TRACKS.length)]);
+    audio.volume = 0.5;
+    audio.onended = () => setSpeaking(false);
+    audioRef.current = audio;
+    setSpeaking(true);
+    void audio.play().catch(() => setSpeaking(false));
+  }, []);
+
+  // Stop any gargle when the modal unmounts.
+  useEffect(() => () => audioRef.current?.pause(), []);
 
   const restart = useCallback(async () => {
     setBusy(true);
@@ -64,7 +83,8 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     setLog([{ role: 'npc', content: persona.initial_output.gb_message }]);
     setTurn(persona.initial_output);
     setBusy(false);
-  }, []);
+    speak();
+  }, [speak]);
 
   useEffect(() => {
     void restart();
@@ -96,6 +116,7 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
       if (!next) throw new Error('The challenge engine returned an invalid turn');
       setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: next.gb_message }]);
       setTurn(next);
+      speak();
       if (next.status === 'success') {
         const out = await awardChallenge(PERSONA_ID);
         if (out.awarded > 0) {
@@ -180,7 +201,21 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
           ))}
           {busy && (
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> GB Poolius is typing…
+              <Loader2 className="size-3.5 animate-spin" /> GB Poolius is thinking…
+            </div>
+          )}
+          {!busy && speaking && (
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-accent">
+              <Volume2 className="size-3.5 animate-pulse" /> GB Poolius is speaking
+              <span className="flex items-end gap-0.5" aria-hidden>
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="w-1 rounded-sm bg-accent/70"
+                    style={{ height: 4 + ((i * 3) % 7), animation: `pulse 0.6s ease-in-out ${i * 0.15}s infinite alternate` }}
+                  />
+                ))}
+              </span>
             </div>
           )}
           {awarded !== null && (

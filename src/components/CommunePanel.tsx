@@ -169,6 +169,11 @@ const NPCS = [
   { name: 'Waffle', hue: 330, home: { x: 1050, y: 470 } },
 ];
 
+/** GB Poolius — the standing challenge NPC in front of the challenge tent.
+ *  No waypoint / line schedule: he paces in place, waiting for agents. */
+const GB_NPC = { name: 'GB Poolius', hue: 0, x: 1160, y: 790 };
+const GB_INTERACT_RANGE = 92;
+
 const NPC_LINES = [
   'Fresh banners on the board!',
   'Meet at the fountain?',
@@ -277,9 +282,11 @@ export default function CommunePanel() {
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
   playerRef.current.name = username;
   playerRef.current.hue = hueOf(username);
-  const npcsRef = useRef<Agent[]>(
-    NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 }))
-  );
+  const npcsRef = useRef<Agent[]>([
+    ...NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 })),
+    // GB Poolius stands outside the challenge tent (no target/line timer).
+    { x: GB_NPC.x, y: GB_NPC.y, name: GB_NPC.name, hue: GB_NPC.hue, says: null, bobPhase: Math.random() * 10 },
+  ]);
   const keysRef = useRef<Set<string>>(new Set());
   const clickTargetRef = useRef<{ x: number; y: number } | null>(null);
   const camRef = useRef({ x: 0, y: 0 });
@@ -508,8 +515,15 @@ export default function CommunePanel() {
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyE') {
         if (panelRef.current) return;
-        // Interact with the nearest prop.
+        // Talk to GB Poolius first (he stands by the challenge tent).
         const p = playerRef.current;
+        if (Math.hypot(p.x - GB_NPC.x, p.y - GB_NPC.y) < GB_INTERACT_RANGE) {
+          e.preventDefault();
+          clickTargetRef.current = null;
+          setPanel('challenges');
+          return;
+        }
+        // Interact with the nearest prop.
         const near = proximity(p.x, p.y);
         if (near) {
           e.preventDefault();
@@ -674,7 +688,8 @@ export default function CommunePanel() {
 
       /* interactable prompt + my status line */
       const nearProp = nearestProp(player.x, player.y);
-      const nextPrompt = nearProp ? `E  ${nearProp.label}` : null;
+      const nearGb = Math.hypot(player.x - GB_NPC.x, player.y - GB_NPC.y) < GB_INTERACT_RANGE;
+      const nextPrompt = nearGb ? 'E  Talk to GB Poolius' : nearProp ? `E  ${nearProp.label}` : null;
       if (promptRef.current !== nextPrompt) {
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
@@ -682,7 +697,9 @@ export default function CommunePanel() {
       const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.says
         ? 'chatting'
-        : nearKind === 'banners'
+        : nearGb
+          ? 'talking with GB Poolius'
+          : nearKind === 'banners'
           ? 'reading the banners'
           : nearKind === 'showcase'
             ? 'browsing showcases'

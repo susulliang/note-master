@@ -1436,7 +1436,8 @@ async function ensureNpcSchema(env: Env): Promise<void> {
       const now = Date.now();
       for (const [id, persona] of Object.entries(NPC_PERSONAS)) {
         await env.DB.prepare(
-          'INSERT OR IGNORE INTO npc_personas (id, name, data, created_at) VALUES (?1, ?2, ?3, ?4)'
+          `INSERT INTO npc_personas (id, name, data, created_at) VALUES (?1, ?2, ?3, ?4)
+           ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data`
         ).bind(id, 'gb_poolius' === id ? 'GB Poolius' : id, JSON.stringify(persona), now).run();
       }
     })();
