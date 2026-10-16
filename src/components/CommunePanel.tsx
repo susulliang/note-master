@@ -584,7 +584,7 @@ export default function CommunePanel() {
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
 
   return (
-    <div className="relative h-full min-h-full w-full overflow-hidden bg-[#0e1a12]">
+    <div ref={wrapRef} className="relative h-full min-h-full w-full overflow-hidden bg-[#0e1a12]">
       <canvas ref={canvasRef} onClick={onCanvasClick} className="absolute inset-0 cursor-pointer" />
 
       {/* Title chip */}
