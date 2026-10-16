@@ -7,10 +7,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, Trophy, Volume2, X } from 'lucide-react';
+import { Check, Loader2, Mic, RefreshCw, Square, Trash2, Trophy, Volume2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
 import { kittyChat } from '@/lib/kitty-help';
+import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { NPC_PERSONAS } from '@/data/npc-personas';
 
 const PERSONA_ID = 'gb_poolius';
@@ -92,6 +93,114 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /* ── voice replies — local Whisper (mic → PCM → transcript → free reply) ── */
+  const transcriber = useLocalTranscriber();
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'transcribing' | 'draft'>('idle');
+  const [draft, setDraft] = useState('');
+  const [recError, setRecError] = useState<string | null>(null);
+  const [micLevel, setMicLevel] = useState(0);
+  const streamRef = useRef<MediaStream | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const analyserRafRef = useRef(0);
+  const chunksRef = useRef<Float32Array[]>([]);
+
+  const stopRecording = useCallback(async () => {
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    cancelAnimationFrame(analyserRafRef.current);
+    setMicLevel(0);
+    const ctx = ctxRef.current;
+    ctxRef.current = null;
+    await ctx?.close().catch(() => undefined);
+    setRecState('transcribing');
+    try {
+      const total = chunksRef.current.reduce((n, c) => n + c.length, 0);
+      const audio = new Float32Array(total);
+      let off = 0;
+      for (const c of chunksRef.current) {
+        audio.set(c, off);
+        off += c.length;
+      }
+      chunksRef.current = [];
+      if (total < 16_000) {
+        setRecError('Clip too short — hold the mic button a little longer.');
+        setRecState('idle');
+        return;
+      }
+      if (transcriber.status !== 'ready') await transcriber.load();
+      const text = (await transcriber.transcribe(audio)).trim();
+      if (!text) {
+        setRecError('Nothing heard — try again a bit closer to the mic.');
+        setRecState('idle');
+        return;
+      }
+      setDraft(text);
+      setRecState('draft');
+    } catch (err) {
+      setRecError(err instanceof Error ? err.message : 'Transcription failed');
+      setRecState('idle');
+    }
+  }, [transcriber]);
+
+  const startRecording = useCallback(async () => {
+    setRecError(null);
+    setDraft('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const ctx = new AudioContext({ sampleRate: 16_000 });
+      ctxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+      chunksRef.current = [];
+      processor.onaudioprocess = (e) => chunksRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      source.connect(processor);
+      processor.connect(ctx.destination);
+      // live mic meter drives the listening bars
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const tick = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const v of data) {
+          const d = (v - 128) / 128;
+          sum += d * d;
+        }
+        setMicLevel(Math.min(1, Math.sqrt(sum / data.length) * 3));
+        analyserRafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+      setRecState('recording');
+    } catch {
+      setRecError('Microphone unavailable — check browser permissions.');
+    }
+  }, []);
+
+  // Stop the mic if the modal closes mid-recording.
+  useEffect(
+    () => () => {
+      processorRef.current?.disconnect();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      cancelAnimationFrame(analyserRafRef.current);
+      void ctxRef.current?.close().catch(() => undefined);
+    },
+    []
+  );
+
+  const sendDraft = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setRecState('idle');
+    setDraft('');
+    void choose(text);
+  };
 
   /** Play a random gargle track while GB talks over his message. */
   const speak = useCallback(() => {
@@ -236,8 +345,8 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
                     : 'rounded-bl-sm border-border/60 bg-background/60 text-foreground'
                 )}
               >
-                {m.role === 'npc' && <p className="mb-0.5 font-mono text-[10px] font-bold uppercase text-muted-foreground">GB Poolius</p>}
-                {m.content}
+                {m.role === 'npc' && <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">GB Poolius</p>}
+                <span className={cn('leading-relaxed', m.role === 'npc' ? 'text-sm' : 'text-xs')}>{m.content}</span>
               </div>
             </div>
           ))}
@@ -294,6 +403,87 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
               </button>
             ))}
           </div>
+
+          {/* voice reply — mic → Whisper → editable draft → send */}
+          {!ended && (
+            <div className="mt-2.5">
+              {recState === 'idle' && (
+                <button
+                  type="button"
+                  onClick={() => void startRecording()}
+                  disabled={busy}
+                  className={cn(
+                    'flex w-full items-center justify-center gap-2 rounded-lg border border-border/60 bg-background/50 px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors',
+                    'hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    busy && 'cursor-not-allowed opacity-50'
+                  )}
+                >
+                  <Mic className="size-3.5" /> Or answer with your voice
+                </button>
+              )}
+              {recState === 'recording' && (
+                <button
+                  type="button"
+                  onClick={() => void stopRecording()}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-destructive/60 bg-destructive/10 px-3 py-2 text-xs font-bold text-destructive transition-colors hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                >
+                  <Square className="size-3 fill-current" /> Listening — tap to stop
+                  <span className="flex items-end gap-0.5" aria-hidden>
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <span
+                        key={i}
+                        className="w-1 rounded-sm bg-destructive/80 transition-all duration-100"
+                        style={{ height: 3 + Math.max(2, micLevel * 10 * (1 - Math.abs(i - 2) / 3)) }}
+                      />
+                    ))}
+                  </span>
+                </button>
+              )}
+              {recState === 'transcribing' && (
+                <div className="flex w-full items-center justify-center gap-2 rounded-lg border border-border/60 bg-background/50 px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  {transcriber.status === 'loading'
+                    ? `Loading Whisper model… ${Math.round(transcriber.progress * 100)}%`
+                    : 'Transcribing your reply…'}
+                </div>
+              )}
+              {recState === 'draft' && (
+                <div className="rounded-lg border border-accent/40 bg-accent/5 p-2">
+                  <p className="mb-1 flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-accent">
+                    <Check className="size-3" /> Your reply — edit before sending
+                  </p>
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    rows={2}
+                    autoFocus
+                    className="w-full resize-none rounded-md border border-border/60 bg-background/70 px-2.5 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  />
+                  <div className="mt-1.5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecState('idle');
+                        setDraft('');
+                      }}
+                      className="flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      <Trash2 className="size-3" /> Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendDraft}
+                      disabled={busy || !draft.trim()}
+                      className="rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                    >
+                      Send reply
+                    </button>
+                  </div>
+                </div>
+              )}
+              {recError && <p className="mt-1.5 text-[11px] text-destructive">{recError}</p>}
+            </div>
+          )}
         </div>
       </div>
     </div>
