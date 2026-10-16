@@ -246,20 +246,81 @@ export interface CommuneAgent {
 }
 
 /** Presence tick: report my position/status (and loadout when included),
- *  receive everyone else. Called every ~2.5s while the Commune is open. */
+ *  receive everyone else plus unclaimed spice drops. Called every ~8s while
+ *  the Commune is open. */
 export async function syncCommune(
   x: number,
   y: number,
   status: string,
   loadout?: CommuneLoadout
-): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null }> {
+): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[] }> {
   const token = getStoredToken();
-  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null }>('/api/commune/sync', {
+  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[] }>('/api/commune/sync', {
     method: 'POST',
     body: JSON.stringify(loadout ? { x, y, status, loadout } : { x, y, status }),
     token,
   });
-  return out;
+  return { drops: out.drops ?? [], others: out.others, me: out.me };
+}
+
+/** A spice pile scattered on the town square — first agent to walk over it
+ *  claims +1 spice. */
+export interface CommuneDrop {
+  id: number;
+  x: number;
+  y: number;
+}
+
+/** Try to claim a spice drop (first-come-first-serve, server-decided). */
+export async function pickSpiceDrop(id: number): Promise<{ picked: boolean; spice: number }> {
+  const token = getStoredToken();
+  return call<{ picked: boolean; spice: number }>('/api/commune/spice/pick', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+    token,
+  });
+}
+
+/* ── NPC challenge (Workers AI roleplay) ───────────────────────────────────── */
+
+export interface ChallengeTurn {
+  gb_message: string;
+  agent_choices: string[];
+  status: 'ongoing' | 'success' | 'fail';
+}
+
+export interface ChallengeMessage {
+  role: 'agent' | 'npc';
+  content: string;
+}
+
+/** Open a challenge with an NPC persona — returns the scripted opening turn. */
+export async function startChallenge(personaId: string): Promise<{ turn: ChallengeTurn }> {
+  const token = getStoredToken();
+  return call<{ turn: ChallengeTurn }>('/api/commune/challenge/start', {
+    method: 'POST',
+    body: JSON.stringify({ personaId }),
+    token,
+  });
+}
+
+/** Submit the agent's chosen reply — returns the NPC's next turn; a 'success'
+ *  ending additionally returns the awarded spice. */
+export async function challengeTurn(
+  personaId: string,
+  history: ChallengeMessage[],
+  choice: string
+): Promise<{ turn: ChallengeTurn; awarded: number; spice: number }> {
+  const token = getStoredToken();
+  return call<{ turn: ChallengeTurn; awarded: number; spice: number }>('/api/commune/challenge/turn', {
+    method: 'POST',
+    body: JSON.stringify({
+      personaId,
+      history: history.map((m) => ({ role: m.role === 'npc' ? 'assistant' : 'user', content: m.content })),
+      choice,
+    }),
+    token,
+  });
 }
 
 /** Play a Wheel of Fortune round — consumes the purchase token, stakes the

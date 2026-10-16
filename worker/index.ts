@@ -10,6 +10,22 @@
 /// <reference path="./worker-configuration.d.ts" />
 
 import { TCG_SETS } from './tcg-manifest.gen';
+import GB_POOLIUS from './npc/GB_Poolius.json';
+
+/** An NPC challenge persona (see worker/npc/*.json). */
+interface NpcPersona {
+  system_prompt: string[];
+  initial_output: { gb_message: string; agent_choices: string[]; status: string };
+}
+
+/** Persona registry — id → persona. Also seeded into the eco-data D1
+ *  `npc_personas` table on first use (see ensureNpcSchema). */
+const NPC_PERSONAS: Record<string, NpcPersona> = {
+  'gb_poolius': GB_POOLIUS as unknown as NpcPersona,
+};
+
+const NPC_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
+const CHALLENGE_SUCCESS_SPICE = 5;
 
 interface TestResultSummary {
   totalSubmissions: number;
@@ -112,7 +128,7 @@ const AUTH_ADMIN_USERNAMES = new Set(['dezzy', 'hoi', 'alexia']);
 const AUTH_EXTRA_NAMES = ['Dezzy', 'Jingyang', 'Troy', 'Yolanda'];
 const AUTH_NAME_RE = /^[A-Za-z][A-Za-z .'-]{0,31}$/;
 const AUTH_MIN_PASSWORD_LEN = 4;
-const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const AUTH_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 const AUTH_PBKDF2_ITERATIONS = 100_000;
 
 interface KeywordAlertRow {
@@ -568,6 +584,27 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            pet TEXT NOT NULL DEFAULT '',
            phrase TEXT NOT NULL DEFAULT '',
            updated_at INTEGER NOT NULL
+         )`
+      ).run();
+      // COMMUNE spice drops — spice piles scattered around the town square;
+      // the first agent to walk over one claims it (+1 spice).
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_spice_drops (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           x REAL NOT NULL,
+           y REAL NOT NULL,
+           picked_by TEXT,
+           picked_at INTEGER,
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
+      // NPC challenge personas — seeded from worker/npc/*.json on first use.
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS npc_personas (
+           id TEXT PRIMARY KEY,
+           name TEXT NOT NULL,
+           data TEXT NOT NULL,
+           created_at INTEGER NOT NULL
          )`
       ).run();
       // Seed the SDS card-draw store item (id-stable; price/edits via admin).
@@ -1242,6 +1279,7 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
   }
 
   await ensureSpiceSchema(env);
+  await ensureCommuneDrops(env, now);
   const stmts = [
     env.DB.prepare(
       `INSERT INTO commune_presence (username, is_admin, x, y, status, seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -1269,6 +1307,11 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
   const own = await env.DB.prepare('SELECT cards, pet, phrase FROM commune_loadout WHERE username = ?1')
     .bind(user.username).first<{ cards: string; pet: string; phrase: string }>();
 
+  // Unclaimed spice piles on the square (client renders + picks them up).
+  const dropRows = await env.DB.prepare(
+    'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL'
+  ).all<{ id: number; x: number; y: number }>();
+
   const parseLoadout = (cards: string | null, pet: string | null, ph: string | null) => {
     if (!cards && !ph) return null;
     let cardIds: string[] = [];
@@ -1295,7 +1338,225 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     seenAgo: now - r.seenAt,
     loadout: parseLoadout(r.cards, r.pet, r.phrase),
   }));
-  return authJson({ others, me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null) });
+  return authJson({
+    others,
+    me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null),
+    drops: (dropRows.results ?? []).map((d) => ({ id: d.id, x: d.x, y: d.y })),
+  });
+}
+
+/* ── COMMUNE spice drops ────────────────────────────────────────────────────── */
+
+/** Walkable spawn rectangles on the town square (world is 1600×1200). Kept
+ *  clear of building footprints, the fountain, the pond, and the fences. */
+const DROP_SPAWN_RECTS: { x: number; y: number; w: number; h: number }[] = [
+  { x: 660, y: 250, w: 280, h: 40 }, // town-hall front strip
+  { x: 380, y: 420, w: 280, h: 200 }, // west of plaza
+  { x: 940, y: 420, w: 280, h: 200 }, // east of plaza
+  { x: 700, y: 730, w: 200, h: 220 }, // south of plaza
+  { x: 340, y: 760, w: 320, h: 180 }, // near showcase stall
+  { x: 960, y: 760, w: 300, h: 180 }, // near challenge tent
+  { x: 300, y: 560, w: 120, h: 220 }, // west path
+  { x: 1180, y: 560, w: 120, h: 220 }, // east path
+];
+
+/** Keep 1–6 spice piles on the square at all times: top up whenever every
+ *  drop has been claimed (and sweep stale claimed rows). */
+async function ensureCommuneDrops(env: Env, now: number): Promise<void> {
+  const open = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM commune_spice_drops WHERE picked_by IS NULL'
+  ).first<{ n: number }>();
+  if (Number(open?.n ?? 0) > 0) return;
+  const count = 1 + Math.floor(Math.random() * 6); // 1–6
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare('DELETE FROM commune_spice_drops WHERE picked_at < ?1').bind(now - 3_600_000),
+  ];
+  for (let i = 0; i < count; i++) {
+    const r = DROP_SPAWN_RECTS[Math.floor(Math.random() * DROP_SPAWN_RECTS.length)];
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO commune_spice_drops (x, y, created_at) VALUES (?1, ?2, ?3)'
+      ).bind(
+        Math.round(r.x + Math.random() * r.w),
+        Math.round(r.y + Math.random() * r.h),
+        now
+      )
+    );
+  }
+  await env.DB.batch(stmts);
+}
+
+/** POST /api/commune/spice/pick { id } — first-come-first-serve claim of a
+ *  spice pile: the conditional UPDATE guarantees a single winner. */
+async function handleCommuneSpicePick(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 1_024) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { id?: unknown };
+  try {
+    payload = (await request.json()) as { id?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const id = Math.round(Number(payload.id));
+  if (!Number.isFinite(id) || id <= 0) return authJson({ error: 'Invalid drop id' }, 400);
+
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  const claim = await env.DB.prepare(
+    'UPDATE commune_spice_drops SET picked_by = ?1, picked_at = ?2 WHERE id = ?3 AND picked_by IS NULL'
+  ).bind(user.username, now, id).run();
+  if (!claim.meta.changes) return authJson({ error: 'Already picked' }, 409);
+
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + 1, updated_at = ?2 WHERE username = ?1')
+      .bind(user.username, now),
+    env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 1, 'pickup', ?2, ?3)")
+      .bind(user.username, `drop:${id}`, now),
+  ]);
+  return authJson({ picked: true, spice: Number(user.spice ?? 0) + 1 });
+}
+
+/* ── NPC challenge (Workers AI roleplay) ───────────────────────────────────── */
+
+/** One-time schema + persona seeding — the persona JSON is uploaded into the
+ *  eco-data D1 `npc_personas` table on first use. */
+let npcSchemaPromise: Promise<void> | null = null;
+async function ensureNpcSchema(env: Env): Promise<void> {
+  if (!npcSchemaPromise) {
+    npcSchemaPromise = (async () => {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS npc_personas (
+           id TEXT PRIMARY KEY,
+           name TEXT NOT NULL,
+           data TEXT NOT NULL,
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
+      const now = Date.now();
+      for (const [id, persona] of Object.entries(NPC_PERSONAS)) {
+        await env.DB.prepare(
+          'INSERT OR IGNORE INTO npc_personas (id, name, data, created_at) VALUES (?1, ?2, ?3, ?4)'
+        ).bind(id, 'gb_poolius' === id ? 'GB Poolius' : id, JSON.stringify(persona), now).run();
+      }
+    })();
+  }
+  await npcSchemaPromise;
+}
+
+function sanitizeStatus(raw: unknown): 'ongoing' | 'success' | 'fail' {
+  return raw === 'success' || raw === 'fail' ? raw : 'ongoing';
+}
+
+function sanitizeLlmTurn(parsed: {
+  gb_message?: unknown;
+  agent_choices?: unknown;
+  status?: unknown;
+}): { gb_message: string; agent_choices: string[]; status: 'ongoing' | 'success' | 'fail' } | null {
+  const gb = String(parsed.gb_message ?? '').trim().slice(0, 2_000);
+  const choices = Array.isArray(parsed.agent_choices)
+    ? parsed.agent_choices.map((c) => String(c).trim().slice(0, 400)).filter(Boolean)
+    : [];
+  if (!gb || choices.length !== 4) return null;
+  return { gb_message: gb, agent_choices: choices, status: sanitizeStatus(parsed.status) };
+}
+
+/** Best-effort JSON extraction from an LLM response (handles code fences and
+ *  stray prose around the JSON object). */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/commune/challenge/start { personaId } — opens a challenge with
+ *  the persona's scripted opening turn. */
+async function handleChallengeStart(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  let payload: { personaId?: unknown } = {};
+  try {
+    payload = (await request.json()) as { personaId?: unknown };
+  } catch {
+    /* empty body is fine */
+  }
+  const personaId = String(payload.personaId ?? '');
+  const persona = NPC_PERSONAS[personaId];
+  if (!persona) return authJson({ error: 'Unknown persona' }, 404);
+  await ensureNpcSchema(env);
+  void user;
+  return authJson({ turn: persona.initial_output });
+}
+
+/** POST /api/commune/challenge/turn { personaId, history, choice } — feeds the
+ *  agent's chosen reply to the persona via Workers AI and returns GB's next
+ *  JSON turn. A 'success' ending awards spice (server-computed). */
+async function handleChallengeTurn(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 65_536) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { personaId?: unknown; history?: unknown; choice?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const personaId = String(payload.personaId ?? '');
+  const persona = NPC_PERSONAS[personaId];
+  if (!persona) return authJson({ error: 'Unknown persona' }, 404);
+  const choice = String(payload.choice ?? '').trim().slice(0, 400);
+  if (!choice) return authJson({ error: 'Missing choice' }, 400);
+
+  type Turn = { role: 'user' | 'assistant'; content: string };
+  const history: Turn[] = [];
+  if (Array.isArray(payload.history)) {
+    for (const m of payload.history.slice(-20)) {
+      if (!m || typeof m !== 'object') continue;
+      const mm = m as { role?: unknown; content?: unknown };
+      const role = mm.role === 'assistant' ? 'assistant' : mm.role === 'user' ? 'user' : null;
+      const content = String(mm.content ?? '').trim().slice(0, 2_000);
+      if (role && content) history.push({ role, content });
+    }
+  }
+
+  const messages: Turn[] = [
+    { role: 'system', content: persona.system_prompt.join('\n') },
+    ...history,
+    { role: 'user', content: choice },
+  ];
+
+  let raw: string | null = null;
+  try {
+    const out = (await env.AI.run(NPC_MODEL, {
+      messages,
+      max_tokens: 1_200,
+      temperature: 0.7,
+    })) as { response?: unknown };
+    raw = typeof out?.response === 'string' ? out.response : null;
+  } catch {
+    return authJson({ error: 'Challenge engine is unavailable right now' }, 502);
+  }
+  const parsed = raw ? extractJsonObject(raw) : null;
+  const turn = parsed ? sanitizeLlmTurn(parsed as never) : null;
+  if (!turn) return authJson({ error: 'Challenge engine returned an invalid turn' }, 502);
+
+  // Success ending — award spice server-side so it can't be faked client-side.
+  let awarded = 0;
+  if (turn.status === 'success') {
+    await ensureSpiceSchema(env);
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
+        .bind(user.username, CHALLENGE_SUCCESS_SPICE, now),
+      env.DB.prepare(
+        "INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'challenge', ?3, ?4)"
+      ).bind(user.username, CHALLENGE_SUCCESS_SPICE, personaId, now),
+    ]);
+    awarded = CHALLENGE_SUCCESS_SPICE;
+  }
+
+  return authJson({ turn, awarded, spice: Number(user.spice ?? 0) + awarded });
 }
 
 /** Roulette betting spots and their STANDARD casino payout odds ("to one"):
@@ -1615,6 +1876,22 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSync(request, env, user);
+  }
+  if (path === '/api/commune/spice/pick' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneSpicePick(request, env, user);
+  }
+  // NPC challenge (Workers AI roleplay) — any logged-in user.
+  if (path === '/api/commune/challenge/start' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleChallengeStart(request, env, user);
+  }
+  if (path === '/api/commune/challenge/turn' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleChallengeTurn(request, env, user);
   }
 
   // Admin routes — bearer must belong to an is_admin account.

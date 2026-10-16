@@ -28,8 +28,10 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
   fetchCardCollection,
+  pickSpiceDrop,
   syncCommune,
   type CommuneAgent,
+  type CommuneDrop,
   type CommuneLoadout,
   type CommunePet,
 } from '@/lib/auth-client';
@@ -37,6 +39,7 @@ import { CAT_CHOICES, CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } fr
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
 import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
 import StorePanel from '@/components/StorePanel';
+import ChallengePanel from '@/components/ChallengePanel';
 
 /* ── world layout ──────────────────────────────────────────────────────────── */
 
@@ -90,7 +93,7 @@ const COMMUNE_PROPS: CommuneProp[] = [
   {
     kind: 'challenges', label: 'Challenge Tent', x: TENT.x - 40, y: TENT.y, range: 110,
     hitbox: { x: TENT.x - TENT.w / 2, y: TENT.y - TENT.h / 2, w: TENT.w, h: TENT.h },
-    description: 'The challenge tent is being prepared for case-study activities and friendly tests.',
+    description: 'Step inside the tent and take on an NPC customer challenge — talk them down to earn spice.',
   },
 ];
 /** Solid footprints (building walls incl. roof silhouette + props). */
@@ -409,6 +412,28 @@ export default function CommunePanel() {
     }
   };
 
+  /* ── spice drops on the square ────────────────────────────────────────────── */
+  const dropsRef = useRef<CommuneDrop[]>([]);
+  /** Ids with an in-flight or settled pickup request this session. */
+  const pickingRef = useRef<Set<number>>(new Set());
+
+  const tryPickDrop = useCallback(
+    async (id: number) => {
+      if (pickingRef.current.has(id)) return;
+      pickingRef.current.add(id);
+      dropsRef.current = dropsRef.current.filter((d) => d.id !== id);
+      try {
+        const out = await pickSpiceDrop(id);
+        setSpice(out.spice);
+        const p = playerRef.current;
+        p.says = { text: '+1 spice 🌶', until: Date.now() + 2200 };
+      } catch {
+        /* someone else claimed it or offline — it just stays gone visually */
+      }
+    },
+    [setSpice]
+  );
+
   /* ── presence poll — one round-trip every 8s while the commune is open ────── */
   useEffect(() => {
     if (!user) return;
@@ -424,6 +449,7 @@ export default function CommunePanel() {
         );
         if (stopped) return;
         loadoutDirtyRef.current = false;
+        dropsRef.current = out.drops.filter((d) => !pickingRef.current.has(d.id));
         // First server echo fills the editor (until the user edits locally).
         // A saved loadout without a pet keeps the locally carried companion.
         if (!loadoutTouchedRef.current && out.me) {
@@ -597,6 +623,11 @@ export default function CommunePanel() {
       }
       if (player.says && player.says.until < now) player.says = null;
 
+      /* spice pickups — walk over a pile to claim it */
+      for (const d of dropsRef.current) {
+        if (Math.hypot(player.x - d.x, player.y - (d.y - 8)) < 24) void tryPickDrop(d.id);
+      }
+
       /* update NPCs */
       for (const npc of npcsRef.current) {
         const nowMs = now;
@@ -711,7 +742,7 @@ export default function CommunePanel() {
         now,
         dt
       );
-      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current);
+      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current);
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -855,7 +886,8 @@ export default function CommunePanel() {
       {panel === 'store' && (
         <StorePanel spice={user?.spice ?? 0} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
       )}
-      {panel && panel !== 'store' && (
+      {panel === 'challenges' && <ChallengePanel onSpiceChange={setSpice} onClose={() => setPanel(null)} />}
+      {panel && panel !== 'store' && panel !== 'challenges' && (
         <div
           role="dialog"
           aria-modal="false"
@@ -959,25 +991,6 @@ export default function CommunePanel() {
                   >
                     <p className="font-mono text-[10px] font-bold text-muted-foreground">{label}</p>
                     <p className="mt-1 text-[9px] text-muted-foreground/60">coming next</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {panel === 'challenges' && (
-            <div>
-              <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Trophy className="size-4 text-primary" /> NPC Challenges
-              </h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Villager NPCs will hand out real case-study challenges here — answer from live tickets.
-              </p>
-              <div className="mt-3 space-y-2">
-                {['Case-study quiz from a real DSAT ticket', 'Escalation role-play with an NPC customer', 'Daily commune challenge streak'].map((label) => (
-                  <div key={label} className="rounded-lg border border-dashed border-border/60 bg-background/20 px-3 py-2.5">
-                    <p className="text-xs font-semibold text-muted-foreground">{label}</p>
-                    <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground/60">coming next</p>
                   </div>
                 ))}
               </div>
@@ -1358,7 +1371,8 @@ function draw(
   remotes: RemoteView[],
   pets: PixelPetView[],
   reduceMotion: boolean,
-  destination: { x: number; y: number } | null
+  destination: { x: number; y: number } | null,
+  drops: CommuneDrop[] = []
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -1390,6 +1404,9 @@ function draw(
   type D = { y: number; fn: () => void };
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+
+  /* spice drops — pixel piles bobbing gently */
+  for (const d of drops) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
 
   /* bulletin board (banners) */
   items.push({
@@ -1558,6 +1575,35 @@ function draw(
   items.sort((a, b) => a.y - b.y);
   for (const it of items) it.fn();
 
+  ctx.restore();
+}
+
+/** A pixel spice pile (red chili + green flecks on a wooden scoop), bobbing
+ *  gently so it reads as a pickup from across the square. */
+function drawSpiceDrop(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  const bob = Math.round(Math.sin(t * 2.4 + x * 0.13) * 2);
+  const px = 3; // pixel size — matches the town's chunky pixel look
+  ctx.save();
+  // ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 4, 11, 4.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const top = y - 12 + bob;
+  // scoop (wood tone)
+  ctx.fillStyle = '#8a5a33';
+  ctx.fillRect(x - 5 * px, top + 4 * px, 10 * px, 2 * px);
+  // chili-red mound
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(x - 4 * px, top + 2 * px, 8 * px, 2 * px);
+  ctx.fillRect(x - 3 * px, top + 1 * px, 6 * px, 1 * px);
+  ctx.fillRect(x - 1 * px, top, 2 * px, 1 * px);
+  // green flecks + a highlight
+  ctx.fillStyle = '#4c9a2a';
+  ctx.fillRect(x - 3 * px, top + 2 * px, px, px);
+  ctx.fillRect(x + 1 * px, top + 1 * px, px, px);
+  ctx.fillStyle = '#e8735a';
+  ctx.fillRect(x - 2 * px, top + px, px, px);
   ctx.restore();
 }
 
