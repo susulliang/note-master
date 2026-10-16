@@ -1,0 +1,22 @@
+{
+  "skillProvenance": {
+    "skillName": "solo-graphic-generation",
+    "version": "2026.08.06.21.24.57",
+    "release": "unsupported-size-user-confirmation"
+  },
+  "requestedSizeVerbatim": "2048x2048",
+  "actualToolImageSize": "2048x2048",
+  "sizeDifferenceUserConfirmed": false,
+  "assetCount": 1,
+  "assets": [
+    {
+      "filename": "hunao-eating-sprites.png",
+      "title": "Hunao Eating Sprite Sheet",
+      "intendedSize": "2048x2048",
+      "generationStatus": "success"
+    }
+  ],
+  "canvasImageNodeIds": [
+    "image-001"
+  ]
+}

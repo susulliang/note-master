@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": "image-001",
+      "title": "Hunao Eating Sprite Sheet",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1792116805543,
+      "devMetadata": {
+        "imageSrc": "assets/hunao-eating-sprites.png"
+      },
+      "canvasData": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "freeSize",
+    "projectName": "Hunao Eating Sprite Sheet"
+  }
+}

@@ -59,9 +59,16 @@ export const CAT_CHOICES = [
 
 export type CatId = (typeof CAT_CHOICES)[number]['id'];
 
-/** Eating-can sheet (16 frames, same 4×4 64px layout) — shown while the
- *  heyheyhey cat enjoys a "Fancy Feast" bought from the spice store. */
-export const CAT_EATING_SPRITE = '/assets/cat/heyheyhey-eating-sprites.png';
+/** Per-cat eating-can sheets (16 frames, same 4×4 64px layout) — shown while
+ *  that cat enjoys a "Fancy Feast" bought from the spice store. Cats without
+ *  a dedicated sheet fall back to Hunao's. */
+const CATS_WITH_EATING_SHEET = new Set<string>(['hunao', 'siam', 'heyhey', 'ailu', 'heyheyhey']);
+
+export function getCatEatingSprite(catId: CatId): string {
+  return CATS_WITH_EATING_SHEET.has(catId)
+    ? `/assets/cat/${catId}-eating-sprites.png`
+    : '/assets/cat/hunao-eating-sprites.png';
+}
 /** Window event dispatched after a successful store purchase. */
 export const CAT_EAT_EVENT = 'cat-eat';
 

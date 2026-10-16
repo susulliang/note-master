@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import type { CatThought } from '@/hooks/use-cat-assistant';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
-import { getCatSprite, getCatSleepSprite, CAT_EATING_SPRITE, CAT_EAT_EVENT, type CatId } from '@/lib/cat-sprites';
+import { getCatSprite, getCatSleepSprite, getCatEatingSprite, CAT_EAT_EVENT, type CatId } from '@/lib/cat-sprites';
 
 /**
  * Draggable pixel cat with occasional sprite animation and thought bubbles.
@@ -380,7 +380,7 @@ export function CatAssistant({
             napping && 'brightness-[0.8] saturate-[0.85]'
           )}
           style={{
-            backgroundImage: `url("${isEating ? CAT_EATING_SPRITE : sleepMode ? getCatSleepSprite(catId) : getCatSprite(catId)}")`,
+            backgroundImage: `url("${isEating ? getCatEatingSprite(catId) : sleepMode ? getCatSleepSprite(catId) : getCatSprite(catId)}")`,
             transform: `scale(${petScale.toFixed(3)})`,
           }}
         />
