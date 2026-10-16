@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CommunePanel — COMMUNE, the agents' town square (摩尔庄园-inspired).
  * A cozy walk-around canvas world where logged-in agents stroll between the
  * fountain, the bulletin board, the showcase stall and the challenge tent,
@@ -27,10 +27,12 @@ import { Building2, Megaphone, Palette, Trophy, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
+  DEFAULT_AVATAR,
   fetchCardCollection,
   pickSpiceDrop,
   syncCommune,
   type CommuneAgent,
+  type CommuneAvatar,
   type CommuneDrop,
   type CommuneLoadout,
   type CommunePet,
@@ -160,6 +162,34 @@ const NPCS = [
   { name: 'Mocha', hue: 25, home: { x: 620, y: 760 } },
 ];
 
+/** Avatar-look persistence — kept locally so the look survives refresh. */
+const AVATAR_STORAGE_KEY = 'ecovacs_commune_avatar';
+
+function loadAvatar(): CommuneAvatar {
+  try {
+    const raw = localStorage.getItem(AVATAR_STORAGE_KEY);
+    if (raw) return { ...DEFAULT_AVATAR, ...(JSON.parse(raw) as Partial<CommuneAvatar>) };
+  } catch {
+    /* fall through to default */
+  }
+  return DEFAULT_AVATAR;
+}
+
+function saveAvatar(avatar: CommuneAvatar): void {
+  try {
+    localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(avatar));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Palette offered for the pixel-look swatches. */
+const AVATAR_SWATCHES = [
+  '#4a3728', '#8b5a2b', '#d9b380', '#b34700', '#e8c34a', '#238636',
+  '#3b82f6', '#58a6ff', '#7a4fd0', '#e05252', '#ff8fab', '#f5f0e6',
+  '#6b7280', '#111318',
+];
+
 /** Standing challenge NPCs — walk up and press E to start their chat.
  *  Each runs its own persona (worker/npc/*.json, see npc-personas.ts). */
 const CHALLENGE_NPCS = [
@@ -199,6 +229,8 @@ interface Agent {
   admin?: boolean;
   /** Optional pixel companion shown beside this agent. */
   pet?: CommunePet | null;
+  /** Optional personalized pixel look (player + remote agents). */
+  avatar?: CommuneAvatar | null;
   /** NPC-only: current waypoint + pause state. */
   target?: { x: number; y: number };
   pauseUntil?: number;
@@ -217,6 +249,7 @@ interface RemoteView {
   status?: string;
   admin?: boolean;
   pet: CommunePet | null;
+  avatar: CommuneAvatar | null;
   moving: boolean;
   bobPhase: number;
 }
@@ -304,10 +337,11 @@ export default function CommunePanel() {
   const statusRef = useRef('hanging out');
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
-  const [loadout, setLoadout] = useState<CommuneLoadout>(() => ({ cards: [], pet: carriedPet(username), phrase: '' }));
+  const [loadout, setLoadout] = useState<CommuneLoadout>(() => ({ cards: [], pet: carriedPet(username), phrase: '', avatar: loadAvatar() }));
   const loadoutRef = useRef(loadout);
   loadoutRef.current = loadout;
   playerRef.current.pet = loadout.pet;
+  playerRef.current.avatar = loadout.avatar;
   const loadoutTouchedRef = useRef(false);
   const loadoutDirtyRef = useRef(false);
   const [petChoices, setPetChoices] = useState<CommunePet[]>([]);
@@ -400,6 +434,17 @@ export default function CommunePanel() {
       ...l,
       cards: l.cards.includes(id) ? l.cards.filter((c) => c !== id) : [...l.cards, id].slice(-3),
     }));
+  };
+
+  /** Patch the pixel look — persists locally and flags the loadout dirty. */
+  const patchAvatar = (patch: Partial<CommuneAvatar>) => {
+    loadoutTouchedRef.current = true;
+    loadoutDirtyRef.current = true;
+    setLoadout((l) => {
+      const avatar = { ...(l.avatar ?? DEFAULT_AVATAR), ...patch };
+      saveAvatar(avatar);
+      return { ...l, avatar };
+    });
   };
 
   const saveLoadout = async () => {
@@ -741,6 +786,7 @@ export default function CommunePanel() {
           status: r.agent.status,
           admin: r.agent.isAdmin,
           pet: r.agent.loadout?.pet ?? null,
+          avatar: r.agent.loadout?.avatar ?? null,
           moving: r.moving,
           bobPhase: r.bobPhase,
         });
@@ -1075,6 +1121,72 @@ export default function CommunePanel() {
                     </p>
                   </button>
                 ))}
+              </div>
+
+              {/* Pixel look personalization */}
+              <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Your look</p>
+              <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/20 p-2">
+                {([['Hair', 'hair'], ['Shirt', 'shirt'], ['Shoes', 'shoes']] as const).map(([label, key]) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="w-10 shrink-0 text-[10px] font-bold uppercase text-muted-foreground">{label}</span>
+                    <div className="flex flex-wrap gap-1">
+                      {AVATAR_SWATCHES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => patchAvatar({ [key]: c })}
+                          className={cn(
+                            'size-5 rounded-full border transition-transform hover:scale-110',
+                            (loadout.avatar?.[key] ?? DEFAULT_AVATAR[key]) === c
+                              ? 'border-foreground ring-2 ring-accent'
+                              : 'border-border/60'
+                          )}
+                          style={{ background: c }}
+                          aria-label={`${label} color ${c}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-start gap-2">
+                  <span className="mt-1.5 w-10 shrink-0 text-[10px] font-bold uppercase text-muted-foreground">Legs</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex gap-1">
+                      {(['pants', 'skirt'] as const).map((b) => (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => patchAvatar({ bottom: b })}
+                          className={cn(
+                            'rounded-md border px-2 py-0.5 text-[10px] font-bold capitalize transition-colors',
+                            (loadout.avatar?.bottom ?? DEFAULT_AVATAR.bottom) === b
+                              ? 'border-primary/60 bg-primary/15 text-foreground'
+                              : 'border-border/50 bg-background/30 text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          {b}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {AVATAR_SWATCHES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => patchAvatar({ bottomColor: c })}
+                          className={cn(
+                            'size-5 rounded-full border transition-transform hover:scale-110',
+                            (loadout.avatar?.bottomColor ?? DEFAULT_AVATAR.bottomColor) === c
+                              ? 'border-foreground ring-2 ring-accent'
+                              : 'border-border/60'
+                          )}
+                          style={{ background: c }}
+                          aria-label={`Bottom color ${c}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Card slots */}
@@ -1473,7 +1585,7 @@ function draw(
         ctx.fillStyle = `hsl(${b.hue} 75% 78%)`;
         ctx.fillRect(0, 0, 44, 56);
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.font = 'bold 7px ui-monospace, monospace';
+        ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
         ctx.textAlign = 'center';
         const words = b.text.split(' ');
         let line = '';
@@ -1494,7 +1606,7 @@ function draw(
       roundRect(ctx, bx - 46, by + BOARD.h / 2 + 22, 92, 18, 9);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px ui-monospace, monospace';
+      ctx.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
       ctx.textAlign = 'center';
       ctx.fillText('BULLETIN', bx, by + BOARD.h / 2 + 35);
     },
@@ -1529,7 +1641,7 @@ function draw(
       roundRect(ctx, sx - 52, sy + 66, 104, 18, 9);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px ui-monospace, monospace';
+      ctx.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
       ctx.textAlign = 'center';
       ctx.fillText('SHOWCASE', sx, sy + 79);
     },
@@ -1544,7 +1656,7 @@ function draw(
         const near = !!r.phrase && Math.hypot(r.x - player.x, r.y - player.y) < 170;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, pet: r.pet, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
@@ -1678,17 +1790,29 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   ctx.ellipse(a.x, a.y + 4, 19, 7, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const hair = `hsl(${a.hue} 42% 30%)`;
-  const hairHi = `hsl(${a.hue} 48% 42%)`;
+  const look = a.avatar ?? null;
+  const hair = look?.hair ?? `hsl(${a.hue} 42% 30%)`;
+  const hairHi = look?.hair ?? `hsl(${a.hue} 48% 42%)`;
   const skin = '#eec39a';
   const eye = '#33251b';
-  const shirt = `hsl(${a.hue} 60% 52%)`;
-  const shirtSh = `hsl(${a.hue} 60% 38%)`;
-  const pants = '#3f4a63';
-  const shoe = '#2a2d38';
+  const shirt = look?.shirt ?? `hsl(${a.hue} 60% 52%)`;
+  const shirtSh = look?.shirt ?? `hsl(${a.hue} 60% 38%)`;
+  const pants = look?.bottomColor ?? '#3f4a63';
+  const shoe = look?.shoes ?? '#2a2d38';
   const palette: Record<string, string> = { h: hair, H: hairHi, S: skin, E: eye, B: shirt, b: shirtSh, s: shirtSh, a: skin, P: pants, F: shoe };
 
   const tpl = a.moving && Math.floor((a.bobPhase ?? 0) / 3) % 2 === 1 ? HUMAN_WALK : HUMAN_STAND;
+  // Skirt: flare the lowest pants row one pixel wider on each side.
+  const skirt = look?.bottom === 'skirt';
+  let hemRow = -1;
+  if (skirt) {
+    for (let r = tpl.length - 1; r >= 0; r--) {
+      if (tpl[r].includes('P')) {
+        hemRow = r;
+        break;
+      }
+    }
+  }
   const ox = Math.round(a.x) - (tpl[0].length * SP_P) / 2;
   const oy = Math.round(feet) - tpl.length * SP_P;
   for (let r = 0; r < tpl.length; r++) {
@@ -1697,7 +1821,11 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       const ch = row[c];
       if (ch === '.') continue;
       ctx.fillStyle = palette[ch] ?? skin;
-      ctx.fillRect(ox + c * SP_P, oy + r * SP_P, SP_P, SP_P);
+      if (r === hemRow && ch === 'P') {
+        ctx.fillRect(ox + c * SP_P - SP_P, oy + r * SP_P, SP_P * 3, SP_P);
+      } else {
+        ctx.fillRect(ox + c * SP_P, oy + r * SP_P, SP_P, SP_P);
+      }
     }
   }
 
@@ -1709,7 +1837,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
     ctx.lineWidth = 2.5;
     ctx.stroke();
   }
-  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.font = "bold 11px 'Schoolbell', ui-monospace, monospace";
   ctx.textAlign = 'center';
   const tag = (a.admin ? '★ ' : '') + a.name;
   const w = ctx.measureText(tag).width + 14;
@@ -1719,7 +1847,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   ctx.fillStyle = isPlayer ? '#1a1a1a' : '#fff';
   ctx.fillText(tag, a.x, a.y + 24);
   if (a.status && !isPlayer) {
-    ctx.font = '9px ui-monospace, monospace';
+    ctx.font = "9px 'Schoolbell', ui-monospace, monospace";
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.fillText(a.status, a.x, a.y + 37);
   }
@@ -1733,20 +1861,22 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
 /** Procedural pixel cat: drawn from the same square-pixel grammar as agents. */
 function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: number, reduceMotion: boolean) {
   const stageScale: Record<string, number> = {
-    Kitten: 0.85,
-    Junior: 0.92,
-    Prime: 1,
-    Mature: 1.08,
-    Elder: 1.15,
+    Kitten: 0.78,
+    Junior: 0.84,
+    Prime: 0.9,
+    Mature: 0.97,
+    Elder: 1.03,
   };
-  const scale = stageScale[pet.stage] ?? 1;
-  const cell = SP_P * scale;
+  const scale = stageScale[pet.stage] ?? 0.9;
+  // Slightly narrower than tall so the cats read lean, not fat.
+  const cellX = SP_P * scale * 0.8;
+  const cellY = SP_P * scale;
   const animated = pet.moving && !reduceMotion;
   const rows = animated
     ? (Math.floor(pet.walkPhase * 5) % 2 === 0 ? CAT_WALK_A : CAT_WALK_B)
     : CAT_STAND;
-  const width = rows[0].length * cell;
-  const height = rows.length * cell;
+  const width = rows[0].length * cellX;
+  const height = rows.length * cellY;
   const left = pet.x - width / 2;
   const bob = reduceMotion ? 0 : animated ? Math.sin(pet.walkPhase * 2) * 1.2 : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
   const top = pet.y - height + 4 + bob;
@@ -1765,10 +1895,10 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
       const col = pet.facingLeft ? row.length - 1 - colIndex : colIndex;
       ctx.fillStyle = palette[pixel] ?? palette.C;
       ctx.fillRect(
-        Math.round(left + col * cell),
-        Math.round(top + rowIndex * cell),
-        Math.ceil(cell),
-        Math.ceil(cell)
+        Math.round(left + col * cellX),
+        Math.round(top + rowIndex * cellY),
+        Math.ceil(cellX),
+        Math.ceil(cellY)
       );
     }
   }
@@ -1793,7 +1923,7 @@ function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number
 }
 
 function drawBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string) {
-  ctx.font = '11px ui-monospace, monospace';
+  ctx.font = "11px 'Schoolbell', ui-monospace, monospace";
   const maxChars = 22;
   const lines: string[] = [];
   let line = '';
@@ -2005,7 +2135,7 @@ function getTownLayer(): HTMLCanvasElement {
     px(cx + 64, top - 96, 26, 16, '#788c5d');
     px(cx - 70, top + 14, 140, 24, '#49504c'); // sign band
     g.fillStyle = '#f2e6c8';
-    g.font = 'bold 14px ui-monospace, monospace';
+    g.font = "bold 14px 'Schoolbell', ui-monospace, monospace";
     g.textAlign = 'center';
     g.fillText('TOWN HALL', cx, top + 31);
     bakeWindows(cx - 110, top + 46);
@@ -2029,7 +2159,7 @@ function getTownLayer(): HTMLCanvasElement {
     for (let i = 0; i < 10; i++) px(cx - w / 2 + 4 + i * 16, gy - 84, 16, 14, i % 2 ? '#f7f3ea' : '#d97757'); // awning
     px(cx - 30, gy - 84, 60, 14, '#49504c');
     g.fillStyle = '#f2dfb8';
-    g.font = 'bold 10px ui-monospace, monospace';
+    g.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
     g.textAlign = 'center';
     g.fillText('STORE', cx, gy - 73);
   }
@@ -2042,7 +2172,7 @@ function getTownLayer(): HTMLCanvasElement {
     bakeRoof(cx, top, w, '#3e4e61', '#303f51');
     px(cx - 62, top + 12, 124, 24, '#2d3949'); // arcade sign
     g.fillStyle = '#b5d8e3';
-    g.font = 'bold 14px ui-monospace, monospace';
+    g.font = "bold 14px 'Schoolbell', ui-monospace, monospace";
     g.textAlign = 'center';
     g.fillText('ARCADE', cx, top + 30);
     for (let i = 0; i < 12; i++) px(cx - 62 + i * 11, top + 40, 4, 4, i % 2 ? '#d9879a' : '#9ec9d9');

@@ -227,11 +227,30 @@ export interface CommunePet {
   xp: number;
 }
 
+/** Personalized pixel look — shown on the agent's sprite in the COMMUNE. */
+export interface CommuneAvatar {
+  hair: string;
+  shirt: string;
+  bottom: 'pants' | 'skirt';
+  bottomColor: string;
+  shoes: string;
+}
+
+export const DEFAULT_AVATAR: CommuneAvatar = {
+  hair: '#4a3728',
+  shirt: '#58a6ff',
+  bottom: 'pants',
+  bottomColor: '#3f4a63',
+  shoes: '#2a2d38',
+};
+
 export interface CommuneLoadout {
   /** Up to 3 TCG card ids from the agent's collection. */
   cards: string[];
   pet: CommunePet | null;
   phrase: string;
+  /** Pixel-look personalization (optional — defaults apply when absent). */
+  avatar: CommuneAvatar | null;
 }
 
 /** Another agent currently walking the square. */

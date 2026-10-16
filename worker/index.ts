@@ -584,9 +584,16 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            cards TEXT NOT NULL DEFAULT '[]',
            pet TEXT NOT NULL DEFAULT '',
            phrase TEXT NOT NULL DEFAULT '',
+           avatar TEXT NOT NULL DEFAULT '',
            updated_at INTEGER NOT NULL
          )`
       ).run();
+      // Older deployments created the table without the avatar column.
+      try {
+        await env.DB.prepare('ALTER TABLE commune_loadout ADD COLUMN avatar TEXT NOT NULL DEFAULT \'\'').run();
+      } catch {
+        /* column already exists */
+      }
       // COMMUNE spice drops — spice piles scattered around the town square;
       // the first agent to walk over one claims it (+1 spice).
       await env.DB.prepare(
@@ -1254,12 +1261,14 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
   const status = String(payload.status ?? '').slice(0, 40);
   const now = Date.now();
 
-  // Optional loadout push — up to 3 card ids, one pet snapshot, one phrase.
+  // Optional loadout push — up to 3 card ids, one pet snapshot, one phrase,
+  // and an avatar look (hair/shirt/bottom/shoes colors + pants-vs-skirt).
   let cardsJson: string | null = null;
   let petJson: string | null = null;
   let phrase: string | null = null;
+  let avatarJson: string | null = null;
   if (payload.loadout && typeof payload.loadout === 'object') {
-    const lo = payload.loadout as { cards?: unknown; pet?: unknown; phrase?: unknown };
+    const lo = payload.loadout as { cards?: unknown; pet?: unknown; phrase?: unknown; avatar?: unknown };
     const cards = Array.isArray(lo.cards)
       ? lo.cards.filter((c): c is string => typeof c === 'string' && c.length <= 64).slice(0, 3)
       : [];
@@ -1277,6 +1286,18 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     }
     petJson = pet;
     phrase = String(lo.phrase ?? '').slice(0, 80);
+    if (lo.avatar && typeof lo.avatar === 'object') {
+      const a = lo.avatar as Record<string, unknown>;
+      const col = (v: unknown, fallback: string) =>
+        /^#[0-9a-fA-F]{6}$/.test(String(v ?? '')) ? String(v) : fallback;
+      avatarJson = JSON.stringify({
+        hair: col(a.hair, '#4a3728'),
+        shirt: col(a.shirt, '#58a6ff'),
+        bottom: a.bottom === 'skirt' ? 'skirt' : 'pants',
+        bottomColor: col(a.bottomColor, '#3f4a63'),
+        shoes: col(a.shoes, '#2a2d38'),
+      });
+    }
   }
 
   await ensureSpiceSchema(env);
@@ -1290,9 +1311,9 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
   if (cardsJson !== null) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO commune_loadout (username, cards, pet, phrase, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(username) DO UPDATE SET cards = ?2, pet = ?3, phrase = ?4, updated_at = ?5`
-      ).bind(user.username, cardsJson, petJson ?? '', phrase ?? '', now)
+        `INSERT INTO commune_loadout (username, cards, pet, phrase, avatar, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(username) DO UPDATE SET cards = ?2, pet = ?3, phrase = ?4, avatar = ?5, updated_at = ?6`
+      ).bind(user.username, cardsJson, petJson ?? '', phrase ?? '', avatarJson ?? '', now)
     );
   }
   stmts.push(env.DB.prepare('DELETE FROM commune_presence WHERE seen_at < ?1').bind(now - 30_000));
@@ -1300,21 +1321,20 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
 
   const rows = await env.DB.prepare(
     `SELECT p.username AS username, p.is_admin AS isAdmin, p.x AS x, p.y AS y,
-            p.status AS status, p.seen_at AS seenAt, l.cards AS cards, l.pet AS pet, l.phrase AS phrase
+            p.status AS status, p.seen_at AS seenAt, l.cards AS cards, l.pet AS pet, l.phrase AS phrase, l.avatar AS avatar
      FROM commune_presence p LEFT JOIN commune_loadout l ON l.username = p.username
      WHERE p.seen_at >= ?1 AND p.username != ?2`
-  ).bind(now - 30_000, user.username).all<{ username: string; isAdmin: number; x: number; y: number; status: string; seenAt: number; cards: string | null; pet: string | null; phrase: string | null }>();
+  ).bind(now - 30_000, user.username).all<{ username: string; isAdmin: number; x: number; y: number; status: string; seenAt: number; cards: string | null; pet: string | null; phrase: string | null; avatar: string | null }>();
 
-  const own = await env.DB.prepare('SELECT cards, pet, phrase FROM commune_loadout WHERE username = ?1')
-    .bind(user.username).first<{ cards: string; pet: string; phrase: string }>();
+  const own = await env.DB.prepare('SELECT cards, pet, phrase, avatar FROM commune_loadout WHERE username = ?1')
+    .bind(user.username).first<{ cards: string; pet: string; phrase: string; avatar: string }>();
 
   // Unclaimed spice piles on the square (client renders + picks them up).
   const dropRows = await env.DB.prepare(
     'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL'
   ).all<{ id: number; x: number; y: number }>();
 
-  const parseLoadout = (cards: string | null, pet: string | null, ph: string | null) => {
-    if (!cards && !ph) return null;
+  const parseLoadout = (cards: string | null, pet: string | null, ph: string | null, avatar: string | null) => {
     let cardIds: string[] = [];
     try {
       cardIds = cards ? (JSON.parse(cards) as string[]) : [];
@@ -1327,7 +1347,15 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     } catch {
       petOut = null;
     }
-    return { cards: cardIds, pet: petOut, phrase: ph ?? '' };
+    let avatarOut: unknown = null;
+    try {
+      avatarOut = avatar ? JSON.parse(avatar) : null;
+    } catch {
+      avatarOut = null;
+    }
+    // A loadout with only an avatar (or only a pet) is still a loadout.
+    if (!cardIds.length && !petOut && !ph && !avatarOut) return null;
+    return { cards: cardIds, pet: petOut, phrase: ph ?? '', avatar: avatarOut };
   };
 
   const others = (rows.results ?? []).map((r) => ({
@@ -1337,11 +1365,11 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
     y: r.y,
     status: r.status,
     seenAgo: now - r.seenAt,
-    loadout: parseLoadout(r.cards, r.pet, r.phrase),
+    loadout: parseLoadout(r.cards, r.pet, r.phrase, r.avatar),
   }));
   return authJson({
     others,
-    me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null),
+    me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null, own?.avatar ?? null),
     drops: (dropRows.results ?? []).map((d) => ({ id: d.id, x: d.x, y: d.y })),
   });
 }
