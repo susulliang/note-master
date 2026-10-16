@@ -320,6 +320,9 @@ export default function CommunePanel() {
   const shakeUntilRef = useRef(0);
   const [chatFocused, setChatFocused] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
+  /** Secondary keyboard tip (H — hold hands) shown beside the E prompt. */
+  const [hTip, setHTip] = useState<string | null>(null);
+  const hTipRef = useRef<string | null>(null);
 
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
   playerRef.current.name = username;
@@ -729,18 +732,19 @@ export default function CommunePanel() {
       const player = playerRef.current;
       const hands = handsRef.current;
       if (hands && !hands.lead) {
-        // Follower: glide along beside the leader (their last synced position).
+        // Follower: stay pinned beside the leader (their last synced position).
         const leader = remoteRef.current.get(hands.partner);
         if (leader) {
           const tx = leader.rx - 22;
           const ty = leader.ry + 6;
           const d = Math.hypot(tx - player.x, ty - player.y);
-          player.moving = d > 10;
-          if (d > 2) {
-            const step = Math.min(SPEED * 1.35 * dt, d);
-            moveWithCollision(player, player.x + ((tx - player.x) / d) * step, player.y + ((ty - player.y) / d) * step);
-            player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
-          }
+          // Smooth hard-pull (no collision — we're in the leader's walkable
+          // space) so the two read as locked side by side.
+          const k = 1 - Math.exp(-dt * 9);
+          player.x += (tx - player.x) * k;
+          player.y += (ty - player.y) * k;
+          player.moving = leader.moving;
+          if (leader.moving) player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
         } else {
           player.moving = false;
         }
@@ -852,6 +856,16 @@ export default function CommunePanel() {
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
       }
+      // The H tip shows beside the E tip whenever an agent is in reach.
+      const nextHTip = held
+        ? null // the prompt itself is the H tip while holding hands
+        : nearAgentName
+          ? `H  Hold hands with ${nearAgentName}`
+          : null;
+      if (hTipRef.current !== nextHTip) {
+        hTipRef.current = nextHTip;
+        setHTip(nextHTip);
+      }
       const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.says
         ? 'chatting'
@@ -873,7 +887,9 @@ export default function CommunePanel() {
               ? 'resting by the fountain'
               : 'hanging out';
 
-      /* remote agents: lerp toward their last reported position */
+      /* remote agents: lerp toward their last reported position. While holding
+       * hands as the leader, pin the partner beside us (fixed absolute slot). */
+      const heldHands = handsRef.current;
       const remoteViews: RemoteView[] = [];
       for (const r of remoteRef.current.values()) {
         const dx = r.tx - r.rx;
@@ -886,9 +902,17 @@ export default function CommunePanel() {
           r.ry += dy * k;
         }
         if (r.moving) r.bobPhase += dt * 9;
+        let vx = r.rx;
+        let vy = r.ry;
+        let vmoving = r.moving;
+        if (heldHands && heldHands.lead && r.agent.username === heldHands.partner) {
+          vx = player.x - 22;
+          vy = player.y + 6;
+          vmoving = !!player.moving;
+        }
         remoteViews.push({
-          x: r.rx,
-          y: r.ry,
+          x: vx,
+          y: vy,
           name: r.agent.username,
           hue: hueOf(r.agent.username),
           phrase: r.agent.loadout?.phrase || null,
@@ -896,7 +920,7 @@ export default function CommunePanel() {
           admin: r.agent.isAdmin,
           pet: r.agent.loadout?.pet ?? null,
           avatar: r.agent.loadout?.avatar ?? null,
-          moving: r.moving,
+          moving: vmoving,
           bobPhase: r.bobPhase,
         });
       }
@@ -917,7 +941,8 @@ export default function CommunePanel() {
         dt
       );
       // Bump shake — jitter the camera for a moment when someone bumps us.
-      const shakeCam = now < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
+      // (rAF `now` is performance.now(); the deadline is epoch-based.)
+      const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
       draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current);
       raf = requestAnimationFrame(step);
     };
@@ -1011,11 +1036,23 @@ export default function CommunePanel() {
         </span>
       </div>
 
-      {/* Interaction prompt */}
-      {prompt && !panel && (
-        <div className="pointer-events-none absolute bottom-[4.75rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-xl border border-primary/40 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
-          <kbd className="mr-2 rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">E</kbd>
-          {prompt.replace(/^E\s+/, '')}
+      {/* Interaction prompt (+ secondary H tip) */}
+      {(prompt || hTip) && !panel && (
+        <div className="pointer-events-none absolute bottom-[4.75rem] left-1/2 flex -translate-x-1/2 items-center gap-2 animate-in fade-in">
+          {prompt && (
+            <span className="rounded-xl border border-primary/40 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
+              <kbd className="mr-2 rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">
+                {prompt.startsWith('H') ? 'H' : 'E'}
+              </kbd>
+              {prompt.replace(/^[EH]\s+/, '')}
+            </span>
+          )}
+          {hTip && (
+            <span className="rounded-xl border border-white/30 bg-card/80 px-3 py-2 text-xs font-semibold text-foreground/90 shadow-lg backdrop-blur-xl">
+              <kbd className="mr-2 rounded-md bg-accent px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent-foreground">H</kbd>
+              {hTip.replace(/^H\s+/, '')}
+            </span>
+          )}
         </div>
       )}
 
