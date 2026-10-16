@@ -33,17 +33,49 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
 
 function parseTurn(raw: string): ChallengeTurn | null {
   const parsed = extractJsonObject(raw);
-  if (!parsed) return null;
-  const gb = String(parsed.gb_message ?? '').trim();
-  const choices = Array.isArray(parsed.agent_choices)
-    ? parsed.agent_choices.map((c) => String(c).trim()).filter(Boolean)
-    : [];
-  if (!gb || choices.length === 0) return null;
-  return {
-    gb_message: gb,
-    agent_choices: choices,
-    status: parsed.status === 'success' || parsed.status === 'fail' ? parsed.status : 'ongoing',
-  };
+  if (parsed) {
+    const gb = String(parsed.gb_message ?? '').trim();
+    const choices = Array.isArray(parsed.agent_choices)
+      ? parsed.agent_choices.map((c) => String(c).trim()).filter(Boolean)
+      : [];
+    if (gb && choices.length > 0) {
+      return {
+        gb_message: gb,
+        agent_choices: choices,
+        status: parsed.status === 'success' || parsed.status === 'fail' ? parsed.status : 'ongoing',
+      };
+    }
+  }
+  return salvageTruncatedTurn(raw);
+}
+
+/** Salvage a truncated reply: long rambles can hit the token cap and cut the
+ *  JSON mid-object. Pull the gb_message string and whatever choices made it
+ *  out before the cut; the turn stays 'ongoing'. */
+function salvageTruncatedTurn(raw: string): ChallengeTurn | null {
+  const msgMatch = raw.match(/"gb_message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (!msgMatch) return null;
+  let gb: string;
+  try {
+    gb = JSON.parse(`"${msgMatch[1]}"`) as string;
+  } catch {
+    return null;
+  }
+  if (!gb.trim()) return null;
+  // Whatever choice strings appeared after the gb_message are the choices.
+  const after = raw.slice((msgMatch.index ?? 0) + msgMatch[0].length);
+  const choiceMatches = after.matchAll(/"((?:[^"\\]|\\.)+)"\s*(?=,|\])/g);
+  const choices: string[] = [];
+  for (const m of choiceMatches) {
+    try {
+      const text = (JSON.parse(`"${m[1]}"`) as string).trim();
+      if (text && !choices.includes(text)) choices.push(text);
+    } catch {
+      /* skip malformed fragment */
+    }
+  }
+  if (choices.length === 0) return null;
+  return { gb_message: gb.trim(), agent_choices: choices, status: 'ongoing' };
 }
 
 interface ChallengePanelProps {
@@ -104,15 +136,25 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
     try {
-      const raw = await kittyChat(
-        [
-          { role: 'system', content: persona.system_prompt.join('\n') },
-          ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
-          { role: 'user', content: choice },
-        ],
-        1_200
-      );
-      const next = parseTurn(raw);
+      const baseMessages = [
+        { role: 'system', content: persona.system_prompt.join('\n') },
+        ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
+      ];
+      let raw = await kittyChat([...baseMessages, { role: 'user', content: choice }], 3_000);
+      let next = parseTurn(raw);
+      if (!next) {
+        // One corrective retry — ask for the complete JSON object again.
+        raw = await kittyChat(
+          [
+            ...baseMessages,
+            { role: 'user', content: choice },
+            { role: 'assistant', content: raw.slice(-1_000) },
+            { role: 'user', content: 'Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with gb_message, agent_choices (all 4), and status.' },
+          ],
+          3_000
+        );
+        next = parseTurn(raw);
+      }
       if (!next) throw new Error('The challenge engine returned an invalid turn');
       setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: next.gb_message }]);
       setTurn(next);
