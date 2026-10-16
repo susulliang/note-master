@@ -111,6 +111,30 @@ const TREES: [number, number][] = [
   [64, 470], [1536, 470], [64, 872], [1536, 872],
   [600, 1128], [1000, 1128],
 ];
+
+/** Plaza benches — E to sit, E / move keys to stand. */
+const BENCHES: [number, number][] = [
+  [660, 480], [940, 480], [640, 940], [960, 940],
+];
+const BENCH_RANGE = 54;
+
+/** Fortunes for tossing a coin into the fountain (E near the water). */
+const FORTUNES = [
+  '🪙 The plaza whispers: good news is walking your way ☘',
+  '🪙 A tricky caller today — patience wins spice',
+  '🪙 Someone somewhere just admired your cards',
+  '🪙 The ducks know something you don\u2019t…',
+  '🪙 Your next QA score will make you smile',
+  '🪙 A banner you hang will outlive the trend',
+  '🪙 Spice comes to those who wander the square',
+  '🪙 The fountain accepts your offering',
+];
+const FOUNTAIN_RANGE = 155;
+const POND_RANGE = 155;
+
+/** Pixel ducks summoned by feeding the pond (E near the water). */
+interface PondDuck { x: number; y: number; vx: number; phase: number; until: number }
+const DUCK_LIFE_MS = 20_000;
 const SPEED = 240; // player px/s
 const NPC_SPEED = 90;
 interface Banner {
@@ -318,6 +342,10 @@ export default function CommunePanel() {
   const handsRef = useRef<{ partner: string; lead: boolean } | null>(null);
   /** Bump screen-shake end timestamp (ms). */
   const shakeUntilRef = useRef(0);
+  /** Bench seat we're sitting on (null = standing). */
+  const sittingRef = useRef<{ x: number; y: number } | null>(null);
+  /** Pixel ducks drifting on the pond after a feed. */
+  const ducksRef = useRef<PondDuck[]>([]);
   const [chatFocused, setChatFocused] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
   /** Secondary keyboard tip (H — hold hands) shown beside the E prompt. */
@@ -445,7 +473,11 @@ export default function CommunePanel() {
     };
   }, [panel, ownedCards]);
 
+  /** Every loadout edit marks it dirty — the next presence tick syncs it
+   *  (no separate save button). */
   const toggleLoadoutCard = (id: string) => {
+    loadoutTouchedRef.current = true;
+    loadoutDirtyRef.current = true;
     setLoadout((l) => ({
       ...l,
       cards: l.cards.includes(id) ? l.cards.filter((c) => c !== id) : [...l.cards, id].slice(-3),
@@ -461,19 +493,6 @@ export default function CommunePanel() {
       saveAvatar(avatar);
       return { ...l, avatar };
     });
-  };
-
-  const saveLoadout = async () => {
-    loadoutTouchedRef.current = true;
-    loadoutDirtyRef.current = true;
-    setPanel(null);
-    const p = playerRef.current;
-    try {
-      const out = await syncCommune(Math.round(p.x), Math.round(p.y), statusRef.current, loadout);
-      setOthers(out.others);
-    } catch {
-      /* next presence tick will retry */
-    }
   };
 
   /* ── spice drops on the square ────────────────────────────────────────────── */
@@ -590,6 +609,12 @@ export default function CommunePanel() {
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyE') {
         if (panelRef.current) return;
+        // Standing up from a bench comes first.
+        if (sittingRef.current) {
+          e.preventDefault();
+          sittingRef.current = null;
+          return;
+        }
         // Talk to the nearest challenge NPC first.
         const p = playerRef.current;
         const npc = CHALLENGE_NPCS.find((c) => Math.hypot(p.x - c.x, p.y - c.y) < CHALLENGE_INTERACT_RANGE);
@@ -615,6 +640,41 @@ export default function CommunePanel() {
           clickTargetRef.current = null;
           setMessaging(bumpName);
           void communeInteract(bumpName, 'bump');
+          return;
+        }
+        // Sit on a bench.
+        const bench = BENCHES.find(([bx, by]) => Math.hypot(p.x - bx, p.y - by) < BENCH_RANGE);
+        if (bench) {
+          e.preventDefault();
+          clickTargetRef.current = null;
+          sittingRef.current = { x: bench[0], y: bench[1] - 2 };
+          return;
+        }
+        // Toss a coin into the fountain.
+        if (Math.hypot(p.x - FOUNTAIN.x, p.y - FOUNTAIN.y) < FOUNTAIN_RANGE) {
+          e.preventDefault();
+          clickTargetRef.current = null;
+          playerRef.current.says = {
+            text: FORTUNES[Math.floor(Math.random() * FORTUNES.length)],
+            until: Date.now() + 4500,
+          };
+          return;
+        }
+        // Feed the pond ducks.
+        if (Math.hypot(p.x - POND_C.x, p.y - POND_C.y) < POND_RANGE) {
+          e.preventDefault();
+          clickTargetRef.current = null;
+          const now = Date.now();
+          for (let i = 0; i < 3; i++) {
+            ducksRef.current.push({
+              x: POND_C.x + 70,
+              y: POND_C.y - 30 + i * 30,
+              vx: -26,
+              phase: i * 2.1,
+              until: now + DUCK_LIFE_MS,
+            });
+          }
+          playerRef.current.says = { text: 'Here ducky ducky… 🍞', until: now + 3500 };
           return;
         }
         // Interact with the nearest prop.
@@ -656,6 +716,7 @@ export default function CommunePanel() {
       }
       if (panelRef.current) return; // walking disabled while a panel is open
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        if (sittingRef.current) sittingRef.current = null; // moving stands up
         keysRef.current.add(e.code);
       }
     };
@@ -731,7 +792,13 @@ export default function CommunePanel() {
       /* update player */
       const player = playerRef.current;
       const hands = handsRef.current;
-      if (hands && !hands.lead) {
+      const sitting = sittingRef.current;
+      if (sitting) {
+        // Pinned to the bench seat; E or a move key stands up.
+        player.x = sitting.x;
+        player.y = sitting.y;
+        player.moving = false;
+      } else if (hands && !hands.lead) {
         // Follower: stay pinned beside the leader (their last synced position).
         const leader = remoteRef.current.get(hands.partner);
         if (leader) {
@@ -781,6 +848,16 @@ export default function CommunePanel() {
       for (const d of dropsRef.current) {
         if (Math.hypot(player.x - d.x, player.y - (d.y - 8)) < 24) void tryPickDrop(d.id);
       }
+
+      /* pond ducks — drift back and forth until their feed expires */
+      ducksRef.current = ducksRef.current
+        .filter((d) => d.until > now)
+        .map((d) => {
+          d.x += d.vx * dt;
+          if (Math.abs(d.x - POND_C.x) > 88) d.vx *= -1;
+          d.y = POND_C.y + Math.sin(now / 900 + d.phase) * 16;
+          return d;
+        });
 
       /* update NPCs */
       for (const npc of npcsRef.current) {
@@ -843,15 +920,26 @@ export default function CommunePanel() {
         }
       }
       const held = handsRef.current;
-      const nextPrompt = held
-        ? `H  Let go of ${held.partner}'s hand`
-        : nearChallengeNpc
-          ? `E  Talk to ${nearChallengeNpc.name}`
-          : nearAgentName
-            ? `E  Bump into ${nearAgentName}`
-            : nearProp
-              ? `E  ${nearProp.label}`
-              : null;
+      const nearBench = !sittingRef.current && BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE);
+      const nearFountain = Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
+      const nearPond = !nearFountain && Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE;
+      const nextPrompt = sittingRef.current
+        ? 'E  Stand up'
+        : held
+          ? `H  Let go of ${held.partner}'s hand`
+          : nearChallengeNpc
+            ? `E  Talk to ${nearChallengeNpc.name}`
+            : nearAgentName
+              ? `E  Bump into ${nearAgentName}`
+              : nearBench
+                ? 'E  Sit on the bench'
+                : nearFountain
+                  ? 'E  Toss a coin into the fountain'
+                  : nearPond
+                    ? 'E  Feed the ducks'
+                    : nearProp
+                      ? `E  ${nearProp.label}`
+                      : null;
       if (promptRef.current !== nextPrompt) {
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
@@ -943,7 +1031,7 @@ export default function CommunePanel() {
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
-      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current);
+      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current, ducksRef.current);
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -978,6 +1066,11 @@ export default function CommunePanel() {
     const rect = canvas.getBoundingClientRect();
     const wx = e.clientX - rect.left + camRef.current.x;
     const wy = e.clientY - rect.top + camRef.current.y;
+    // Clicking to walk stands up from a bench.
+    if (sittingRef.current) {
+      sittingRef.current = null;
+      return;
+    }
     // Clicking another agent opens their card (loadout: phrase, cards, pet).
     for (const r of remoteRef.current.values()) {
       if (Math.hypot(wx - r.rx, wy - (r.ry - 30)) < 42) {
@@ -1292,7 +1385,11 @@ export default function CommunePanel() {
               <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Signature phrase</p>
               <input
                 value={loadout.phrase}
-                onChange={(e) => setLoadout((l) => ({ ...l, phrase: e.target.value }))}
+                onChange={(e) => {
+                  loadoutTouchedRef.current = true;
+                  loadoutDirtyRef.current = true;
+                  setLoadout((l) => ({ ...l, phrase: e.target.value }));
+                }}
                 onKeyDown={(e) => e.stopPropagation()}
                 maxLength={80}
                 placeholder="e.g. Greetings from the north stall ☕"
@@ -1306,7 +1403,11 @@ export default function CommunePanel() {
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setLoadout((l) => ({ ...l, pet: l.pet?.id === p.id ? null : { ...p } }))}
+                    onClick={() => {
+                      loadoutTouchedRef.current = true;
+                      loadoutDirtyRef.current = true;
+                      setLoadout((l) => ({ ...l, pet: l.pet?.id === p.id ? null : { ...p } }));
+                    }}
                     className={cn(
                       'rounded-lg border px-1.5 py-1.5 text-center transition-colors',
                       loadout.pet?.id === p.id
@@ -1345,6 +1446,25 @@ export default function CommunePanel() {
                         />
                       ))}
                     </div>
+                    {key === 'hair' && (
+                      <div className="ml-auto flex gap-1">
+                        {(['short', 'long'] as const).map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => patchAvatar({ hairStyle: s })}
+                            className={cn(
+                              'rounded-md border px-1.5 py-0.5 text-[10px] font-bold capitalize transition-colors',
+                              (loadout.avatar?.hairStyle ?? DEFAULT_AVATAR.hairStyle) === s
+                                ? 'border-primary/60 bg-primary/15 text-foreground'
+                                : 'border-border/50 bg-background/30 text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div className="flex items-start gap-2">
@@ -1446,13 +1566,9 @@ export default function CommunePanel() {
                 </p>
               )}
 
-              <button
-                type="button"
-                onClick={() => void saveLoadout()}
-                className="glass-btn mt-3 h-10 w-full rounded-xl border border-primary/40 bg-primary text-sm font-bold text-primary-foreground shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                Save loadout
-              </button>
+              <p className="mt-3 text-center text-[10px] text-muted-foreground">
+                Edits save automatically ✓
+              </p>
             </div>
           )}
 
@@ -1720,7 +1836,8 @@ function draw(
   pets: PixelPetView[],
   reduceMotion: boolean,
   destination: { x: number; y: number } | null,
-  drops: CommuneDrop[] = []
+  drops: CommuneDrop[] = [],
+  ducks: PondDuck[] = []
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -1752,6 +1869,7 @@ function draw(
   type D = { y: number; fn: () => void };
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+  for (const d of ducks) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
 
   /* spice drops — pixel piles bobbing gently */
   for (const d of drops) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
@@ -2027,6 +2145,14 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       }
     }
   }
+  // Long hair — falls past the shoulders on both sides.
+  if (look?.hairStyle === 'long') {
+    for (let r = 3; r <= 10; r++) {
+      ctx.fillStyle = r === 3 || r === 8 ? hairHi : hair;
+      ctx.fillRect(ox + 2 * SP_P, oy + r * SP_P, SP_P, SP_P);
+      ctx.fillRect(ox + 9 * SP_P, oy + r * SP_P, SP_P, SP_P);
+    }
+  }
 
   // player ring + name tag (+ admin star, + status line for remote agents)
   if (isPlayer) {
@@ -2113,12 +2239,39 @@ function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number
     ctx.fillStyle = color;
     ctx.fillRect(Math.round(px / 4) * 4, Math.round(py / 4) * 4, Math.round(w / 4) * 4, Math.round(h / 4) * 4);
   };
-  q(x - 8, groundY - 40, 16, 40, '#876b54');
-  q(x, groundY - 40, 8, 40, '#735944');
-  q(x - 44, groundY - 100, 88, 32, '#527a58');
-  q(x - 34, groundY - 126, 68, 28, '#668c63');
-  q(x - 20, groundY - 148, 40, 24, '#7a9c71');
-  q(x - 16, groundY - 142, 14, 8, 'rgba(255,255,255,0.18)');
+  // Trunk reaches up into the canopy (no gap → no floating look).
+  q(x - 8, groundY - 72, 16, 74, '#876b54');
+  q(x, groundY - 72, 8, 74, '#735944');
+  q(x - 44, groundY - 104, 88, 38, '#527a58');
+  q(x - 34, groundY - 128, 68, 30, '#668c63');
+  q(x - 20, groundY - 150, 40, 24, '#7a9c71');
+  q(x - 16, groundY - 144, 14, 8, 'rgba(255,255,255,0.18)');
+}
+
+/** A little pixel duck drifting on the pond (occasionally quacks). */
+function drawDuck(ctx: CanvasRenderingContext2D, d: PondDuck, t: number) {
+  const bob = Math.sin(t * 4 + d.phase) * 1.5;
+  const x = Math.round(d.x);
+  const y = Math.round(d.y + bob);
+  const facing = d.vx >= 0 ? 1 : -1;
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 3, 9, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // body + wing shade
+  ctx.fillStyle = '#f2ede0';
+  ctx.fillRect(x - 7, y - 6, 14, 7);
+  ctx.fillStyle = '#ddd6c0';
+  ctx.fillRect(x - 7, y - 1, 14, 2);
+  // head toward the swim direction
+  ctx.fillStyle = '#4a7a4f';
+  ctx.fillRect(x + facing * 2 - 3, y - 13, 6, 6);
+  // beak + eye
+  ctx.fillStyle = '#e8a13c';
+  ctx.fillRect(x + facing * 7 - 1, y - 11, 3, 2);
+  ctx.fillStyle = '#1d2b1e';
+  ctx.fillRect(x + facing * 3 - 1, y - 12, 2, 2);
+  if ((t * 0.35 + d.phase) % 7 < 0.45) drawBubble(ctx, x, y - 20, 'quack!');
 }
 
 function drawBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string) {
@@ -2285,6 +2438,14 @@ function getTownLayer(): HTMLCanvasElement {
   px(FOUNTAIN.x - 16, FOUNTAIN.y - 72, 32, 10, '#d4d9e2');
   px(FOUNTAIN.x - 7, FOUNTAIN.y - 96, 14, 26, '#d4d9e2'); // statue body
   px(FOUNTAIN.x - 5, FOUNTAIN.y - 110, 10, 14, '#d4d9e2'); // statue head
+
+  /* plaza benches (E to sit) */
+  for (const [bx, by] of BENCHES) {
+    px(bx - 26, by - 14, 52, 8, '#8a6a4a'); // backrest
+    px(bx - 26, by - 4, 52, 8, '#a07a52'); // seat
+    px(bx - 24, by + 4, 6, 10, '#6b4f36'); // legs
+    px(bx + 18, by + 4, 6, 10, '#6b4f36');
+  }
 
   /* pond */
   pxEllipse(POND_C.x, POND_C.y, POND_C.rx + 16, POND_C.ry + 16, '#c1a17c');

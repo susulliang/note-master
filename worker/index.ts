@@ -1306,6 +1306,7 @@ async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow):
         /^#[0-9a-fA-F]{6}$/.test(String(v ?? '')) ? String(v) : fallback;
       avatarJson = JSON.stringify({
         hair: col(a.hair, '#4a3728'),
+        hairStyle: a.hairStyle === 'long' ? 'long' : 'short',
         shirt: col(a.shirt, '#58a6ff'),
         bottom: a.bottom === 'skirt' ? 'skirt' : 'pants',
         bottomColor: col(a.bottomColor, '#3f4a63'),

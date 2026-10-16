@@ -230,6 +230,7 @@ export interface CommunePet {
 /** Personalized pixel look — shown on the agent's sprite in the COMMUNE. */
 export interface CommuneAvatar {
   hair: string;
+  hairStyle: 'short' | 'long';
   shirt: string;
   bottom: 'pants' | 'skirt';
   bottomColor: string;
@@ -238,6 +239,7 @@ export interface CommuneAvatar {
 
 export const DEFAULT_AVATAR: CommuneAvatar = {
   hair: '#4a3728',
+  hairStyle: 'short',
   shirt: '#58a6ff',
   bottom: 'pants',
   bottomColor: '#3f4a63',
