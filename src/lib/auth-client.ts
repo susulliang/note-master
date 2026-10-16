@@ -281,7 +281,7 @@ export async function pickSpiceDrop(id: number): Promise<{ picked: boolean; spic
   });
 }
 
-/* ── NPC challenge (Workers AI roleplay) ───────────────────────────────────── */
+/* ── NPC challenge (remote DeepSeek roleplay) ──────────────────────────────── */
 
 export interface ChallengeTurn {
   gb_message: string;
@@ -294,31 +294,13 @@ export interface ChallengeMessage {
   content: string;
 }
 
-/** Open a challenge with an NPC persona — returns the scripted opening turn. */
-export async function startChallenge(personaId: string): Promise<{ turn: ChallengeTurn }> {
+/** Report a successful challenge ending — the server awards the spice
+ *  (throttled per persona so completed runs can't be farmed). */
+export async function awardChallenge(personaId: string): Promise<{ awarded: number; spice: number }> {
   const token = getStoredToken();
-  return call<{ turn: ChallengeTurn }>('/api/commune/challenge/start', {
+  return call<{ awarded: number; spice: number }>('/api/commune/challenge/award', {
     method: 'POST',
     body: JSON.stringify({ personaId }),
-    token,
-  });
-}
-
-/** Submit the agent's chosen reply — returns the NPC's next turn; a 'success'
- *  ending additionally returns the awarded spice. */
-export async function challengeTurn(
-  personaId: string,
-  history: ChallengeMessage[],
-  choice: string
-): Promise<{ turn: ChallengeTurn; awarded: number; spice: number }> {
-  const token = getStoredToken();
-  return call<{ turn: ChallengeTurn; awarded: number; spice: number }>('/api/commune/challenge/turn', {
-    method: 'POST',
-    body: JSON.stringify({
-      personaId,
-      history: history.map((m) => ({ role: m.role === 'npc' ? 'assistant' : 'user', content: m.content })),
-      choice,
-    }),
     token,
   });
 }

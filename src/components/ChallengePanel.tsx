@@ -1,16 +1,47 @@
 /**
  * Challenge panel — NPC role-play challenge opened from the Challenge Tent in
- * the COMMUNE. The NPC (persona served by the Worker, driven by Workers AI)
- * plays a difficult customer; the agent picks one of four suggested replies
- * each turn. Success (+5 spice) / fail endings are decided server-side.
+ * the COMMUNE. The NPC (persona in src/data/npc-personas) plays a difficult
+ * customer via the same remote DeepSeek pipeline as the transcript parser /
+ * Kitty Help (kittyChat); the agent picks one of four suggested replies each
+ * turn. The success ending's spice award is granted server-side.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw, Trophy, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { challengeTurn, startChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
+import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
+import { kittyChat } from '@/lib/kitty-help';
+import { NPC_PERSONAS } from '@/data/npc-personas';
 
 const PERSONA_ID = 'gb_poolius';
+
+/** Best-effort JSON extraction from an LLM reply (handles code fences and
+ *  stray prose around the JSON object). */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function parseTurn(raw: string): ChallengeTurn | null {
+  const parsed = extractJsonObject(raw);
+  if (!parsed) return null;
+  const gb = String(parsed.gb_message ?? '').trim();
+  const choices = Array.isArray(parsed.agent_choices)
+    ? parsed.agent_choices.map((c) => String(c).trim()).filter(Boolean)
+    : [];
+  if (!gb || choices.length === 0) return null;
+  return {
+    gb_message: gb,
+    agent_choices: choices,
+    status: parsed.status === 'success' || parsed.status === 'fail' ? parsed.status : 'ongoing',
+  };
+}
 
 interface ChallengePanelProps {
   onSpiceChange: (spice: number) => void;
@@ -29,15 +60,10 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     setBusy(true);
     setError(null);
     setAwarded(null);
-    try {
-      const out = await startChallenge(PERSONA_ID);
-      setLog([{ role: 'npc', content: out.turn.gb_message }]);
-      setTurn(out.turn);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open the challenge');
-    } finally {
-      setBusy(false);
-    }
+    const persona = NPC_PERSONAS[PERSONA_ID];
+    setLog([{ role: 'npc', content: persona.initial_output.gb_message }]);
+    setTurn(persona.initial_output);
+    setBusy(false);
   }, []);
 
   useEffect(() => {
@@ -54,15 +80,28 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
     if (busy || !turn || turn.status !== 'ongoing') return;
     setBusy(true);
     setError(null);
+    const persona = NPC_PERSONAS[PERSONA_ID];
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
     try {
-      const out = await challengeTurn(PERSONA_ID, history, choice);
-      setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: out.turn.gb_message }]);
-      setTurn(out.turn);
-      if (out.awarded > 0) {
-        setAwarded(out.awarded);
-        onSpiceChange(out.spice);
+      const raw = await kittyChat(
+        [
+          { role: 'system', content: persona.system_prompt.join('\n') },
+          ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
+          { role: 'user', content: choice },
+        ],
+        1_200
+      );
+      const next = parseTurn(raw);
+      if (!next) throw new Error('The challenge engine returned an invalid turn');
+      setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: next.gb_message }]);
+      setTurn(next);
+      if (next.status === 'success') {
+        const out = await awardChallenge(PERSONA_ID);
+        if (out.awarded > 0) {
+          setAwarded(out.awarded);
+          onSpiceChange(out.spice);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The challenge engine did not respond');

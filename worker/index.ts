@@ -24,7 +24,6 @@ const NPC_PERSONAS: Record<string, NpcPersona> = {
   'gb_poolius': GB_POOLIUS as unknown as NpcPersona,
 };
 
-const NPC_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
 const CHALLENGE_SUCCESS_SPICE = 5;
 
 interface TestResultSummary {
@@ -1416,10 +1415,12 @@ async function handleCommuneSpicePick(request: Request, env: Env, user: AuthUser
   return authJson({ picked: true, spice: Number(user.spice ?? 0) + 1 });
 }
 
-/* ── NPC challenge (Workers AI roleplay) ───────────────────────────────────── */
+/* ── NPC challenge (remote DeepSeek roleplay) ──────────────────────────────── */
 
 /** One-time schema + persona seeding — the persona JSON is uploaded into the
- *  eco-data D1 `npc_personas` table on first use. */
+ *  eco-data D1 `npc_personas` table on first use. The roleplay itself runs
+ *  client-side through the shared remote DeepSeek pipeline (kittyChat); only
+ *  the success spice award is server-side. */
 let npcSchemaPromise: Promise<void> | null = null;
 async function ensureNpcSchema(env: Env): Promise<void> {
   if (!npcSchemaPromise) {
@@ -1443,120 +1444,38 @@ async function ensureNpcSchema(env: Env): Promise<void> {
   await npcSchemaPromise;
 }
 
-function sanitizeStatus(raw: unknown): 'ongoing' | 'success' | 'fail' {
-  return raw === 'success' || raw === 'fail' ? raw : 'ongoing';
-}
-
-function sanitizeLlmTurn(parsed: {
-  gb_message?: unknown;
-  agent_choices?: unknown;
-  status?: unknown;
-}): { gb_message: string; agent_choices: string[]; status: 'ongoing' | 'success' | 'fail' } | null {
-  const gb = String(parsed.gb_message ?? '').trim().slice(0, 2_000);
-  const choices = Array.isArray(parsed.agent_choices)
-    ? parsed.agent_choices.map((c) => String(c).trim().slice(0, 400)).filter(Boolean)
-    : [];
-  if (!gb || choices.length !== 4) return null;
-  return { gb_message: gb, agent_choices: choices, status: sanitizeStatus(parsed.status) };
-}
-
-/** Best-effort JSON extraction from an LLM response (handles code fences and
- *  stray prose around the JSON object). */
-function extractJsonObject(text: string): Record<string, unknown> | null {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-/** POST /api/commune/challenge/start { personaId } — opens a challenge with
- *  the persona's scripted opening turn. */
-async function handleChallengeStart(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
-  let payload: { personaId?: unknown } = {};
+/** POST /api/commune/challenge/award { personaId } — called once when the
+ *  remote-LLM roleplay reaches a 'success' ending. A per-persona cooldown
+ *  (a real challenge takes minutes) throttles repeat-claim farming. */
+async function handleChallengeAward(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 1_024) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { personaId?: unknown };
   try {
     payload = (await request.json()) as { personaId?: unknown };
-  } catch {
-    /* empty body is fine */
-  }
-  const personaId = String(payload.personaId ?? '');
-  const persona = NPC_PERSONAS[personaId];
-  if (!persona) return authJson({ error: 'Unknown persona' }, 404);
-  await ensureNpcSchema(env);
-  void user;
-  return authJson({ turn: persona.initial_output });
-}
-
-/** POST /api/commune/challenge/turn { personaId, history, choice } — feeds the
- *  agent's chosen reply to the persona via Workers AI and returns GB's next
- *  JSON turn. A 'success' ending awards spice (server-computed). */
-async function handleChallengeTurn(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
-  const contentLength = Number(request.headers.get('content-length') ?? 0);
-  if (contentLength > 65_536) return authJson({ error: 'Request is too large' }, 413);
-  let payload: { personaId?: unknown; history?: unknown; choice?: unknown };
-  try {
-    payload = (await request.json()) as typeof payload;
   } catch {
     return authJson({ error: 'Invalid JSON body' }, 400);
   }
   const personaId = String(payload.personaId ?? '');
-  const persona = NPC_PERSONAS[personaId];
-  if (!persona) return authJson({ error: 'Unknown persona' }, 404);
-  const choice = String(payload.choice ?? '').trim().slice(0, 400);
-  if (!choice) return authJson({ error: 'Missing choice' }, 400);
+  if (!NPC_PERSONAS[personaId]) return authJson({ error: 'Unknown persona' }, 404);
 
-  type Turn = { role: 'user' | 'assistant'; content: string };
-  const history: Turn[] = [];
-  if (Array.isArray(payload.history)) {
-    for (const m of payload.history.slice(-20)) {
-      if (!m || typeof m !== 'object') continue;
-      const mm = m as { role?: unknown; content?: unknown };
-      const role = mm.role === 'assistant' ? 'assistant' : mm.role === 'user' ? 'user' : null;
-      const content = String(mm.content ?? '').trim().slice(0, 2_000);
-      if (role && content) history.push({ role, content });
-    }
-  }
+  await ensureSpiceSchema(env);
+  await ensureNpcSchema(env);
+  const last = await env.DB.prepare(
+    "SELECT created_at FROM spice_ledger WHERE username = ?1 AND reason = 'challenge' AND detail = ?2 ORDER BY created_at DESC LIMIT 1"
+  ).bind(user.username, personaId).first<{ created_at: number }>();
+  if (last && Date.now() - Number(last.created_at) < 180_000)
+    return authJson({ error: 'Challenge award cooldown — finish another run first' }, 429);
 
-  const messages: Turn[] = [
-    { role: 'system', content: persona.system_prompt.join('\n') },
-    ...history,
-    { role: 'user', content: choice },
-  ];
-
-  let raw: string | null = null;
-  try {
-    const out = (await env.AI.run(NPC_MODEL, {
-      messages,
-      max_tokens: 1_200,
-      temperature: 0.7,
-    })) as { response?: unknown };
-    raw = typeof out?.response === 'string' ? out.response : null;
-  } catch {
-    return authJson({ error: 'Challenge engine is unavailable right now' }, 502);
-  }
-  const parsed = raw ? extractJsonObject(raw) : null;
-  const turn = parsed ? sanitizeLlmTurn(parsed as never) : null;
-  if (!turn) return authJson({ error: 'Challenge engine returned an invalid turn' }, 502);
-
-  // Success ending — award spice server-side so it can't be faked client-side.
-  let awarded = 0;
-  if (turn.status === 'success') {
-    await ensureSpiceSchema(env);
-    const now = Date.now();
-    await env.DB.batch([
-      env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
-        .bind(user.username, CHALLENGE_SUCCESS_SPICE, now),
-      env.DB.prepare(
-        "INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'challenge', ?3, ?4)"
-      ).bind(user.username, CHALLENGE_SUCCESS_SPICE, personaId, now),
-    ]);
-    awarded = CHALLENGE_SUCCESS_SPICE;
-  }
-
-  return authJson({ turn, awarded, spice: Number(user.spice ?? 0) + awarded });
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE auth_users SET spice = spice + ?2, updated_at = ?3 WHERE username = ?1')
+      .bind(user.username, CHALLENGE_SUCCESS_SPICE, now),
+    env.DB.prepare(
+      "INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, ?2, 'challenge', ?3, ?4)"
+    ).bind(user.username, CHALLENGE_SUCCESS_SPICE, personaId, now),
+  ]);
+  return authJson({ awarded: CHALLENGE_SUCCESS_SPICE, spice: Number(user.spice ?? 0) + CHALLENGE_SUCCESS_SPICE });
 }
 
 /** Roulette betting spots and their STANDARD casino payout odds ("to one"):
@@ -1882,16 +1801,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSpicePick(request, env, user);
   }
-  // NPC challenge (Workers AI roleplay) — any logged-in user.
-  if (path === '/api/commune/challenge/start' && request.method === 'POST') {
+  // NPC challenge success award (roleplay runs client-side via DeepSeek).
+  if (path === '/api/commune/challenge/award' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleChallengeStart(request, env, user);
-  }
-  if (path === '/api/commune/challenge/turn' && request.method === 'POST') {
-    const user = await authBearerUser(request, env);
-    if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleChallengeTurn(request, env, user);
+    return handleChallengeAward(request, env, user);
   }
 
   // Admin routes — bearer must belong to an is_admin account.
