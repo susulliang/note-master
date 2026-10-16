@@ -166,12 +166,16 @@ const RE_CARDS = [
 ];
 
 async function waybackSnapshotUrl(wikiPath) {
-  const api = `https://archive.org/wayback/available?url=${encodeURIComponent(`residentevil.fandom.com${wikiPath}`)}`;
+  // CDX API, last entry = newest capture (the "available" API's closest match
+  // can land on a years-old snapshot and miss newer card scans).
+  const api =
+    `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(`residentevil.fandom.com${wikiPath}`)}` +
+    '&output=json&filter=statuscode:200&limit=-1';
   for (let i = 0; i < 3; i += 1) {
     try {
-      const json = await fetch(api, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then((r) => r.json());
-      const snap = json?.archived_snapshots?.closest;
-      if (snap?.available && snap.url) return snap.url;
+      const rows = await fetch(api, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then((r) => r.json());
+      const ts = rows?.[1]?.[1]; // row 0 is the header
+      if (ts) return `https://web.archive.org/web/${ts}/${`residentevil.fandom.com${wikiPath}`}`;
       return null;
     } catch {
       await new Promise((r) => setTimeout(r, 800 * (i + 1)));
