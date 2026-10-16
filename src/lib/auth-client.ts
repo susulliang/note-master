@@ -287,6 +287,8 @@ export interface ChallengeTurn {
   gb_message: string;
   agent_choices: string[];
   status: 'ongoing' | 'success' | 'fail';
+  /** End-of-call satisfaction rating the NPC hands out (0–5 stars). */
+  stars?: number;
 }
 
 export interface ChallengeMessage {

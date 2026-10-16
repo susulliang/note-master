@@ -64,6 +64,7 @@
     "- If the agent's choice meets success criteria, set status to 'success' and provide a final GB message (satisfied or accepting).",
     "- If the agent's choice triggers fail criteria, set status to 'fail' and provide a final GB message (GB leaves angrily).",
     "- Otherwise status is 'ongoing'.",
+    "- END-OF-CALL RATING: whenever status becomes 'success' or 'fail', also add a 'stars' field (integer 0-5) — GB's customer-satisfaction score for how the agent handled him. 5 = delighted, would stay loyal; 4 = satisfied, complaint handled; 3 = neutral, willing to give another chance; 2 = dissatisfied, still returning the product; 1 = angry, felt ignored again; 0 = furious hang-up. Rate strictly by the success/fail criteria and how seen, respected, and helped GB actually felt — a bare-minimum 'success' should not get 5 stars. Omit 'stars' entirely while status is 'ongoing'.",
     "- Keep the conversation realistic and consistent with GB's personality.",
     "- Output ONLY valid JSON. No markdown, no explanations.",
     "- Your first response must exactly match the initial_output object below.",

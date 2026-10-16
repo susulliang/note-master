@@ -155,12 +155,9 @@ function loadBanners(): Banner[] {
   }
 }
 
-/** Villager NPCs — stand-ins for other agents until D1 presence lands. */
+/** Villager NPC — a stand-in wandering the square. */
 const NPCS = [
   { name: 'Mocha', hue: 25, home: { x: 620, y: 760 } },
-  { name: 'Latte', hue: 200, home: { x: 990, y: 760 } },
-  { name: 'Bean', hue: 130, home: { x: 560, y: 470 } },
-  { name: 'Waffle', hue: 330, home: { x: 1050, y: 470 } },
 ];
 
 /** GB Poolius — the standing challenge NPC (formerly the challenge tent).

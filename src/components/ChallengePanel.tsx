@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Loader2, Mic, RefreshCw, Square, Trash2, Trophy, Volume2, X } from 'lucide-react';
+import { Check, Loader2, Mic, RefreshCw, Square, Star, Trash2, Trophy, Volume2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
 import { kittyChat } from '@/lib/kitty-help';
@@ -40,10 +40,15 @@ function parseTurn(raw: string): ChallengeTurn | null {
       ? parsed.agent_choices.map((c) => String(c).trim()).filter(Boolean)
       : [];
     if (gb && choices.length > 0) {
+      const rawStars = Number(parsed.stars);
       return {
         gb_message: gb,
         agent_choices: choices,
         status: parsed.status === 'success' || parsed.status === 'fail' ? parsed.status : 'ongoing',
+        stars:
+          Number.isFinite(rawStars) && parsed.status !== 'ongoing'
+            ? Math.max(0, Math.min(5, Math.round(rawStars)))
+            : undefined,
       };
     }
   }
@@ -77,6 +82,18 @@ function salvageTruncatedTurn(raw: string): ChallengeTurn | null {
   }
   if (choices.length === 0) return null;
   return { gb_message: gb.trim(), agent_choices: choices, status: 'ongoing' };
+}
+
+/** The NPC's end-of-call satisfaction rating (0–5 stars). */
+function StarRow({ stars }: { stars: number }) {
+  return (
+    <div className="mt-1 flex items-center gap-1" title={`Satisfaction: ${stars}/5`}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <Star key={i} className={cn('size-4', i < stars ? 'fill-yellow-400 text-yellow-400' : 'text-foreground/25')} />
+      ))}
+      <span className="ml-1 text-[10px] font-bold uppercase tracking-wide opacity-80">{stars}/5</span>
+    </div>
+  );
 }
 
 interface ChallengePanelProps {
@@ -372,11 +389,13 @@ export default function ChallengePanel({ onSpiceChange, onClose }: ChallengePane
           {awarded !== null && (
             <div className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
               🌶 Call defused — GB is staying with us. +{awarded} spice awarded.
+              <StarRow stars={turn?.stars ?? 0} />
             </div>
           )}
           {turn?.status === 'fail' && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
-              GB hung up. Hit the restart button above and try another approach.
+              GB hung up on you.
+              <StarRow stars={turn.stars ?? 0} />
             </div>
           )}
           {error && (
