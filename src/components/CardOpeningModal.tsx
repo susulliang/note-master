@@ -29,7 +29,7 @@ type Phase = 'idle' | 'spinning' | 'revealed' | 'drawing';
 const SPIN_MS = 6_400;
 const TICKER_LEN = 64; // strip length (cards)
 const WIN_INDEX = 56; // winner slot inside the strip
-const ITEM_W = 132; // px per strip item (card + gaps)
+const ITEM_W = 176; // px per strip item (card + gaps)
 
 /** Weighted random card for ticker filler — mirrors the server tier odds so
  *  the fly-by looks plausible (commons flood, secrets are rare). */
@@ -76,11 +76,16 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
 
   // Kick the spin once the strip exists: transition target computed from the
   // winner slot so the card stops under the marker. The ticker tick rate
-  // follows the strip's deceleration for the roll sound.
+  // follows the strip's deceleration for the roll sound. On re-draws the
+  // track is parked at the previous winner, so it is first snapped back to 0
+  // with transitions disabled — otherwise the transform never changes and
+  // the strip would just sit still.
   useEffect(() => {
     if (phase !== 'spinning' || !manifest || !strip.length) return;
     const el = trackRef.current;
     if (!el) return;
+    el.style.transition = 'none';
+    el.style.transform = 'translateX(0px)';
     void el.offsetWidth; // flush layout so the transition starts from 0
     const start = el.getBoundingClientRect().left;
     const target = WIN_INDEX * ITEM_W + ITEM_W / 2 - start;
@@ -139,6 +144,16 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
       const out = await purchaseItem(productId);
       onSpiceChange(out.spice);
       if (!out.card) throw new Error('Draw failed — no card returned');
+      // Rebuild the strip for the new winner in the same commit as the phase
+      // change — leaving the old strip would keep the previous card parked
+      // under the marker.
+      if (manifest) {
+        setStrip(
+          Array.from({ length: TICKER_LEN }, (_, i) =>
+            i === WIN_INDEX ? (out.card as TcgManifestCard) : weightedPick(manifest.cards, manifest.tierWeights)
+          )
+        );
+      }
       setWon(out.card);
       onCardWon?.(out.card);
       setPhase('spinning');
@@ -146,7 +161,7 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
       setError(err instanceof Error ? err.message : 'Draw failed');
       setPhase('revealed');
     }
-  }, [phase, onSpiceChange, onCardWon, won.collection]);
+  }, [phase, manifest, onSpiceChange, onCardWon, won.collection]);
 
   const style = rarityStyle(won.rarity);
   const spinning = phase === 'spinning';
@@ -178,12 +193,12 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
         {spinning ? 'Opening pack…' : phase === 'drawing' ? 'Drawing…' : `${style.label}!`}
       </h2>
 
-      {/* Ticker */}
-      <div className="relative mt-6 w-full max-w-3xl overflow-hidden">
+      {/* Ticker — spans the full canvas width (CS:GO style). */}
+      <div className="relative mt-6 w-full overflow-hidden">
         {/* center marker */}
         <div className="pointer-events-none absolute left-1/2 top-0 z-20 h-full w-0.5 -translate-x-1/2 bg-amber-300 shadow-[0_0_12px_2px_rgba(252,211,77,0.9)]" />
-        <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-16 bg-gradient-to-r from-black to-transparent" />
-        <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-16 bg-gradient-to-l from-black to-transparent" />
+        <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-24 bg-gradient-to-r from-black to-transparent" />
+        <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-24 bg-gradient-to-l from-black to-transparent" />
         <div ref={trackRef} className="flex gap-2 will-change-transform">
           {(strip.length ? strip : Array.from({ length: TICKER_LEN })).map((c, i) => {
             const mc = c as TcgManifestCard | undefined;
@@ -192,7 +207,7 @@ export default function CardOpeningModal({ card, spice, onSpiceChange, onCardWon
                 key={i}
                 style={{ width: ITEM_W - 8, minWidth: ITEM_W - 8 }}
                 className={cn(
-                  'flex h-[186px] items-center justify-center overflow-hidden rounded-lg border bg-white/5',
+                  'flex h-[240px] items-center justify-center overflow-hidden rounded-lg border bg-white/5',
                   mc ? rarityStyle(mc.rarity).border : 'border-white/10'
                 )}
               >
