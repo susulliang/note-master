@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Megaphone, Palette, Trophy, Users, X } from 'lucide-react';
+import { Building2, Megaphone, Palette, Trophy, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -33,7 +33,7 @@ import {
   type CommuneLoadout,
   type CommunePet,
 } from '@/lib/auth-client';
-import { CAT_CHOICES, type CatId } from '@/lib/cat-sprites';
+import { CAT_CHOICES, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
 import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
 
@@ -47,6 +47,51 @@ const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const TENT = { x: 1200, y: 730, w: 180, h: 160 }; // challenge tent
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
+type PropPanelKind = 'townhall' | 'cafe' | 'arcade' | 'banners' | 'showcase' | 'challenges';
+type PanelKind = PropPanelKind | 'loadout' | 'agent' | null;
+
+interface CommuneProp {
+  kind: PropPanelKind;
+  label: string;
+  x: number;
+  y: number;
+  range: number;
+  hitbox: { x: number; y: number; w: number; h: number };
+  description: string;
+}
+
+const COMMUNE_PROPS: CommuneProp[] = [
+  {
+    kind: 'townhall', label: 'Town Hall', x: 800, y: 252, range: 112,
+    hitbox: { x: 650, y: 96, w: 300, h: 134 },
+    description: 'The heart of the square. Stop by to see what the community is building together.',
+  },
+  {
+    kind: 'cafe', label: 'Café', x: 270, y: 420, range: 102,
+    hitbox: { x: 185, y: 206, w: 170, h: 184 },
+    description: 'A quiet corner for a coffee, a chat, and a little break between cases.',
+  },
+  {
+    kind: 'arcade', label: 'Arcade', x: 1330, y: 420, range: 102,
+    hitbox: { x: 1245, y: 206, w: 170, h: 184 },
+    description: 'The arcade is where the square’s games and collection adventures live.',
+  },
+  {
+    kind: 'banners', label: 'Bulletin Board', x: BOARD.x, y: BOARD.y + 60, range: 110,
+    hitbox: { x: BOARD.x - BOARD.w / 2, y: BOARD.y - BOARD.h / 2, w: BOARD.w, h: BOARD.h },
+    description: 'Community notes and announcements hung for everyone passing through.',
+  },
+  {
+    kind: 'showcase', label: 'Showcase Stall', x: STALL.x + 40, y: STALL.y, range: 110,
+    hitbox: { x: STALL.x - STALL.w / 2, y: STALL.y - STALL.h / 2, w: STALL.w, h: STALL.h },
+    description: 'A place to show off favorite cards, milestones, and personal collections.',
+  },
+  {
+    kind: 'challenges', label: 'Challenge Tent', x: TENT.x - 40, y: TENT.y, range: 110,
+    hitbox: { x: TENT.x - TENT.w / 2, y: TENT.y - TENT.h / 2, w: TENT.w, h: TENT.h },
+    description: 'The challenge tent is being prepared for case-study activities and friendly tests.',
+  },
+];
 /** Solid footprints (building walls incl. roof silhouette + props). */
 const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 650, y: 96, w: 300, h: 134 }, // town hall
@@ -67,8 +112,6 @@ const TREES: [number, number][] = [
 ];
 const SPEED = 240; // player px/s
 const NPC_SPEED = 90;
-const INTERACT_RANGE = 110;
-
 interface Banner {
   id: string;
   text: string;
@@ -108,8 +151,6 @@ const NPC_LINES = [
   'brb, feeding my cat',
 ];
 
-type PanelKind = 'banners' | 'showcase' | 'challenges' | 'loadout' | 'agent' | null;
-
 /** Deterministic hue from a username so each agent wears their own color. */
 function hueOf(name: string): number {
   let h = 0;
@@ -129,6 +170,8 @@ interface Agent {
   status?: string;
   /** Admin badge (gold star). */
   admin?: boolean;
+  /** Optional pixel companion shown beside this agent. */
+  pet?: CommunePet | null;
   /** NPC-only: current waypoint + pause state. */
   target?: { x: number; y: number };
   pauseUntil?: number;
@@ -146,8 +189,47 @@ interface RemoteView {
   phrase: string | null;
   status?: string;
   admin?: boolean;
+  pet: CommunePet | null;
   moving: boolean;
   bobPhase: number;
+}
+
+interface PetOwner {
+  ownerId: string;
+  x: number;
+  y: number;
+  moving: boolean;
+  pet: CommunePet | null;
+}
+
+interface PetFollower {
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  ownerX: number;
+  ownerY: number;
+  followAt: number;
+  repathAt: number;
+  side: number;
+  idleAngle: number;
+  headingX: number;
+  headingY: number;
+  ownerWasMoving: boolean;
+  following: boolean;
+  moving: boolean;
+  walkPhase: number;
+  facingLeft: boolean;
+}
+
+interface PixelPetView {
+  catId: CatId;
+  stage: string;
+  x: number;
+  y: number;
+  moving: boolean;
+  walkPhase: number;
+  facingLeft: boolean;
 }
 
 export default function CommunePanel() {
@@ -164,6 +246,8 @@ export default function CommunePanel() {
   const [prompt, setPrompt] = useState<string | null>(null);
 
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
+  playerRef.current.name = username;
+  playerRef.current.hue = hueOf(username);
   const npcsRef = useRef<Agent[]>(
     NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 }))
   );
@@ -173,6 +257,7 @@ export default function CommunePanel() {
   const panelRef = useRef<PanelKind>(null);
   panelRef.current = panel;
   const chatFocusedRef = useRef(false);
+  const promptRef = useRef<string | null>(null);
 
   /* ── live presence (other agents) ─────────────────────────────────────────── */
   const [others, setOthers] = useState<CommuneAgent[]>([]);
@@ -188,6 +273,9 @@ export default function CommunePanel() {
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
   const [loadout, setLoadout] = useState<CommuneLoadout>({ cards: [], pet: null, phrase: '' });
+  const loadoutRef = useRef(loadout);
+  loadoutRef.current = loadout;
+  playerRef.current.pet = loadout.pet;
   const loadoutTouchedRef = useRef(false);
   const loadoutDirtyRef = useRef(false);
   const [petChoices, setPetChoices] = useState<CommunePet[]>([]);
@@ -306,7 +394,7 @@ export default function CommunePanel() {
           Math.round(p.x),
           Math.round(p.y),
           statusRef.current,
-          loadoutDirtyRef.current ? loadout : undefined
+          loadoutDirtyRef.current ? loadoutRef.current : undefined
         );
         if (stopped) return;
         loadoutDirtyRef.current = false;
@@ -344,21 +432,29 @@ export default function CommunePanel() {
       stopped = true;
       window.clearInterval(iv);
     };
-  }, [user, loadout]);
+  }, [user]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
   useEffect(() => {
     const isTypingTarget = (t: EventTarget | null) =>
-      t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      t instanceof HTMLElement &&
+      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     const down = (e: KeyboardEvent) => {
+      if (e.code === 'Escape' && panelRef.current) {
+        e.preventDefault();
+        setPanel(null);
+        return;
+      }
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyE') {
+        if (panelRef.current) return;
         // Interact with the nearest prop.
         const p = playerRef.current;
         const near = proximity(p.x, p.y);
         if (near) {
           e.preventDefault();
+          clickTargetRef.current = null;
           setPanel(near);
         }
         return;
@@ -377,21 +473,21 @@ export default function CommunePanel() {
     };
   }, []);
 
-  /** Which interactable prop is within range of (x, y)? */
-  const proximity = (x: number, y: number): PanelKind => {
-    const near = (px: number, py: number, tx: number, ty: number, range = INTERACT_RANGE) =>
-      Math.hypot(px - tx, py - ty) <= range;
-    if (near(x, y, BOARD.x, BOARD.y + 60)) return 'banners';
-    if (near(x, y, STALL.x + 40, STALL.y)) return 'showcase';
-    if (near(x, y, TENT.x - 40, TENT.y)) return 'challenges';
-    return null;
+  /** Nearest interactable within range; keeps prompts and E behavior aligned. */
+  const nearestProp = (x: number, y: number) => {
+    let nearest: CommuneProp | null = null;
+    let nearestDistance = Infinity;
+    for (const prop of COMMUNE_PROPS) {
+      const distance = Math.hypot(x - prop.x, y - prop.y);
+      if (distance <= prop.range && distance < nearestDistance) {
+        nearest = prop;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
   };
 
-  const PROP_LABEL: Record<Exclude<PanelKind, null>, string> = {
-    banners: 'Bulletin Board',
-    showcase: 'Showcase Stall',
-    challenges: 'Challenge Tent',
-  };
+  const proximity = (x: number, y: number): PropPanelKind | null => nearestProp(x, y)?.kind ?? null;
 
   /* ── main loop ───────────────────────────────────────────────────────────── */
 
@@ -404,7 +500,7 @@ export default function CommunePanel() {
 
     let vw = 0;
     let vh = 0;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const resize = () => {
       vw = wrap.clientWidth;
       vh = wrap.clientHeight;
@@ -419,10 +515,22 @@ export default function CommunePanel() {
 
     let raf = 0;
     let last = performance.now();
+    let lastFrame = 0;
+    let cameraReady = false;
+    const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reduceMotion = reduceMotionQuery.matches;
+    const petFollowers = new Map<string, PetFollower>();
 
     const step = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      raf = 0;
+      if (document.hidden) return;
+      if (now - lastFrame < 1000 / 40) {
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      const dt = Math.min(0.04, (now - last) / 1000);
       last = now;
+      lastFrame = now;
       const tSec = now / 1000;
 
       /* update player */
@@ -431,6 +539,7 @@ export default function CommunePanel() {
         const k = keysRef.current;
         let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
         let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
+        if (dx !== 0 || dy !== 0) clickTargetRef.current = null;
         if (dx === 0 && dy === 0 && clickTargetRef.current) {
           const tx = clickTargetRef.current.x - player.x;
           const ty = clickTargetRef.current.y - player.y;
@@ -487,12 +596,26 @@ export default function CommunePanel() {
 
       /* camera follows the player, clamped to the world */
       const cam = camRef.current;
-      cam.x = Math.min(Math.max(player.x - vw / 2, 0), Math.max(0, WORLD_W - vw));
-      cam.y = Math.min(Math.max(player.y - vh / 2, 0), Math.max(0, WORLD_H - vh));
+      const targetX = Math.min(Math.max(player.x - vw / 2, 0), Math.max(0, WORLD_W - vw));
+      const targetY = Math.min(Math.max(player.y - vh / 2, 0), Math.max(0, WORLD_H - vh));
+      if (!cameraReady) {
+        cam.x = targetX;
+        cam.y = targetY;
+        cameraReady = true;
+      } else {
+        const follow = 1 - Math.exp(-dt * 8);
+        cam.x += (targetX - cam.x) * follow;
+        cam.y += (targetY - cam.y) * follow;
+      }
 
       /* interactable prompt + my status line */
-      const nearKind = proximity(player.x, player.y);
-      setPrompt(nearKind ? `E — ${PROP_LABEL[nearKind]}` : null);
+      const nearProp = nearestProp(player.x, player.y);
+      const nextPrompt = nearProp ? `E  ${nearProp.label}` : null;
+      if (promptRef.current !== nextPrompt) {
+        promptRef.current = nextPrompt;
+        setPrompt(nextPrompt);
+      }
+      const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.says
         ? 'chatting'
         : nearKind === 'banners'
@@ -501,6 +624,12 @@ export default function CommunePanel() {
             ? 'browsing showcases'
             : nearKind === 'challenges'
               ? 'at the challenge tent'
+        : nearKind === 'townhall'
+          ? 'visiting town hall'
+        : nearKind === 'cafe'
+          ? 'at the café'
+        : nearKind === 'arcade'
+          ? 'at the arcade'
               : player.moving
                 ? 'wandering'
                 : Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < PLAZA.r
@@ -528,20 +657,51 @@ export default function CommunePanel() {
           phrase: r.agent.loadout?.phrase || null,
           status: r.agent.status,
           admin: r.agent.isAdmin,
+          pet: r.agent.loadout?.pet ?? null,
           moving: r.moving,
           bobPhase: r.bobPhase,
         });
       }
 
-      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews);
+      const petViews = updatePetFollowers(
+        [
+          { ownerId: player.name, x: player.x, y: player.y, moving: !!player.moving, pet: player.pet ?? null },
+          ...remoteViews.map((remote) => ({
+            ownerId: remote.name,
+            x: remote.x,
+            y: remote.y,
+            moving: remote.moving,
+            pet: remote.pet,
+          })),
+        ],
+        petFollowers,
+        now,
+        dt
+      );
+      draw(ctx, vw, vh, dpr, cam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current);
       raf = requestAnimationFrame(step);
     };
+    const onMotionChange = (event: MediaQueryListEvent) => {
+      reduceMotion = event.matches;
+    };
+    reduceMotionQuery.addEventListener('change', onMotionChange);
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      } else if (!raf) {
+        last = performance.now();
+        raf = requestAnimationFrame(step);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     raf = requestAnimationFrame(step);
     return () => {
       cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      reduceMotionQuery.removeEventListener('change', onMotionChange);
       ro.disconnect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [banners]);
 
   /* ── canvas click → interact or walk ─────────────────────────────────────── */
@@ -557,18 +717,19 @@ export default function CommunePanel() {
     for (const r of remoteRef.current.values()) {
       if (Math.hypot(wx - r.rx, wy - (r.ry - 30)) < 42) {
         const agent = others.find((o) => o.username === r.agent.username) ?? r.agent;
+    clickTargetRef.current = null;
         setSelected(agent);
         setPanel('agent');
         return;
       }
     }
     // Props open their panel when clicked directly.
-    const hitProp =
-      (wx >= BOARD.x - BOARD.w / 2 && wx <= BOARD.x + BOARD.w / 2 && wy >= BOARD.y - BOARD.h / 2 && wy <= BOARD.y + BOARD.h / 2 && 'banners') ||
-      (wx >= STALL.x - STALL.w / 2 && wx <= STALL.x + STALL.w / 2 && wy >= STALL.y - STALL.h / 2 && wy <= STALL.y + STALL.h / 2 && 'showcase') ||
-      (wx >= TENT.x - TENT.w / 2 && wx <= TENT.x + TENT.w / 2 && wy >= TENT.y - TENT.h / 2 && wy <= TENT.y + TENT.h / 2 && 'challenges');
+    const hitProp = COMMUNE_PROPS.find(({ hitbox }) =>
+      wx >= hitbox.x && wx <= hitbox.x + hitbox.w && wy >= hitbox.y && wy <= hitbox.y + hitbox.h
+    );
     if (hitProp) {
-      setPanel(hitProp);
+      clickTargetRef.current = null;
+      setPanel(hitProp.kind);
       return;
     }
     clickTargetRef.current = { x: wx, y: wy };
@@ -582,20 +743,38 @@ export default function CommunePanel() {
   };
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
+  const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
+  const panelPosition = panel === 'loadout'
+    ? 'right-4 top-4 z-20'
+    : 'left-1/2 top-14 z-30 -translate-x-1/2';
 
   return (
-    <div ref={wrapRef} className="relative h-full min-h-full w-full overflow-hidden bg-[#0e1a12]">
-      <canvas ref={canvasRef} onClick={onCanvasClick} className="absolute inset-0 cursor-pointer" />
+    <div ref={wrapRef} className="relative h-full min-h-full w-full overflow-hidden bg-[#607c61]">
+      <canvas
+        ref={canvasRef}
+        onClick={onCanvasClick}
+        className="absolute inset-0 cursor-crosshair outline-none"
+        role="application"
+        aria-label="COMMUNE town square. Click to walk, use WASD or arrow keys, and press E near a place to interact."
+        tabIndex={0}
+      />
 
-      {/* Title chip */}
-      <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-white/20 bg-black/40 px-4 py-1.5 font-mono text-xs font-extrabold tracking-widest text-amber-300 backdrop-blur">
-        COMMUNE · town square
+      {/* Compact world identity */}
+      <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 rounded-2xl border border-white/35 bg-card/85 px-3.5 py-2 text-foreground shadow-lg backdrop-blur-xl">
+        <span className="grid size-8 place-items-center rounded-xl bg-primary/15 text-primary">
+          <Users className="size-4" />
+        </span>
+        <span>
+          <span className="block font-mono text-[11px] font-extrabold tracking-[0.12em]">COMMUNE</span>
+          <span className="block text-[10px] text-muted-foreground">Town square · {others.length + 1} here</span>
+        </span>
       </div>
 
       {/* Interaction prompt */}
       {prompt && !panel && (
-        <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 animate-in fade-in rounded-full border border-amber-300/50 bg-black/60 px-4 py-1.5 text-xs font-bold text-amber-200 backdrop-blur">
-          {prompt}
+        <div className="pointer-events-none absolute bottom-[4.75rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-xl border border-primary/40 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
+          <kbd className="mr-2 rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">E</kbd>
+          {prompt.replace(/^E\s+/, '')}
         </div>
       )}
 
@@ -604,18 +783,18 @@ export default function CommunePanel() {
         type="button"
         onClick={() => setPanel(panel === 'loadout' ? null : 'loadout')}
         className={cn(
-          'absolute right-4 top-4 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold backdrop-blur transition-colors',
+          'glass-btn absolute right-4 top-4 z-10 flex items-center gap-2 rounded-xl border border-border/70 bg-card/85 px-3.5 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           panel === 'loadout'
-            ? 'border-amber-300/60 bg-amber-500/80 text-white'
-            : 'border-white/20 bg-black/40 text-amber-200 hover:bg-black/60'
+            ? 'border-primary/70 bg-primary/15 text-primary'
+            : ''
         )}
         title="Edit what other agents see: cards, pet, phrase"
       >
-        <Palette className="size-3.5" /> Loadout
+        <Palette className="size-3.5" /> <span>Loadout</span>
       </button>
 
       {/* Chat bar */}
-      <div className="absolute bottom-4 left-1/2 flex w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2">
+      <div className="glass-panel absolute bottom-3 left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl p-2 shadow-xl">
         <input
           value={chatDraft}
           onChange={(e) => setChatDraft(e.target.value)}
@@ -627,12 +806,12 @@ export default function CommunePanel() {
           }}
           placeholder={`Say something to the square, ${username}…`}
           maxLength={90}
-          className="h-9 flex-1 rounded-full border border-white/20 bg-black/50 px-4 text-sm text-white placeholder:text-white/40 backdrop-blur focus:border-amber-300/60 focus:outline-none"
+          className="glass-field h-10 min-w-0 flex-1 rounded-xl border border-border/70 bg-background/75 px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
         <button
           type="button"
           onClick={speak}
-          className="h-9 rounded-full border border-amber-300/50 bg-amber-500/80 px-4 text-xs font-extrabold text-white transition hover:brightness-110"
+          className="glass-btn h-10 rounded-xl border border-primary/40 bg-primary px-4 text-xs font-bold text-primary-foreground shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           Speak
         </button>
@@ -640,20 +819,44 @@ export default function CommunePanel() {
 
       {/* ── panels ──────────────────────────────────────────────────────────── */}
       {panel && (
-        <div className="glass-panel absolute right-4 top-4 max-h-[calc(100%-88px)] w-[min(360px,calc(100vw-32px))] overflow-y-auto rounded-2xl border-amber-400/30 p-4 shadow-2xl">
+        <div
+          role="dialog"
+          aria-modal="false"
+          aria-label={activeProp?.label ?? (panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
+          className={cn(
+            'glass-panel absolute max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))] overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
+            panelPosition
+          )}
+        >
           <button
             type="button"
             onClick={() => setPanel(null)}
-            className="absolute right-2.5 top-2.5 rounded-full p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+            className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             aria-label="Close"
           >
             <X className="size-4" />
           </button>
 
+          {activeProp && !['banners', 'showcase', 'challenges'].includes(activeProp.kind) && (
+            <div className="pr-7">
+              <div className="flex items-center gap-2.5">
+                <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
+                  <Building2 className="size-4" />
+                </span>
+                <div>
+                  <p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-muted-foreground">COMMUNE PLACE</p>
+                  <h3 className="font-mono text-sm font-extrabold text-foreground">{activeProp.label}</h3>
+                </div>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{activeProp.description}</p>
+              <p className="mt-4 border-t border-border/50 pt-2.5 text-[10px] text-muted-foreground/80">Press Esc to close · Keep exploring with WASD</p>
+            </div>
+          )}
+
           {panel === 'banners' && (
             <div>
               <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Megaphone className="size-4 text-amber-400" /> Town Banners
+                <Megaphone className="size-4 text-primary" /> Town Banners
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Announcements hung by admins for every agent passing the square.
@@ -667,7 +870,7 @@ export default function CommunePanel() {
                 {banners.map((b) => (
                   <div
                     key={b.id}
-                    className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2"
+                    className="rounded-xl border border-primary/25 bg-primary/10 px-3 py-2"
                     style={{ borderLeft: `4px solid hsl(${b.hue} 70% 55%)` }}
                   >
                     <p className="text-xs font-semibold text-foreground">{b.text}</p>
@@ -688,13 +891,13 @@ export default function CommunePanel() {
                     }}
                     maxLength={80}
                     placeholder="Hang a banner…"
-                    className="h-8 flex-1 rounded-lg border border-border/60 bg-background/40 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-amber-300/60 focus:outline-none"
+                    className="glass-field h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   />
                   <button
                     type="button"
                     onClick={hangBanner}
                     disabled={!bannerDraft.trim()}
-                    className="h-8 rounded-lg border border-amber-400/50 bg-amber-500/80 px-3 text-[11px] font-extrabold text-white disabled:opacity-40"
+                    className="glass-btn h-9 rounded-lg border border-primary/40 bg-primary px-3 text-[11px] font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
                   >
                     Hang
                   </button>
@@ -706,7 +909,7 @@ export default function CommunePanel() {
           {panel === 'showcase' && (
             <div>
               <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Users className="size-4 text-amber-400" /> Personal Showcases
+                <Users className="size-4 text-primary" /> Personal Showcases
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Agents will display their achievement &amp; TCG cards on this stall.
@@ -728,7 +931,7 @@ export default function CommunePanel() {
           {panel === 'challenges' && (
             <div>
               <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Trophy className="size-4 text-amber-400" /> NPC Challenges
+                <Trophy className="size-4 text-primary" /> NPC Challenges
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Villager NPCs will hand out real case-study challenges here — answer from live tickets.
@@ -747,7 +950,7 @@ export default function CommunePanel() {
           {panel === 'loadout' && (
             <div>
               <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Palette className="size-4 text-amber-400" /> My Loadout
+                <Palette className="size-4 text-primary" /> My Loadout
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 What other agents see when they click you: up to 3 collection cards, one pet, one phrase.
@@ -761,7 +964,7 @@ export default function CommunePanel() {
                 onKeyDown={(e) => e.stopPropagation()}
                 maxLength={80}
                 placeholder="e.g. Greetings from the north stall ☕"
-                className="h-8 w-full rounded-lg border border-border/60 bg-background/40 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-amber-300/60 focus:outline-none"
+                className="glass-field h-9 w-full rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
 
               {/* Pet selector */}
@@ -775,7 +978,7 @@ export default function CommunePanel() {
                     className={cn(
                       'rounded-lg border px-1.5 py-1.5 text-center transition-colors',
                       loadout.pet?.id === p.id
-                        ? 'border-amber-300/70 bg-amber-400/15'
+                        ? 'border-primary/60 bg-primary/10'
                         : 'border-border/50 bg-background/20 hover:bg-background/40'
                     )}
                   >
@@ -830,7 +1033,7 @@ export default function CommunePanel() {
                       onClick={() => toggleLoadoutCard(c.id)}
                       className={cn(
                         'relative aspect-[5/7] overflow-hidden rounded border transition-transform hover:scale-105',
-                        loadout.cards.includes(c.id) ? 'border-amber-300 ring-1 ring-amber-300/60' : 'border-transparent'
+                        loadout.cards.includes(c.id) ? 'border-primary ring-1 ring-primary/60' : 'border-transparent'
                       )}
                       title={`${c.name} — ${c.rarity}`}
                     >
@@ -848,7 +1051,7 @@ export default function CommunePanel() {
               <button
                 type="button"
                 onClick={() => void saveLoadout()}
-                className="mt-3 h-9 w-full rounded-lg border border-amber-400/50 bg-amber-500/80 text-sm font-extrabold text-white transition hover:brightness-110"
+                className="glass-btn mt-3 h-10 w-full rounded-xl border border-primary/40 bg-primary text-sm font-bold text-primary-foreground shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Save loadout
               </button>
@@ -858,14 +1061,14 @@ export default function CommunePanel() {
           {panel === 'agent' && selected && (
             <div>
               <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                {selected.isAdmin && <span className="text-amber-400">★</span>}
+                {selected.isAdmin && <span className="text-primary">★</span>}
                 {selected.username}
               </h3>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {selected.status || 'hanging out'} · seen {Math.max(1, Math.round(selected.seenAgo / 1000))}s ago
               </p>
               {selected.loadout?.phrase && (
-                <blockquote className="mt-2 rounded-lg border-l-4 border-amber-400/60 bg-amber-400/10 px-3 py-2 text-xs italic text-foreground">
+                <blockquote className="mt-2 rounded-lg border-l-4 border-primary/60 bg-primary/10 px-3 py-2 text-xs italic text-foreground">
                   “{selected.loadout.phrase}”
                 </blockquote>
               )}
@@ -926,8 +1129,8 @@ export default function CommunePanel() {
 
       {/* Banner ticker — hung banners also scroll along the top edge */}
       {bannerWords.length > 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-4 w-[min(680px,calc(100%-200px))] -translate-x-1/2 overflow-hidden rounded-full border border-amber-300/30 bg-black/40 py-1 backdrop-blur">
-          <p className="truncate text-center font-mono text-[11px] font-bold text-amber-200">
+        <div className="pointer-events-none absolute left-1/2 top-4 w-[min(680px,calc(100%-200px))] -translate-x-1/2 overflow-hidden rounded-full border border-border/70 bg-card/80 py-1.5 shadow-sm backdrop-blur-xl">
+          <p className="truncate text-center font-mono text-[11px] font-semibold text-primary">
             📣 {bannerWords[bannerWords.length - 1]}
           </p>
         </div>
@@ -938,51 +1141,167 @@ export default function CommunePanel() {
 
 /* ── movement ─────────────────────────────────────────────────────────────── */
 
-/** Move to (nx, ny) with world bounds, fountain/pond ellipses and the solid
- *  building footprints (slide along the nearest edge). */
+/** Axis-separated collision checks keep diagonal walking from snagging on walls. */
+function canOccupy(x: number, y: number, radius: number) {
+  if (x < radius || x > WORLD_W - radius || y < radius + 120 || y > WORLD_H - radius) return false;
+  if (Math.hypot(x - FOUNTAIN.x, y - FOUNTAIN.y) < FOUNTAIN.r + radius) return false;
+
+  const pondX = (x - POND_C.x) / (POND_C.rx + radius);
+  const pondY = (y - POND_C.y) / (POND_C.ry + radius);
+  if (pondX * pondX + pondY * pondY < 1) return false;
+
+  return !SOLID_RECTS.some(
+    (s) =>
+      x > s.x - radius &&
+      x < s.x + s.w + radius &&
+      y > s.y - radius &&
+      y < s.y + s.h + radius
+  );
+}
+
+function petSpot(ownerX: number, ownerY: number, angle: number, distance: number) {
+  for (let i = 0; i < 8; i++) {
+    const candidateAngle = angle + i * Math.PI / 4;
+    const x = ownerX + Math.cos(candidateAngle) * distance;
+    const y = ownerY + Math.sin(candidateAngle) * distance * 0.72;
+    if (canOccupy(x, y, 12)) return { x, y };
+  }
+  return { x: ownerX + 52, y: ownerY };
+}
+
+function updatePetFollowers(
+  owners: PetOwner[],
+  followers: Map<string, PetFollower>,
+  now: number,
+  dt: number
+): PixelPetView[] {
+  const active = new Set<string>();
+  const views: PixelPetView[] = [];
+
+  for (const owner of owners) {
+    if (!owner.pet?.id) continue;
+    const key = owner.ownerId.trim().toLowerCase();
+    active.add(key);
+    let follower = followers.get(key);
+    if (!follower) {
+      const idleAngle = Math.random() * Math.PI * 2;
+      const start = petSpot(owner.x, owner.y, idleAngle, 54);
+      follower = {
+        ...start,
+        targetX: start.x,
+        targetY: start.y,
+        ownerX: owner.x,
+        ownerY: owner.y,
+        followAt: now + 650 + Math.random() * 1700,
+        repathAt: 0,
+        side: Math.random() < 0.5 ? -1 : 1,
+        idleAngle,
+        headingX: 1,
+        headingY: 0,
+        ownerWasMoving: owner.moving,
+        following: false,
+        moving: false,
+        walkPhase: Math.random() * Math.PI * 2,
+        facingLeft: false,
+      };
+      followers.set(key, follower);
+    }
+
+    const ownerDx = owner.x - follower.ownerX;
+    const ownerDy = owner.y - follower.ownerY;
+    if (Math.hypot(ownerDx, ownerDy) > 0.1) {
+      const length = Math.hypot(ownerDx, ownerDy);
+      follower.headingX = ownerDx / length;
+      follower.headingY = ownerDy / length;
+    }
+
+    if (owner.moving && !follower.ownerWasMoving) {
+      // Let the owner get going before the cat decides to trail after them.
+      follower.followAt = now + 650 + Math.random() * 1750;
+      follower.side = Math.random() < 0.5 ? -1 : 1;
+      follower.following = false;
+    } else if (!owner.moving && follower.ownerWasMoving) {
+      follower.followAt = now + 450 + Math.random() * 900;
+    }
+    follower.ownerWasMoving = owner.moving;
+
+    const ownerDistance = Math.hypot(owner.x - follower.x, owner.y - follower.y);
+    if (owner.moving && now >= follower.followAt) follower.following = true;
+    if (!owner.moving && ownerDistance > 105 && now >= follower.followAt) follower.following = true;
+
+    if (follower.following && !owner.moving && ownerDistance < 82) {
+      follower.following = false;
+      follower.idleAngle = Math.random() * Math.PI * 2;
+      const rest = petSpot(owner.x, owner.y, follower.idleAngle, 54);
+      follower.targetX = rest.x;
+      follower.targetY = rest.y;
+    }
+
+    const targetDistance = Math.hypot(follower.targetX - follower.x, follower.targetY - follower.y);
+    if (follower.following && (now >= follower.repathAt || targetDistance < 14)) {
+      let angle = follower.idleAngle;
+      if (owner.moving) {
+        const perpendicular = Math.atan2(follower.headingY, follower.headingX) + follower.side * Math.PI / 2;
+        angle = perpendicular;
+        const behindX = owner.x - follower.headingX * 10;
+        const behindY = owner.y - follower.headingY * 10;
+        const target = petSpot(behindX, behindY, angle, 52);
+        follower.targetX = target.x;
+        follower.targetY = target.y;
+      } else {
+        const rest = petSpot(owner.x, owner.y, angle, 54);
+        follower.targetX = rest.x;
+        follower.targetY = rest.y;
+      }
+      follower.repathAt = now + 380 + Math.random() * 520;
+    }
+
+    const oldX = follower.x;
+    const oldY = follower.y;
+    const dx = follower.targetX - follower.x;
+    const dy = follower.targetY - follower.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance > 2) {
+      const speed = Math.min(220, 118 + distance * 0.3);
+      const travel = Math.min(distance, speed * dt);
+      const nextX = follower.x + (dx / distance) * travel;
+      const nextY = follower.y + (dy / distance) * travel;
+      if (canOccupy(nextX, follower.y, 12)) follower.x = nextX;
+      if (canOccupy(follower.x, nextY, 12)) follower.y = nextY;
+    }
+    const movedX = follower.x - oldX;
+    const movedY = follower.y - oldY;
+    follower.moving = Math.hypot(movedX, movedY) > 0.15;
+    if (follower.moving) {
+      follower.walkPhase += dt * 8.5;
+      follower.facingLeft = movedX < -0.1;
+    }
+    follower.ownerX = owner.x;
+    follower.ownerY = owner.y;
+
+    views.push({
+      catId: normalizeCatId(owner.pet.id),
+      stage: owner.pet.stage,
+      x: follower.x,
+      y: follower.y,
+      moving: follower.moving,
+      walkPhase: follower.walkPhase,
+      facingLeft: follower.facingLeft,
+    });
+  }
+
+  for (const key of followers.keys()) {
+    if (!active.has(key)) followers.delete(key);
+  }
+  return views;
+}
+
 function moveWithCollision(a: Agent, nx: number, ny: number) {
-  const R = 24;
-  nx = Math.min(Math.max(nx, R), WORLD_W - R);
-  ny = Math.min(Math.max(ny, R + 120), WORLD_H - R);
-  // Circular fountain + elliptical pond: push out radially.
-  for (const circ of [{ x: FOUNTAIN.x, y: FOUNTAIN.y, r: FOUNTAIN.r }] as const) {
-    const d = Math.hypot(nx - circ.x, ny - circ.y);
-    if (d < circ.r + R) {
-      const ang = Math.atan2(ny - circ.y, nx - circ.x);
-      nx = circ.x + Math.cos(ang) * (circ.r + R);
-      ny = circ.y + Math.sin(ang) * (circ.r + R);
-    }
-  }
-  {
-    const ex = (nx - POND_C.x) / (POND_C.rx + R);
-    const ey = (ny - POND_C.y) / (POND_C.ry + R);
-    const d2 = ex * ex + ey * ey;
-    if (d2 < 1) {
-      const d = Math.sqrt(d2) || 1e-6;
-      nx = POND_C.x + (ex / d) * (POND_C.rx + R);
-      ny = POND_C.y + (ey / d) * (POND_C.ry + R);
-    }
-  }
-  // Rect buildings: push out along the smallest penetration axis.
-  for (const s of SOLID_RECTS) {
-    const l = s.x - R;
-    const r2 = s.x + s.w + R;
-    const tp = s.y - R;
-    const bt = s.y + s.h + R;
-    if (nx > l && nx < r2 && ny > tp && ny < bt) {
-      const dl = nx - l;
-      const dr = r2 - nx;
-      const dtp = ny - tp;
-      const db = bt - ny;
-      const m = Math.min(dl, dr, dtp, db);
-      if (m === dl) nx = l;
-      else if (m === dr) nx = r2;
-      else if (m === dtp) ny = tp;
-      else ny = bt;
-    }
-  }
-  a.x = nx;
-  a.y = ny;
+  const radius = 24;
+  const clampedX = Math.min(Math.max(nx, radius), WORLD_W - radius);
+  const clampedY = Math.min(Math.max(ny, radius + 120), WORLD_H - radius);
+  if (canOccupy(clampedX, a.y, radius)) a.x = clampedX;
+  if (canOccupy(a.x, clampedY, radius)) a.y = clampedY;
 }
 
 /* ── drawing ──────────────────────────────────────────────────────────────── */
@@ -999,15 +1318,23 @@ function draw(
   player: Agent,
   npcs: Agent[],
   banners: Banner[],
-  remotes: RemoteView[]
+  remotes: RemoteView[],
+  pets: PixelPetView[],
+  reduceMotion: boolean,
+  destination: { x: number; y: number } | null
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, vw, vh);
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
 
   /* baked pixel town (grass, paths, plaza, buildings, pond, lamps, decor) */
-  ctx.drawImage(getTownLayer(), 0, 0);
+  const visibleW = Math.min(vw, WORLD_W - cam.x);
+  const visibleH = Math.min(vh, WORLD_H - cam.y);
+  if (visibleW > 0 && visibleH > 0) {
+    ctx.drawImage(getTownLayer(), cam.x, cam.y, visibleW, visibleH, cam.x, cam.y, visibleW, visibleH);
+  }
 
   /* fountain water ripples — the basin itself is baked */
   ctx.strokeStyle = 'rgba(255,255,255,0.55)';
@@ -1020,6 +1347,7 @@ function draw(
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  if (destination) drawDestinationMarker(ctx, destination.x, destination.y, t);
 
   /* y-sorted drawables */
   type D = { y: number; fn: () => void };
@@ -1033,15 +1361,15 @@ function draw(
       const bx = BOARD.x;
       const by = BOARD.y;
       // posts
-      ctx.fillStyle = '#8a5a33';
+      ctx.fillStyle = '#876b54';
       ctx.fillRect(bx - 70, by + 20, 12, 70);
       ctx.fillRect(bx + 58, by + 20, 12, 70);
       // frame + cork
       roundRect(ctx, bx - BOARD.w / 2, by - BOARD.h / 2, BOARD.w, BOARD.h, 10);
-      ctx.fillStyle = '#a9713f';
+      ctx.fillStyle = '#a87f5c';
       ctx.fill();
       roundRect(ctx, bx - BOARD.w / 2 + 8, by - BOARD.h / 2 + 8, BOARD.w - 16, BOARD.h - 16, 6);
-      ctx.fillStyle = '#d9a866';
+      ctx.fillStyle = '#d8b889';
       ctx.fill();
       // hung banners (up to 3 papers)
       const shown = banners.slice(-3);
@@ -1089,7 +1417,7 @@ function draw(
       const sy = STALL.y;
       // counter
       roundRect(ctx, sx - STALL.w / 2 + 14, sy + 10, STALL.w - 28, 52, 8);
-      ctx.fillStyle = '#b98254';
+      ctx.fillStyle = '#b88b67';
       ctx.fill();
       // poles
       ctx.fillStyle = '#8a5a33';
@@ -1097,7 +1425,7 @@ function draw(
       ctx.fillRect(sx + STALL.w / 2 - 24, sy - 44, 8, 96);
       // striped awning
       for (let i = 0; i < 8; i++) {
-        ctx.fillStyle = i % 2 ? '#e05555' : '#f7f3ea';
+        ctx.fillStyle = i % 2 ? '#d97757' : '#f7f3ea';
         ctx.beginPath();
         ctx.moveTo(sx - STALL.w / 2 + 10 + i * ((STALL.w - 20) / 8), sy - 40);
         ctx.lineTo(sx - STALL.w / 2 + 10 + (i + 1) * ((STALL.w - 20) / 8), sy - 40);
@@ -1128,7 +1456,7 @@ function draw(
       ctx.lineTo(tx + TENT.w / 2, ty + 26);
       ctx.lineTo(tx - TENT.w / 2, ty + 26);
       ctx.closePath();
-      ctx.fillStyle = '#e8a33d';
+      ctx.fillStyle = '#d49a5b';
       ctx.fill();
       // stripes
       ctx.fillStyle = 'rgba(255,255,255,0.28)';
@@ -1145,7 +1473,7 @@ function draw(
       ctx.moveTo(tx, ty - 96);
       ctx.lineTo(tx, ty - 122);
       ctx.stroke();
-      ctx.fillStyle = '#e05555';
+      ctx.fillStyle = '#d97757';
       ctx.beginPath();
       ctx.moveTo(tx, ty - 122);
       ctx.lineTo(tx + 26, ty - 114);
@@ -1179,13 +1507,16 @@ function draw(
         const near = !!r.phrase && Math.hypot(r.x - player.x, r.y - player.y) < 170;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, pet: r.pet, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
     });
   }
   items.push({ y: player.y, fn: () => drawAgent(ctx, player, t, true) });
+  for (const pet of pets) {
+    items.push({ y: pet.y, fn: () => drawPixelCat(ctx, pet, t, reduceMotion) });
+  }
 
   items.sort((a, b) => a.y - b.y);
   for (const it of items) it.fn();
@@ -1193,7 +1524,22 @@ function draw(
   ctx.restore();
 }
 
+function drawDestinationMarker(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  const pulse = 1 + Math.sin(t * 5) * 0.12;
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  ctx.strokeStyle = '#d97757';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(x, y, 13 * pulse, 7 * pulse, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#d97757';
+  ctx.fillRect(Math.round(x - 2), Math.round(y - 2), 4, 4);
+  ctx.restore();
+}
+
 /* ── pixel people ─────────────────────────────────────────────────────────── */
+
 
 const SP_P = 4; // sprite pixel size (each art pixel = 4 canvas px)
 
@@ -1231,8 +1577,31 @@ const HUMAN_WALK = [
   '.FFF....FFF.',
 ];
 
-/** A little pixel human — hair + shirt tinted by the agent's hue, a 2-frame
- *  walk cycle, gold name tag for the player, status line for remote agents. */
+const CAT_STAND = [
+  '..D....D..',
+  '.DDD..DDD.',
+  'DCCCCCCCCD',
+  'DCEECCEECD',
+  'DCCCCCCCCD',
+  '.DCLNWLCD.',
+  '..DCCCCD..',
+  'TCCCCCCCC.',
+  '.CCCCOCCC.',
+  '..LL..LL..',
+];
+const CAT_WALK_A = [...CAT_STAND.slice(0, 9), '...LL.LL..'];
+const CAT_WALK_B = [...CAT_STAND.slice(0, 9), '..LL.LL...'];
+
+const CAT_PIXEL_PALETTES: Record<CatId, Record<string, string>> = {
+  hunao: { D: '#58616a', C: '#aeb8c0', L: '#dce3e7', W: '#f4f2ec', E: '#7eaaa7', N: '#d9878f', O: '#aeb8c0', T: '#707b84' },
+  siam: { D: '#3e5368', C: '#6a9bcc', L: '#b6d0e1', W: '#f1f1e9', E: '#d4bd6d', N: '#d9878f', O: '#6a9bcc', T: '#526f8b' },
+  heyhey: { D: '#292c32', C: '#41444c', L: '#858993', W: '#e6e4dc', E: '#d6bd65', N: '#ce8588', O: '#41444c', T: '#33363e' },
+  heyheyhey: { D: '#202228', C: '#30333a', L: '#70747d', W: '#eeeae1', E: '#cbb66a', N: '#c67d84', O: '#30333a', T: '#282b31' },
+  ailu: { D: '#3f4e82', C: '#6478c2', L: '#bcc9ef', W: '#f1efe8', E: '#75a5cb', N: '#d9878f', O: '#6478c2', T: '#4f619d' },
+  bella: { D: '#51483f', C: '#eee5d5', L: '#fff8e9', W: '#fffaf0', E: '#788c5d', N: '#d97757', O: '#d97757', T: '#756657' },
+};
+
+/** Pixel human with an optional cat companion and a readable identity tag. */
 function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer = false) {
   const bob = a.moving ? Math.sin((a.bobPhase ?? 0) / 1.6) * 2.4 : Math.sin(t * 2 + (a.bobPhase ?? 0)) * 1.2;
   const feet = a.y + bob;
@@ -1270,7 +1639,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   if (isPlayer) {
     ctx.beginPath();
     ctx.ellipse(a.x, a.y + 4, 26, 10, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,215,64,0.85)';
+    ctx.strokeStyle = 'rgba(217,119,87,0.9)';
     ctx.lineWidth = 2.5;
     ctx.stroke();
   }
@@ -1279,7 +1648,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   const tag = (a.admin ? '★ ' : '') + a.name;
   const w = ctx.measureText(tag).width + 14;
   roundRect(ctx, a.x - w / 2, a.y + 12, w, 17, 8);
-  ctx.fillStyle = isPlayer ? 'rgba(255,215,64,0.92)' : 'rgba(0,0,0,0.55)';
+  ctx.fillStyle = isPlayer ? 'rgba(217,119,87,0.94)' : 'rgba(20,20,19,0.74)';
   ctx.fill();
   ctx.fillStyle = isPlayer ? '#1a1a1a' : '#fff';
   ctx.fillText(tag, a.x, a.y + 24);
@@ -1295,6 +1664,50 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   }
 }
 
+/** Procedural pixel cat: drawn from the same square-pixel grammar as agents. */
+function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: number, reduceMotion: boolean) {
+  const stageScale: Record<string, number> = {
+    Kitten: 0.85,
+    Junior: 0.92,
+    Prime: 1,
+    Mature: 1.08,
+    Elder: 1.15,
+  };
+  const scale = stageScale[pet.stage] ?? 1;
+  const cell = SP_P * scale;
+  const animated = pet.moving && !reduceMotion;
+  const rows = animated
+    ? (Math.floor(pet.walkPhase * 5) % 2 === 0 ? CAT_WALK_A : CAT_WALK_B)
+    : CAT_STAND;
+  const width = rows[0].length * cell;
+  const height = rows.length * cell;
+  const left = pet.x - width / 2;
+  const bob = reduceMotion ? 0 : animated ? Math.sin(pet.walkPhase * 2) * 1.2 : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
+  const top = pet.y - height + 4 + bob;
+  const palette = CAT_PIXEL_PALETTES[pet.catId];
+
+  ctx.fillStyle = 'rgba(20,20,19,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(pet.x, pet.y + 3, width * 0.46, 5 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
+    for (let colIndex = 0; colIndex < row.length; colIndex++) {
+      const pixel = row[colIndex];
+      if (pixel === '.') continue;
+      const col = pet.facingLeft ? row.length - 1 - colIndex : colIndex;
+      ctx.fillStyle = palette[pixel] ?? palette.C;
+      ctx.fillRect(
+        Math.round(left + col * cell),
+        Math.round(top + rowIndex * cell),
+        Math.ceil(cell),
+        Math.ceil(cell)
+      );
+    }
+  }
+}
+
 /** Chunky pixel oak (dynamic so it y-sorts with the agents). */
 function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
@@ -1305,11 +1718,11 @@ function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number
     ctx.fillStyle = color;
     ctx.fillRect(Math.round(px / 4) * 4, Math.round(py / 4) * 4, Math.round(w / 4) * 4, Math.round(h / 4) * 4);
   };
-  q(x - 8, groundY - 40, 16, 40, '#7a4a22');
-  q(x, groundY - 40, 8, 40, '#683d1a');
-  q(x - 44, groundY - 100, 88, 32, '#3f8f3a');
-  q(x - 34, groundY - 126, 68, 28, '#4aa044');
-  q(x - 20, groundY - 148, 40, 24, '#57b14e');
+  q(x - 8, groundY - 40, 16, 40, '#876b54');
+  q(x, groundY - 40, 8, 40, '#735944');
+  q(x - 44, groundY - 100, 88, 32, '#527a58');
+  q(x - 34, groundY - 126, 68, 28, '#668c63');
+  q(x - 20, groundY - 148, 40, 24, '#7a9c71');
   q(x - 16, groundY - 142, 14, 8, 'rgba(255,255,255,0.18)');
 }
 
@@ -1410,23 +1823,23 @@ function getTownLayer(): HTMLCanvasElement {
   const tg = tile.getContext('2d')!;
   for (let j = 0; j < 4; j++) {
     for (let i = 0; i < 4; i++) {
-      tg.fillStyle = (i + j) % 2 ? '#6fb254' : '#77bb5c';
+      tg.fillStyle = (i + j) % 2 ? '#6a8e68' : '#759873';
       tg.fillRect(i * 8, j * 8, 8, 8);
     }
   }
-  tg.fillStyle = '#639e4b';
+  tg.fillStyle = '#5b805d';
   tg.fillRect(8, 16, 8, 8);
   tg.fillRect(24, 0, 8, 8);
   g.fillStyle = g.createPattern(tile, 'repeat')!;
   g.fillRect(0, 0, WORLD_W, WORLD_H);
 
   /* hedge border + corner bushes */
-  px(0, 0, WORLD_W, 16, '#3c7a35');
-  px(0, WORLD_H - 16, WORLD_W, 16, '#3c7a35');
-  px(0, 0, 16, WORLD_H, '#3c7a35');
-  px(WORLD_W - 16, 0, 16, WORLD_H, '#3c7a35');
+  px(0, 0, WORLD_W, 16, '#456b4b');
+  px(0, WORLD_H - 16, WORLD_W, 16, '#456b4b');
+  px(0, 0, 16, WORLD_H, '#456b4b');
+  px(WORLD_W - 16, 0, 16, WORLD_H, '#456b4b');
   for (const [bx, by] of [[40, 40], [1560, 40], [40, 1160], [1560, 1160]] as const) {
-    pxEllipse(bx, by, 40, 28, '#35803b');
+    pxEllipse(bx, by, 40, 28, '#527a58');
   }
 
   /* dirt paths (quadratic curves sampled into grid-aligned slabs) */
@@ -1444,33 +1857,33 @@ function getTownLayer(): HTMLCanvasElement {
       const wx = u * u * x0 + 2 * u * t * cx + t * t * x1;
       const wy = u * u * y0 + 2 * u * t * cy + t * t * y1;
       pathPts.push([wx, wy]);
-      px(wx - 20, wy - 20, 40, 40, '#d9b47c');
+      px(wx - 20, wy - 20, 40, 40, '#c8a27b');
     }
   }
   for (let i = 0; i < 260; i++) {
     const [wx, wy] = pathPts[Math.floor(rand() * pathPts.length)];
-    px(wx - 20 + rand() * 40, wy - 20 + rand() * 40, 8, 8, rand() < 0.5 ? '#c9a266' : '#e8cd96');
+    px(wx - 20 + rand() * 40, wy - 20 + rand() * 40, 8, 8, rand() < 0.5 ? '#b68e69' : '#e2c69c');
   }
 
   /* plaza cobbles + fountain */
-  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r + 14, PLAZA.r * 0.72 + 14, '#b89a63');
-  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r, PLAZA.r * 0.72, '#e6d6a8');
+  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r + 14, PLAZA.r * 0.72 + 14, '#b3916d');
+  pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r, PLAZA.r * 0.72, '#e8dabb');
   for (let i = 0; i < 420; i++) {
     const a = rand() * Math.PI * 2;
     const rr = Math.sqrt(rand());
     const wx = PLAZA.x + Math.cos(a) * rr * PLAZA.r;
     const wy = PLAZA.y + Math.sin(a) * rr * PLAZA.r * 0.72;
-    g.fillStyle = rand() < 0.6 ? '#d4c190' : '#efe2ba';
+    g.fillStyle = rand() < 0.6 ? '#d2c19f' : '#f0e5cc';
     g.fillRect(Math.round(wx / BG) * BG, Math.round(wy / BG) * BG, BG, BG);
   }
-  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r + 16, (FOUNTAIN.r + 16) * 0.62, '#c8cdd6');
-  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r, FOUNTAIN.r * 0.62, '#8f96a3');
-  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 6, (FOUNTAIN.r - 6) * 0.62, '#5aa7d8');
-  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 26, (FOUNTAIN.r - 26) * 0.62, '#63b2e6');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r + 16, (FOUNTAIN.r + 16) * 0.62, '#b0aea5');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r, FOUNTAIN.r * 0.62, '#738ca2');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 6, (FOUNTAIN.r - 6) * 0.62, '#6a9bcc');
+  pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 26, (FOUNTAIN.r - 26) * 0.62, '#83b1d5');
   for (let i = 0; i < 36; i++) {
     const a = rand() * Math.PI * 2;
     const rr = Math.sqrt(rand()) * (FOUNTAIN.r - 30);
-    g.fillStyle = '#8fd0f0';
+    g.fillStyle = '#c1dfeb';
     g.fillRect(Math.round((FOUNTAIN.x + Math.cos(a) * rr) / BG) * BG, Math.round((FOUNTAIN.y + Math.sin(a) * rr * 0.6) / BG) * BG, BG, BG);
   }
   px(FOUNTAIN.x - 8, FOUNTAIN.y - 64, 16, 44, '#c8cdd6'); // pedestal
@@ -1479,13 +1892,13 @@ function getTownLayer(): HTMLCanvasElement {
   px(FOUNTAIN.x - 5, FOUNTAIN.y - 110, 10, 14, '#d4d9e2'); // statue head
 
   /* pond */
-  pxEllipse(POND_C.x, POND_C.y, POND_C.rx + 16, POND_C.ry + 16, '#d3c48c');
-  pxEllipse(POND_C.x, POND_C.y, POND_C.rx, POND_C.ry, '#4f9fd8');
-  pxEllipse(POND_C.x, POND_C.y, POND_C.rx - 18, POND_C.ry - 14, '#63b2e6');
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx + 16, POND_C.ry + 16, '#c1a17c');
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx, POND_C.ry, '#6a9bcc');
+  pxEllipse(POND_C.x, POND_C.y, POND_C.rx - 18, POND_C.ry - 14, '#83b1d5');
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
     const rr = Math.sqrt(rand());
-    g.fillStyle = '#8fd0f0';
+    g.fillStyle = '#c1dfeb';
     g.fillRect(Math.round((POND_C.x + Math.cos(a) * rr * POND_C.rx) / BG) * BG, Math.round((POND_C.y + Math.sin(a) * rr * POND_C.ry) / BG) * BG, BG, BG);
   }
   px(120, 616, 20, 12, '#3f9a46'); // lily pads
@@ -1516,23 +1929,23 @@ function getTownLayer(): HTMLCanvasElement {
   /* TOWN HALL (north, behind the bulletin board) */
   {
     const cx = 800, gy = 230, w = 300, top = gy - 120;
-    px(cx - w / 2, top, w, 120, '#ddd3c0');
-    px(cx - w / 2, top, w, 8, '#cfc3ac');
-    px(cx - w / 2, gy - 10, w, 10, '#b8ab90');
-    bakeRoof(cx, top, w, '#7d8aa0', '#6b778c');
+    px(cx - w / 2, top, w, 120, '#e8dfcf');
+    px(cx - w / 2, top, w, 8, '#d6cbb8');
+    px(cx - w / 2, gy - 10, w, 10, '#b8a991');
+    bakeRoof(cx, top, w, '#718797', '#5f7586');
     px(cx - 64, top - 98, 6, 42, '#8a5a33'); // flag poles
-    px(cx - 58, top - 96, 26, 16, '#e05555');
+    px(cx - 58, top - 96, 26, 16, '#d97757');
     px(cx + 58, top - 98, 6, 42, '#8a5a33');
-    px(cx + 64, top - 96, 26, 16, '#3f8f3a');
-    px(cx - 70, top + 14, 140, 24, '#4a4034'); // sign band
+    px(cx + 64, top - 96, 26, 16, '#788c5d');
+    px(cx - 70, top + 14, 140, 24, '#49504c'); // sign band
     g.fillStyle = '#f2e6c8';
     g.font = 'bold 14px ui-monospace, monospace';
     g.textAlign = 'center';
     g.fillText('TOWN HALL', cx, top + 31);
     bakeWindows(cx - 110, top + 46);
     bakeWindows(cx + 82, top + 46);
-    px(cx - 46, gy - 62, 14, 62, '#cfc3ac'); // columns
-    px(cx + 32, gy - 62, 14, 62, '#cfc3ac');
+    px(cx - 46, gy - 62, 14, 62, '#d6cbb8'); // columns
+    px(cx + 32, gy - 62, 14, 62, '#d6cbb8');
     px(cx - 20, gy - 56, 40, 56, '#7a4a2a'); // door
     px(cx + 10, gy - 30, 6, 6, '#e8c86a');
   }
@@ -1540,16 +1953,16 @@ function getTownLayer(): HTMLCanvasElement {
   /* CAFÉ (west-north) */
   {
     const cx = 270, gy = 390, w = 170, top = gy - 104;
-    px(cx - w / 2, top, w, 104, '#efdcb4');
-    px(cx - w / 2, gy - 10, w, 10, '#d9c398');
-    bakeRoof(cx, top, w, '#c05a4c', '#a84a3e');
+    px(cx - w / 2, top, w, 104, '#ead9b8');
+    px(cx - w / 2, gy - 10, w, 10, '#d2bd98');
+    bakeRoof(cx, top, w, '#d97757', '#b85e49');
     bakeWindows(cx - 56, gy - 66);
     bakeWindows(cx + 26, gy - 66);
     px(cx - 16, gy - 48, 32, 48, '#7a4a2a');
     px(cx + 8, gy - 26, 6, 6, '#e8c86a');
-    for (let i = 0; i < 10; i++) px(cx - w / 2 + 4 + i * 16, gy - 84, 16, 14, i % 2 ? '#f7f3ea' : '#e05555'); // awning
-    px(cx - 30, gy - 84, 60, 14, '#4a4034');
-    g.fillStyle = '#ffd98a';
+    for (let i = 0; i < 10; i++) px(cx - w / 2 + 4 + i * 16, gy - 84, 16, 14, i % 2 ? '#f7f3ea' : '#d97757'); // awning
+    px(cx - 30, gy - 84, 60, 14, '#49504c');
+    g.fillStyle = '#f2dfb8';
     g.font = 'bold 10px ui-monospace, monospace';
     g.textAlign = 'center';
     g.fillText('CAFE', cx, gy - 73);
@@ -1558,46 +1971,46 @@ function getTownLayer(): HTMLCanvasElement {
   /* ARCADE (east-north) */
   {
     const cx = 1330, gy = 390, w = 170, top = gy - 104;
-    px(cx - w / 2, top, w, 104, '#4d5370');
-    px(cx - w / 2, gy - 10, w, 10, '#3c4158');
-    bakeRoof(cx, top, w, '#323750', '#2a2f44');
-    px(cx - 62, top + 12, 124, 24, '#23273a'); // neon sign
-    g.fillStyle = '#7ef3ff';
+    px(cx - w / 2, top, w, 104, '#56677b');
+    px(cx - w / 2, gy - 10, w, 10, '#405366');
+    bakeRoof(cx, top, w, '#3e4e61', '#303f51');
+    px(cx - 62, top + 12, 124, 24, '#2d3949'); // arcade sign
+    g.fillStyle = '#b5d8e3';
     g.font = 'bold 14px ui-monospace, monospace';
     g.textAlign = 'center';
     g.fillText('ARCADE', cx, top + 30);
-    for (let i = 0; i < 12; i++) px(cx - 62 + i * 11, top + 40, 4, 4, i % 2 ? '#ff7ad9' : '#7ef3ff');
-    px(cx - 56, gy - 60, 24, 24, '#3c4158'); // glowing windows
-    px(cx - 54, gy - 58, 20, 20, '#ffd76e');
-    px(cx + 32, gy - 60, 24, 24, '#3c4158');
-    px(cx + 34, gy - 58, 20, 20, '#ffd76e');
-    px(cx - 16, gy - 48, 32, 48, '#23273a');
-    px(cx + 8, gy - 26, 6, 6, '#ff7ad9');
+    for (let i = 0; i < 12; i++) px(cx - 62 + i * 11, top + 40, 4, 4, i % 2 ? '#d9879a' : '#9ec9d9');
+    px(cx - 56, gy - 60, 24, 24, '#354758'); // glowing windows
+    px(cx - 54, gy - 58, 20, 20, '#d6b875');
+    px(cx + 32, gy - 60, 24, 24, '#354758');
+    px(cx + 34, gy - 58, 20, 20, '#d6b875');
+    px(cx - 16, gy - 48, 32, 48, '#2d3949');
+    px(cx + 8, gy - 26, 6, 6, '#d9879a');
   }
 
   /* houses (south corners) */
   const bakeHouseSmall = (cx: number) => {
     const gy = 1040, w = 150, top = gy - 96;
-    px(cx - w / 2, top, w, 96, '#e3d6b6');
-    px(cx - w / 2, gy - 10, w, 10, '#cbbb96');
-    bakeRoof(cx, top, w, '#8a6f4e', '#75603f');
+    px(cx - w / 2, top, w, 96, '#e4d9c5');
+    px(cx - w / 2, gy - 10, w, 10, '#cbb99b');
+    bakeRoof(cx, top, w, '#8f7560', '#755e4d');
     bakeWindows(cx - 52, gy - 62);
     bakeWindows(cx + 24, gy - 62);
     px(cx - 15, gy - 44, 30, 44, '#7a4a2a');
     px(cx + 7, gy - 24, 5, 5, '#e8c86a');
-    px(cx - 56, gy - 36, 28, 8, '#8a5a33'); // flower boxes
-    for (let i = 0; i < 4; i++) px(cx - 54 + i * 7, gy - 42, 5, 6, i % 2 ? '#ffd24a' : '#f05a5a');
-    px(cx + 20, gy - 36, 28, 8, '#8a5a33');
-    for (let i = 0; i < 4; i++) px(cx + 22 + i * 7, gy - 42, 5, 6, i % 2 ? '#e88ac2' : '#f8f4ec');
+    px(cx - 56, gy - 36, 28, 8, '#876b54'); // flower boxes
+    for (let i = 0; i < 4; i++) px(cx - 54 + i * 7, gy - 42, 5, 6, i % 2 ? '#d6b875' : '#d97757');
+    px(cx + 20, gy - 36, 28, 8, '#876b54');
+    for (let i = 0; i < 4; i++) px(cx + 22 + i * 7, gy - 42, 5, 6, i % 2 ? '#d9879a' : '#f7f3ea');
   };
   bakeHouseSmall(230);
   bakeHouseSmall(1370);
 
   /* fences in front of the houses */
   const fence = (x0: number, x1: number, y: number) => {
-    for (let x = x0; x <= x1; x += 32) px(x, y - 20, 6, 20, '#9c7647');
-    px(x0, y - 16, x1 - x0 + 6, 4, '#b08a55');
-    px(x0, y - 8, x1 - x0 + 6, 4, '#b08a55');
+    for (let x = x0; x <= x1; x += 32) px(x, y - 20, 6, 20, '#876b54');
+    px(x0, y - 16, x1 - x0 + 6, 4, '#a38665');
+    px(x0, y - 8, x1 - x0 + 6, 4, '#a38665');
   };
   fence(90, 330, 1080);
   fence(1310, 1520, 1080);
@@ -1608,9 +2021,9 @@ function getTownLayer(): HTMLCanvasElement {
     g.beginPath();
     g.arc(x, y - 51, 26, 0, Math.PI * 2);
     g.fill();
-    px(x - 3, y - 46, 7, 46, '#3a3f4a');
-    px(x - 9, y - 60, 19, 16, '#2f333d');
-    px(x - 5, y - 56, 11, 9, '#ffe08a');
+    px(x - 3, y - 46, 7, 46, '#46525a');
+    px(x - 9, y - 60, 19, 16, '#36414a');
+    px(x - 5, y - 56, 11, 9, '#f0d394');
   };
   lamp(712, 500);
   lamp(888, 500);
@@ -1621,10 +2034,10 @@ function getTownLayer(): HTMLCanvasElement {
 
   /* bushes + flower patches */
   for (const [bx, by] of [[648, 224], [952, 224], [336, 428], [1204, 428], [536, 772], [1064, 772]] as const) {
-    pxEllipse(bx, by, 26, 18, '#35803b');
-    px(bx - 10, by - 10, 8, 5, '#4aa044');
+    pxEllipse(bx, by, 26, 18, '#527a58');
+    px(bx - 10, by - 10, 8, 5, '#6b9567');
   }
-  const flowerColors = ['#f05a5a', '#ffd24a', '#f8f4ec', '#e88ac2'];
+  const flowerColors = ['#d97757', '#d6b875', '#f7f3ea', '#d9879a'];
   for (const [fx, fy] of [
     [620, 540], [980, 540], [648, 748], [952, 748],
     [392, 292], [168, 452], [1216, 292], [1436, 452],

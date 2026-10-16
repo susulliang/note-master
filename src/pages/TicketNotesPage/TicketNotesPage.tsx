@@ -2795,20 +2795,22 @@ Additional information (if needed): ${additional}`;
       {authPanelOpen && <AuthPanel onClose={() => setAuthPanelOpen(false)} />}
       {adminPanelOpen && authUser?.isAdmin && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
 
-      {/* Clippy-style cat assistant — floats above everything */}
-      <CatAssistant
-        catId={selectedCat}
-        currentThought={cat.currentThought}
-        isCapturing={call.isCapturing}
-        isThinking={cat.isThinking || kitty.busy}
-        onDismiss={cat.dismiss}
-        moveRequest={catMoveRequest}
-        onKittyHelp={() => { void kitty.start(); }}
-        kittyStage={kitty.stage}
-        pet={catPet.pet}
-        onPet={catPet.petCat}
-        petCooldown={catPet.petCooldown}
-      />
+      {/* Keep the floating mascot out of the pixel-world scene. */}
+      {workView !== 'commune' && (
+        <CatAssistant
+          catId={selectedCat}
+          currentThought={cat.currentThought}
+          isCapturing={call.isCapturing}
+          isThinking={cat.isThinking || kitty.busy}
+          onDismiss={cat.dismiss}
+          moveRequest={catMoveRequest}
+          onKittyHelp={() => { void kitty.start(); }}
+          kittyStage={kitty.stage}
+          pet={catPet.pet}
+          onPet={catPet.petCat}
+          petCooldown={catPet.petCooldown}
+        />
+      )}
       {kitty.panelOpen && kitty.result && (
         <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
       )}
