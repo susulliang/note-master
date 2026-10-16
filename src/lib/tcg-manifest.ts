@@ -27,6 +27,7 @@ export interface TcgManifest {
 /** Collections available in the app (order = tab order in My Collection). */
 export const TCG_COLLECTIONS = [
   { id: 'sds', label: 'The Seven Deadly Sins' },
+  { id: 'aot', label: 'Attack on Titan' },
   { id: 'pokemon', label: 'Pokémon Rare Bundles' },
 ] as const;
 
@@ -61,12 +62,14 @@ export function collectionOfProduct(productId: string): TcgCollectionId {
 /** Store product id per collection (for Draw-again flows). */
 export const PRODUCT_OF_COLLECTION: Record<TcgCollectionId, string> = {
   sds: 'tcg-sds-card',
+  aot: 'tcg-aot-card',
   pokemon: 'tcg-pokemon-rare',
 };
 
 /** Spice price per collection draw (mirrors the seeded store products). */
 export const DRAW_PRICE: Record<TcgCollectionId, number> = {
   sds: 9,
+  aot: 29,
   pokemon: 99,
 };
 

@@ -6,7 +6,7 @@
  * but we don't render 200+ empty placeholders.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchCardCollection } from '@/lib/auth-client';
@@ -35,30 +35,26 @@ export default function CardCollectionPanel({ onClose }: CardCollectionPanelProp
   const [data, setData] = useState<{ [collection: string]: ColData | null }>({});
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TcgManifestCard | null>(null);
+  /** Collections whose load has been kicked off (ref: survives data updates). */
+  const startedRef = useRef<Set<TcgCollectionId>>(new Set());
 
   // Load the active collection's manifest + the user's pull rows.
   useEffect(() => {
-    if (data[active] !== undefined) return; // already loaded / loading
-    let cancelled = false;
-    setData((d) => ({ ...d, [active]: null }));
+    if (startedRef.current.has(active)) return;
+    startedRef.current.add(active);
+    setData((d) => (d[active] === undefined ? { ...d, [active]: null } : d));
     void (async () => {
       try {
         const [manifest, col] = await Promise.all([loadTcgManifest(active), fetchCardCollection()]);
-        if (cancelled) return;
         const ids = new Set(manifest.cards.map((c) => c.id));
         const owned = new Map(col.filter((row) => ids.has(row.cardId)).map((row) => [row.cardId, row.qty]));
         setData((d) => ({ ...d, [active]: { cards: manifest.cards, owned } }));
       } catch (err) {
-        if (!cancelled) {
-          setData((d) => ({ ...d, [active]: { cards: [], owned: new Map() } }));
-          setError(err instanceof Error ? err.message : 'Failed to load your collection');
-        }
+        setData((d) => ({ ...d, [active]: { cards: [], owned: new Map() } }));
+        setError(err instanceof Error ? err.message : 'Failed to load your collection');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active, data]);
+  }, [active]);
 
   const current = data[active] ?? null;
   const ownedCards = current ? current.cards.filter((c) => (current.owned.get(c.id) ?? 0) > 0) : [];

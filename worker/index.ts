@@ -562,6 +562,14 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            'Premium Pokémon draw — a curated pool of 150 rare & illustration cards across every era, chase cards included. Results land in My Collection.',
            99, 1, 'cards', ?1, ?1)`
       ).bind(nowSeed).run();
+      // Seed the AoT foil draw (mid tier, 29 spice).
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO store_products
+           (id, name, emoji, description, price, active, category, created_at, updated_at)
+         VALUES ('tcg-aot-card', 'Attack on Titan — Draw a Card', '🃏',
+           'Draw from the Attack on Titan foil pool — Final Season + Vol. 1 & 2 sets merged, rarity set by market price. Results land in My Collection.',
+           29, 1, 'cards', ?1, ?1)`
+      ).bind(nowSeed).run();
     })().catch((err) => {
       spiceSchemaPromise = null; // retry on the next request
       throw err;
@@ -1063,6 +1071,7 @@ async function handleStorePurchase(request: Request, env: Env, user: AuthUserRow
  *  the seeded product ids in ensureSpiceSchema). */
 const TCG_PRODUCT_SETS: Readonly<Record<string, string>> = {
   'tcg-sds-card': 'sds',
+  'tcg-aot-card': 'aot',
   'tcg-pokemon-rare': 'pokemon',
 };
 

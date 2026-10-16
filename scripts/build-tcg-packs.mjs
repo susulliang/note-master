@@ -41,6 +41,17 @@ const SDS_TIERS = [
   { max: Infinity, rarity: 'Secret Rare', weight: 0.5 },
 ];
 
+// Attack on Titan foils — the whole pool is foil-grade with a long price tail
+// (SSP chase cards reach $300). Ladder mirrors that spread.
+const AOT_TIERS = [
+  { max: 5, rarity: 'Common', weight: 30 },
+  { max: 15, rarity: 'Uncommon', weight: 28 },
+  { max: 40, rarity: 'Rare', weight: 22 },
+  { max: 100, rarity: 'Super Rare', weight: 12 },
+  { max: 250, rarity: 'Ultra Rare', weight: 5.5 },
+  { max: Infinity, rarity: 'Secret Rare', weight: 1.5 },
+];
+
 // Pokémon Rare Bundles is a premium (99 🌶️) product — steeper ladder, and
 // every card in the pool is already rare/holo-grade. The pool pyramid is
 // built in fetchPokemon() to match these bands.
@@ -61,15 +72,17 @@ function rarityFromPrice(price, tiers) {
   return (tiers.find((t) => price < t.max) ?? tiers[tiers.length - 1]).rarity;
 }
 
-// ── SDS scraping ─────────────────────────────────────────────────────────────
+// ── Shopify scraping (Strictly Broken TCG) ───────────────────────────────────
 
 const SDS_CODE_RE = /^(SDS\/[A-Z0-9]+-\d+[A-Za-z]?)/;
 const SDS_SUFFIX_RE = /\s*-\s*The Seven Deadly Sins.*$/i;
+const AOT_CODE_RE = /^(AOT\/[A-Z0-9]+-\d+[A-Za-z]?)/;
+const AOT_SUFFIX_RE = /\s*\(Foil\)\s*$/i;
 
-async function fetchSds() {
+async function fetchShopify(source, codeRe, suffixRe) {
   const products = [];
   for (let page = 1; page <= 10; page += 1) {
-    const res = await fetch(`${SDS_SOURCE}products.json?limit=250&page=${page}`, {
+    const res = await fetch(`${source}products.json?limit=250&page=${page}`, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; note-master-tcg-pack)' },
     });
     if (!res.ok) break;
@@ -81,8 +94,8 @@ async function fetchSds() {
   for (const p of products) {
     const price = Number(p.variants?.[0]?.price) || 0;
     const title = p.title || '';
-    const code = title.match(SDS_CODE_RE)?.[1] ?? '';
-    let name = title.replace(SDS_SUFFIX_RE, '').trim();
+    const code = title.match(codeRe)?.[1] ?? '';
+    let name = title.replace(suffixRe, '').trim();
     if (code && name.startsWith(code)) name = name.slice(code.length).replace(/^[\s:–-]+/, '');
     const img = p.images?.[0]?.src;
     if (!img || !name) continue;
@@ -96,6 +109,30 @@ async function fetchSds() {
     });
   }
   return cards;
+}
+
+async function fetchSds() {
+  return fetchShopify(SDS_SOURCE, SDS_CODE_RE, SDS_SUFFIX_RE);
+}
+
+// Attack on Titan — three foil sets merged into one collection.
+const AOT_SOURCES = [
+  'https://www.strictlybrokentcg.ca/collections/attack-on-titan-final-season-foils/',
+  'https://www.strictlybrokentcg.ca/collections/attack-on-titan-vol-1-foils/',
+  'https://www.strictlybrokentcg.ca/collections/attack-on-titan-vol-2-foils/',
+];
+
+async function fetchAot() {
+  const all = [];
+  for (const source of AOT_SOURCES) {
+    const cards = await fetchShopify(source, AOT_CODE_RE, AOT_SUFFIX_RE);
+    console.log(`[aot] ${cards.length} cards from ${new URL(source).pathname.split('/').pop()}`);
+    all.push(...cards);
+  }
+  // Dedupe by product id (a card can appear in more than one foil set page).
+  const seen = new Map();
+  for (const c of all) if (!seen.has(c.id)) seen.set(c.id, c);
+  return [...seen.values()];
 }
 
 // ── Pokémon (pokemontcg.io v2) — curated rare pool ───────────────────────────
@@ -230,6 +267,13 @@ const COLLECTIONS = [
     source: SDS_SOURCE,
     tiers: SDS_TIERS,
     fetch: fetchSds,
+  },
+  {
+    id: 'aot',
+    label: 'Attack on Titan',
+    source: AOT_SOURCES[0],
+    tiers: AOT_TIERS,
+    fetch: fetchAot,
   },
   {
     id: 'pokemon',
