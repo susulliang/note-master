@@ -242,15 +242,15 @@ export default function KnowledgeBaseTab() {
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {/* Kind selector */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {KIND_LABELS.map(({ key, label, hint }) => (
+        {KIND_LABELS.map(({ kind: k, label, hint }) => (
           <button
-            key={key}
+            key={k}
             type="button"
-            onClick={() => setKind(key)}
+            onClick={() => setKind(k)}
             title={hint}
             className={cn(
               'rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors',
-              kind === key
+              kind === k
                 ? 'border-sky-400/50 bg-sky-400/20 text-sky-300'
                 : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/70'
             )}

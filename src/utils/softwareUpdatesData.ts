@@ -174,7 +174,7 @@ export function loadSoftwareUpdatesIndex(): Promise<SoftwareUpdateEntry[]> {
       }
       const sources: Array<[string, string]> = [];
       if (d1.size === 0 && deleted.size === 0) {
-        sources.push(...bundled);
+        sources.push(...bundled.map(([key, raw]) => [key, raw] as [string, string]));
       } else {
         for (const [key, raw] of bundled) {
           const stem = key.split('/').pop()?.replace(/\.md$/, '') ?? key;
