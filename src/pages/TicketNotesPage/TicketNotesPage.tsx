@@ -826,6 +826,20 @@ export default function TicketNotesPage() {
   }, []);
   const effectiveScale: UiScale =
     uiScale === 'large' ? 'large' : windowWidth < NARROW_SCREEN_WIDTH ? 'small' : 'normal';
+  // Collapsed left rail — on narrower screens (<1024px) the pill rail auto-
+  // collapses into a glassmorphism circle so the canvas takes the full
+  // width; clicking the circle (or the rail's collapse button, in reverse)
+  // toggles it manually.
+  const [railCollapsed, setRailCollapsed] = useState(() =>
+    typeof window === 'undefined' ? false : window.innerWidth < 1024
+  );
+  useEffect(() => {
+    const apply = () => setRailCollapsed(window.innerWidth < 1024);
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, []);
+  const toggleRailCollapsed = useCallback(() => setRailCollapsed((v) => !v), []);
   const [history, setHistory] = useScopedState<NoteHistoryEntry[]>(
     'ecovacs_ticket_notes_history',
     []
@@ -2250,6 +2264,8 @@ Additional information (if needed): ${additional}`;
               dashEnabled={analyticsUnlocked || !!authPrivileges?.dash}
               trakEnabled={analyticsUnlocked || !!authPrivileges?.trak}
               railBottomSlotRef={setRailControlsSlot}
+              railCollapsed={railCollapsed}
+              onToggleRailCollapsed={toggleRailCollapsed}
               collapsedNodes={collapsedNodes}
               onToggleNodeCollapsed={handleToggleNodeCollapsed}
             />
@@ -2266,6 +2282,7 @@ Additional information (if needed): ${additional}`;
           <RailControls
             theme={theme}
             onCycleTheme={handleCycleTheme}
+            onCollapseRail={() => setRailCollapsed(true)}
             historyOpen={showHistory}
             onToggleHistory={handleToggleHistory}
             history={history}

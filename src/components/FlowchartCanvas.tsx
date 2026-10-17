@@ -1,5 +1,5 @@
 import { lazy, Suspense, memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
-import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, Users, type LucideIcon } from 'lucide-react';
+import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, Users, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -123,6 +123,12 @@ interface FlowchartCanvasProps {
    *  (History/Reset/Boxes/Mic/Type/Settings/Theme) into it — they render
    *  inside the unified pill without breaking FlowchartCanvas memoization. */
   railBottomSlotRef?: React.Ref<HTMLDivElement>;
+  /** Collapsed-rail mode: the tall pill rail shrinks into a small glass
+   *  circle (top-left) and the canvas reflows to use the full width.
+   *  Clicking the circle re-expands the rail (auto-engaged on narrow
+   *  screens by the page via matchMedia). */
+  railCollapsed?: boolean;
+  onToggleRailCollapsed?: () => void;
   /** Progressive disclosure: node ids currently rendered collapsed to their
    *  one-line toggle (e.g. Shipping Address until an address is parsed or a
    *  replacement resolution is chosen). */
@@ -272,7 +278,8 @@ function computeDefaultLayout(
   canvasWidth: number,
   heightOf: (n: NodeConfig) => number,
   hiddenNodes: Set<string> | undefined,
-  widthOverrides: Record<string, number>
+  widthOverrides: Record<string, number>,
+  railReserved: number = LEFT_RAIL_RESERVED
 ): Record<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const positions: Record<string, { x: number; y: number }> = {};
@@ -302,7 +309,7 @@ function computeDefaultLayout(
   // Resolve width for node math inside the layout engine.
   const nodeWidth = (n: NodeConfig): number => widthOverrides[n.id] ?? n.width ?? 240;
 
-  let mainAvailLeft = CANVAS_MARGIN + LEFT_RAIL_RESERVED;
+  let mainAvailLeft = CANVAS_MARGIN + railReserved;
   const mainMaxRight = canvasWidth - CANVAS_MARGIN;
   if (isWide) {
     const leftColPx = widthOverrides[LEFT_COL_IDS[0]] ?? 700;
@@ -438,10 +445,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   dashEnabled,
   trakEnabled,
   railBottomSlotRef,
+  railCollapsed = false,
+  onToggleRailCollapsed,
   collapsedNodes,
   onToggleNodeCollapsed,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
+  /** Left space the flow layout must reserve for the rail — 0 when the rail
+   *  is collapsed into the corner circle so the canvas uses the full width. */
+  const railReserved = railCollapsed ? 0 : LEFT_RAIL_RESERVED;
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
   // Work-view pills shown in the rail. Case Trak + KPI Dashboard are hidden
@@ -637,7 +649,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   // widest natural width so the grid looks balanced (no ragged right edges
   // inside a group). Left-column panels are excluded.
   const effectiveNodes = useMemo(() => {
-    const avail = Math.max(140, layoutContainerWidth - CANVAS_MARGIN * 2 - LEFT_RAIL_RESERVED);
+    const avail = Math.max(140, layoutContainerWidth - CANVAS_MARGIN * 2 - railReserved);
     const clamped = nodes
       // Pull-tab panels are rendered in their own floating layer, never in
       // the main flow grid.
@@ -668,7 +680,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       const u = uniformById.get(n.id);
       return u && u !== n.width ? { ...n, width: u } : n;
     });
-  }, [nodes, layoutContainerWidth, hiddenNodes, widthOverrides, isWideLayout]);
+  }, [nodes, layoutContainerWidth, hiddenNodes, widthOverrides, isWideLayout, railReserved]);
 
   // Measured height with estimate fallback
   const heightOf = useCallback(
@@ -678,8 +690,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
 
   // Responsive default layout; stored positions (user drags) take precedence
   const defaultLayout = useMemo(
-    () => computeDefaultLayout(effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides),
-    [effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides]
+    () => computeDefaultLayout(effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides, railReserved),
+    [effectiveNodes, layoutContainerWidth, heightOf, hiddenNodes, widthOverrides, railReserved]
   );
 
   const effectivePositions = useMemo(() => {
@@ -940,7 +952,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               // under the left-edge pill rail (the centering `extra` can push
               // narrower groups further left than their content). Rail right
               // edge = left-3 (12px) + w-16 (64px) = 76px; +8px air gap.
-              const bx = Math.max(LEFT_RAIL_WIDTH + 20, minX - padX - extra);
+              // Collapsed rail: only the small corner circle floats here.
+              const bx = Math.max(railCollapsed ? 20 : LEFT_RAIL_WIDTH + 20, minX - padX - extra);
               const by = minY - padTop;
               const bw = commonWidth + padX * 2;
               const bh = maxY - minY + padTop + padBottom;
@@ -1054,7 +1067,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           canvas height/width via h-full on the min-h-full anchor.
           Hidden analytics view: only rendered when unlocked (Shift+D). */}
       {activeView === 'caseTrak' && (trakEnabled ?? analyticsEnabled) && (
-        <div className="h-full min-h-full w-full pl-[92px]">
+        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
           {caseTrakContent}
         </div>
       )}
@@ -1062,7 +1075,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Self Test workspace — weekly news knowledge quizzes. Always
           available from the left rail, directly under Notes. */}
       {activeView === 'selfTest' && (
-        <div className="h-full min-h-full w-full pl-[92px]">
+        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
           {selfTestContent}
         </div>
       )}
@@ -1071,7 +1084,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           Salesforce dashboard snapshot. Hidden analytics view: only rendered
           when unlocked (Shift+D). Same full-canvas layout as Trak. */}
       {activeView === 'dash' && (dashEnabled ?? analyticsEnabled) && (
-        <div className="h-full min-h-full w-full pl-[92px]">
+        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
           {dashContent}
         </div>
       )}
@@ -1079,7 +1092,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Shifts workspace — agent roster (hidden work view; unlocked with
           Shift+S). Same full-canvas layout as the Case Trak board. */}
       {activeView === 'shifts' && (
-        <div className="h-full min-h-full w-full pl-[92px]">
+        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
           {shiftsContent}
         </div>
       )}
@@ -1088,7 +1101,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           a walk-around canvas world with NPC chit-chat, admin banners and
           personal showcase stubs. */}
       {activeView === 'commune' && communeEnabled && (
-        <div className="h-full min-h-full w-full pl-[92px]">
+        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
           {communeContent}
         </div>
       )}
@@ -1102,7 +1115,23 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               ancestor would trap them).
             • rounded-full on a tall narrow bar = half-circle caps top and
               bottom; a right-biased layered shadow "casts" the pill onto
-              the canvas for the protruded look. */}
+              the canvas for the protruded look.
+            • Collapsed (narrow screens / manual collapse button): the whole
+              pill shrinks into a small glassmorphism circle in the top-left
+              corner; clicking it re-expands the rail. */}
+        {railCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleRailCollapsed}
+            title="Expand menu"
+            aria-label="Expand menu"
+            className="fixed left-3 top-3 z-40 flex size-14 animate-in items-center justify-center rounded-full border-[1.5px] border-foreground/15 bg-card/75 text-muted-foreground shadow-[inset_0_1.5px_0_rgba(255,255,255,0.22),inset_0_-1.5px_0_rgba(255,255,255,0.07),3px_3px_14px_-3px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150 transition-all duration-300 fade-in zoom-in-90 hover:scale-110 hover:text-foreground hover:shadow-[inset_0_1.5px_0_rgba(255,255,255,0.26),inset_0_-1.5px_0_rgba(255,255,255,0.09),5px_5px_20px_-4px_rgba(0,0,0,0.4)] active:scale-95"
+            style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}
+          >
+            <PanelLeftOpen className="size-5" />
+          </button>
+        )}
+        {!railCollapsed && (
         <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]" style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}>
           {/* Glass background layer — carries all surface styling.
               Idle: subtle shadow only; hover (on the outer container, via
@@ -1307,6 +1336,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             <div ref={railBottomSlotRef} className="flex shrink-0 flex-col items-center" />
           </div>
         </div>
+        )}
 
         {/* Pull-tab panels — ALL are kept mounted (collapsed ones get
             display:none) so their data loads on page render instead of
@@ -1315,7 +1345,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             mounted so e.g. the Product Lookup index is ready instantly.
             Offset to the right of the unified full-height rail (left-3 +
             w-16 = 76px right edge; 12px breathing gap). */}
-        <div className="absolute left-[88px] top-4 z-30">
+        <div className={`absolute top-4 z-30 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
           {(() => {
             const gap = 16;
             let cursorY = 0;
@@ -1491,7 +1521,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setAppPhotosOpen(false)}
               aria-hidden="true"
             />
-            <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
+            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
               </Suspense>
@@ -1508,7 +1538,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setQaOpen(false)}
               aria-hidden="true"
             />
-            <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
+            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <QaPanel onClose={() => setQaOpen(false)} />
               </Suspense>
@@ -1525,7 +1555,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setManualsOpen(false)}
               aria-hidden="true"
             />
-            <div className="fixed left-[88px] top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200">
+            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <ManualsPanel onClose={() => setManualsOpen(false)} />
               </Suspense>

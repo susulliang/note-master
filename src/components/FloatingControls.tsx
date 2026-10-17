@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Settings, Type } from 'lucide-react';
+import { History, PanelLeftClose, Settings, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HistoryPanel from '@/components/HistoryPanel';
 import EngineSettingsPanel, {
@@ -59,6 +59,9 @@ interface RailControlsProps {
   onOpenAuth?: () => void;
   /** Opens the Shift+A admin panel (Settings → Account → Admin badge). */
   onOpenAdmin?: () => void;
+  /** Collapse the left rail pill into its glass circle (hidden while
+   *  collapsed — the rail is unmounted then). */
+  onCollapseRail?: () => void;
 }
 
 /** Round icon button shared by every rail control — springy hover/active. */
@@ -104,6 +107,7 @@ export default function RailControls({
   keywordAlertSource,
   onOpenAuth,
   onOpenAdmin,
+  onCollapseRail,
 }: RailControlsProps) {
   const themeMeta = getThemeMeta(theme);
   const ThemeIcon = themeMeta.icon;
@@ -178,6 +182,22 @@ export default function RailControls({
         >
           <ThemeIcon className="size-[18px] transition-transform duration-300 hover:scale-110" />
         </Button>
+
+        {/* Collapse the rail into its glass circle (narrow screens /
+            extra canvas room). Hidden while collapsed — the whole rail
+            unmounts then. */}
+        {onCollapseRail && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCollapseRail}
+            className={RAIL_BTN}
+            aria-label="Collapse menu"
+            title="Collapse menu — click the circle to reopen"
+          >
+            <PanelLeftClose className="size-[18px]" />
+          </Button>
+        )}
       </div>
 
       {historyOpen && (
