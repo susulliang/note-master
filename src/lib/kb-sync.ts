@@ -207,14 +207,24 @@ export async function exportKbToR2(
     let sourceExported = 0;
     let sourceTotal: number | null = null;
     let cursor = '';
-    for (let page = 0; page < 500; page++) {
+    let limit = 40;
+    // Adaptive page size: a page whose D1 rows exceed D1's response-size cap
+    // (dense clusters of large documents) fails with a 500 — retry the same
+    // cursor with a smaller page until it fits.
+    for (let page = 0; page < 5000; page++) {
       try {
         const res = await fetch(`${getApiBase()}/api/kb/export-r2`, {
           method: 'POST',
           headers: kbHeaders(token),
-          body: JSON.stringify({ source, ...(cursor ? { cursor } : {}) }),
+          body: JSON.stringify({ source, ...(cursor ? { cursor } : {}), limit }),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (res.status >= 500 && limit > 1) {
+            limit = Math.max(1, Math.floor(limit / 4));
+            continue;
+          }
+          return null;
+        }
         const payload = (await res.json()) as {
           exported?: number;
           total?: number;
