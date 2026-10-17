@@ -47,13 +47,46 @@ import ChallengePanel from '@/components/ChallengePanel';
 
 const WORLD_W = 1600;
 const WORLD_H = 1200;
+const GMT8_OFFSET_MS = 8 * 60 * 60 * 1000;
 const PLAZA = { x: 800, y: 620, r: 300 };
 const FOUNTAIN = { x: 800, y: 600, r: 96 }; // collision circle
 const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
+
+function smoothStep(edge0: number, edge1: number, value: number): number {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Nightfall follows a fixed GMT+8 clock, independent of the viewer's locale. */
+function getNightOpacity(timestamp: number): number {
+  const gmt8 = new Date(timestamp + GMT8_OFFSET_MS);
+  const hour = gmt8.getUTCHours() + gmt8.getUTCMinutes() / 60;
+  const daylight = smoothStep(5.5, 7.25, hour) * (1 - smoothStep(17.5, 19.25, hour));
+  return (1 - daylight) * 0.54;
+}
+
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
 type PanelKind = PropPanelKind | 'loadout' | 'agent' | null;
+
+type CommuneAction =
+  | { type: 'stand'; key: 'E'; label: string }
+  | { type: 'challenge'; key: 'E'; label: string; personaId: string }
+  | { type: 'message-agent'; key: 'E'; label: string; username: string }
+  | { type: 'hold-hands'; key: 'H'; label: string; username: string }
+  | { type: 'release-hands'; key: 'H'; label: string; username: string }
+  | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
+  | { type: 'fountain'; key: 'E'; label: string }
+  | { type: 'pond'; key: 'E'; label: string }
+  | { type: 'prop'; key: 'E'; label: string; panel: PropPanelKind };
+
+interface FocusedNpc {
+  personaId: string;
+  name: string;
+  x: number;
+  y: number;
+}
 
 interface CommuneProp {
   kind: PropPanelKind;
@@ -198,13 +231,14 @@ const AVATAR_SWATCHES = [
   '#6b7280', '#111318',
 ];
 
-/** Standing challenge NPCs — walk up and press E to start their chat.
+/** Standing challenge NPCs — walk up and use the shared Talk action.
  *  Each runs its own persona (worker/npc/*.json, see npc-personas.ts). */
 const CHALLENGE_NPCS = [
   { personaId: 'gb_poolius', name: 'GB Poolius', hue: 0, x: 1200, y: 800 },
   { personaId: 'topus_hundrius', name: 'Topus Hundrius', hue: 45, x: 960, y: 800 },
 ];
 const CHALLENGE_INTERACT_RANGE = 92;
+const CHALLENGE_HIT_RADIUS = 46;
 
 const NPC_LINES = [
   'Fresh banners on the board!',
@@ -372,13 +406,16 @@ export default function CommunePanel() {
   const shakeUntilRef = useRef(0);
   /** Bench seat we're sitting on (null = standing). */
   const sittingRef = useRef<{ x: number; y: number } | null>(null);
+  const [nearbyActions, setNearbyActions] = useState<CommuneAction[]>([]);
+  const nearbyActionsRef = useRef<CommuneAction[]>([]);
+  const [focusedNpc, setFocusedNpc] = useState<FocusedNpc | null>(null);
+  const focusedNpcRef = useRef<FocusedNpc | null>(null);
+  const [touchControls, setTouchControls] = useState(false);
+  const [movePadOpen, setMovePadOpen] = useState(false);
+  const canvasPointerRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
   const [chatFocused, setChatFocused] = useState(false);
-  const [prompt, setPrompt] = useState<string | null>(null);
-  /** Secondary keyboard tip (H — hold hands) shown beside the E prompt. */
-  const [hTip, setHTip] = useState<string | null>(null);
-  const hTipRef = useRef<string | null>(null);
 
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
   playerRef.current.name = username;
@@ -394,7 +431,6 @@ export default function CommunePanel() {
   const panelRef = useRef<PanelKind>(null);
   panelRef.current = panel;
   const chatFocusedRef = useRef(false);
-  const promptRef = useRef<string | null>(null);
 
   /* ── live presence (other agents) ─────────────────────────────────────────── */
   const [others, setOthers] = useState<CommuneAgent[]>([]);
@@ -429,6 +465,23 @@ export default function CommunePanel() {
     } catch {
       return false;
     }
+  }, []);
+
+  const publishNearbyActions = useCallback((actions: CommuneAction[]) => {
+    const signature = (items: CommuneAction[]) => JSON.stringify(items);
+    if (signature(nearbyActionsRef.current) === signature(actions)) return;
+    nearbyActionsRef.current = actions;
+    setNearbyActions(actions);
+  }, []);
+
+  useEffect(() => {
+    const coarsePointer = window.matchMedia('(pointer: coarse)');
+    const updateTouchMode = () => {
+      setTouchControls(coarsePointer.matches || navigator.maxTouchPoints > 0);
+    };
+    updateTouchMode();
+    coarsePointer.addEventListener('change', updateTouchMode);
+    return () => coarsePointer.removeEventListener('change', updateTouchMode);
   }, []);
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
@@ -773,6 +826,101 @@ export default function CommunePanel() {
     return () => window.clearTimeout(timer);
   }, [loadout]);
 
+  const executeInteraction = useCallback((action: CommuneAction, direct = false) => {
+    if (panelRef.current) return;
+    if (!direct) {
+      const player = playerRef.current;
+      const inRange = (() => {
+        switch (action.type) {
+          case 'stand':
+            return !!sittingRef.current;
+          case 'challenge': {
+            const npc = CHALLENGE_NPCS.find((item) => item.personaId === action.personaId);
+            return !!npc && Math.hypot(player.x - npc.x, player.y - npc.y) < CHALLENGE_INTERACT_RANGE;
+          }
+          case 'message-agent': {
+            const remote = remoteRef.current.get(action.username);
+            return !!remote && Math.hypot(player.x - remote.rx, player.y - remote.ry) < 64;
+          }
+          case 'hold-hands': {
+            const remote = remoteRef.current.get(action.username);
+            return !handsRef.current && !!remote && Math.hypot(player.x - remote.rx, player.y - remote.ry) < 90;
+          }
+          case 'release-hands':
+            return handsRef.current?.partner === action.username;
+          case 'sit':
+            return BENCHES.some(([x, y]) => x === action.x && y === action.y)
+              && Math.hypot(player.x - action.x, player.y - action.y) < BENCH_RANGE;
+          case 'fountain':
+            return Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
+          case 'pond':
+            return Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE
+              && Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) >= FOUNTAIN_RANGE;
+          case 'prop': {
+            const prop = COMMUNE_PROPS.find((item) => item.kind === action.panel);
+            return !!prop && Math.hypot(player.x - prop.x, player.y - prop.y) <= prop.range;
+          }
+        }
+      })();
+      if (!inRange) return;
+    }
+    clickTargetRef.current = null;
+    switch (action.type) {
+      case 'stand':
+        sittingRef.current = null;
+        focusedNpcRef.current = null;
+        setFocusedNpc(null);
+        return;
+      case 'challenge':
+        focusedNpcRef.current = null;
+        setFocusedNpc(null);
+        setChallengePersona(action.personaId);
+        setPanel('challenges');
+        return;
+      case 'message-agent':
+        setMessaging(action.username);
+        sendRoomEvent({ type: 'interaction', target: action.username, kind: 'bump' });
+        window.requestAnimationFrame(() => chatInputRef.current?.focus());
+        return;
+      case 'hold-hands':
+        handsRef.current = { partner: action.username, lead: true };
+        setHands(handsRef.current);
+        sendRoomEvent({ type: 'interaction', target: action.username, kind: 'hands' });
+        return;
+      case 'release-hands':
+        handsRef.current = null;
+        setHands(null);
+        sendRoomEvent({ type: 'interaction', target: action.username, kind: 'hands_release' });
+        return;
+      case 'sit':
+        sittingRef.current = { x: action.x, y: action.y - 2 };
+        return;
+      case 'fountain':
+        playerRef.current.says = {
+          text: FORTUNES[Math.floor(Math.random() * FORTUNES.length)],
+          until: Date.now() + 4500,
+        };
+        return;
+      case 'pond': {
+        const now = Date.now();
+        for (let i = 0; i < 3; i++) {
+          ducksRef.current.push({
+            x: POND_C.x + 70,
+            y: POND_C.y - 30 + i * 30,
+            vx: -26,
+            phase: i * 2.1,
+            until: now + DUCK_LIFE_MS,
+          });
+        }
+        playerRef.current.says = { text: 'Here ducky ducky… 🍞', until: now + 3500 };
+        return;
+      }
+      case 'prop':
+        setPanel(action.panel);
+        return;
+    }
+  }, [sendRoomEvent]);
+
   /* ── input ───────────────────────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -786,116 +934,29 @@ export default function CommunePanel() {
         return;
       }
       if (isTypingTarget(e.target)) return;
-      if (e.code === 'KeyE') {
+      if (e.code === 'KeyE' || e.code === 'KeyH') {
         if (panelRef.current) return;
-        // Standing up from a bench comes first.
-        if (sittingRef.current) {
+        if (e.repeat) return;
+        const action = nearbyActionsRef.current.find((candidate) => candidate.key === (e.code === 'KeyE' ? 'E' : 'H'));
+        if (action) {
           e.preventDefault();
-          sittingRef.current = null;
-          return;
-        }
-        // Talk to the nearest challenge NPC first.
-        const p = playerRef.current;
-        const npc = CHALLENGE_NPCS.find((c) => Math.hypot(p.x - c.x, p.y - c.y) < CHALLENGE_INTERACT_RANGE);
-        if (npc) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          setChallengePersona(npc.personaId);
-          setPanel('challenges');
-          return;
-        }
-        // Bump into the nearest agent — opens a direct chat + shakes their screen.
-        let bumpName: string | null = null;
-        let bumpDist = 64;
-        for (const r of remoteRef.current.values()) {
-          const d = Math.hypot(p.x - r.rx, p.y - r.ry);
-          if (d < bumpDist) {
-            bumpDist = d;
-            bumpName = r.agent.username;
-          }
-        }
-        if (bumpName) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          setMessaging(bumpName);
-          sendRoomEvent({ type: 'interaction', target: bumpName, kind: 'bump' });
-          return;
-        }
-        // Sit on a bench.
-        const bench = BENCHES.find(([bx, by]) => Math.hypot(p.x - bx, p.y - by) < BENCH_RANGE);
-        if (bench) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          sittingRef.current = { x: bench[0], y: bench[1] - 2 };
-          return;
-        }
-        // Toss a coin into the fountain.
-        if (Math.hypot(p.x - FOUNTAIN.x, p.y - FOUNTAIN.y) < FOUNTAIN_RANGE) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          playerRef.current.says = {
-            text: FORTUNES[Math.floor(Math.random() * FORTUNES.length)],
-            until: Date.now() + 4500,
-          };
-          return;
-        }
-        // Feed the pond ducks.
-        if (Math.hypot(p.x - POND_C.x, p.y - POND_C.y) < POND_RANGE) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          const now = Date.now();
-          for (let i = 0; i < 3; i++) {
-            ducksRef.current.push({
-              x: POND_C.x + 70,
-              y: POND_C.y - 30 + i * 30,
-              vx: -26,
-              phase: i * 2.1,
-              until: now + DUCK_LIFE_MS,
-            });
-          }
-          playerRef.current.says = { text: 'Here ducky ducky… 🍞', until: now + 3500 };
-          return;
-        }
-        // Interact with the nearest prop.
-        const near = proximity(p.x, p.y);
-        if (near) {
-          e.preventDefault();
-          clickTargetRef.current = null;
-          setPanel(near);
+          executeInteraction(action);
         }
         return;
       }
-      if (e.code === 'KeyH') {
-        if (panelRef.current) return;
-        const held = handsRef.current;
-        if (held) {
-          // Release — either partner can let go.
-          handsRef.current = null;
-          setHands(null);
-          sendRoomEvent({ type: 'interaction', target: held.partner, kind: 'hands_release' });
-        } else {
-          // Hold hands with the nearest agent (first presser leads).
-          const p = playerRef.current;
-          let partner: string | null = null;
-          let pd = 90;
-          for (const r of remoteRef.current.values()) {
-            const d = Math.hypot(p.x - r.rx, p.y - r.ry);
-            if (d < pd) {
-              pd = d;
-              partner = r.agent.username;
-            }
-          }
-          if (partner) {
-            handsRef.current = { partner, lead: true };
-            setHands(handsRef.current);
-            sendRoomEvent({ type: 'interaction', target: partner, kind: 'hands' });
-          }
-        }
+      if (e.code === 'Escape' && focusedNpcRef.current) {
+        clickTargetRef.current = null;
+        focusedNpcRef.current = null;
+        setFocusedNpc(null);
         return;
       }
       if (panelRef.current) return; // walking disabled while a panel is open
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
         if (sittingRef.current) sittingRef.current = null; // moving stands up
+        if (focusedNpcRef.current) {
+          focusedNpcRef.current = null;
+          setFocusedNpc(null);
+        }
         keysRef.current.add(e.code);
       }
     };
@@ -906,9 +967,9 @@ export default function CommunePanel() {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
-  }, []);
+  }, [executeInteraction]);
 
-  /** Nearest interactable within range; keeps prompts and E behavior aligned. */
+  /** Nearest interactable within range. */
   const nearestProp = (x: number, y: number) => {
     let nearest: CommuneProp | null = null;
     let nearestDistance = Infinity;
@@ -921,8 +982,6 @@ export default function CommunePanel() {
     }
     return nearest;
   };
-
-  const proximity = (x: number, y: number): PropPanelKind | null => nearestProp(x, y)?.kind ?? null;
 
   /* ── main loop ───────────────────────────────────────────────────────────── */
 
@@ -952,6 +1011,8 @@ export default function CommunePanel() {
     let last = performance.now();
     let lastFrame = 0;
     let cameraReady = false;
+    let lightingMinute = -1;
+    let nightOpacity = 0;
     const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduceMotion = reduceMotionQuery.matches;
     const petFollowers = new Map<string, PetFollower>();
@@ -959,9 +1020,15 @@ export default function CommunePanel() {
     const step = (now: number) => {
       raf = 0;
       if (document.hidden) return;
-      if (now - lastFrame < 1000 / 40) {
+      if (now - lastFrame < 1000 / 30) {
         raf = requestAnimationFrame(step);
         return;
+      }
+      const wallNow = Date.now();
+      const minute = Math.floor(wallNow / 60_000);
+      if (minute !== lightingMinute) {
+        lightingMinute = minute;
+        nightOpacity = getNightOpacity(wallNow);
       }
       const dt = Math.min(0.04, (now - last) / 1000);
       last = now;
@@ -983,7 +1050,6 @@ export default function CommunePanel() {
         if (leader) {
           const tx = leader.rx - 22;
           const ty = leader.ry + 6;
-          const d = Math.hypot(tx - player.x, ty - player.y);
           // Smooth hard-pull (no collision — we're in the leader's walkable
           // space) so the two read as locked side by side.
           const k = 1 - Math.exp(-dt * 9);
@@ -1082,57 +1148,83 @@ export default function CommunePanel() {
         cam.y += (targetY - cam.y) * follow;
       }
 
-      /* interactable prompt + my status line */
+      /* Resolve keyboard and touch actions from the same nearby target list. */
+      const focused = focusedNpcRef.current;
+      const focusedChallenge = focused
+        ? CHALLENGE_NPCS.find((npc) => npc.personaId === focused.personaId) ?? null
+        : null;
+      const focusedDistance = focusedChallenge
+        ? Math.hypot(player.x - focusedChallenge.x, player.y - focusedChallenge.y)
+        : Infinity;
+      const nearestChallenge = CHALLENGE_NPCS
+        .map((npc) => ({ npc, distance: Math.hypot(player.x - npc.x, player.y - npc.y) }))
+        .filter(({ distance }) => distance < CHALLENGE_INTERACT_RANGE)
+        .sort((a, b) => a.distance - b.distance)[0]?.npc ?? null;
+      const nearChallengeNpc = focusedChallenge && focusedDistance < CHALLENGE_INTERACT_RANGE
+        ? focusedChallenge
+        : nearestChallenge;
       const nearProp = nearestProp(player.x, player.y);
-      const nearChallengeNpc = CHALLENGE_NPCS.find(
-        (c) => Math.hypot(player.x - c.x, player.y - c.y) < CHALLENGE_INTERACT_RANGE
-      );
-      let nearAgentName: string | null = null;
-      if (!nearChallengeNpc) {
-        let ad = 64;
-        for (const r of remoteRef.current.values()) {
-          const d = Math.hypot(player.x - r.rx, player.y - r.ry);
-          if (d < ad) {
-            ad = d;
-            nearAgentName = r.agent.username;
-          }
+      let nearAgent: { username: string; distance: number } | null = null;
+      let handAgent: { username: string; distance: number } | null = null;
+      for (const remote of remoteRef.current.values()) {
+        const distance = Math.hypot(player.x - remote.rx, player.y - remote.ry);
+        if (distance < 64 && (!nearAgent || distance < nearAgent.distance)) {
+          nearAgent = { username: remote.agent.username, distance };
+        }
+        if (distance < 90 && (!handAgent || distance < handAgent.distance)) {
+          handAgent = { username: remote.agent.username, distance };
         }
       }
       const held = handsRef.current;
-      const nearBench = !sittingRef.current && BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE);
+      const nearBench = !sittingRef.current
+        ? BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE)
+        : undefined;
       const nearFountain = Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
       const nearPond = !nearFountain && Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE;
-      const nextPrompt = sittingRef.current
-        ? 'E  Stand up'
-        : held
-          ? `H  Let go of ${held.partner}'s hand`
-          : nearChallengeNpc
-            ? `E  Talk to ${nearChallengeNpc.name}`
-            : nearAgentName
-              ? `E  Bump into ${nearAgentName}`
-              : nearBench
-                ? 'E  Sit on the bench'
-                : nearFountain
-                  ? 'E  Toss a coin into the fountain'
-                  : nearPond
-                    ? 'E  Feed the ducks'
-                    : nearProp
-                      ? `E  ${nearProp.label}`
-                      : null;
-      if (promptRef.current !== nextPrompt) {
-        promptRef.current = nextPrompt;
-        setPrompt(nextPrompt);
+      const actions: CommuneAction[] = [];
+
+      if (sittingRef.current) {
+        actions.push({ type: 'stand', key: 'E', label: 'Stand up' });
+      } else if (nearChallengeNpc) {
+        actions.push({
+          type: 'challenge',
+          key: 'E',
+          label: `Talk to ${nearChallengeNpc.name}`,
+          personaId: nearChallengeNpc.personaId,
+        });
+      } else if (nearAgent) {
+        actions.push({
+          type: 'message-agent',
+          key: 'E',
+          label: `Say hi to ${nearAgent.username}`,
+          username: nearAgent.username,
+        });
+      } else if (nearBench) {
+        actions.push({ type: 'sit', key: 'E', label: 'Sit on the bench', x: nearBench[0], y: nearBench[1] });
+      } else if (nearFountain) {
+        actions.push({ type: 'fountain', key: 'E', label: 'Toss a coin into the fountain' });
+      } else if (nearPond) {
+        actions.push({ type: 'pond', key: 'E', label: 'Feed the ducks' });
+      } else if (nearProp) {
+        actions.push({ type: 'prop', key: 'E', label: nearProp.label, panel: nearProp.kind });
       }
-      // The H tip shows beside the E tip whenever an agent is in reach.
-      const nextHTip = held
-        ? null // the prompt itself is the H tip while holding hands
-        : nearAgentName
-          ? `H  Hold hands with ${nearAgentName}`
-          : null;
-      if (hTipRef.current !== nextHTip) {
-        hTipRef.current = nextHTip;
-        setHTip(nextHTip);
+
+      if (held) {
+        actions.push({
+          type: 'release-hands',
+          key: 'H',
+          label: `Let go of ${held.partner}`,
+          username: held.partner,
+        });
+      } else if (handAgent) {
+        actions.push({
+          type: 'hold-hands',
+          key: 'H',
+          label: `Hold hands with ${handAgent.username}`,
+          username: handAgent.username,
+        });
       }
+      publishNearbyActions(actions);
       const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.says
         ? 'chatting'
@@ -1154,7 +1246,6 @@ export default function CommunePanel() {
               ? 'resting by the fountain'
               : 'hanging out';
 
-      const wallNow = Date.now();
       const statusChanged = statusRef.current !== lastPositionStatusRef.current;
       if (
         (player.moving && wallNow - lastPositionSentAtRef.current >= 100) ||
@@ -1223,7 +1314,7 @@ export default function CommunePanel() {
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
-      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, clickTargetRef.current, dropsRef.current, ducksRef.current);
+      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, nightOpacity, clickTargetRef.current, dropsRef.current, ducksRef.current);
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -1247,27 +1338,41 @@ export default function CommunePanel() {
       reduceMotionQuery.removeEventListener('change', onMotionChange);
       ro.disconnect();
     };
-  }, [banners, sendRoomEvent]);
+  }, [banners, publishNearbyActions, sendRoomEvent]);
 
-  /* ── canvas click → interact or walk ─────────────────────────────────────── */
+  /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
-  const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (panel) return;
+  const handleCanvasTap = (clientX: number, clientY: number) => {
+    if (panelRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const wx = e.clientX - rect.left + camRef.current.x;
-    const wy = e.clientY - rect.top + camRef.current.y;
-    // Clicking to walk stands up from a bench.
-    if (sittingRef.current) {
-      sittingRef.current = null;
+    const wx = clientX - rect.left + camRef.current.x;
+    const wy = clientY - rect.top + camRef.current.y;
+    // A target tap also stands the player up before selecting the target.
+    if (sittingRef.current) sittingRef.current = null;
+    const challengeNpc = CHALLENGE_NPCS.find(
+      (npc) => Math.hypot(wx - npc.x, wy - (npc.y - 30)) < CHALLENGE_HIT_RADIUS
+    );
+    if (challengeNpc) {
+      const focus = { ...challengeNpc };
+      focusedNpcRef.current = focus;
+      setFocusedNpc(focus);
+      const player = playerRef.current;
+      if (Math.hypot(player.x - focus.x, player.y - focus.y) < CHALLENGE_INTERACT_RANGE - 12) {
+        clickTargetRef.current = null;
+      } else {
+        clickTargetRef.current = approachPoint(focus.x, focus.y, player.x, player.y);
+      }
       return;
     }
     // Clicking another agent opens their card (loadout: phrase, cards, pet).
     for (const r of remoteRef.current.values()) {
       if (Math.hypot(wx - r.rx, wy - (r.ry - 30)) < 42) {
         const agent = others.find((o) => o.username === r.agent.username) ?? r.agent;
-    clickTargetRef.current = null;
+        clickTargetRef.current = null;
+        focusedNpcRef.current = null;
+        setFocusedNpc(null);
         setSelected(agent);
         setPanel('agent');
         return;
@@ -1279,10 +1384,48 @@ export default function CommunePanel() {
     );
     if (hitProp) {
       clickTargetRef.current = null;
-      setPanel(hitProp.kind);
+      focusedNpcRef.current = null;
+      setFocusedNpc(null);
+      executeInteraction({ type: 'prop', key: 'E', label: hitProp.label, panel: hitProp.kind }, true);
       return;
     }
+    focusedNpcRef.current = null;
+    setFocusedNpc(null);
     clickTargetRef.current = { x: wx, y: wy };
+  };
+
+  const onCanvasPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    canvasPointerRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onCanvasPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const pointer = canvasPointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
+    pointer.moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12;
+  };
+
+  const onCanvasPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const pointer = canvasPointerRef.current;
+    canvasPointerRef.current = null;
+    if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
+    handleCanvasTap(event.clientX, event.clientY);
+  };
+
+  const onCanvasPointerCancel = () => {
+    canvasPointerRef.current = null;
+  };
+
+  const onCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    // Pointer events handle mouse and touch; keep click-only keyboard activation.
+    if (event.detail !== 0) return;
+    handleCanvasTap(event.clientX, event.clientY);
   };
 
   const speak = () => {
@@ -1310,18 +1453,35 @@ export default function CommunePanel() {
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
-  const panelPosition = panel === 'loadout'
-    ? 'right-4 top-4 z-20'
-    : 'left-1/2 top-14 z-30 -translate-x-1/2';
+  const panelPosition = touchControls
+    ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
+    : panel === 'loadout'
+      ? 'right-4 top-4 z-20'
+      : 'left-1/2 top-14 z-30 -translate-x-1/2';
+  const primaryAction = nearbyActions.find((action) => action.key === 'E');
+  const secondaryAction = nearbyActions.find((action) => action.key === 'H');
+  const focusedNpcIsReady = !!focusedNpc && nearbyActions.some(
+    (action) => action.type === 'challenge' && action.personaId === focusedNpc.personaId
+  );
+  const moveDirections = [
+    null, { code: 'ArrowUp', label: 'Move up' }, null,
+    { code: 'ArrowLeft', label: 'Move left' }, null, { code: 'ArrowRight', label: 'Move right' },
+    null, { code: 'ArrowDown', label: 'Move down' }, null,
+  ];
 
   return (
     <div ref={wrapRef} className="relative h-full min-h-full w-full overflow-hidden bg-[#607c61]">
       <canvas
         ref={canvasRef}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
+        onPointerCancel={onCanvasPointerCancel}
         onClick={onCanvasClick}
         className="absolute inset-0 cursor-crosshair outline-none"
         role="application"
-        aria-label="COMMUNE town square. Click to walk, use WASD or arrow keys, and press E near a place to interact."
+        aria-label="COMMUNE town square. Tap or click the ground to walk. Use the nearby action buttons, or WASD, arrow keys, E, and H."
+        style={{ touchAction: 'manipulation' }}
         tabIndex={0}
       />
 
@@ -1340,22 +1500,129 @@ export default function CommunePanel() {
         </span>
       </div>
 
-      {/* Interaction prompt (+ secondary H tip) */}
-      {(prompt || hTip) && !panel && (
-        <div className="pointer-events-none absolute bottom-[4.75rem] left-1/2 flex -translate-x-1/2 items-center gap-2 animate-in fade-in">
-          {prompt && (
-            <span className="rounded-xl border border-primary/40 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
-              <kbd className="mr-2 rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">
-                {prompt.startsWith('H') ? 'H' : 'E'}
-              </kbd>
-              {prompt.replace(/^[EH]\s+/, '')}
-            </span>
+      {/* Focused NPC approach and shared nearby actions */}
+      {!panel && (focusedNpc && !focusedNpcIsReady || nearbyActions.length > 0) && (
+        <div
+          aria-live="polite"
+          className={cn(
+            'absolute z-20 flex max-w-[calc(100%-24px)] flex-col gap-1.5 animate-in fade-in',
+            touchControls
+              ? 'items-end'
+              : 'bottom-[4.75rem] left-1/2 -translate-x-1/2 items-center'
           )}
-          {hTip && (
-            <span className="rounded-xl border border-white/30 bg-card/80 px-3 py-2 text-xs font-semibold text-foreground/90 shadow-lg backdrop-blur-xl">
-              <kbd className="mr-2 rounded-md bg-accent px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent-foreground">H</kbd>
-              {hTip.replace(/^H\s+/, '')}
-            </span>
+          style={touchControls
+            ? {
+                bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.25rem)',
+                right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+              }
+            : undefined}
+        >
+          {focusedNpc && !focusedNpcIsReady && (
+            <div className="flex items-center gap-2 rounded-xl border border-accent/40 bg-card/95 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
+              <span className="max-w-[34vw] truncate">Walking to {focusedNpc.name}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  clickTargetRef.current = null;
+                  focusedNpcRef.current = null;
+                  setFocusedNpc(null);
+                }}
+                className="rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                aria-label={`Cancel approach to ${focusedNpc.name}`}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {[primaryAction, secondaryAction].filter((action): action is CommuneAction => !!action).map((action) => (
+            <button
+              key={`${action.key}-${action.type}`}
+              type="button"
+              onClick={() => executeInteraction(action)}
+              aria-label={`${action.label}${touchControls ? '' : `, press ${action.key}`}`}
+              title={touchControls ? action.label : `${action.label} (${action.key})`}
+              className={cn(
+                'glass-btn flex min-h-11 max-w-[min(72vw,360px)] items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold shadow-lg backdrop-blur-xl transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                touchControls && 'w-[min(46vw,220px)]',
+                action.key === 'E'
+                  ? 'border-primary/50 bg-card/95 text-foreground hover:border-primary'
+                  : 'border-accent/40 bg-card/90 text-foreground/90 hover:border-accent'
+              )}
+            >
+              {!touchControls && (
+                <kbd className="rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">
+                  {action.key}
+                </kbd>
+              )}
+              <span className="truncate">{action.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Optional touch D-pad; tap-to-walk remains available on the map. */}
+      {touchControls && !panel && !chatFocused && (
+        <div
+          className="absolute z-20"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.25rem)',
+            left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
+            touchAction: 'none',
+          }}
+        >
+          {movePadOpen ? (
+            <div
+              id="commune-move-controls"
+              role="group"
+              aria-label="Directional movement controls"
+              className="grid grid-cols-3 gap-1 rounded-2xl border border-white/25 bg-card/75 p-1.5 shadow-lg backdrop-blur-xl"
+            >
+              {moveDirections.map((direction, index) => direction ? (
+                <button
+                  key={direction.code}
+                  type="button"
+                  aria-label={direction.label}
+                  className="grid size-10 touch-none place-items-center rounded-xl border border-border/70 bg-background/70 text-lg font-bold text-foreground shadow-sm active:scale-95 active:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    keysRef.current.add(direction.code);
+                    if (sittingRef.current) sittingRef.current = null;
+                  }}
+                  onPointerUp={() => keysRef.current.delete(direction.code)}
+                  onPointerCancel={() => keysRef.current.delete(direction.code)}
+                  onLostPointerCapture={() => keysRef.current.delete(direction.code)}
+                >
+                  {direction.code === 'ArrowUp' ? '^' : direction.code === 'ArrowDown' ? 'v' : direction.code === 'ArrowLeft' ? '<' : '>'}
+                </button>
+              ) : (
+                <span key={`empty-${index}`} className="size-10" aria-hidden="true" />
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setMovePadOpen(true)}
+              className="glass-btn min-h-11 rounded-xl border border-white/25 bg-card/85 px-3 text-xs font-bold text-foreground shadow-lg backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-expanded={movePadOpen}
+              aria-controls="commune-move-controls"
+            >
+              Move controls
+            </button>
+          )}
+          {movePadOpen && (
+            <button
+              type="button"
+              onClick={() => {
+                keysRef.current.clear();
+                setMovePadOpen(false);
+              }}
+              className="mt-1 w-full rounded-lg border border-border/50 bg-card/85 px-2 py-1 text-[10px] font-semibold text-muted-foreground shadow backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-expanded={true}
+              aria-controls="commune-move-controls"
+            >
+              Hide controls
+            </button>
           )}
         </div>
       )}
@@ -1440,21 +1707,23 @@ export default function CommunePanel() {
       {/* Hand-holding indicator */}
       {hands && (
         <div className="pointer-events-none absolute bottom-[7.25rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-full border border-primary/50 bg-primary/15 px-3 py-1 text-[11px] font-bold text-primary shadow-lg backdrop-blur-xl">
-          🤝 {hands.lead ? 'Leading' : 'Following'} {hands.partner} — press H to let go
+          🤝 {hands.lead ? 'Leading' : 'Following'} {hands.partner}
+          {touchControls ? ' · Use the action button to let go' : ' · press H to let go'}
         </div>
       )}
 
       {/* Chat bar — ghost glass while idle; opaque only while typing; green while
-          direct-messaging an agent (after bumping into them with E) */}
+          direct-messaging an agent. */}
       <div
         className={cn(
-          'absolute bottom-3 left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl border p-2 shadow-xl backdrop-blur-md transition-all duration-200',
+          'absolute left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl border p-2 shadow-xl backdrop-blur-md transition-all duration-200',
           messaging
             ? 'border-primary/70 bg-card/95'
             : chatFocused || chatDraft
               ? 'border-white/30 bg-card/95'
               : 'border-white/35 bg-transparent'
         )}
+        style={{ bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
       >
         {messaging && (
           <button
@@ -1514,9 +1783,19 @@ export default function CommunePanel() {
           aria-modal="false"
           aria-label={activeProp?.label ?? (panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
           className={cn(
-            'glass-panel absolute max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))] overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
+            'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
+            touchControls
+              ? 'max-h-[min(78dvh,640px)] w-auto'
+              : 'max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))]',
             panelPosition
           )}
+          style={touchControls
+            ? {
+                bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
+                left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
+                right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+              }
+            : undefined}
         >
           <button
             type="button"
@@ -1926,6 +2205,17 @@ function canOccupy(x: number, y: number, radius: number) {
   );
 }
 
+function approachPoint(targetX: number, targetY: number, fromX: number, fromY: number) {
+  const baseAngle = Math.atan2(fromY - targetY, fromX - targetX);
+  for (let i = 0; i < 8; i++) {
+    const angle = baseAngle + i * Math.PI / 4;
+    const x = targetX + Math.cos(angle) * 58;
+    const y = targetY + Math.sin(angle) * 58;
+    if (canOccupy(x, y, 24)) return { x, y };
+  }
+  return { x: targetX + 64, y: targetY };
+}
+
 function petSpot(ownerX: number, ownerY: number, angle: number, distance: number) {
   const rings = [distance, distance * 0.78, distance * 1.2, 34, 52, 72];
   for (const radius of rings) {
@@ -2212,6 +2502,7 @@ function draw(
   remotes: RemoteView[],
   pets: PixelPetView[],
   reduceMotion: boolean,
+  nightOpacity: number,
   destination: { x: number; y: number } | null,
   drops: CommuneDrop[] = [],
   ducks: PondDuck[] = []
@@ -2227,9 +2518,21 @@ function draw(
   const visibleH = Math.min(vh, WORLD_H - cam.y);
   if (visibleW > 0 && visibleH > 0) {
     ctx.drawImage(getTownLayer(), cam.x, cam.y, visibleW, visibleH, cam.x, cam.y, visibleW, visibleH);
+    if (nightOpacity > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = `rgba(7, 22, 70, ${nightOpacity})`;
+      ctx.fillRect(cam.x, cam.y, visibleW, visibleH);
+      ctx.restore();
+    }
   }
 
   /* fountain water ripples — the basin itself is baked */
+  ctx.save();
+  if (nightOpacity > 0) {
+    const night = nightOpacity / 0.54;
+    ctx.filter = `brightness(${1 - night * 0.42}) saturate(${1 - night * 0.2})`;
+  }
   ctx.strokeStyle = 'rgba(255,255,255,0.55)';
   ctx.lineWidth = 2;
   for (let k = 0; k < 3; k++) {
@@ -2240,10 +2543,11 @@ function draw(
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
   if (destination) drawDestinationMarker(ctx, destination.x, destination.y, t);
 
   /* y-sorted drawables */
-  type D = { y: number; fn: () => void };
+  type D = { y: number; fn: () => void; bright?: boolean };
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
   for (const d of ducks) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
@@ -2257,6 +2561,7 @@ function draw(
     fn: () => {
       const bx = BOARD.x;
       const by = BOARD.y;
+      drawGroundShadow(ctx, bx, by + 91, 82, 14, 0.2);
       // posts
       ctx.fillStyle = '#876b54';
       ctx.fillRect(bx - 70, by + 20, 12, 70);
@@ -2312,6 +2617,7 @@ function draw(
     fn: () => {
       const sx = STALL.x;
       const sy = STALL.y;
+      drawGroundShadow(ctx, sx, sy + 63, 78, 15, 0.22);
       // counter
       roundRect(ctx, sx - STALL.w / 2 + 14, sy + 10, STALL.w - 28, 52, 8);
       ctx.fillStyle = '#b88b67';
@@ -2342,10 +2648,11 @@ function draw(
   });
 
   /* entities — remotes reveal their loadout phrase when you walk close */
-  for (const npc of npcs) items.push({ y: npc.y, fn: () => drawAgent(ctx, npc, t) });
+  for (const npc of npcs) items.push({ y: npc.y, bright: true, fn: () => drawAgent(ctx, npc, t) });
   for (const r of remotes) {
     items.push({
       y: r.y,
+      bright: true,
       fn: () => {
         const near = !!r.phrase && Math.hypot(r.x - player.x, r.y - player.y) < 170;
         const speech = r.says && r.says.until > Date.now()
@@ -2361,15 +2668,37 @@ function draw(
       },
     });
   }
-  items.push({ y: player.y, fn: () => drawAgent(ctx, player, t, true) });
+  items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
   for (const pet of pets) {
     items.push({ y: pet.y, fn: () => drawPixelCat(ctx, pet, t, reduceMotion) });
   }
 
   items.sort((a, b) => a.y - b.y);
-  for (const it of items) it.fn();
+  for (const it of items) {
+    ctx.save();
+    if (nightOpacity > 0 && !it.bright) {
+      const night = nightOpacity / 0.54;
+      ctx.filter = `brightness(${1 - night * 0.42}) saturate(${1 - night * 0.2})`;
+    }
+    it.fn();
+    ctx.restore();
+  }
 
   ctx.restore();
+}
+
+function drawGroundShadow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rx: number,
+  ry: number,
+  alpha = 0.18
+) {
+  ctx.fillStyle = `rgba(20, 20, 19, ${alpha})`;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /** A pixel spice pile (red chili + green flecks on a wooden scoop), bobbing
@@ -2662,8 +2991,21 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
   }
 }
 
-/** Chunky pixel oak (dynamic so it y-sorts with the agents). */
+/** Chunky pixel oak (dynamic so it y-sorts with the agents), cached as a sprite. */
+let pixelTreeSprite: HTMLCanvasElement | null = null;
+
 function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
+  if (!pixelTreeSprite) {
+    pixelTreeSprite = document.createElement('canvas');
+    pixelTreeSprite.width = 112;
+    pixelTreeSprite.height = 176;
+    const treeCtx = pixelTreeSprite.getContext('2d');
+    if (treeCtx) paintPixelTree(treeCtx, 56, 160);
+  }
+  ctx.drawImage(pixelTreeSprite, x - 56, groundY - 160);
+}
+
+function paintPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
   ctx.beginPath();
   ctx.ellipse(x, groundY + 2, 30, 9, 0, 0, Math.PI * 2);
@@ -2797,6 +3139,13 @@ function getTownLayer(): HTMLCanvasElement {
     }
   };
 
+  const pxShadow = (cx: number, cy: number, rx: number, ry: number, alpha = 0.16) => {
+    g.fillStyle = `rgba(20, 20, 19, ${alpha})`;
+    g.beginPath();
+    g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    g.fill();
+  };
+
   /* grass base — two-tone dithered pattern */
   const tile = document.createElement('canvas');
   tile.width = 32;
@@ -2847,6 +3196,7 @@ function getTownLayer(): HTMLCanvasElement {
   }
 
   /* plaza cobbles + fountain */
+  pxShadow(PLAZA.x + 5, PLAZA.y + 16, PLAZA.r + 20, PLAZA.r * 0.72 + 20, 0.14);
   pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r + 14, PLAZA.r * 0.72 + 14, '#b3916d');
   pxEllipse(PLAZA.x, PLAZA.y, PLAZA.r, PLAZA.r * 0.72, '#e8dabb');
   for (let i = 0; i < 420; i++) {
@@ -2857,6 +3207,7 @@ function getTownLayer(): HTMLCanvasElement {
     g.fillStyle = rand() < 0.6 ? '#d2c19f' : '#f0e5cc';
     g.fillRect(Math.round(wx / BG) * BG, Math.round(wy / BG) * BG, BG, BG);
   }
+  pxShadow(FOUNTAIN.x + 4, FOUNTAIN.y + 12, FOUNTAIN.r + 20, (FOUNTAIN.r + 20) * 0.62, 0.2);
   pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r + 16, (FOUNTAIN.r + 16) * 0.62, '#b0aea5');
   pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r, FOUNTAIN.r * 0.62, '#738ca2');
   pxEllipse(FOUNTAIN.x, FOUNTAIN.y, FOUNTAIN.r - 6, (FOUNTAIN.r - 6) * 0.62, '#6a9bcc');
@@ -2874,6 +3225,7 @@ function getTownLayer(): HTMLCanvasElement {
 
   /* plaza benches (E to sit) */
   for (const [bx, by] of BENCHES) {
+    pxShadow(bx + 3, by + 12, 31, 10, 0.2);
     px(bx - 26, by - 14, 52, 8, '#8a6a4a'); // backrest
     px(bx - 26, by - 4, 52, 8, '#a07a52'); // seat
     px(bx - 24, by + 4, 6, 10, '#6b4f36'); // legs
@@ -2881,6 +3233,7 @@ function getTownLayer(): HTMLCanvasElement {
   }
 
   /* pond */
+  pxShadow(POND_C.x + 4, POND_C.y + 12, POND_C.rx + 20, POND_C.ry + 20, 0.19);
   pxEllipse(POND_C.x, POND_C.y, POND_C.rx + 16, POND_C.ry + 16, '#c1a17c');
   pxEllipse(POND_C.x, POND_C.y, POND_C.rx, POND_C.ry, '#6a9bcc');
   pxEllipse(POND_C.x, POND_C.y, POND_C.rx - 18, POND_C.ry - 14, '#83b1d5');
@@ -2918,6 +3271,7 @@ function getTownLayer(): HTMLCanvasElement {
   /* TOWN HALL (north, behind the bulletin board) */
   {
     const cx = 800, gy = 230, w = 300, top = gy - 120;
+    pxShadow(cx + 8, gy + 8, w * 0.58, 18, 0.2);
     px(cx - w / 2, top, w, 120, '#e8dfcf');
     px(cx - w / 2, top, w, 8, '#d6cbb8');
     px(cx - w / 2, gy - 10, w, 10, '#b8a991');
@@ -2942,6 +3296,7 @@ function getTownLayer(): HTMLCanvasElement {
   /* CAFÉ (west-north) */
   {
     const cx = 270, gy = 390, w = 170, top = gy - 104;
+    pxShadow(cx + 5, gy + 7, w * 0.62, 15, 0.2);
     px(cx - w / 2, top, w, 104, '#ead9b8');
     px(cx - w / 2, gy - 10, w, 10, '#d2bd98');
     bakeRoof(cx, top, w, '#d97757', '#b85e49');
@@ -2960,6 +3315,7 @@ function getTownLayer(): HTMLCanvasElement {
   /* ARCADE (east-north) */
   {
     const cx = 1330, gy = 390, w = 170, top = gy - 104;
+    pxShadow(cx + 5, gy + 7, w * 0.62, 15, 0.2);
     px(cx - w / 2, top, w, 104, '#56677b');
     px(cx - w / 2, gy - 10, w, 10, '#405366');
     bakeRoof(cx, top, w, '#3e4e61', '#303f51');
@@ -2980,6 +3336,7 @@ function getTownLayer(): HTMLCanvasElement {
   /* houses (south corners) */
   const bakeHouseSmall = (cx: number) => {
     const gy = 1040, w = 150, top = gy - 96;
+    pxShadow(cx + 5, gy + 7, w * 0.62, 15, 0.2);
     px(cx - w / 2, top, w, 96, '#e4d9c5');
     px(cx - w / 2, gy - 10, w, 10, '#cbb99b');
     bakeRoof(cx, top, w, '#8f7560', '#755e4d');
@@ -2997,6 +3354,7 @@ function getTownLayer(): HTMLCanvasElement {
 
   /* fences in front of the houses */
   const fence = (x0: number, x1: number, y: number) => {
+    pxShadow((x0 + x1) / 2, y + 3, (x1 - x0) / 2 + 8, 7, 0.15);
     for (let x = x0; x <= x1; x += 32) px(x, y - 20, 6, 20, '#876b54');
     px(x0, y - 16, x1 - x0 + 6, 4, '#a38665');
     px(x0, y - 8, x1 - x0 + 6, 4, '#a38665');
@@ -3006,6 +3364,7 @@ function getTownLayer(): HTMLCanvasElement {
 
   /* lamp posts */
   const lamp = (x: number, y: number) => {
+    pxShadow(x + 2, y + 3, 10, 4, 0.2);
     g.fillStyle = 'rgba(255,224,138,0.16)';
     g.beginPath();
     g.arc(x, y - 51, 26, 0, Math.PI * 2);
@@ -3023,6 +3382,7 @@ function getTownLayer(): HTMLCanvasElement {
 
   /* bushes + flower patches */
   for (const [bx, by] of [[648, 224], [952, 224], [336, 428], [1204, 428], [536, 772], [1064, 772]] as const) {
+    pxShadow(bx + 3, by + 13, 27, 8, 0.18);
     pxEllipse(bx, by, 26, 18, '#527a58');
     px(bx - 10, by - 10, 8, 5, '#6b9567');
   }
