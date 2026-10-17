@@ -79,6 +79,7 @@ type CommuneAction =
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
   | { type: 'pond'; key: 'E'; label: string }
+  | { type: 'serendipity'; key: 'E'; label: string; momentId: number }
   | { type: 'prop'; key: 'E'; label: string; panel: PropPanelKind };
 
 interface FocusedNpc {
@@ -163,6 +164,30 @@ const FORTUNES = [
 ];
 const FOUNTAIN_RANGE = 155;
 const POND_RANGE = 155;
+
+type SerendipityKind = 'feather' | 'clover' | 'paper-plane' | 'firefly';
+interface TownSerendipity {
+  id: number;
+  kind: SerendipityKind;
+  x: number;
+  y: number;
+  label: string;
+  message: string;
+  expiresAt: number;
+}
+
+const SERENDIPITY_SPOTS: [number, number][] = [
+  [430, 520], [1170, 520], [410, 785], [1190, 785],
+  [800, 870], [350, 680], [1250, 680],
+];
+const SERENDIPITIES: Omit<TownSerendipity, 'id' | 'x' | 'y' | 'expiresAt'>[] = [
+  { kind: 'feather', label: 'Look closer at the feather', message: 'A silver feather drifted into your path. The town says hello.' },
+  { kind: 'clover', label: 'Find the lucky clover', message: 'Four little leaves. One pocket-sized bit of luck.' },
+  { kind: 'paper-plane', label: 'Read the tiny note', message: 'A tiny note says: “Glad you wandered by.”' },
+  { kind: 'firefly', label: 'Follow the firefly', message: 'A firefly led you to a quiet corner. Take a little breath.' },
+];
+const SERENDIPITY_RANGE = 62;
+const SERENDIPITY_LIFETIME_MS = 120_000;
 
 /** Pixel ducks summoned by feeding the pond (E near the water). */
 interface PondDuck { x: number; y: number; vx: number; phase: number; until: number }
@@ -408,6 +433,9 @@ export default function CommunePanel() {
   const sittingRef = useRef<{ x: number; y: number } | null>(null);
   const [nearbyActions, setNearbyActions] = useState<CommuneAction[]>([]);
   const nearbyActionsRef = useRef<CommuneAction[]>([]);
+  const serendipityRef = useRef<TownSerendipity | null>(null);
+  const nextSerendipityAtRef = useRef(0);
+  const serendipitySequenceRef = useRef(0);
   const [focusedNpc, setFocusedNpc] = useState<FocusedNpc | null>(null);
   const focusedNpcRef = useRef<FocusedNpc | null>(null);
   const [touchControls, setTouchControls] = useState(false);
@@ -856,6 +884,11 @@ export default function CommunePanel() {
           case 'pond':
             return Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE
               && Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) >= FOUNTAIN_RANGE;
+          case 'serendipity': {
+            const moment = serendipityRef.current;
+            return moment?.id === action.momentId
+              && Math.hypot(player.x - moment.x, player.y - moment.y) < SERENDIPITY_RANGE;
+          }
           case 'prop': {
             const prop = COMMUNE_PROPS.find((item) => item.kind === action.panel);
             return !!prop && Math.hypot(player.x - prop.x, player.y - prop.y) <= prop.range;
@@ -913,6 +946,14 @@ export default function CommunePanel() {
           });
         }
         playerRef.current.says = { text: 'Here ducky ducky… 🍞', until: now + 3500 };
+        return;
+      }
+      case 'serendipity': {
+        const moment = serendipityRef.current;
+        if (!moment || moment.id !== action.momentId) return;
+        serendipityRef.current = null;
+        nextSerendipityAtRef.current = Date.now() + 60_000 + Math.random() * 120_000;
+        playerRef.current.says = { text: moment.message, until: Date.now() + 5200 };
         return;
       }
       case 'prop':
@@ -1104,6 +1145,25 @@ export default function CommunePanel() {
           return d;
         });
 
+      if (!nextSerendipityAtRef.current) {
+        nextSerendipityAtRef.current = wallNow + 18_000 + Math.random() * 27_000;
+      }
+      if (serendipityRef.current && wallNow >= serendipityRef.current.expiresAt) {
+        serendipityRef.current = null;
+        nextSerendipityAtRef.current = wallNow + 75_000 + Math.random() * 120_000;
+      }
+      if (!serendipityRef.current && wallNow >= nextSerendipityAtRef.current) {
+        const surprise = SERENDIPITIES[Math.floor(Math.random() * SERENDIPITIES.length)];
+        const [x, y] = chooseSerendipitySpot(player.x, player.y);
+        serendipityRef.current = {
+          ...surprise,
+          id: ++serendipitySequenceRef.current,
+          x,
+          y,
+          expiresAt: wallNow + SERENDIPITY_LIFETIME_MS,
+        };
+      }
+
       /* update NPCs */
       for (const npc of npcsRef.current) {
         const nowMs = now;
@@ -1181,6 +1241,11 @@ export default function CommunePanel() {
         : undefined;
       const nearFountain = Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
       const nearPond = !nearFountain && Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE;
+      const moment = serendipityRef.current;
+      const nearSerendipity = moment
+        && Math.hypot(player.x - moment.x, player.y - moment.y) < SERENDIPITY_RANGE
+        ? moment
+        : null;
       const actions: CommuneAction[] = [];
 
       if (sittingRef.current) {
@@ -1191,6 +1256,13 @@ export default function CommunePanel() {
           key: 'E',
           label: `Talk to ${nearChallengeNpc.name}`,
           personaId: nearChallengeNpc.personaId,
+        });
+      } else if (nearSerendipity) {
+        actions.push({
+          type: 'serendipity',
+          key: 'E',
+          label: nearSerendipity.label,
+          momentId: nearSerendipity.id,
         });
       } else if (nearAgent) {
         actions.push({
@@ -1314,7 +1386,7 @@ export default function CommunePanel() {
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
-      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, nightOpacity, clickTargetRef.current, dropsRef.current, ducksRef.current);
+      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current, clickTargetRef.current, dropsRef.current, ducksRef.current);
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -1351,6 +1423,23 @@ export default function CommunePanel() {
     const wy = clientY - rect.top + camRef.current.y;
     // A target tap also stands the player up before selecting the target.
     if (sittingRef.current) sittingRef.current = null;
+    const moment = serendipityRef.current;
+    if (moment && Math.hypot(wx - moment.x, wy - (moment.y - 15)) < 28) {
+      focusedNpcRef.current = null;
+      setFocusedNpc(null);
+      const player = playerRef.current;
+      if (Math.hypot(player.x - moment.x, player.y - moment.y) < SERENDIPITY_RANGE) {
+        executeInteraction({
+          type: 'serendipity',
+          key: 'E',
+          label: moment.label,
+          momentId: moment.id,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(moment.x, moment.y, player.x, player.y);
+      }
+      return;
+    }
     const challengeNpc = CHALLENGE_NPCS.find(
       (npc) => Math.hypot(wx - npc.x, wy - (npc.y - 30)) < CHALLENGE_HIT_RADIUS
     );
@@ -2205,6 +2294,21 @@ function canOccupy(x: number, y: number, radius: number) {
   );
 }
 
+function chooseSerendipitySpot(originX: number, originY: number): [number, number] {
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 120 + Math.random() * 190;
+    const x = Math.round((originX + Math.cos(angle) * distance) / 4) * 4;
+    const y = Math.round((originY + Math.sin(angle) * distance) / 4) * 4;
+    const nearChallenge = CHALLENGE_NPCS.some((npc) => Math.hypot(x - npc.x, y - npc.y) < 130);
+    const nearProp = COMMUNE_PROPS.some((prop) => Math.hypot(x - prop.x, y - prop.y) < 115);
+    if (canOccupy(x, y, 28) && !nearChallenge && !nearProp) return [x, y];
+  }
+
+  const safeSpots = SERENDIPITY_SPOTS.filter(([x, y]) => canOccupy(x, y, 28));
+  return safeSpots[Math.floor(Math.random() * safeSpots.length)] ?? [originX, originY];
+}
+
 function approachPoint(targetX: number, targetY: number, fromX: number, fromY: number) {
   const baseAngle = Math.atan2(fromY - targetY, fromX - targetX);
   for (let i = 0; i < 8; i++) {
@@ -2503,6 +2607,7 @@ function draw(
   pets: PixelPetView[],
   reduceMotion: boolean,
   nightOpacity: number,
+  serendipity: TownSerendipity | null,
   destination: { x: number; y: number } | null,
   drops: CommuneDrop[] = [],
   ducks: PondDuck[] = []
@@ -2551,6 +2656,13 @@ function draw(
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
   for (const d of ducks) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
+  if (serendipity) {
+    items.push({
+      y: serendipity.y,
+      bright: true,
+      fn: () => drawTownSerendipity(ctx, serendipity, t, reduceMotion),
+    });
+  }
 
   /* spice drops — pixel piles bobbing gently */
   for (const d of drops) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
@@ -2684,6 +2796,68 @@ function draw(
     ctx.restore();
   }
 
+  ctx.restore();
+}
+
+function drawTownSerendipity(
+  ctx: CanvasRenderingContext2D,
+  moment: TownSerendipity,
+  t: number,
+  reduceMotion: boolean
+) {
+  const bob = reduceMotion ? 0 : Math.sin(t * 2.4 + moment.id) * 2;
+  const pulse = reduceMotion ? 0.5 : 0.5 + Math.sin(t * 4.2 + moment.id) * 0.5;
+  const colors: Record<SerendipityKind, string> = {
+    feather: '#c4d9ee',
+    clover: '#b6d18c',
+    'paper-plane': '#f3d6a2',
+    firefly: '#f6dc82',
+  };
+  ctx.save();
+  ctx.translate(moment.x, moment.y - 15 + bob);
+  ctx.globalAlpha = 0.72 + pulse * 0.28;
+  ctx.shadowColor = colors[moment.kind];
+  ctx.shadowBlur = 8 + pulse * 8;
+  ctx.fillStyle = colors[moment.kind];
+  ctx.fillRect(-2, -2, 4, 4);
+  ctx.fillRect(-1, -7, 2, 14);
+  ctx.fillRect(-7, -1, 14, 2);
+  ctx.shadowBlur = 0;
+
+  if (moment.kind === 'feather') {
+    ctx.rotate(-0.5);
+    ctx.fillRect(-2, -8, 4, 13);
+    ctx.fillRect(-5, -5, 3, 4);
+    ctx.fillRect(2, -1, 3, 4);
+  } else if (moment.kind === 'clover') {
+    ctx.fillRect(-5, -5, 4, 4);
+    ctx.fillRect(1, -5, 4, 4);
+    ctx.fillRect(-5, 1, 4, 4);
+    ctx.fillRect(1, 1, 4, 4);
+    ctx.fillRect(-1, 4, 2, 7);
+  } else if (moment.kind === 'paper-plane') {
+    ctx.beginPath();
+    ctx.moveTo(-7, -5);
+    ctx.lineTo(8, -1);
+    ctx.lineTo(-3, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3, 7);
+    ctx.lineTo(-1, 0);
+    ctx.lineTo(8, -1);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-1, -10, 2, 4);
+    ctx.fillRect(-1, 6, 2, 4);
+    ctx.fillRect(-10, -1, 4, 2);
+    ctx.fillRect(6, -1, 4, 2);
+  }
   ctx.restore();
 }
 
