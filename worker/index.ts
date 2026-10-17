@@ -2587,6 +2587,7 @@ export default {
       url.pathname.startsWith('/api/spice') ||
       url.pathname.startsWith('/api/amr-templates') ||
       url.pathname.startsWith('/api/sop') ||
+      url.pathname.startsWith('/api/kb/') ||
       url.pathname.startsWith('/api/news')
     ) {
       return handleAuth(request, env);
