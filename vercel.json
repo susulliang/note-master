@@ -9,11 +9,11 @@
   "rewrites": [
     {
       "source": "/api/test-results",
-      "destination": "https://note-master.susulliang.workers.dev/api/test-results"
+      "destination": "https://note-master.econote.workers.dev/api/test-results"
     },
     {
       "source": "/api/keyword-alerts",
-      "destination": "https://note-master.susulliang.workers.dev/api/keyword-alerts"
+      "destination": "https://note-master.econote.workers.dev/api/keyword-alerts"
     },
     { "source": "/((?!assets/|favicon\\.svg|icons\\.svg).*)", "destination": "/index.html" }
   ],
@@ -45,7 +45,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net https://*.r2.dev https://*.r2.cloudflarestorage.com https://note-master.susulliang.workers.dev https://api.deepseek.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          "value": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net https://*.r2.dev https://*.r2.cloudflarestorage.com https://note-master.econote.workers.dev https://api.deepseek.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         },
         {
           "key": "X-Content-Type-Options",

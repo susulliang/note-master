@@ -12,6 +12,9 @@
 import { TCG_SETS } from './tcg-manifest.gen';
 import GB_POOLIUS from './npc/GB_Poolius.json';
 import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
+import { CommuneRoom, type CommuneRoomBanner, type CommuneRoomLoadout } from './commune-room';
+
+export { CommuneRoom } from './commune-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -267,6 +270,300 @@ function authJson(data: unknown, status = 200): Response {
   response.headers.set('access-control-allow-headers', 'content-type, authorization');
   response.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
   return response;
+}
+
+const WORKERS_AI_MODELS = [
+  '@cf/qwen/qwen3.8-27b',
+  '@cf/zai-org/glm-5.3-flash',
+  '@cf/google/gemma-4-26b-a4b-it',
+] as const;
+type WorkersAiModel = (typeof WORKERS_AI_MODELS)[number];
+const DEEPSEEK_MODEL_ID = 'deepseek-v4-flash';
+const MAX_LLM_REQUEST_BYTES = 1_000_000;
+
+type LlmChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+function isWorkersAiModel(model: string): model is WorkersAiModel {
+  return WORKERS_AI_MODELS.some((candidate) => candidate === model);
+}
+
+function normalizeWorkersAiStream(stream: ReadableStream<Uint8Array>): Response {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = '';
+  const normalized = stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let boundary: number;
+        while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
+          const frame = buffer.slice(0, boundary);
+          const separator = buffer.slice(boundary).match(/^\r?\n\r?\n/)?.[0] ?? '\n\n';
+          buffer = buffer.slice(boundary + separator.length);
+          for (const line of frame.split(/\r?\n/)) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              const value = JSON.parse(payload) as {
+                response?: unknown;
+                choices?: Array<{ delta?: { content?: unknown } }>;
+              };
+              const text = typeof value.response === 'string'
+                ? value.response
+                : value.choices?.[0]?.delta?.content;
+              if (typeof text === 'string' && text.length > 0) {
+                controller.enqueue(encoder.encode(
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`,
+                ));
+              }
+            } catch {
+              /* ignore malformed provider stream frames */
+            }
+          }
+        }
+      },
+      flush(controller) {
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          const frame = buffer.trim();
+          if (frame.startsWith('data:')) {
+            const payload = frame.slice(5).trim();
+            try {
+              const value = JSON.parse(payload) as { response?: unknown };
+              if (typeof value.response === 'string' && value.response.length > 0) {
+                controller.enqueue(encoder.encode(
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: value.response } }] })}\n\n`,
+                ));
+              }
+            } catch {
+              /* ignore an incomplete final provider frame */
+            }
+          }
+        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      },
+    }),
+  );
+  return new Response(normalized, {
+    headers: {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'content-type, authorization',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
+    },
+  });
+}
+
+async function readBoundedRequestText(request: Request, maxBytes: number): Promise<string | null> {
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+async function readBoundedResponseText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  while (bytes < maxBytes) {
+    const { value, done } = await reader.read();
+    if (done) {
+      text += decoder.decode();
+      return text;
+    }
+    const remaining = maxBytes - bytes;
+    const chunk = value.subarray(0, remaining);
+    bytes += chunk.byteLength;
+    text += decoder.decode(chunk, { stream: true });
+    if (value.byteLength > remaining) {
+      await reader.cancel();
+      break;
+    }
+  }
+  text += decoder.decode();
+  return text;
+}
+
+function extractWorkersAiReply(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object') return '';
+  const record = result as {
+    response?: unknown;
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  if (typeof record.response === 'string') return record.response;
+  const content = record.choices?.[0]?.message?.content;
+  return typeof content === 'string' ? content : '';
+}
+
+async function handleLlmModels(request: Request, env: Env): Promise<Response> {
+  const user = await authBearerUser(request, env);
+  if (!user) return authJson({ error: 'Sign in to use the remote AI service.' }, 401);
+
+  const models: string[] = [];
+  if (env.DEEPSEEK_API_KEY?.trim()) models.push(DEEPSEEK_MODEL_ID);
+  if (env.AI) models.push(...WORKERS_AI_MODELS);
+  return authJson({ models });
+}
+
+async function handleLlmChat(request: Request, env: Env): Promise<Response> {
+  const user = await authBearerUser(request, env);
+  if (!user) return authJson({ error: 'Sign in to use the remote AI service.' }, 401);
+
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > MAX_LLM_REQUEST_BYTES) return authJson({ error: 'LLM request is too large.' }, 413);
+
+  let payload: {
+    model?: unknown;
+    messages?: unknown;
+    max_tokens?: unknown;
+    temperature?: unknown;
+    stream?: unknown;
+  };
+  try {
+    const raw = await readBoundedRequestText(request, MAX_LLM_REQUEST_BYTES);
+    if (raw === null) return authJson({ error: 'LLM request is too large.' }, 413);
+    payload = JSON.parse(raw) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON request.' }, 400);
+  }
+
+  const model = typeof payload.model === 'string' ? payload.model : '';
+  const isDeepseek = model === DEEPSEEK_MODEL_ID;
+  const isWorkersAi = isWorkersAiModel(model);
+  if (!isDeepseek && !isWorkersAi) return authJson({ error: 'Unsupported remote model.' }, 400);
+  if (!Array.isArray(payload.messages) || payload.messages.length < 1 || payload.messages.length > 80)
+    return authJson({ error: 'Messages must contain between 1 and 80 entries.' }, 400);
+
+  const messages: LlmChatMessage[] = [];
+  let totalChars = 0;
+  for (const item of payload.messages) {
+    if (!item || typeof item !== 'object') return authJson({ error: 'Invalid chat message.' }, 400);
+    const row = item as { role?: unknown; content?: unknown };
+    if (
+      (row.role !== 'system' && row.role !== 'user' && row.role !== 'assistant') ||
+      typeof row.content !== 'string'
+    ) return authJson({ error: 'Invalid chat message.' }, 400);
+    totalChars += row.content.length;
+    if (row.content.length > 250_000 || totalChars > 700_000)
+      return authJson({ error: 'LLM prompt is too large.' }, 413);
+    messages.push({ role: row.role, content: row.content });
+  }
+
+  const maxTokens = Number(payload.max_tokens ?? 512);
+  if (!Number.isFinite(maxTokens) || maxTokens < 1 || maxTokens > 8192)
+    return authJson({ error: 'max_tokens must be between 1 and 8192.' }, 400);
+  const temperature = Number(payload.temperature ?? 0.2);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)
+    return authJson({ error: 'temperature must be between 0 and 2.' }, 400);
+  const stream = payload.stream === true;
+
+  try {
+    if (isDeepseek) {
+      const key = env.DEEPSEEK_API_KEY?.trim();
+      if (!key) return authJson({ error: 'DeepSeek is not configured on the serving Worker.' }, 503);
+      const upstream = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${key}`,
+          'content-type': 'application/json',
+          accept: stream ? 'text/event-stream' : 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: Math.floor(maxTokens),
+          temperature,
+          thinking: { type: 'disabled' },
+          stream,
+        }),
+      });
+      if (!upstream.ok) {
+        const rawError = await readBoundedResponseText(upstream, 4_096);
+        let detail = rawError.slice(0, 1_000);
+        try {
+          const parsed = JSON.parse(rawError) as { error?: { message?: string } };
+          detail = parsed.error?.message ?? detail;
+        } catch {
+          /* retain bounded text response */
+        }
+        return authJson({ error: `DeepSeek request failed (${upstream.status}): ${detail}` }, upstream.status);
+      }
+      if (stream && upstream.body) {
+        return new Response(upstream.body, {
+          headers: {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache, no-transform',
+            'access-control-allow-origin': '*',
+            'access-control-allow-headers': 'content-type, authorization',
+            'access-control-allow-methods': 'GET, POST, OPTIONS',
+          },
+        });
+      }
+      const result = await upstream.json().catch(() => null);
+      if (!result) return authJson({ error: 'DeepSeek returned an invalid response.' }, 502);
+      return authJson(result);
+    }
+
+    if (!env.AI) return authJson({ error: 'Workers AI is not configured on the serving Worker.' }, 503);
+    const aiInput = {
+      messages,
+      max_tokens: Math.floor(maxTokens),
+      temperature,
+    };
+    if (stream) {
+      let streamResult: ReadableStream<Uint8Array>;
+      switch (model) {
+        case '@cf/qwen/qwen3.8-27b':
+          streamResult = await env.AI.run(model, { ...aiInput, stream: true });
+          break;
+        case '@cf/zai-org/glm-5.3-flash':
+          streamResult = await env.AI.run(model, { ...aiInput, stream: true });
+          break;
+        case '@cf/google/gemma-4-26b-a4b-it':
+          streamResult = await env.AI.run(model, { ...aiInput, stream: true });
+          break;
+        default:
+          return authJson({ error: 'Unsupported Workers AI model.' }, 400);
+      }
+      return normalizeWorkersAiStream(streamResult);
+    }
+    let result: unknown;
+    switch (model) {
+      case '@cf/qwen/qwen3.8-27b':
+        result = await env.AI.run(model, aiInput);
+        break;
+      case '@cf/zai-org/glm-5.3-flash':
+        result = await env.AI.run(model, aiInput);
+        break;
+      case '@cf/google/gemma-4-26b-a4b-it':
+        result = await env.AI.run(model, aiInput);
+        break;
+      default:
+        return authJson({ error: 'Unsupported Workers AI model.' }, 400);
+    }
+    const content = extractWorkersAiReply(result);
+    if (!content) return authJson({ error: 'Workers AI returned an empty or unsupported response.' }, 502);
+    return authJson({ choices: [{ message: { role: 'assistant', content } }] });
+  } catch (error) {
+    return authJson({ error: `Remote AI request failed: ${(error as Error).message}` }, 502);
+  }
 }
 
 function encodeB64(bytes: Uint8Array): string {
@@ -566,18 +863,7 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            PRIMARY KEY (username, card_id)
          )`
       ).run();
-      // COMMUNE town square — live agent presence (pruned continuously) and
-      // the per-agent display loadout (3 cards + a pet + a phrase).
-      await env.DB.prepare(
-        `CREATE TABLE IF NOT EXISTS commune_presence (
-           username TEXT PRIMARY KEY,
-           is_admin INTEGER NOT NULL DEFAULT 0,
-           x REAL NOT NULL,
-           y REAL NOT NULL,
-           status TEXT NOT NULL DEFAULT '',
-           seen_at INTEGER NOT NULL
-         )`
-      ).run();
+      // COMMUNE's saved display loadout (3 cards + a pet + a phrase).
       await env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS commune_loadout (
            username TEXT PRIMARY KEY,
@@ -588,26 +874,20 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            updated_at INTEGER NOT NULL
          )`
       ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_banners (
+           id TEXT PRIMARY KEY,
+           text TEXT NOT NULL,
+           author TEXT NOT NULL,
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
       // Older deployments created the table without the avatar column.
       try {
         await env.DB.prepare('ALTER TABLE commune_loadout ADD COLUMN avatar TEXT NOT NULL DEFAULT \'\'').run();
       } catch {
         /* column already exists */
       }
-      // Agent→agent interaction signals (bump shake, direct chat, hand-holding).
-      await env.DB.prepare(
-        `CREATE TABLE IF NOT EXISTS commune_signals (
-           id INTEGER PRIMARY KEY AUTOINCREMENT,
-           from_user TEXT NOT NULL,
-           to_user TEXT NOT NULL,
-           kind TEXT NOT NULL,
-           payload TEXT NOT NULL DEFAULT '',
-           created_at INTEGER NOT NULL
-         )`
-      ).run();
-      await env.DB.prepare(
-        'CREATE INDEX IF NOT EXISTS idx_commune_signals_to ON commune_signals (to_user, created_at)'
-      ).run();
       // COMMUNE spice drops — spice piles scattered around the town square;
       // the first agent to walk over one claims it (+1 spice).
       await env.DB.prepare(
@@ -1258,146 +1538,198 @@ async function handleCardsCollection(env: Env, user: AuthUserRow): Promise<Respo
   return authJson({ collection: result.results ?? [] });
 }
 
-/** One round-trip COMMUNE presence tick: upsert the caller's position +
- *  status (and loadout when included), prune stale walkers, and return every
- *  other live agent with their display loadout attached. */
-async function handleCommuneSync(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
-  const contentLength = Number(request.headers.get('content-length') ?? 0);
-  if (contentLength > 8_192) return authJson({ error: 'Request is too large' }, 413);
-  let payload: { x?: unknown; y?: unknown; status?: unknown; loadout?: unknown };
+function normalizeCommuneLoadout(input: unknown): CommuneRoomLoadout {
+  const lo = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+  const cards = Array.isArray(lo.cards)
+    ? lo.cards.filter((card): card is string => typeof card === 'string' && card.length <= 64).slice(0, 3)
+    : [];
+  let pet: CommuneRoomLoadout['pet'] = null;
+  if (lo.pet && typeof lo.pet === 'object') {
+    const value = lo.pet as Record<string, unknown>;
+    pet = {
+      id: String(value.id ?? '').slice(0, 32),
+      name: String(value.name ?? '').slice(0, 24),
+      stage: String(value.stage ?? '').slice(0, 16),
+      mood: Math.max(0, Math.min(100, Number(value.mood) || 0)),
+      xp: Math.max(0, Math.min(100_000, Number(value.xp) || 0)),
+    };
+  }
+  const color = (value: unknown, fallback: string) =>
+    /^#[0-9a-fA-F]{6}$/.test(String(value ?? '')) ? String(value) : fallback;
+  let avatar: CommuneRoomLoadout['avatar'] = null;
+  if (lo.avatar && typeof lo.avatar === 'object') {
+    const value = lo.avatar as Record<string, unknown>;
+    avatar = {
+      hair: color(value.hair, '#4a3728'),
+      hairStyle: value.hairStyle === 'long' ? 'long' : 'short',
+      shirt: color(value.shirt, '#58a6ff'),
+      bottom: value.bottom === 'skirt' ? 'skirt' : 'pants',
+      bottomColor: color(value.bottomColor, '#3f4a63'),
+      shoes: color(value.shoes, '#2a2d38'),
+    };
+  }
+  return {
+    cards,
+    pet,
+    phrase: String(lo.phrase ?? '').slice(0, 80),
+    avatar,
+  };
+}
+
+function parseStoredCommuneLoadout(row: {
+  cards: string | null;
+  pet: string | null;
+  phrase: string | null;
+  avatar: string | null;
+} | null): CommuneRoomLoadout | null {
+  if (!row) return null;
+  try {
+    const parsedCards: unknown = row.cards ? JSON.parse(row.cards) : [];
+    const parsedPet: unknown = row.pet ? JSON.parse(row.pet) : null;
+    const parsedAvatar: unknown = row.avatar ? JSON.parse(row.avatar) : null;
+    const loadout = normalizeCommuneLoadout({
+      cards: parsedCards,
+      pet: parsedPet,
+      phrase: row.phrase,
+      avatar: parsedAvatar,
+    });
+    if (!loadout.cards.length && !loadout.pet && !loadout.phrase && !loadout.avatar) return null;
+    return loadout;
+  } catch {
+    return null;
+  }
+}
+
+async function loadCommuneBanners(env: Env): Promise<CommuneRoomBanner[]> {
+  const result = await env.DB.prepare(
+    'SELECT id, text, author, created_at FROM commune_banners ORDER BY created_at ASC, id ASC LIMIT 6',
+  ).all<{ id: string; text: string; author: string; created_at: number }>();
+  return (result.results ?? []).map((banner) => ({
+    id: banner.id,
+    text: banner.text,
+    author: banner.author,
+    at: Number(banner.created_at),
+  }));
+}
+
+/** Issue a single-use ticket for the browser's authenticated WebSocket upgrade. */
+async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  if (Number(request.headers.get('content-length') ?? 0) > 8_192)
+    return authJson({ error: 'Request is too large' }, 413);
+  let payload: { x?: unknown; y?: unknown; status?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
   } catch {
     return authJson({ error: 'Invalid JSON body' }, 400);
   }
-  const x = Math.max(-100, Math.min(5000, Number(payload.x) || 0));
-  const y = Math.max(-100, Math.min(5000, Number(payload.y) || 0));
-  const status = String(payload.status ?? '').slice(0, 40);
-  const now = Date.now();
-
-  // Optional loadout push — up to 3 card ids, one pet snapshot, one phrase,
-  // and an avatar look (hair/shirt/bottom/shoes colors + pants-vs-skirt).
-  let cardsJson: string | null = null;
-  let petJson: string | null = null;
-  let phrase: string | null = null;
-  let avatarJson: string | null = null;
-  if (payload.loadout && typeof payload.loadout === 'object') {
-    const lo = payload.loadout as { cards?: unknown; pet?: unknown; phrase?: unknown; avatar?: unknown };
-    const cards = Array.isArray(lo.cards)
-      ? lo.cards.filter((c): c is string => typeof c === 'string' && c.length <= 64).slice(0, 3)
-      : [];
-    cardsJson = JSON.stringify(cards);
-    let pet = '';
-    if (lo.pet && typeof lo.pet === 'object') {
-      const p = lo.pet as Record<string, unknown>;
-      pet = JSON.stringify({
-        id: String(p.id ?? '').slice(0, 32),
-        name: String(p.name ?? '').slice(0, 24),
-        stage: String(p.stage ?? '').slice(0, 16),
-        mood: Math.max(0, Math.min(100, Number(p.mood) || 0)),
-        xp: Math.max(0, Math.min(100000, Number(p.xp) || 0)),
-      });
-    }
-    petJson = pet;
-    phrase = String(lo.phrase ?? '').slice(0, 80);
-    if (lo.avatar && typeof lo.avatar === 'object') {
-      const a = lo.avatar as Record<string, unknown>;
-      const col = (v: unknown, fallback: string) =>
-        /^#[0-9a-fA-F]{6}$/.test(String(v ?? '')) ? String(v) : fallback;
-      avatarJson = JSON.stringify({
-        hair: col(a.hair, '#4a3728'),
-        hairStyle: a.hairStyle === 'long' ? 'long' : 'short',
-        shirt: col(a.shirt, '#58a6ff'),
-        bottom: a.bottom === 'skirt' ? 'skirt' : 'pants',
-        bottomColor: col(a.bottomColor, '#3f4a63'),
-        shoes: col(a.shoes, '#2a2d38'),
-      });
-    }
-  }
 
   await ensureSpiceSchema(env);
+  const now = Date.now();
   await ensureCommuneDrops(env, now);
-  const stmts = [
-    env.DB.prepare(
-      `INSERT INTO commune_presence (username, is_admin, x, y, status, seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-       ON CONFLICT(username) DO UPDATE SET is_admin = ?2, x = ?3, y = ?4, status = ?5, seen_at = ?6`
-    ).bind(user.username, user.isAdmin ? 1 : 0, x, y, status, now),
-  ];
-  if (cardsJson !== null) {
-    stmts.push(
-      env.DB.prepare(
-        `INSERT INTO commune_loadout (username, cards, pet, phrase, avatar, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(username) DO UPDATE SET cards = ?2, pet = ?3, phrase = ?4, avatar = ?5, updated_at = ?6`
-      ).bind(user.username, cardsJson, petJson ?? '', phrase ?? '', avatarJson ?? '', now)
-    );
-  }
-  stmts.push(env.DB.prepare('DELETE FROM commune_presence WHERE seen_at < ?1').bind(now - 30_000));
-  await env.DB.batch(stmts);
-
-  const rows = await env.DB.prepare(
-    `SELECT p.username AS username, p.is_admin AS isAdmin, p.x AS x, p.y AS y,
-            p.status AS status, p.seen_at AS seenAt, l.cards AS cards, l.pet AS pet, l.phrase AS phrase, l.avatar AS avatar
-     FROM commune_presence p LEFT JOIN commune_loadout l ON l.username = p.username
-     WHERE p.seen_at >= ?1 AND p.username != ?2`
-  ).bind(now - 30_000, user.username).all<{ username: string; isAdmin: number; x: number; y: number; status: string; seenAt: number; cards: string | null; pet: string | null; phrase: string | null; avatar: string | null }>();
-
-  const own = await env.DB.prepare('SELECT cards, pet, phrase, avatar FROM commune_loadout WHERE username = ?1')
-    .bind(user.username).first<{ cards: string; pet: string; phrase: string; avatar: string }>();
-
-  // Unclaimed spice piles on the square (client renders + picks them up).
-  const dropRows = await env.DB.prepare(
-    'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL'
+  const x = Math.max(24, Math.min(1_576, Number(payload.x) || 800));
+  const y = Math.max(144, Math.min(1_176, Number(payload.y) || 860));
+  const status = String(payload.status ?? 'hanging out').slice(0, 40);
+  const saved = await env.DB.prepare(
+    'SELECT cards, pet, phrase, avatar FROM commune_loadout WHERE username = ?1',
+  )
+    .bind(user.username)
+    .first<{ cards: string; pet: string; phrase: string; avatar: string }>();
+  const me = parseStoredCommuneLoadout(saved);
+  const drops = await env.DB.prepare(
+    'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL',
   ).all<{ id: number; x: number; y: number }>();
-
-  const parseLoadout = (cards: string | null, pet: string | null, ph: string | null, avatar: string | null) => {
-    let cardIds: string[] = [];
-    try {
-      cardIds = cards ? (JSON.parse(cards) as string[]) : [];
-    } catch {
-      cardIds = [];
-    }
-    let petOut: unknown = null;
-    try {
-      petOut = pet ? JSON.parse(pet) : null;
-    } catch {
-      petOut = null;
-    }
-    let avatarOut: unknown = null;
-    try {
-      avatarOut = avatar ? JSON.parse(avatar) : null;
-    } catch {
-      avatarOut = null;
-    }
-    // A loadout with only an avatar (or only a pet) is still a loadout.
-    if (!cardIds.length && !petOut && !ph && !avatarOut) return null;
-    return { cards: cardIds, pet: petOut, phrase: ph ?? '', avatar: avatarOut };
-  };
-
-  // Deliver (and clear) interaction signals addressed to me — last 15s only.
-  const signalRows = await env.DB.prepare(
-    'SELECT id, from_user, kind, payload FROM commune_signals WHERE to_user = ?1 AND created_at >= ?2 ORDER BY id LIMIT 20'
-  ).bind(user.username, now - 15_000).all<{ id: number; from_user: string; kind: string; payload: string }>();
-  if (signalRows.results?.length) {
-    await env.DB.prepare(
-      `DELETE FROM commune_signals WHERE id IN (${signalRows.results.map((_, i) => `?${i + 1}`).join(', ')})`
-    ).bind(...signalRows.results.map((r) => r.id)).run();
+  const banners = await loadCommuneBanners(env);
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').publishDrops(drops.results ?? []);
+  } catch {
+    // A later ticket bootstrap includes the current drop set.
   }
-
-  const others = (rows.results ?? []).map((r) => ({
-    username: r.username,
-    isAdmin: r.isAdmin === 1,
-    x: r.x,
-    y: r.y,
-    status: r.status,
-    seenAgo: now - r.seenAt,
-    loadout: parseLoadout(r.cards, r.pet, r.phrase, r.avatar),
-  }));
-  return authJson({
-    others,
-    me: parseLoadout(own?.cards ?? null, own?.pet ?? null, own?.phrase ?? null, own?.avatar ?? null),
-    drops: (dropRows.results ?? []).map((d) => ({ id: d.id, x: d.x, y: d.y })),
-    signals: (signalRows.results ?? []).map((s) => ({ from: s.from_user, kind: s.kind, message: s.payload })),
+  const ticket = await env.COMMUNE_ROOM.getByName('main-plaza').createTicket({
+    username: user.username,
+    isAdmin: Number(user.is_admin) === 1,
+    x,
+    y,
+    status,
+    seenAgo: 0,
+    loadout: me,
   });
+  return authJson({
+    ticket,
+    me,
+    drops: (drops.results ?? []).map((drop) => ({ id: drop.id, x: drop.x, y: drop.y })),
+    banners,
+  });
+}
+
+/** Persist a shared town banner; only admins may publish announcements. */
+async function handleCommuneBannerCreate(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+  if (Number(request.headers.get('content-length') ?? 0) > 2_048)
+    return authJson({ error: 'Request is too large' }, 413);
+  let payload: { text?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const text = typeof payload.text === 'string' ? payload.text.trim().slice(0, 80) : '';
+  if (!text) return authJson({ error: 'Banner text is required' }, 400);
+
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      'INSERT INTO commune_banners (id, text, author, created_at) VALUES (?1, ?2, ?3, ?4)',
+    ).bind(crypto.randomUUID(), text, user.username, now),
+    env.DB.prepare(
+      `DELETE FROM commune_banners
+       WHERE id NOT IN (SELECT id FROM commune_banners ORDER BY created_at DESC, id DESC LIMIT 6)`,
+    ),
+  ]);
+  const banners = await loadCommuneBanners(env);
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').publishBanners(banners);
+  } catch {
+    // D1 is authoritative; the next socket bootstrap includes the latest board.
+  }
+  return authJson({ banners });
+}
+
+/** Persist profile edits in D1 and fan them out to currently connected agents. */
+async function handleCommuneLoadout(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  if (Number(request.headers.get('content-length') ?? 0) > 8_192)
+    return authJson({ error: 'Request is too large' }, 413);
+  let payload: { loadout?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  if (!payload.loadout || typeof payload.loadout !== 'object')
+    return authJson({ error: 'Missing loadout' }, 400);
+  const loadout = normalizeCommuneLoadout(payload.loadout);
+  const now = Date.now();
+  await ensureSpiceSchema(env);
+  await env.DB.prepare(
+    `INSERT INTO commune_loadout (username, cards, pet, phrase, avatar, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(username) DO UPDATE SET cards = ?2, pet = ?3, phrase = ?4, avatar = ?5, updated_at = ?6`,
+  )
+    .bind(
+      user.username,
+      JSON.stringify(loadout.cards),
+      loadout.pet ? JSON.stringify(loadout.pet) : '',
+      loadout.phrase,
+      loadout.avatar ? JSON.stringify(loadout.avatar) : '',
+      now,
+    )
+    .run();
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').updateLoadout(user.username, loadout);
+  } catch {
+    // D1 is authoritative; a reconnect will load the latest saved profile.
+  }
+  return authJson({ ok: true });
 }
 
 /* ── COMMUNE spice drops ────────────────────────────────────────────────────── */
@@ -1468,14 +1800,23 @@ async function handleCommuneSpicePick(request: Request, env: Env, user: AuthUser
     env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 1, 'pickup', ?2, ?3)")
       .bind(user.username, `drop:${id}`, now),
   ]);
+  await ensureCommuneDrops(env, now);
+  const drops = await env.DB.prepare(
+    'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL',
+  ).all<{ id: number; x: number; y: number }>();
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').publishDrops(drops.results ?? []);
+  } catch {
+    // A later ticket bootstrap includes the current drop set.
+  }
   return authJson({ picked: true, spice: Number(user.spice ?? 0) + 1 });
 }
 
-/* ── NPC challenge (remote DeepSeek roleplay) ──────────────────────────────── */
+/* ── NPC challenge (remote LLM roleplay) ───────────────────────────────────── */
 
 /** One-time schema + persona seeding — the persona JSON is uploaded into the
  *  eco-data D1 `npc_personas` table on first use. The roleplay itself runs
- *  client-side through the shared remote DeepSeek pipeline (kittyChat); only
+ *  client-side through the shared remote LLM service (kittyChat); only
  *  the success spice award is server-side. */
 let npcSchemaPromise: Promise<void> | null = null;
 async function ensureNpcSchema(env: Env): Promise<void> {
@@ -1533,32 +1874,6 @@ async function handleChallengeAward(request: Request, env: Env, user: AuthUserRo
     ).bind(user.username, CHALLENGE_SUCCESS_SPICE, personaId, now),
   ]);
   return authJson({ awarded: CHALLENGE_SUCCESS_SPICE, spice: Number(user.spice ?? 0) + CHALLENGE_SUCCESS_SPICE });
-}
-
-/* ── COMMUNE agent→agent signals ───────────────────────────────────────────── */
-
-/** POST /api/commune/interact { target, kind, message? } — queue a signal for
- *  another agent; they receive it on their next presence sync (and it is
- *  deleted on delivery). kinds: 'bump' (screen shake), 'chat' (direct message
- *  banner), 'hands' (start hand-holding, sender leads), 'hands_release'. */
-async function handleCommuneInteract(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
-  let payload: { target?: unknown; kind?: unknown; message?: unknown };
-  try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return authJson({ error: 'Invalid JSON' }, 400);
-  }
-  const target = String(payload.target ?? '').trim();
-  const kind = String(payload.kind ?? '');
-  const message = String(payload.message ?? '').slice(0, 140);
-  if (!target || target === user.username) return authJson({ error: 'Invalid target' }, 400);
-  if (!['bump', 'chat', 'hands', 'hands_release'].includes(kind)) return authJson({ error: 'Invalid kind' }, 400);
-  if (kind === 'chat' && !message.trim()) return authJson({ error: 'Message required' }, 400);
-  const now = Date.now();
-  await env.DB.prepare(
-    'INSERT INTO commune_signals (from_user, to_user, kind, payload, created_at) VALUES (?1, ?2, ?3, ?4, ?5)'
-  ).bind(user.username, target, kind, message, now).run();
-  return authJson({ ok: true });
 }
 
 /** Roulette betting spots and their STANDARD casino payout odds ("to one"):
@@ -1771,6 +2086,8 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     preflight.headers.set('access-control-max-age', '86400');
     return preflight;
   }
+  if (path === '/api/llm/models' && request.method === 'GET') return handleLlmModels(request, env);
+  if (path === '/api/llm/chat' && request.method === 'POST') return handleLlmChat(request, env);
   if (path === '/api/auth/health' && request.method === 'GET') return authJson({ ok: true });
   if (path === '/api/auth/names' && request.method === 'GET')
     return authJson({ names: AUTH_EXTRA_NAMES, admin: [...AUTH_ADMIN_USERNAMES] });
@@ -1873,24 +2190,27 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCardsCollection(env, user);
   }
-  // COMMUNE live presence + loadouts (any logged-in user).
-  if (path === '/api/commune/sync' && request.method === 'POST') {
+  if (path === '/api/commune/socket-ticket' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleCommuneSync(request, env, user);
+    return handleCommuneSocketTicket(request, env, user);
+  }
+  if (path === '/api/commune/banners' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneBannerCreate(request, env, user);
+  }
+  if (path === '/api/commune/loadout' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneLoadout(request, env, user);
   }
   if (path === '/api/commune/spice/pick' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSpicePick(request, env, user);
   }
-  // Agent→agent interaction signals (bump / direct chat / hand-holding).
-  if (path === '/api/commune/interact' && request.method === 'POST') {
-    const user = await authBearerUser(request, env);
-    if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleCommuneInteract(request, env, user);
-  }
-  // NPC challenge success award (roleplay runs client-side via DeepSeek).
+  // NPC challenge success award (roleplay calls the shared LLM serving route).
   if (path === '/api/commune/challenge/award' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
@@ -2089,11 +2409,21 @@ async function handleKeywordAlerts(request: Request, env: Env): Promise<Response
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/api/commune/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      try {
+        return await env.COMMUNE_ROOM.getByName('main-plaza').fetch(request);
+      } catch {
+        return new Response('Commune room is temporarily unavailable', { status: 503 });
+      }
+    }
     if (url.pathname === '/api/keyword-alerts') {
       return handleKeywordAlerts(request, env);
     }
     if (
       url.pathname.startsWith('/api/auth/') ||
+      url.pathname.startsWith('/api/llm/') ||
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/pet') ||

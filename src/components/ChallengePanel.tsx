@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Mic, RefreshCw, Square, Star, Trash2, Trophy, Volume2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
-import { kittyChat } from '@/lib/kitty-help';
+import { kittyChat, type ChatMsg } from '@/lib/kitty-help';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { NPC_PERSONAS } from '@/data/npc-personas';
 
@@ -266,23 +266,22 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
     try {
-      const baseMessages = [
+      const baseMessages: ChatMsg[] = [
         { role: 'system', content: persona.data.system_prompt.join('\n') },
         ...history.map((m) => ({ role: m.role === 'npc' ? ('assistant' as const) : ('user' as const), content: m.content })),
       ];
-      let raw = await kittyChat([...baseMessages, { role: 'user', content: choice }], 8_192);
+      const choiceMessages: ChatMsg[] = [...baseMessages, { role: 'user', content: choice }];
+      let raw = await kittyChat(choiceMessages, 8_192);
       let next = parseTurn(raw, persona.messageKey);
       if (!next) {
         // One corrective retry — ask for the complete JSON object again.
-        raw = await kittyChat(
-          [
-            ...baseMessages,
-            { role: 'user', content: choice },
-            { role: 'assistant', content: raw.slice(-1_000) },
-            { role: 'user', content: `Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with ${persona.messageKey}, agent_choices (all 4), and status.` },
-          ],
-          8_192
-        );
+        const retryMessages: ChatMsg[] = [
+          ...baseMessages,
+          { role: 'user', content: choice },
+          { role: 'assistant', content: raw.slice(-1_000) },
+          { role: 'user', content: `Your previous reply was cut off or invalid. Re-output ONLY the complete JSON object with ${persona.messageKey}, agent_choices (all 4), and status.` },
+        ];
+        raw = await kittyChat(retryMessages, 8_192);
         next = parseTurn(raw, persona.messageKey);
       }
       if (!next) throw new Error('The challenge engine returned an invalid turn');

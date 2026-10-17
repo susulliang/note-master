@@ -295,7 +295,7 @@ export default defineConfig(({ mode }) => {
   // Miaoda-to-env passthrough (harmless on Vercel — will just be "/")
   const base = env.MIAODA_APP_ID ? `/app/${env.MIAODA_APP_ID}` : '/';
   const localWorkerApiOrigin =
-    env.LOCAL_WORKER_API_ORIGIN || 'https://note-master.susulliang.workers.dev';
+    env.LOCAL_WORKER_API_ORIGIN || 'https://note-master.econote.workers.dev';
 
   return {
     plugins: [

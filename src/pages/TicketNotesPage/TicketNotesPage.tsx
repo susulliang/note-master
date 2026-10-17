@@ -89,7 +89,7 @@ import { useLlmParser } from '@/hooks/use-llm-parser';
 import { isMultilingualModel } from '@/lib/whisper-models';
 import { useCloudParser } from '@/hooks/use-cloud-parser';
 import { useCcpExtensionBridge, type PendingExtensionPush } from '@/hooks/use-ccp-extension-bridge';
-import { generateWithDeepseek } from '@/lib/cloud-parser';
+import { generateWithRemoteLlm } from '@/lib/cloud-parser';
 import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import { CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
@@ -1531,10 +1531,10 @@ Additional information (if needed): ${additional}`;
     maxNewTokens?: number
   ) => Promise<{ text: string; ms: number; timedOut: boolean }>>(
     (system, user, maxNewTokens = 512) =>
-      generateWithDeepseek(system, user, maxNewTokens),
+      generateWithRemoteLlm(system, user, maxNewTokens),
     []
   );
-  const sopCloudGenerateEnabled = cloudParser.hasKey;
+  const sopCloudGenerateEnabled = cloudParser.isAvailable;
 
   // ---------------------------------------------------------------------
   //  CCP tab-audio capture → local Whisper → auto-fill.
@@ -1900,7 +1900,7 @@ Additional information (if needed): ${additional}`;
     //    the auto-full-parse we might run on a prior hangup attempt didn't
     //    already land (call.hasSuccessfulCloudParse() == false)
     //  - we actually have a backend to call: either env default or a local
-    //    key (cloudParser.hasKey)
+    //    model (cloudParser.isAvailable)
     //  - transcript has enough text to be worth an API call (≥400 chars)
     //
     // The parse we auto-run here is mode='full' (all clauses preserved in
@@ -1910,7 +1910,7 @@ Additional information (if needed): ${additional}`;
       const transcriptChars = callNow.transcript.reduce((n, e) => n + e.text.length, 0);
       const enoughChars = transcriptChars >= 400;
       const noPriorCloudParse = !callNow.hasSuccessfulCloudParse();
-      const hasBackend = !!cloudParserRef.current && (cloudParserRef.current?.hasKey ?? false);
+      const hasBackend = !!cloudParserRef.current && (cloudParserRef.current?.isAvailable ?? false);
       if (noPriorCloudParse && hasBackend && enoughChars) {
         // Run with a bounded time-out so network hiccups can't hang the
         // note modal forever. ~25s = 2x the normal V4 flash RTT, generous.
@@ -2147,8 +2147,9 @@ Additional information (if needed): ${additional}`;
                   }}
                   cloud={{
                     isParsing: call.isCloudParsing,
+                    available: cloudParser.isAvailable,
+                    modelLabel: cloudParser.modelLabel,
                     progress: cloudParser.progress,
-                    isDefault: cloudParser.isDefault,
                     error: cloudParser.error,
                     lastResult: cloudParser.lastResult,
                     lastMode: call.lastCloudParse()?.mode ?? null,
@@ -2316,10 +2317,12 @@ Additional information (if needed): ${additional}`;
               onLoad: handleLoadLlm,
             }}
             cloud={{
-              hasKey: cloudParser.hasKey,
+              isAvailable: cloudParser.isAvailable,
+              availableModels: cloudParser.availableModels,
+              selectedModel: cloudParser.selectedModel,
+              modelLabel: cloudParser.modelLabel,
+              onSelectModel: cloudParser.selectModel,
               error: cloudParser.error,
-              onSetApiKey: cloudParser.setApiKey,
-              isDefault: cloudParser.isDefault,
             }}
             transcript={call.transcript}
             isTranscribing={call.isTranscribing}

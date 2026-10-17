@@ -31,6 +31,7 @@ import {
 import { fetchAmrTemplates } from '@/lib/amr-db';
 import { loadSopRaw } from '@/lib/sop-db';
 import { extractJsonLoose } from '@/lib/llm-parser';
+import { readRemoteLlmModel, requestRemoteChatCompletion } from '@/lib/llm-serving-client';
 import type { FaqEntry } from '@/utils/productData';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import { loadNewsIndex, type NewsItem } from '@/utils/newsData';
@@ -43,11 +44,8 @@ import {
 } from '@/utils/sopIndexer';
 
 /* ------------------------------------------------------------------ */
-/*  DeepSeek chat (same endpoint/key chain as cloud-parser.ts)         */
+/*  Remote chat through the shared authenticated Worker serving API   */
 /* ------------------------------------------------------------------ */
-
-const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
-const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
 export interface ChatMsg {
   role: 'system' | 'user' | 'assistant';
@@ -113,44 +111,12 @@ export function unwrapNestedLlmJson(
  * Throws on failure so the orchestrating hook can surface the stage.
  */
 export async function kittyChat(messages: ChatMsg[], maxTokens: number): Promise<string> {
-  const key = (() => {
-    try {
-      return (
-        (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-          ?.VITE_DEEPSEEK_API_KEY ?? localStorage.getItem('nm-deepseek-api-key') ?? ''
-      );
-    } catch {
-      return '';
-    }
-  })();
-  if (!key) throw new Error('No DeepSeek API key configured (Engine settings).');
-
-  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages,
-      temperature: 0.2,
-      max_tokens: Math.max(1, Math.min(8192, maxTokens | 0)),
-      thinking: { type: 'disabled' },
-      stream: false,
-    }),
+  const response = await requestRemoteChatCompletion({
+    model: readRemoteLlmModel(),
+    messages,
+    temperature: 0.2,
+    maxTokens: Math.max(1, Math.min(8192, maxTokens | 0)),
   });
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = (await response.json()) as { error?: { message?: string } };
-      if (body?.error?.message) detail = body.error.message;
-    } catch {
-      /* keep status line */
-    }
-    throw new Error(`DeepSeek API error — ${detail}`);
-  }
   const body = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };

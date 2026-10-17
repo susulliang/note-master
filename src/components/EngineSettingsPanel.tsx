@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, ChevronDown, Cpu, Heart, KeyRound, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, Sparkles, Star, Utensils, X, Zap } from 'lucide-react';
+import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, ChevronDown, Cpu, Heart, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, Sparkles, Star, Utensils, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 import KeywordAlertContent from '@/components/KeywordAlertContent';
 import StorePanel from '@/components/StorePanel';
 import CardCollectionPanel from '@/components/CardCollectionPanel';
+import { REMOTE_LLM_MODELS, type RemoteLlmModel } from '@/lib/llm-serving-client';
 
 /** Shared prefers-reduced-motion media query (reactive). */
 function useReducedMotion(): boolean {
@@ -88,26 +89,15 @@ export interface ParserState {
   onLoad: () => void;
 }
 
-/**
- * Cloud-parser state for the settings panel. When an env secret provides
- * a key (VITE_DEEPSEEK_API_KEY) `isDefault` is true and the panel treats
- * the remote LLM as the default backend — the DeepSeek row and key-entry
- * UI are hidden because the agent never needs to manage the secret at
- * the client level; the agent can still instead OPT IN to a local model
- * build via the Model selection list below.
- *
- * When `isDefault` is false the panel renders the DeepSeek row with
- * API-key management (agent enters the key locally).
- */
 export interface CloudState {
-  /** True when a DeepSeek API key is available (env secret OR local storage) */
-  hasKey: boolean;
-  /** Last failure (bad key, network, API error) — surfaced on the row */
+  /** True when the selected model is available on the authenticated serving Worker. */
+  isAvailable: boolean;
+  availableModels: RemoteLlmModel[];
+  selectedModel: RemoteLlmModel;
+  modelLabel: string;
+  onSelectModel: (model: RemoteLlmModel) => void;
+  /** Last remote inference failure. */
   error: string | null;
-  /** Store (or clear, with '') the DeepSeek API key in local storage */
-  onSetApiKey: (key: string) => void;
-  /** True when the env var sets DeepSeek as the default backend → row is hidden */
-  isDefault?: boolean;
 }
 
 interface EngineSettingsPanelProps {
@@ -115,7 +105,7 @@ interface EngineSettingsPanelProps {
   selectedCat: CatId;
   onSelectCat: (catId: CatId) => void;
   parser?: ParserState;
-  /** DeepSeek cloud parser (API-key management on its Model selection row) */
+  /** Remote LLM provider/model selection backed by the authenticated Worker. */
   cloud?: CloudState;
   /** Live transcript (drives the parse-debug window preview) */
   transcript: TranscriptEntry[];
@@ -298,7 +288,7 @@ export default function EngineSettingsPanel({
   onPet,
   onToggleNap,
 }: EngineSettingsPanelProps) {
-  const aiParserAvailable = Boolean(parser?.enabled || cloud?.hasKey);
+  const aiParserAvailable = Boolean(parser?.enabled || cloud?.isAvailable);
   const toggleNap = onToggleNap;
   const panelsCtx = useContext(TicketPanelsContext);
   // Fallback: EngineSettingsPanel may render outside TicketPanelsContext.Provider
@@ -337,9 +327,6 @@ export default function EngineSettingsPanel({
   const [showLlmDebug, setShowLlmDebug] = useState(false);
   const [showJsonWindow, setShowJsonWindow] = useState(false);
   const [jsonCopied, setJsonCopied] = useState(false);
-  /** Draft API-key input (saved to storage via cloud.onSetApiKey) */
-  const [apiKeyDraft, setApiKeyDraft] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
   // Account state — surfaced as a login-status block at the top of Settings.
   const { user: authUser, logout: authLogout, resolving: authResolving, setSpice: setAuthSpice } = useAuth();
   const [storeOpen, setStoreOpen] = useState(false);
@@ -880,18 +867,52 @@ export default function EngineSettingsPanel({
           </div>
         </div>
 
-        {/* ---- Model selection: remote (DeepSeek) + local builds ---- */}
-        {parser?.onLoadDevice && (
+        {/* ---- Model selection: remote serving backend + local builds ---- */}
+        {(cloud || parser?.onLoadDevice) && (
           <div>
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
               Model selection
             </p>
             <div className="flex flex-col gap-1.5">
-              {/* Remote AI parsing is always available via the caption
-                  panel's Parse button (no model download, no local key
-                  entry). Below are the local ONNX builds — one-time
-                  browser-cached alternatives that run fully offline. */}
-              {parser.models.map((name) => (
+              {cloud && (
+                <div className="rounded-md border border-accent/20 bg-accent/[0.035] p-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-[10px] font-semibold text-foreground">
+                      Remote serving model
+                    </span>
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide',
+                        cloud.isAvailable
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : 'bg-foreground/10 text-muted-foreground'
+                      )}
+                    >
+                      {cloud.isAvailable ? 'available' : authUser ? 'unavailable' : 'sign in required'}
+                    </span>
+                  </div>
+                  <select
+                    value={cloud.selectedModel}
+                    onChange={(event) => cloud.onSelectModel(event.target.value as RemoteLlmModel)}
+                    disabled={!authUser || authResolving}
+                    aria-label="Remote LLM provider and model"
+                    className="mt-1 w-full rounded-md border border-border/60 bg-background/80 px-2 py-1.5 text-[10px] text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {REMOTE_LLM_MODELS.map((model) => {
+                      const available = cloud.availableModels.includes(model.id);
+                      return (
+                        <option key={model.id} value={model.id} disabled={!available}>
+                          {model.provider} · {model.label}{available ? '' : ' (unavailable)'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="mt-1 text-[9px] leading-snug text-muted-foreground/80">
+                    Used by remote parse, QA, SOP matching, Kitty Help, and COMMUNE roleplay. Local models remain on-device.
+                  </p>
+                </div>
+              )}
+              {parser?.onLoadDevice && parser.models.map((name) => (
                 <div key={name} className="rounded-md bg-foreground/[0.04] p-1.5">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-semibold text-foreground">
@@ -943,7 +964,7 @@ export default function EngineSettingsPanel({
                 </div>
               ))}
             </div>
-            {parser.failedAttempts && parser.failedAttempts.length > 0 && (
+            {parser?.failedAttempts && parser.failedAttempts.length > 0 && (
               <div className="mt-1.5 rounded-md bg-destructive/10 p-1.5">
                 <p className="text-[9px] font-bold uppercase tracking-wide text-destructive">
                   failed builds

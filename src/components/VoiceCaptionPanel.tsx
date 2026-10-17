@@ -80,19 +80,18 @@ export interface EnginePanelState {
  * complaint clauses, only the 2–4 most impactful / confirmed fix steps,
  * while still being 100% faithful to transcript wording.
  *
- * When `isDefault` is true (VITE_DEEPSEEK_API_KEY env secret set) the UI
- * drops the "DeepSeek" brand tag: the button reads generically as "Parse"
- * / "Concise Parse" without a brand label. The status label and the
- * inline AI progress bar still reflect the cloud parse's live streamed
- * progress.
+ * The selected remote provider label is used in accessibility/status copy;
+ * inference itself is served by the authenticated Worker endpoint.
  */
 export interface CloudPanelState {
   /** True while the round-trip is in flight */
   isParsing: boolean;
+  /** True when the selected model is available and the user is signed in. */
+  available: boolean;
+  /** Selected remote backend/model label shown in parse status copy. */
+  modelLabel: string;
   /** Live streamed progress: 0..1 (0 = idle). Fills the AI progress bar. */
   progress?: number;
-  /** True when cloud is the DEFAULT backend — brand tags are hidden */
-  isDefault?: boolean;
   /** Last failure (bad key, network, API error) — surfaced under the header */
   error: string | null;
   /** Last successful round-trip, for the status readout */
@@ -451,20 +450,16 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
               <Button
                 variant="outline"
                 size="sm"
-                disabled={cloud.isParsing || call.transcript.length === 0}
+                disabled={!cloud.available || cloud.isParsing || call.transcript.length === 0}
                 onClick={cloud.onParseConcise}
                 className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
                 aria-label={
-                  cloud.isDefault
-                    ? 'Concise Parse — trim issue + resolution to the 2–4 primary points each'
-                    : 'Concise Parse (DeepSeek) — trim issue + resolution to the 2–4 primary points each'
+                  `Concise Parse (${cloud.modelLabel}) — trim issue + resolution to the 2–4 primary points each`
                 }
                 title={
                   call.transcript.length === 0
                     ? 'Nothing to parse yet — the transcript is empty'
-                    : cloud.isDefault
-                      ? 'Condensed AI parse: keep only the 2–4 PRIMARY customer complaints and 2–4 MOST CONFIRMED agent fix steps, accurate to transcript.'
-                      : 'Condensed DeepSeek parse: keep only the 2–4 PRIMARY customer complaints and 2–4 MOST CONFIRMED agent fix steps, accurate to transcript.'
+                    : `Condensed ${cloud.modelLabel} parse: keep only the 2–4 PRIMARY customer complaints and 2–4 MOST CONFIRMED agent fix steps, accurate to transcript.`
                 }
               >
                 {cloud.isParsing ? (
@@ -477,20 +472,16 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
               <Button
                 variant="default"
                 size="sm"
-                disabled={cloud.isParsing || call.transcript.length === 0}
+                disabled={!cloud.available || cloud.isParsing || call.transcript.length === 0}
                 onClick={cloud.onParse}
                 className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
                 aria-label={
-                  cloud.isDefault
-                    ? 'Parse the transcript with AI'
-                    : 'Parse the transcript with DeepSeek'
+                  `Parse the transcript with ${cloud.modelLabel}`
                 }
                 title={
                   call.transcript.length === 0
                     ? 'Nothing to parse yet — the transcript is empty'
-                    : cloud.isDefault
-                      ? 'Send the current transcript window to the AI parser and fill every field (overwrites regex fills). Keeps EVERY clause in issue + resolution.'
-                      : 'Send the current transcript window to DeepSeek and fill every field (overwrites regex fills). Keeps EVERY clause in issue + resolution.'
+                    : `Send the current transcript window to ${cloud.modelLabel} and fill every field (overwrites regex fills). Keeps EVERY clause in issue + resolution.`
                 }
               >
                 {cloud.isParsing ? (
@@ -514,9 +505,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
             title={cloud.error ?? undefined}
           >
             {cloud.error ??
-              (cloud.isDefault
-                ? `AI${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`
-                : `DeepSeek${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`)}
+              `${cloud.modelLabel}${cloud.lastMode === 'concise' ? ' (concise)' : ''}: ${(cloud.lastResult!.ms / 1000).toFixed(1)}s · ${cloud.lastResult!.fields.length} fields filled`}
           </p>
         )}
 
@@ -784,9 +773,8 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
               }
               tone="emerald"
             />
-            {/* Unified AI progress row. Priority: cloud parse (streamed live
-                progress, the default backend when VITE_DEEPSEEK_API_KEY is
-                set), then the on-device LLM parser's own download/generation.
+            {/* Unified AI progress row. Priority: cloud parse (served through
+                the selected remote model), then the on-device LLM generation.
                 Either provider drives the same "AI" label — no branded name
                 when cloud is default. */}
             {(parser || cloud) && (

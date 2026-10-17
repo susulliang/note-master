@@ -15,7 +15,7 @@ import {
 } from '@/lib/transcript-noise';
 import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
 import { extractJsonLoose, renderTranscript } from '@/lib/llm-parser';
-import { generateWithDeepseek } from '@/lib/cloud-parser';
+import { generateWithRemoteLlm } from '@/lib/cloud-parser';
 import {
   boostQaScore,
   buildQaScoringPrompt,
@@ -736,7 +736,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       const { system, user } = buildQaScoringPrompt(
         renderTranscript(entriesRef.current, 16_000)
       );
-      const { text } = await generateWithDeepseek(system, user, 1024);
+      const { text } = await generateWithRemoteLlm(system, user, 1024);
       const parsed = extractJsonLoose(text) as {
         scores?: Record<string, unknown>;
         summary?: unknown;

@@ -43,9 +43,8 @@ interface SopPanelProps {
    *  own the final-note generator itself because that already lives in
    *  the page layer alongside the Hang-Up output. */
   getFinalNote: () => string;
-  /** Cloud DeepSeek generate handle — when provided it's the PREFERRED
-   *  backend for the AI match button (default when VITE_DEEPSEEK_API_KEY
-   *  is set). The SOP panel uses the same prompt contract as the local
+  /** Remote Worker-served model — when provided it's the PREFERRED
+   *  backend for the AI match button. The SOP panel uses the same prompt contract as the local
    *  LLM and picks the LLM with the better backend. */
   cloudGenerate?: LlmGenerateFn;
   /** The LLM worker handle — exposed from `useLlmParser().generate` */
@@ -185,7 +184,7 @@ export default function SopPanel({
     setLlmError(null);
 
     // Priority of LLM backends for SOP heading match:
-    //   1. `cloudGenerate` — DeepSeek via env secret (the default backend).
+    //   1. `cloudGenerate` — selected remote model via the serving Worker.
     //      Warm-up is instant (no model download) so we call it directly.
     //   2. `llmGenerate` — the on-device local WASM LLM, which may still
     //      be downloading; we warm it up and check readiness first.
@@ -198,7 +197,7 @@ export default function SopPanel({
         if (!llmIsReady) {
           setLlmError(
             llmStatus === 'disabled'
-              ? 'Local LLM is disabled — enable it in the transcript panel engine settings, or set VITE_DEEPSEEK_API_KEY for cloud matching.'
+              ? 'Local LLM is disabled — enable it in the transcript panel engine settings, or sign in and select an available remote model in Settings.'
               : 'Local LLM is still loading. Wait ~30s and try again, or use the keyword picks below.'
           );
           return;
@@ -207,7 +206,7 @@ export default function SopPanel({
       generator = llmGenerate;
     } else {
       setLlmError(
-        'No AI backend is available yet. Set VITE_DEEPSEEK_API_KEY for cloud matching, or enable a local LLM build in settings.'
+        'No AI backend is available yet. Sign in and select an available remote model in Settings, or enable a local LLM build.'
       );
       return;
     }

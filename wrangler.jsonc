@@ -17,6 +17,17 @@
       "migrations_dir": "migrations"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "COMMUNE_ROOM", "class_name": "CommuneRoom" }
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "migrations": [
+    { "tag": "commune-room-v1", "new_sqlite_classes": ["CommuneRoom"] }
+  ],
   "assets": {
     "directory": "./dist/client",
     "run_worker_first": ["/api/*"],

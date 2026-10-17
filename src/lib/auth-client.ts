@@ -40,14 +40,12 @@ const TOKEN_KEY = 'ecovacs_auth_token';
 
 /** Workers deployment serves the API; other origins (Vercel / Tauri / local
  *  dev) call it cross-origin — the Worker sends permissive CORS headers. */
-const WORKERS_ORIGIN = 'https://note-master.susulliang.workers.dev';
+const WORKERS_ORIGIN = 'https://note-master.econote.workers.dev';
 const API_BASE: string = (() => {
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.workers.dev')) return '';
   if (import.meta.env.VITE_AUTH_API_BASE) return String(import.meta.env.VITE_AUTH_API_BASE).replace(/\/+$/, '');
   if (typeof window === 'undefined') return WORKERS_ORIGIN;
-  const host = window.location.hostname;
-  // Same-origin on the Workers deployment; everywhere else (Vercel / Tauri /
-  // localhost dev) call the Workers deployment cross-origin (CORS is open).
-  if (host.endsWith('.workers.dev')) return '';
+  // Vercel, Tauri and localhost use the Workers deployment cross-origin.
   return WORKERS_ORIGIN;
 })();
 
@@ -266,40 +264,62 @@ export interface CommuneAgent {
   loadout: CommuneLoadout | null;
 }
 
-/** Agent→agent interaction signal delivered via the presence sync. */
-export interface CommuneSignal {
-  from: string;
-  kind: 'bump' | 'chat' | 'hands' | 'hands_release';
-  message: string;
+export interface CommuneBanner {
+  id: string;
+  text: string;
+  author: string;
+  at: number;
 }
 
-/** Presence tick: report my position/status (and loadout when included),
- *  receive everyone else plus unclaimed spice drops. Called every ~8s while
- *  the Commune is open. */
-export async function syncCommune(
+export interface CommuneConnectionBootstrap {
+  ticket: string;
+  me: CommuneLoadout | null;
+  drops: CommuneDrop[];
+  banners?: CommuneBanner[];
+}
+
+/** Issue a short-lived one-time ticket for an authenticated room socket. */
+export async function createCommuneSocketTicket(
   x: number,
   y: number,
-  status: string,
-  loadout?: CommuneLoadout
-): Promise<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[]; signals: CommuneSignal[] }> {
+  status: string
+): Promise<CommuneConnectionBootstrap> {
   const token = getStoredToken();
-  const out = await call<{ others: CommuneAgent[]; me: CommuneLoadout | null; drops: CommuneDrop[]; signals?: CommuneSignal[] }>('/api/commune/sync', {
+  return call<CommuneConnectionBootstrap>('/api/commune/socket-ticket', {
     method: 'POST',
-    body: JSON.stringify(loadout ? { x, y, status, loadout } : { x, y, status }),
+    body: JSON.stringify({ x, y, status }),
     token,
   });
-  return { drops: out.drops ?? [], others: out.others, me: out.me, signals: out.signals ?? [] };
 }
 
-/** Send an interaction signal to another agent (bump shake, direct chat
- *  banner, hand-holding start/stop). Delivered on their next presence sync. */
-export async function communeInteract(target: string, kind: CommuneSignal['kind'], message = ''): Promise<void> {
+/** Save the durable loadout in D1 and broadcast it to the live room. */
+export async function saveCommuneLoadout(loadout: CommuneLoadout): Promise<void> {
   const token = getStoredToken();
-  await call('/api/commune/interact', {
+  await call('/api/commune/loadout', {
     method: 'POST',
-    body: JSON.stringify({ target, kind, message }),
+    body: JSON.stringify({ loadout }),
     token,
   });
+}
+
+/** Hang an admin announcement on the shared town board. */
+export async function createCommuneBanner(text: string): Promise<CommuneBanner[]> {
+  const token = getStoredToken();
+  const out = await call<{ banners: CommuneBanner[] }>('/api/commune/banners', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+    token,
+  });
+  return out.banners;
+}
+
+/** WebSocket URL uses the same Worker origin as the authenticated HTTP API. */
+export function communeSocketUrl(ticket: string): string {
+  const origin = new URL(API_BASE || window.location.origin, window.location.origin).origin;
+  const url = new URL('/api/commune/socket', origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('ticket', ticket);
+  return url.toString();
 }
 
 /** A spice pile scattered on the town square — first agent to walk over it

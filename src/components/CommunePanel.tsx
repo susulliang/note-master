@@ -8,32 +8,31 @@
  *   • Pixel-art town — the static map (town hall, café, arcade, houses, pond,
  *     paths, lamps, fences, flowers) is baked once into an offscreen canvas.
  *   • Pixel human sprites for the player, villager NPCs and remote agents.
- *   • Live presence — other agents walk around in real time (D1, 2.5s poll).
+ *   • Live presence — positions and status stream over the room WebSocket.
  *   • Loadouts — up to 3 collection cards from your inventory, one pet
  *     snapshot, one phrase (revealed when someone walks close).
- *   • Bulletin board (admin banners), showcase stall + challenge tent stubs.
+ *   • Shared admin banners, transient square chat, showcase + challenge stubs.
  *
  * NEXT-BOARD ROADMAP (deliberate hook points, see the panels' stubs):
- *   1. NPC challenges — walk up to a standing NPC (GB Poolius) and press E.
- *   2. Agent chit-chat — real multi-user presence + chat (D1 presence sync:
- *      the player/NPC entity model below is already the wire shape).
- *   3. Delivery secrets / open conversations — proximity-gated chat channels.
- *   4. Admin banners — promote the localStorage list to a D1 table.
- *   5. Personal showcases — achievement/card displays at the stall.
+ *   1. Delivery secrets / open conversations — proximity-gated chat channels.
+ *   2. Personal showcases — achievement/card displays at the stall.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Megaphone, Palette, Trophy, Users, X } from 'lucide-react';
+import { Building2, Megaphone, MessageSquare, Palette, Trophy, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
+  communeSocketUrl,
+  createCommuneBanner,
+  createCommuneSocketTicket,
   DEFAULT_AVATAR,
-  communeInteract,
   fetchCardCollection,
   pickSpiceDrop,
-  syncCommune,
+  saveCommuneLoadout,
   type CommuneAgent,
   type CommuneAvatar,
+  type CommuneBanner,
   type CommuneDrop,
   type CommuneLoadout,
   type CommunePet,
@@ -137,15 +136,9 @@ interface PondDuck { x: number; y: number; vx: number; phase: number; until: num
 const DUCK_LIFE_MS = 20_000;
 const SPEED = 240; // player px/s
 const NPC_SPEED = 90;
-interface Banner {
-  id: string;
-  text: string;
-  author: string;
-  at: number;
+interface Banner extends CommuneBanner {
   hue: number;
 }
-
-const BANNERS_KEY = '__app_commune_banners';
 
 /** The cat this agent already carries as their workspace companion (the
  *  "Cat companion" pick in Settings) — the loadout defaults to it so the
@@ -170,16 +163,6 @@ function carriedPet(username: string): CommunePet {
     mood: st?.mood ?? 60,
     xp: st?.xp ?? 0,
   };
-}
-
-function loadBanners(): Banner[] {
-  try {
-    const raw = localStorage.getItem(BANNERS_KEY);
-    const list = raw ? (JSON.parse(raw) as Banner[]) : [];
-    return Array.isArray(list) ? list.slice(-6) : [];
-  } catch {
-    return [];
-  }
 }
 
 /** Villager NPC — a stand-in wandering the square. */
@@ -240,7 +223,32 @@ function hueOf(name: string): number {
   return h;
 }
 
+function isCommuneBanner(value: unknown): value is CommuneBanner {
+  if (!value || typeof value !== 'object') return false;
+  const banner = value as Record<string, unknown>;
+  return typeof banner.id === 'string'
+    && typeof banner.text === 'string'
+    && typeof banner.author === 'string'
+    && Number.isFinite(Number(banner.at));
+}
+
+function parseBanners(value: unknown): Banner[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isCommuneBanner).slice(-6).map((banner) => ({
+    ...banner,
+    at: Number(banner.at),
+    hue: hueOf(banner.author),
+  }));
+}
+
 interface Speech { text: string; until: number }
+
+interface SquareChatMessage {
+  id: string;
+  from: string;
+  message: string;
+  at: number;
+}
 
 interface Agent {
   x: number;
@@ -275,8 +283,14 @@ interface RemoteView {
   admin?: boolean;
   pet: CommunePet | null;
   avatar: CommuneAvatar | null;
+  says: Speech | null;
   moving: boolean;
   bobPhase: number;
+}
+
+interface CommuneRoomIncoming {
+  type: string;
+  [key: string]: unknown;
 }
 
 interface PetOwner {
@@ -327,11 +341,14 @@ export default function CommunePanel() {
   const [panel, setPanel] = useState<PanelKind>(null);
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
-  const [banners, setBanners] = useState<Banner[]>(loadBanners);
+  const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerDraft, setBannerDraft] = useState('');
+  const [bannerSending, setBannerSending] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
+  const [squareMessages, setSquareMessages] = useState<SquareChatMessage[]>([]);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
   /* ── agent→agent interactions ──────────────────────────────────────────────── */
-  /** Direct-chat target (set by bumping into them with E) — messages go to them. */
+  /** Direct-chat target (selected from a profile or bump interaction). */
   const [messaging, setMessaging] = useState<string | null>(null);
   const messagingRef = useRef<string | null>(null);
   messagingRef.current = messaging;
@@ -370,15 +387,38 @@ export default function CommunePanel() {
 
   /* ── live presence (other agents) ─────────────────────────────────────────── */
   const [others, setOthers] = useState<CommuneAgent[]>([]);
+  const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const [selected, setSelected] = useState<CommuneAgent | null>(null);
   const selectedRef = useRef<CommuneAgent | null>(null);
   selectedRef.current = selected;
+  const socketRef = useRef<WebSocket | null>(null);
+  const lastPositionSentAtRef = useRef(0);
+  const lastPositionStatusRef = useRef('');
   /** Interpolated remote walkers, keyed by username. */
   const remoteRef = useRef(
-    new Map<string, { rx: number; ry: number; tx: number; ty: number; agent: CommuneAgent; moving: boolean; bobPhase: number }>()
+    new Map<string, {
+      rx: number;
+      ry: number;
+      tx: number;
+      ty: number;
+      agent: CommuneAgent;
+      moving: boolean;
+      bobPhase: number;
+      says: Speech | null;
+    }>()
   );
-  /** My current status, updated by the draw loop, sent by the poll. */
+  /** My current status, updated by the draw loop and sent over the room socket. */
   const statusRef = useRef('hanging out');
+  const sendRoomEvent = useCallback((event: Record<string, unknown>): boolean => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify(event));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
   const [loadout, setLoadout] = useState<CommuneLoadout>(() => ({ cards: [], pet: carriedPet(username), phrase: '', avatar: loadAvatar() }));
@@ -392,24 +432,23 @@ export default function CommunePanel() {
   const [ownedCards, setOwnedCards] = useState<TcgManifestCard[] | null>(null);
   const [cardIndex, setCardIndex] = useState<Map<string, TcgManifestCard> | null>(null);
 
-  /* ── banners ─────────────────────────────────────────────────────────────── */
+  /* ── shared banners ──────────────────────────────────────────────────────── */
 
-  const persistBanners = useCallback((next: Banner[]) => {
-    const trimmed = next.slice(-6);
-    setBanners(trimmed);
-    try {
-      localStorage.setItem(BANNERS_KEY, JSON.stringify(trimmed));
-    } catch {
-      /* storage full / private mode — banners stay in memory */
-    }
-  }, []);
-
-  const hangBanner = useCallback(() => {
+  const hangBanner = useCallback(async () => {
     const text = bannerDraft.trim();
-    if (!text) return;
-    persistBanners([...banners, { id: `${Date.now()}`, text, author: username, at: Date.now(), hue: hueOf(username) }]);
-    setBannerDraft('');
-  }, [bannerDraft, banners, persistBanners, username]);
+    if (!text || bannerSending) return;
+    setBannerSending(true);
+    try {
+      const shared = await createCommuneBanner(text);
+      setBanners(parseBanners(shared));
+      setBannerDraft('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to hang the banner.';
+      setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message }]);
+    } finally {
+      setBannerSending(false);
+    }
+  }, [bannerDraft, bannerSending]);
 
   /* ── loadout editor data (pets + owned cards) ────────────────────────────── */
 
@@ -473,8 +512,7 @@ export default function CommunePanel() {
     };
   }, [panel, ownedCards]);
 
-  /** Every loadout edit marks it dirty — the next presence tick syncs it
-   *  (no separate save button). */
+  /** Every loadout edit marks it dirty; the debounced save persists and broadcasts it. */
   const toggleLoadoutCard = (id: string) => {
     loadoutTouchedRef.current = true;
     loadoutDirtyRef.current = true;
@@ -517,82 +555,212 @@ export default function CommunePanel() {
     [setSpice]
   );
 
-  /* ── presence poll — one round-trip every 8s while the commune is open ────── */
+  /* ── live room connection ─────────────────────────────────────────────────── */
   useEffect(() => {
     if (!user) return;
     let stopped = false;
-    const tick = async () => {
-      const p = playerRef.current;
+    let reconnectTimer = 0;
+    let reconnectAttempt = 0;
+    let activeSocket: WebSocket | null = null;
+
+    const applySnapshot = (agents: CommuneAgent[]) => {
+      remoteRef.current.clear();
+      for (const agent of agents) {
+        remoteRef.current.set(agent.username, {
+          rx: agent.x,
+          ry: agent.y,
+          tx: agent.x,
+          ty: agent.y,
+          agent,
+          moving: false,
+          bobPhase: Math.random() * 10,
+          says: null,
+        });
+      }
+      setOthers(agents);
+      const selectedAgent = selectedRef.current;
+      if (selectedAgent) {
+        const fresh = agents.find((agent) => agent.username === selectedAgent.username) ?? null;
+        setSelected(fresh);
+        if (!fresh) setPanel(null);
+      }
+    };
+
+    const upsertAgent = (agent: CommuneAgent) => {
+      if (agent.username === username) return;
+      const remote = remoteRef.current.get(agent.username);
+      if (remote) {
+        remote.tx = agent.x;
+        remote.ty = agent.y;
+        remote.agent = agent;
+      } else {
+        remoteRef.current.set(agent.username, {
+          rx: agent.x,
+          ry: agent.y,
+          tx: agent.x,
+          ty: agent.y,
+          agent,
+          moving: false,
+          bobPhase: Math.random() * 10,
+          says: null,
+        });
+      }
+      setOthers((current) => [...current.filter((item) => item.username !== agent.username), agent]);
+      if (selectedRef.current?.username === agent.username) setSelected(agent);
+    };
+
+    const removeAgent = (agentName: string) => {
+      remoteRef.current.delete(agentName);
+      setOthers((current) => current.filter((agent) => agent.username !== agentName));
+      if (selectedRef.current?.username === agentName) {
+        setSelected(null);
+        setPanel(null);
+      }
+      if (handsRef.current?.partner === agentName) {
+        handsRef.current = null;
+        setHands(null);
+      }
+      if (messagingRef.current === agentName) setMessaging(null);
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      setConnectionState('reconnecting');
+      reconnectAttempt += 1;
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt - 1, 5));
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, delay);
+    };
+
+    const connect = async () => {
       try {
-        const out = await syncCommune(
-          Math.round(p.x),
-          Math.round(p.y),
+        setConnectionState(reconnectAttempt ? 'reconnecting' : 'connecting');
+        if (loadoutDirtyRef.current) {
+          await saveCommuneLoadout(loadoutRef.current);
+          loadoutDirtyRef.current = false;
+        }
+        if (stopped) return;
+        const player = playerRef.current;
+        const bootstrap = await createCommuneSocketTicket(
+          Math.round(player.x),
+          Math.round(player.y),
           statusRef.current,
-          loadoutDirtyRef.current ? loadoutRef.current : undefined
         );
         if (stopped) return;
-        loadoutDirtyRef.current = false;
-        dropsRef.current = out.drops.filter((d) => !pickingRef.current.has(d.id));
-        // Agent→agent signals: bump shake, direct-message banner, hand-holding.
-        for (const s of out.signals) {
-          if (s.kind === 'bump') {
-            shakeUntilRef.current = Date.now() + 700;
-          } else if (s.kind === 'chat') {
-            setInbox((b) => [...b.slice(-4), { from: s.from, message: s.message }]);
-          } else if (s.kind === 'hands') {
-            if (!handsRef.current) {
-              handsRef.current = { partner: s.from, lead: false };
-              setHands(handsRef.current);
+        dropsRef.current = bootstrap.drops.filter((drop) => !pickingRef.current.has(drop.id));
+        setBanners(parseBanners(bootstrap.banners));
+        let initialLoadout = loadoutRef.current;
+        if (!loadoutTouchedRef.current) {
+          if (bootstrap.me) {
+            initialLoadout = { ...bootstrap.me, pet: bootstrap.me.pet ?? loadoutRef.current.pet };
+            setLoadout(initialLoadout);
+            if (!bootstrap.me.pet && initialLoadout.pet) loadoutDirtyRef.current = true;
+          } else {
+            loadoutDirtyRef.current = true;
+            setLoadout((current) => ({ ...current }));
+          }
+        }
+
+        const socket = new WebSocket(communeSocketUrl(bootstrap.ticket));
+        activeSocket = socket;
+        socketRef.current = socket;
+        socket.onopen = () => {
+          if (stopped || activeSocket !== socket) return;
+          reconnectAttempt = 0;
+          setConnectionState('connected');
+          sendRoomEvent({ type: 'loadout', loadout: initialLoadout });
+        };
+        socket.onmessage = (messageEvent) => {
+          if (stopped || activeSocket !== socket || typeof messageEvent.data !== 'string') return;
+          let event: CommuneRoomIncoming;
+          try {
+            event = JSON.parse(messageEvent.data) as CommuneRoomIncoming;
+          } catch {
+            return;
+          }
+          if (event.type === 'welcome') {
+            applySnapshot(Array.isArray(event.others) ? event.others as CommuneAgent[] : []);
+          } else if (event.type === 'drops' && Array.isArray(event.drops)) {
+            dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
+          } else if (event.type === 'agent_join' || event.type === 'agent_update') {
+            if (event.agent && typeof event.agent === 'object') upsertAgent(event.agent as CommuneAgent);
+          } else if (event.type === 'agent_leave' && typeof event.username === 'string') {
+            removeAgent(event.username);
+          } else if (event.type === 'banners') {
+            setBanners(parseBanners(event.banners));
+          } else if (event.type === 'public_chat') {
+            const from = typeof event.from === 'string' ? event.from : '';
+            const message = typeof event.message === 'string' ? event.message : '';
+            if (from && message) {
+              const at = Number(event.sentAt) || Date.now();
+              setSquareMessages((items) => [
+                ...items.slice(-7),
+                { id: `${at}-${from}`, from, message, at },
+              ]);
+              if (from !== username) {
+                const remote = remoteRef.current.get(from);
+                if (remote) remote.says = { text: message, until: Date.now() + 6_000 };
+              }
             }
-          } else if (s.kind === 'hands_release') {
-            if (handsRef.current?.partner === s.from) {
+          } else if (event.type === 'private_chat') {
+            if (typeof event.from === 'string' && typeof event.message === 'string') {
+              setInbox((items) => [...items.slice(-4), { from: event.from as string, message: event.message as string }]);
+            }
+          } else if (event.type === 'interaction') {
+            const from = typeof event.from === 'string' ? event.from : '';
+            if (event.kind === 'bump') {
+              shakeUntilRef.current = Date.now() + 700;
+            } else if (event.kind === 'hands') {
+              if (!handsRef.current) {
+                handsRef.current = { partner: from, lead: false };
+                setHands(handsRef.current);
+              }
+            } else if (event.kind === 'hands_release' && handsRef.current?.partner === from) {
               handsRef.current = null;
               setHands(null);
             }
+          } else if (event.type === 'error' && typeof event.message === 'string') {
+            setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: event.message as string }]);
           }
-        }
-        // First server echo fills the editor (until the user edits locally).
-        // A saved loadout without a pet keeps the locally carried companion.
-        if (!loadoutTouchedRef.current && out.me) {
-          if (out.me.pet) setLoadout(out.me);
-          else {
-            setLoadout({ ...out.me, pet: loadoutRef.current.pet });
-            loadoutDirtyRef.current = true; // sync the auto-picked pet on the next poll
-          }
-        }
-        const seen = new Set<string>();
-        for (const a of out.others) {
-          seen.add(a.username);
-          const r = remoteRef.current.get(a.username);
-          if (r) {
-            r.tx = a.x;
-            r.ty = a.y;
-            r.agent = a;
-          } else {
-            remoteRef.current.set(a.username, { rx: a.x, ry: a.y, tx: a.x, ty: a.y, agent: a, moving: false, bobPhase: Math.random() * 10 });
-          }
-        }
-        for (const key of [...remoteRef.current.keys()]) {
-          if (!seen.has(key)) remoteRef.current.delete(key);
-        }
-        setOthers(out.others);
-        const sel = selectedRef.current;
-        if (sel) {
-          const fresh = out.others.find((o) => o.username === sel.username) ?? null;
-          setSelected(fresh);
-          if (!fresh) setPanel(null); // they walked away / went offline
-        }
+        };
+        socket.onclose = () => {
+          if (activeSocket !== socket) return;
+          activeSocket = null;
+          if (socketRef.current === socket) socketRef.current = null;
+          scheduleReconnect();
+        };
+        socket.onerror = () => socket.close();
       } catch {
-        /* offline — keep showing the last known square */
+        if (!stopped) scheduleReconnect();
       }
     };
-    void tick();
-    const iv = window.setInterval(() => void tick(), 8000);
+    void connect();
+    const heartbeat = window.setInterval(() => sendRoomEvent({ type: 'heartbeat' }), 20_000);
     return () => {
       stopped = true;
-      window.clearInterval(iv);
+      window.clearInterval(heartbeat);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      activeSocket?.close(1000, 'Leaving the Commune');
+      if (socketRef.current === activeSocket) socketRef.current = null;
     };
-  }, [user]);
+  }, [sendRoomEvent, user, username]);
+
+  useEffect(() => {
+    if (!loadoutDirtyRef.current) return;
+    const snapshot = JSON.stringify(loadout);
+    const timer = window.setTimeout(() => {
+      void saveCommuneLoadout(loadout)
+        .then(() => {
+          if (JSON.stringify(loadoutRef.current) === snapshot) loadoutDirtyRef.current = false;
+        })
+        .catch(() => {
+          /* Keep the dirty flag so the next connection ticket can carry it. */
+        });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [loadout]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -639,7 +807,7 @@ export default function CommunePanel() {
           e.preventDefault();
           clickTargetRef.current = null;
           setMessaging(bumpName);
-          void communeInteract(bumpName, 'bump');
+          sendRoomEvent({ type: 'interaction', target: bumpName, kind: 'bump' });
           return;
         }
         // Sit on a bench.
@@ -693,7 +861,7 @@ export default function CommunePanel() {
           // Release — either partner can let go.
           handsRef.current = null;
           setHands(null);
-          void communeInteract(held.partner, 'hands_release');
+          sendRoomEvent({ type: 'interaction', target: held.partner, kind: 'hands_release' });
         } else {
           // Hold hands with the nearest agent (first presser leads).
           const p = playerRef.current;
@@ -709,7 +877,7 @@ export default function CommunePanel() {
           if (partner) {
             handsRef.current = { partner, lead: true };
             setHands(handsRef.current);
-            void communeInteract(partner, 'hands');
+            sendRoomEvent({ type: 'interaction', target: partner, kind: 'hands' });
           }
         }
         return;
@@ -975,6 +1143,18 @@ export default function CommunePanel() {
               ? 'resting by the fountain'
               : 'hanging out';
 
+      const wallNow = Date.now();
+      const statusChanged = statusRef.current !== lastPositionStatusRef.current;
+      if (
+        (player.moving && wallNow - lastPositionSentAtRef.current >= 100) ||
+        statusChanged
+      ) {
+        if (sendRoomEvent({ type: 'move', x: Math.round(player.x), y: Math.round(player.y), status: statusRef.current })) {
+          lastPositionSentAtRef.current = wallNow;
+          lastPositionStatusRef.current = statusRef.current;
+        }
+      }
+
       /* remote agents: lerp toward their last reported position. While holding
        * hands as the leader, pin the partner beside us (fixed absolute slot). */
       const heldHands = handsRef.current;
@@ -1008,6 +1188,7 @@ export default function CommunePanel() {
           admin: r.agent.isAdmin,
           pet: r.agent.loadout?.pet ?? null,
           avatar: r.agent.loadout?.avatar ?? null,
+          says: r.says,
           moving: vmoving,
           bobPhase: r.bobPhase,
         });
@@ -1055,7 +1236,7 @@ export default function CommunePanel() {
       reduceMotionQuery.removeEventListener('change', onMotionChange);
       ro.disconnect();
     };
-  }, [banners]);
+  }, [banners, sendRoomEvent]);
 
   /* ── canvas click → interact or walk ─────────────────────────────────────── */
 
@@ -1096,9 +1277,24 @@ export default function CommunePanel() {
   const speak = () => {
     const text = chatDraft.trim();
     if (!text) return;
+    const recipient = messagingRef.current;
+    const sent = sendRoomEvent(
+      recipient
+        ? { type: 'private_chat', target: recipient, message: text }
+        : { type: 'public_chat', message: text },
+    );
+    if (!sent) {
+      setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: 'Reconnecting; your message was not sent.' }]);
+      return;
+    }
     playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
     setChatDraft('');
-    if (messagingRef.current) void communeInteract(messagingRef.current, 'chat', text);
+  };
+
+  const startDirectMessage = (target: string) => {
+    setMessaging(target);
+    setPanel(null);
+    window.requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
@@ -1123,9 +1319,13 @@ export default function CommunePanel() {
         <span className="grid size-8 place-items-center rounded-xl bg-primary/15 text-primary">
           <Users className="size-4" />
         </span>
-        <span>
+          <span>
           <span className="block font-mono text-[11px] font-extrabold tracking-[0.12em]">COMMUNE</span>
-          <span className="block text-[10px] text-muted-foreground">Town square · {others.length + 1} here</span>
+            <span className="block text-[10px] text-muted-foreground">Town square · {others.length + 1} here</span>
+            <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+              <span className={cn('size-1.5 rounded-full', connectionState === 'connected' ? 'bg-emerald-400' : 'bg-amber-400')} />
+              {connectionState === 'connected' ? 'Live' : connectionState === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+            </span>
         </span>
       </div>
 
@@ -1179,6 +1379,19 @@ export default function CommunePanel() {
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary">{b.from}</p>
                 <p className="break-words text-xs text-foreground">{b.message}</p>
               </div>
+              {b.from !== 'COMMUNE' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    startDirectMessage(b.from);
+                    setInbox((list) => list.filter((_, j) => j !== i));
+                  }}
+                  className="rounded-lg px-2 py-1 text-[10px] font-semibold text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label={`Reply to ${b.from}`}
+                >
+                  Reply
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setInbox((list) => list.filter((_, j) => j !== i))}
@@ -1189,6 +1402,27 @@ export default function CommunePanel() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Recent square chat is kept in memory only; reconnects do not replay history. */}
+      {squareMessages.length > 0 && (
+        <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+          <div
+            role="log"
+            aria-label="Recent square chat"
+            aria-live="polite"
+            className="flex max-h-36 flex-col gap-1 overflow-hidden rounded-xl border border-white/20 bg-card/85 px-3 py-2 shadow-lg backdrop-blur-md"
+          >
+            {squareMessages.slice(-5).map((item) => (
+              <p key={item.id} className="truncate text-[11px] leading-snug text-foreground">
+                <span className="mr-1.5 font-bold" style={{ color: `hsl(${hueOf(item.from)} 70% 65%)` }}>
+                  {item.from}
+                </span>
+                {item.message}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1222,6 +1456,7 @@ export default function CommunePanel() {
           </button>
         )}
         <input
+          ref={chatInputRef}
           value={chatDraft}
           onChange={(e) => setChatDraft(e.target.value)}
           onFocus={() => {
@@ -1340,10 +1575,10 @@ export default function CommunePanel() {
                   <button
                     type="button"
                     onClick={hangBanner}
-                    disabled={!bannerDraft.trim()}
+                    disabled={!bannerDraft.trim() || bannerSending}
                     className="glass-btn h-9 rounded-lg border border-primary/40 bg-primary px-3 text-[11px] font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
                   >
-                    Hang
+                    {bannerSending ? 'Posting…' : 'Hang'}
                   </button>
                 </div>
               )}
@@ -1581,6 +1816,13 @@ export default function CommunePanel() {
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {selected.status || 'hanging out'} · seen {Math.max(1, Math.round(selected.seenAgo / 1000))}s ago
               </p>
+              <button
+                type="button"
+                onClick={() => startDirectMessage(selected.username)}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/15 px-3 py-2 text-xs font-bold text-primary transition hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <MessageSquare className="size-3.5" /> Message {selected.username}
+              </button>
               {selected.loadout?.phrase && (
                 <blockquote className="mt-2 rounded-lg border-l-4 border-primary/60 bg-primary/10 px-3 py-2 text-xs italic text-foreground">
                   “{selected.loadout.phrase}”
@@ -1971,9 +2213,14 @@ function draw(
       y: r.y,
       fn: () => {
         const near = !!r.phrase && Math.hypot(r.x - player.x, r.y - player.y) < 170;
+        const speech = r.says && r.says.until > Date.now()
+          ? r.says
+          : near && r.phrase
+            ? { text: r.phrase, until: Infinity }
+            : null;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: near && r.phrase ? { text: r.phrase, until: Infinity } : null, status: r.status, admin: r.admin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
