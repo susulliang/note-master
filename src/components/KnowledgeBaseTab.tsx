@@ -13,6 +13,7 @@ import {
   saveKbDoc,
   type KbDoc,
   type KbKind,
+  type KbR2Progress,
 } from '@/lib/kb-sync';
 import { resetFaqCaches } from '@/utils/faqData';
 import {
@@ -67,7 +68,7 @@ export default function KnowledgeBaseTab() {
   const [draft, setDraft] = useState<{ id: string; title: string; body: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [isNew, setIsNew] = useState(false);
-  const [r2Busy, setR2Busy] = useState(false);
+  const [r2, setR2] = useState<KbR2Progress | null>(null);
 
   const isAdmin = user?.isAdmin ?? false;
   const meta = KIND_LABELS.find((k) => k.kind === kind)!;
@@ -226,16 +227,16 @@ export default function KnowledgeBaseTab() {
     }
   };
 
-  /** Copy every D1 doc into the eco-kb R2 bucket (AI Search "Ask" source). */
+  /** Copy every D1 doc into the eco-kb R2 bucket (AI Search "Ask" source),
+   *  streaming per-page progress into the state shown in the progress bar. */
   const syncR2 = async () => {
-    if (r2Busy) return;
-    setR2Busy(true);
+    if (r2) return;
     try {
-      const total = await exportKbToR2();
+      const total = await exportKbToR2((p) => setR2(p));
       if (total === null) toast.error('R2 export failed (not admin?)');
-      else toast.success(`Copied ${total.toLocaleString()} docs to R2 (eco-kb) — manifest.json written`);
+      else toast.success(`Copied ${total.toLocaleString()} objects to R2 (eco-kb) — manifest.json written`);
     } finally {
-      setR2Busy(false);
+      setR2(null);
     }
   };
 
@@ -267,12 +268,12 @@ export default function KnowledgeBaseTab() {
         {isAdmin && (
           <button
             type="button"
-            disabled={r2Busy}
+            disabled={!!r2}
             onClick={() => void syncR2()}
             title="Copy every D1 document into the eco-kb R2 bucket (AI Search source)"
             className="ml-auto flex items-center gap-1.5 rounded-lg border border-sky-400/50 bg-sky-400/15 px-2.5 py-1 text-[11px] font-bold text-sky-300 transition-colors hover:bg-sky-400/25 disabled:opacity-50"
           >
-            <CloudUpload className={cn('size-3.5', r2Busy && 'animate-pulse')} /> Sync to R2
+            <CloudUpload className={cn('size-3.5', r2 && 'animate-pulse')} /> Sync to R2
           </button>
         )}
       </div>
@@ -280,6 +281,27 @@ export default function KnowledgeBaseTab() {
         {meta.hint} · D1 first line, bundled blob fallback ·{' '}
         {docs === null ? 'loading…' : `${filtered?.length ?? 0} docs`}
       </p>
+      {r2 && (
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/60">
+            <div
+              className={cn(
+                'h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-[width] duration-300',
+                r2.total === null && 'w-1/3 animate-pulse'
+              )}
+              style={
+                r2.total
+                  ? { width: `${Math.max(2, Math.round((r2.exported / r2.total) * 100))}%` }
+                  : undefined
+              }
+            />
+          </div>
+          <span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+            Syncing {r2.label} · {r2.exported.toLocaleString()}
+            {r2.total ? ` / ${r2.total.toLocaleString()}` : ''} · {r2.totalSoFar.toLocaleString()} total
+          </span>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 gap-2">
         {/* Document list */}

@@ -408,7 +408,7 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     : 'documents';
   const cursor = typeof payload.cursor === 'string' && payload.cursor ? payload.cursor : '';
 
-  let result: { exported: number; done: boolean; nextCursor: string | null };
+  let result: { exported: number; total: number | null; done: boolean; nextCursor: string | null };
   if (source === 'photos') {
     result = await exportPhotosPage(env, limit, cursor);
   } else if (source === 'sop') {
@@ -427,6 +427,7 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
 async function exportDocumentsPage(env: Env, limit: number, cursor: string) {
   const SEP = '\u001F';
   const [cursorKind = '', cursorId = ''] = cursor.split(SEP);
+  const countPromise = env.DB.prepare(`SELECT COUNT(*) AS n FROM kb_documents`).first<{ n: number }>();
   const rows = cursorKind
     ? (
         await env.DB.prepare(
@@ -447,6 +448,7 @@ async function exportDocumentsPage(env: Env, limit: number, cursor: string) {
   }
   return {
     exported: page.length,
+    total: (await countPromise)?.n ?? null,
     done,
     nextCursor: done ? null : `${page[page.length - 1].kind}${SEP}${page[page.length - 1].id}`,
   };
@@ -503,7 +505,7 @@ async function exportPhotosPage(env: Env, limit: number, cursor: string) {
     }
   }
   const done = end >= paths.length;
-  return { exported, done, nextCursor: done ? null : String(end) };
+  return { exported, total: paths.length, done, nextCursor: done ? null : String(end) };
 }
 
 interface TableExportRow {
@@ -516,10 +518,12 @@ async function exportTablePage<T extends TableExportRow>(
   limit: number,
   cursor: string,
   baseSql: string,
+  countSql: string,
   toBody: (row: T) => string,
   prefix: string
 ) {
   const offset = Number(cursor) || 0;
+  const countPromise = env.DB.prepare(countSql).first<{ n: number }>();
   const rows = (
     await env.DB.prepare(`${baseSql} LIMIT ?1 OFFSET ?2`).bind(limit + 1, offset).all<T>()
   ).results ?? [];
@@ -528,7 +532,12 @@ async function exportTablePage<T extends TableExportRow>(
   for (const row of page) {
     await env.KB_BUCKET!.put(`${prefix}/${row.id}.md`, toBody(row), MD_HTTP_METADATA);
   }
-  return { exported: page.length, done, nextCursor: done ? null : String(offset + page.length) };
+  return {
+    exported: page.length,
+    total: (await countPromise)?.n ?? null,
+    done,
+    nextCursor: done ? null : String(offset + page.length),
+  };
 }
 
 /** 'sop' phase — sop_entries as markdown sections ({sop}/{id}.md). */
@@ -538,6 +547,7 @@ function exportSopPage(env: Env, limit: number, cursor: string) {
     limit,
     cursor,
     `SELECT id, level, title, body FROM sop_entries ORDER BY sort_order`,
+    `SELECT COUNT(*) AS n FROM sop_entries`,
     (row) => `${'#'.repeat(Math.max(1, row.level))} ${row.title}\n\n${row.body}`,
     'sop'
   );
@@ -557,6 +567,7 @@ function exportAmrPage(env: Env, limit: number, cursor: string) {
     limit,
     cursor,
     `SELECT id, name, folder, subject, description, html FROM amr_templates ORDER BY id`,
+    `SELECT COUNT(*) AS n FROM amr_templates`,
     (row) =>
       `# ${row.name}\n\n- Folder: ${row.folder}\n- Subject: ${row.subject}\n- Description: ${row.description}\n\n${row.html}`,
     'amr'

@@ -165,16 +165,40 @@ export async function deleteKbDoc(kind: KbKind, id: string): Promise<boolean> {
   }
 }
 
+/** Progress snapshot for one R2-export phase (reported after every page). */
+export interface KbR2Progress {
+  label: string;
+  /** Objects copied in the current phase so far. */
+  exported: number;
+  /** Total objects in the current phase (null when the worker didn't report one). */
+  total: number | null;
+  /** Cumulative objects copied across all phases so far. */
+  totalSoFar: number;
+}
+
+const R2_SOURCE_LABELS: Record<string, string> = {
+  documents: 'Knowledge documents',
+  photos: 'App photo binaries',
+  sop: 'SOP handbook',
+  amr: 'AMR email templates',
+};
+
 /** Bulk-copy the whole knowledge base into the eco-kb R2 bucket (admin):
  *  kb_documents, then the app-photo binaries, the SOP handbook and the AMR
  *  email templates. Each source is cursor-paginated to stay under the
  *  subrequest limit; the manifest lands when the last source finishes.
+ *  Reports progress via the optional callback after every page.
  *  Returns the total exported or null on failure. */
-export async function exportKbToR2(): Promise<number | null> {
+export async function exportKbToR2(
+  onProgress?: (p: KbR2Progress) => void
+): Promise<number | null> {
   const token = getStoredToken();
   if (!token) return null;
-  let exported = 0;
+  let totalSoFar = 0;
   for (const source of ['documents', 'photos', 'sop', 'amr']) {
+    const label = R2_SOURCE_LABELS[source] ?? source;
+    let sourceExported = 0;
+    let sourceTotal: number | null = null;
     let cursor = '';
     for (let page = 0; page < 500; page++) {
       try {
@@ -186,10 +210,14 @@ export async function exportKbToR2(): Promise<number | null> {
         if (!res.ok) return null;
         const payload = (await res.json()) as {
           exported?: number;
+          total?: number;
           done?: boolean;
           nextCursor?: string | null;
         };
-        exported += payload.exported ?? 0;
+        totalSoFar += payload.exported ?? 0;
+        sourceExported += payload.exported ?? 0;
+        if (typeof payload.total === 'number') sourceTotal = payload.total;
+        onProgress?.({ label, exported: sourceExported, total: sourceTotal, totalSoFar });
         if (payload.done) break;
         if (!payload.nextCursor) break;
         cursor = payload.nextCursor;
@@ -198,5 +226,5 @@ export async function exportKbToR2(): Promise<number | null> {
       }
     }
   }
-  return exported;
+  return totalSoFar;
 }
