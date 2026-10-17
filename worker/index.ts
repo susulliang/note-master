@@ -13,8 +13,10 @@ import { TCG_SETS } from './tcg-manifest.gen';
 import GB_POOLIUS from './npc/GB_Poolius.json';
 import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
 import { CommuneRoom, type CommuneRoomBanner, type CommuneRoomLoadout } from './commune-room';
+import { RosterRoom, type RosterCell } from './roster-room';
 
 export { CommuneRoom } from './commune-room';
+export { RosterRoom } from './roster-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -2112,6 +2114,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleRosterGet(request, env);
   }
 
+  // Live roster edit subscription ticket — any logged-in user.
+  if (path === '/api/roster/socket-ticket' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleRosterSocketTicket(request, env, user);
+  }
+
   // Spice QA award — any logged-in user, one award per call (client submits
   // the FINAL QA score at hang-up; a server-side cooldown blocks farming).
   if (path === '/api/spice/qa' && request.method === 'POST') {
@@ -2236,6 +2245,12 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
 /* ------------------------------ roster sync -------------------------------- */
 
 /**
+ * Roster storage: the per-month RosterRoom Durable Object is the FIRST LINE
+ * (its own SQLite + live WebSocket broadcast to every logged-in viewer);
+ * the D1 `roster_cells` table is the backup mirror. If the DO is unavailable,
+ * the legacy direct-D1 path below keeps writes/reads working (degraded, no
+ * live broadcast).
+ *
  * POST /api/roster (admin only) — two modes:
  *   { month: 'YYYY-MM', mode: 'full', agents: [{ en, shifts: { iso: code } }] }
  *     → bulk-uploads every cell of the month (first submit).
@@ -2259,6 +2274,49 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
   const month = String(payload.month ?? '');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return authJson({ error: 'Invalid month (YYYY-MM)' }, 400);
 
+  try {
+    const room = env.ROSTER_ROOM.getByName(`roster-${month}`);
+    if (payload.mode === 'cell') {
+      const en = String(payload.en ?? '').trim();
+      const iso = String(payload.iso ?? '').trim();
+      const code = String(payload.code ?? '').trim();
+      if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
+      await room.applyCell(en, iso, code);
+      return authJson({ ok: true, mode: 'cell', month, en, iso, code });
+    }
+    if (payload.mode === 'full') {
+      const agents = payload.agents ?? [];
+      if (agents.length === 0) return authJson({ error: 'No agents provided' }, 400);
+      const rows: RosterCell[] = [];
+      for (const a of agents) {
+        for (const [iso, code] of Object.entries(a.shifts ?? {})) {
+          rows.push({ en: a.en, iso, code: String(code) });
+        }
+      }
+      if (rows.length === 0) return authJson({ error: 'No cells provided' }, 400);
+      await room.applyFull(rows);
+      return authJson({ ok: true, mode: 'full', month, cells: rows.length });
+    }
+    return authJson({ error: 'Unknown mode (full | cell)' }, 400);
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'roster_do_unavailable', month, error: String(error) }));
+    // DO unavailable — degrade to a direct D1 backup write (previous behavior).
+    return handleRosterPostD1(payload, month, env);
+  }
+}
+
+/** Legacy direct-D1 write (backup path when the RosterRoom DO is unreachable). */
+async function handleRosterPostD1(
+  payload: {
+    mode?: string;
+    agents?: Array<{ en: string; shifts: Record<string, string> }>;
+    en?: string;
+    iso?: string;
+    code?: string;
+  },
+  month: string,
+  env: Env,
+): Promise<Response> {
   // Self-healing schema (mirrors migrations/0004_roster_cells.sql) so the
   // endpoint works even when the migration has not been applied yet.
   await env.DB.prepare(
@@ -2280,7 +2338,7 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
     )
       .bind(month, en, iso, code)
       .run();
-    return authJson({ ok: true, mode: 'cell', month, en, iso, code });
+    return authJson({ ok: true, mode: 'cell', month, en, iso, code, degraded: true });
   }
 
   if (payload.mode === 'full') {
@@ -2288,10 +2346,10 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
     if (agents.length === 0) return authJson({ error: 'No agents provided' }, 400);
     // D1 caps bound parameters per statement — chunk the multi-row INSERTs
     // (20 rows × 4 params = 80 params per statement) and batch them.
-    const rows: Array<[string, string, string]> = [];
+    const rows: RosterCell[] = [];
     for (const a of agents) {
       for (const [iso, code] of Object.entries(a.shifts ?? {})) {
-        rows.push([a.en, iso, String(code)]);
+        rows.push({ en: a.en, iso, code: String(code) });
       }
     }
     if (rows.length === 0) return authJson({ error: 'No cells provided' }, 400);
@@ -2303,10 +2361,10 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
             `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES ${part
               .map((_, i) => `(?${i * 4 + 1}, ?${i * 4 + 2}, ?${i * 4 + 3}, ?${i * 4 + 4}, datetime('now'))`)
               .join(', ')}`
-          ).bind(...part.flatMap((r) => [month, r[0], r[1], r[2]]))
+          ).bind(...part.flatMap((r) => [month, r.en, r.iso, r.code]))
       ),
     ]);
-    return authJson({ ok: true, mode: 'full', month, cells: rows.length });
+    return authJson({ ok: true, mode: 'full', month, cells: rows.length, degraded: true });
   }
 
   return authJson({ error: 'Unknown mode (full | cell)' }, 400);
@@ -2318,17 +2376,58 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-/** GET /api/roster?month=YYYY-MM (any logged-in user) — all cells for a month. */
+/** GET /api/roster?month=YYYY-MM (any logged-in user) — all cells for a month.
+ *  Served from the RosterRoom DO (first line); falls back to the D1 backup. */
 async function handleRosterGet(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const month = url.searchParams.get('month') ?? '';
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return authJson({ error: 'Invalid month (YYYY-MM)' }, 400);
-  const result = await env.DB.prepare(
-    'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
-  )
-    .bind(month)
-    .all<{ en: string; iso: string; code: string; updatedAt: string }>();
-  return authJson({ month, cells: result.results ?? [] });
+  try {
+    const cells = await env.ROSTER_ROOM.getByName(`roster-${month}`).getCells();
+    if (cells.length > 0) return authJson({ month, cells });
+    // Empty may mean "never uploaded" — verify against the D1 backup before
+    // answering, and pull the DO through if D1 somehow has rows.
+    const backup = await env.DB.prepare(
+      'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
+    )
+      .bind(month)
+      .all<{ en: string; iso: string; code: string; updatedAt: string }>();
+    if ((backup.results ?? []).length > 0) {
+      await env.ROSTER_ROOM.getByName(`roster-${month}`).applyFull(
+        (backup.results ?? []).map((row) => ({ en: row.en, iso: row.iso, code: row.code })),
+      );
+      return authJson({ month, cells: backup.results ?? [] });
+    }
+    return authJson({ month, cells: [] });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'roster_do_unavailable', month, error: String(error) }));
+    const result = await env.DB.prepare(
+      'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
+    )
+      .bind(month)
+      .all<{ en: string; iso: string; code: string; updatedAt: string }>();
+    return authJson({ month, cells: result.results ?? [] });
+  }
+}
+
+/** POST /api/roster/socket-ticket (any logged-in user) — single-use ticket for
+ *  the live roster edit subscription of one month. */
+async function handleRosterSocketTicket(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  let payload: { month?: string };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const month = String(payload.month ?? '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return authJson({ error: 'Invalid month (YYYY-MM)' }, 400);
+  try {
+    const ticket = await env.ROSTER_ROOM.getByName(`roster-${month}`).createTicket(user.username);
+    return authJson({ ticket, month });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'roster_do_unavailable', month, error: String(error) }));
+    return authJson({ error: 'Roster room is temporarily unavailable' }, 503);
+  }
 }
 
 async function handleKeywordAlerts(request: Request, env: Env): Promise<Response> {
@@ -2416,6 +2515,17 @@ export default {
         return await env.COMMUNE_ROOM.getByName('main-plaza').fetch(request);
       } catch {
         return new Response('Commune room is temporarily unavailable', { status: 503 });
+      }
+    }
+    if (url.pathname === '/api/roster/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      const month = url.searchParams.get('month') ?? '';
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return new Response('Invalid month (YYYY-MM)', { status: 400 });
+      try {
+        return await env.ROSTER_ROOM.getByName(`roster-${month}`).fetch(request);
+      } catch {
+        return new Response('Roster room is temporarily unavailable', { status: 503 });
       }
     }
     if (url.pathname === '/api/keyword-alerts') {

@@ -19,14 +19,16 @@
   ],
   "durable_objects": {
     "bindings": [
-      { "name": "COMMUNE_ROOM", "class_name": "CommuneRoom" }
+      { "name": "COMMUNE_ROOM", "class_name": "CommuneRoom" },
+      { "name": "ROSTER_ROOM", "class_name": "RosterRoom" }
     ]
   },
   "ai": {
     "binding": "AI"
   },
   "migrations": [
-    { "tag": "commune-room-v1", "new_sqlite_classes": ["CommuneRoom"] }
+    { "tag": "commune-room-v1", "new_sqlite_classes": ["CommuneRoom"] },
+    { "tag": "roster-room-v1", "new_sqlite_classes": ["RosterRoom"] }
   ],
   "assets": {
     "directory": "./dist/client",

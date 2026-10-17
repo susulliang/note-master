@@ -6,7 +6,8 @@ import { getRoster } from '@/data/roster-index';
 import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
 import { useAuth } from '@/lib/auth-context';
-import { fetchRosterMonth, pushRosterCell, pushRosterFull } from '@/lib/roster-sync';
+import { fetchRosterMonth, pushRosterCell, pushRosterFull, subscribeRosterMonth } from '@/lib/roster-sync';
+import type { RosterCell } from '@/lib/roster-sync';
 import { DateBelt } from './DateBelt';
 
 /**
@@ -356,7 +357,10 @@ export default function ShiftsWorkspace() {
 
   /* ---------------- D1 backup (admin logins) ----------------
    * The first edit of a month uploads the entire table to the eco-data D1
-   * (roster_cells); every later edit upserts just the changed cell. */
+   * (roster_cells); every later edit upserts just the changed cell. Edits
+   * land in the per-month RosterRoom Durable Object first (its SQLite) and
+   * are broadcast live to every logged-in viewer of that month; D1 is the
+   * backup mirror. */
   const { user: authUser } = useAuth();
   const [d1Status, setD1Status] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const d1MonthRef = useRef<Map<string, boolean>>(new Map());
@@ -379,8 +383,22 @@ export default function ShiftsWorkspace() {
         });
       }
     });
+    // Live edits — the RosterRoom DO pushes every admin change to all viewers.
+    const mergeCells = (cells: RosterCell[]) => {
+      if (!alive) return;
+      setD1Overlay((prev) => {
+        const next = { ...prev };
+        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = cell.code;
+        return next;
+      });
+    };
+    const unsubscribe = subscribeRosterMonth(monthKey, {
+      onCell: (cell) => mergeCells([cell]),
+      onCells: mergeCells,
+    });
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, [monthKey, authUser]);
 

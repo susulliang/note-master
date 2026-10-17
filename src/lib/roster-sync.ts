@@ -73,3 +73,116 @@ export async function pushRosterCell(
     return false;
   }
 }
+
+/* ------------------------- live edit subscription ------------------------- */
+
+export interface RosterSocketHandlers {
+  /** One cell edited live by an admin (from the per-month RosterRoom DO). */
+  onCell?: (cell: RosterCell) => void;
+  /** A full snapshot / full-month upload. */
+  onCells?: (cells: RosterCell[]) => void;
+}
+
+function rosterSocketUrl(ticket: string, monthKey: string): string {
+  const origin = new URL(getApiBase() || window.location.origin, window.location.origin).origin;
+  const url = new URL('/api/roster/socket', origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('ticket', ticket);
+  url.searchParams.set('month', monthKey);
+  return url.toString();
+}
+
+/**
+ * Subscribe to live roster edits for a month via the RosterRoom Durable
+ * Object. Retries the ticket+connect loop with backoff while active. Returns
+ * a cleanup function that closes the socket and stops retrying.
+ */
+export function subscribeRosterMonth(monthKey: string, handlers: RosterSocketHandlers): () => void {
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let retryTimer = 0;
+  let attempt = 0;
+
+  const handleEvent = (raw: unknown) => {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(String(raw)) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (event.type === 'roster_cell') {
+      const cell: RosterCell = {
+        en: String(event.en ?? ''),
+        iso: String(event.iso ?? ''),
+        code: String(event.code ?? ''),
+      };
+      if (cell.en && cell.iso) handlers.onCell?.(cell);
+    } else if (event.type === 'roster_cells' || event.type === 'welcome') {
+      if (!Array.isArray(event.cells)) return;
+      const cells = (event.cells as Array<Record<string, unknown>>)
+        .map((c) => ({ en: String(c.en ?? ''), iso: String(c.iso ?? ''), code: String(c.code ?? '') }))
+        .filter((c) => c.en && c.iso);
+      if (cells.length) handlers.onCells?.(cells);
+    }
+  };
+
+  const connect = async () => {
+    if (stopped) return;
+    const token = getStoredToken();
+    if (!token) return;
+    try {
+      const res = await fetch(`${getApiBase()}/api/roster/socket-ticket`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ month: monthKey }),
+      });
+      if (!res.ok) throw new Error(`ticket failed (${res.status})`);
+      const data = (await res.json()) as { ticket?: string };
+      if (!data.ticket) throw new Error('ticket missing');
+      if (stopped) return;
+      const ws = new WebSocket(rosterSocketUrl(data.ticket, monthKey));
+      socket = ws;
+      ws.onmessage = (messageEvent) => {
+        if (typeof messageEvent.data === 'string') handleEvent(messageEvent.data);
+      };
+      ws.onclose = () => {
+        if (stopped || socket !== ws) return;
+        socket = null;
+        attempt += 1;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = 0;
+          void connect();
+        }, Math.min(15_000, 1_000 * 2 ** Math.min(attempt - 1, 4)));
+      };
+      ws.onopen = () => {
+        attempt = 0;
+      };
+    } catch {
+      if (stopped) return;
+      attempt += 1;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        void connect();
+      }, Math.min(15_000, 1_000 * 2 ** Math.min(attempt - 1, 4)));
+    }
+  };
+
+  void connect();
+
+  return () => {
+    stopped = true;
+    if (retryTimer) window.clearTimeout(retryTimer);
+    const ws = socket;
+    socket = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
+  };
+}

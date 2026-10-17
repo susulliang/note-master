@@ -6,11 +6,12 @@ interface __BaseEnv_Env {
 	AI: Ai;
 	DEEPSEEK_API_KEY: string;
 	COMMUNE_ROOM: DurableObjectNamespace<import("./index").CommuneRoom>;
+	ROSTER_ROOM: DurableObjectNamespace<import("./index").RosterRoom>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./index");
-		durableNamespaces: "CommuneRoom";
+		durableNamespaces: "CommuneRoom" | "RosterRoom";
 	}
 	interface Env extends __BaseEnv_Env {}
 }
