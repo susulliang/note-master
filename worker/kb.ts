@@ -401,10 +401,17 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     // Empty body → first documents page.
   }
   const limit = Math.min(Math.max(Number(payload.limit) || 40, 1), 100);
-  const source = (['documents', 'photos', 'sop', 'amr'] as const).includes(
-    payload.source as 'documents' | 'photos' | 'sop' | 'amr'
-  )
-    ? (payload.source as 'documents' | 'photos' | 'sop' | 'amr')
+  // Segmented export: the client syncs one chunk at a time (per KB kind for
+  // kb_documents rows, plus the photo binaries, SOP and AMR tables).
+  const SOURCES = [
+    'documents',
+    ...KB_KINDS,
+    'photos',
+    'sop',
+    'amr',
+  ] as const;
+  const source = (SOURCES as readonly string[]).includes(payload.source ?? '')
+    ? (payload.source as (typeof SOURCES)[number])
     : 'documents';
   const cursor = typeof payload.cursor === 'string' && payload.cursor ? payload.cursor : '';
 
@@ -415,12 +422,49 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     result = await exportSopPage(env, limit, cursor);
   } else if (source === 'amr') {
     result = await exportAmrPage(env, limit, cursor);
-  } else {
+  } else if (source === 'documents') {
     result = await exportDocumentsPage(env, limit, cursor);
+  } else {
+    result = await exportKindPage(env, source, limit, cursor);
   }
 
   if (source === 'amr' && result.done) await writeManifest(env);
   return json(result);
+}
+
+/** Per-kind 'documents' phase — kb_documents rows of ONE kind
+ *  (cursor = last id within the kind). */
+async function exportKindPage(env: Env, kind: KbKind, limit: number, cursor: string) {
+  const countPromise = env.DB.prepare(`SELECT COUNT(*) AS n FROM kb_documents WHERE kind = ?1`)
+    .bind(kind)
+    .first<{ n: number }>();
+  const rows = cursor
+    ? (
+        await env.DB.prepare(
+          `SELECT kind, id, title, body FROM kb_documents
+           WHERE kind = ?1 AND id > ?2
+           ORDER BY id LIMIT ?3`
+        )
+          .bind(kind, cursor, limit + 1)
+          .all<ExportRow>()
+      ).results ?? []
+    : (
+        await env.DB.prepare(`SELECT kind, id, title, body FROM kb_documents WHERE kind = ?1 ORDER BY id LIMIT ?2`)
+          .bind(kind, limit + 1)
+          .all<ExportRow>()
+      ).results ?? [];
+
+  const done = rows.length <= limit;
+  const page = rows.slice(0, limit);
+  for (const row of page) {
+    await env.KB_BUCKET!.put(`${row.kind}/${row.id}.md`, row.body, MD_HTTP_METADATA);
+  }
+  return {
+    exported: page.length,
+    total: (await countPromise)?.n ?? null,
+    done,
+    nextCursor: done ? null : page[page.length - 1].id,
+  };
 }
 
 /** 'documents' phase — every kb_documents row (cursor = "kind\u001Fid"). */

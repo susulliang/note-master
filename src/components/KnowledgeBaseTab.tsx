@@ -32,8 +32,20 @@ const KIND_LABELS: Array<{ kind: KbKind; label: string; hint: string }> = [
   { kind: 'gbu', label: 'GBU map', hint: 'Barcode map (internal code → marketing name)' },
   { kind: 'app_update', label: 'App updates', hint: 'ECOVACS HOME release notes' },
   { kind: 'firmware_update', label: 'Firmware', hint: 'Firmware OTA history' },
-  { kind: 'app_photo', label: 'App photos', hint: 'app-photos index.json — photo metadata (binaries export to R2)' },
+  { kind: 'app_photo', label: 'App photos', hint: 'app-photos index + binaries · also lands SOP handbook + AMR templates + manifest (R2 finale)' },
 ];
+
+/** R2 export segments per tab — the Sync button copies only the current
+ *  tab's data, one toast-confirmed chunk at a time. The App photos tab
+ *  finishes the job: photo binaries + SOP + AMR + manifest.json. */
+const KIND_R2_SOURCES: Record<KbKind, string[]> = {
+  faq: ['faq'],
+  product: ['product'],
+  gbu: ['gbu'],
+  app_update: ['app_update'],
+  firmware_update: ['firmware_update'],
+  app_photo: ['app_photo', 'photos', 'sop', 'amr'],
+};
 
 const NEW_FAQ_TEMPLATE = `---
 category: DEEBOT
@@ -227,14 +239,18 @@ export default function KnowledgeBaseTab() {
     }
   };
 
-  /** Copy every D1 doc into the eco-kb R2 bucket (AI Search "Ask" source),
-   *  streaming per-page progress into the state shown in the progress bar. */
+  /** Copy the current tab's D1 data into the eco-kb R2 bucket (AI Search
+   *  "Ask" source), streaming per-page progress into the progress bar. */
   const syncR2 = async () => {
     if (r2) return;
+    const label = meta.label;
     try {
-      const total = await exportKbToR2((p) => setR2(p));
+      const total = await exportKbToR2(KIND_R2_SOURCES[kind], (p) => setR2(p));
       if (total === null) toast.error('R2 export failed (not admin?)');
-      else toast.success(`Copied ${total.toLocaleString()} objects to R2 (eco-kb) — manifest.json written`);
+      else
+        toast.success(
+          `Copied ${total.toLocaleString()} objects to R2 (${label})${kind === 'app_photo' ? ' — manifest.json written' : ''}`
+        );
     } finally {
       setR2(null);
     }
@@ -270,10 +286,10 @@ export default function KnowledgeBaseTab() {
             type="button"
             disabled={!!r2}
             onClick={() => void syncR2()}
-            title="Copy every D1 document into the eco-kb R2 bucket (AI Search source)"
+            title={`Copy this tab's D1 data into the eco-kb R2 bucket (AI Search source)`}
             className="ml-auto flex items-center gap-1.5 rounded-lg border border-sky-400/50 bg-sky-400/15 px-2.5 py-1 text-[11px] font-bold text-sky-300 transition-colors hover:bg-sky-400/25 disabled:opacity-50"
           >
-            <CloudUpload className={cn('size-3.5', r2 && 'animate-pulse')} /> Sync to R2
+            <CloudUpload className={cn('size-3.5', r2 && 'animate-pulse')} /> Sync {meta.label} to R2
           </button>
         )}
       </div>

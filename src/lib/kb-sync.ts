@@ -178,24 +178,31 @@ export interface KbR2Progress {
 
 const R2_SOURCE_LABELS: Record<string, string> = {
   documents: 'Knowledge documents',
+  faq: 'FAQ documents',
+  product: 'Product sheets',
+  gbu: 'GBU barcode map',
+  app_update: 'App update notes',
+  firmware_update: 'Firmware OTA history',
+  app_photo: 'App photos index',
   photos: 'App photo binaries',
   sop: 'SOP handbook',
   amr: 'AMR email templates',
 };
 
-/** Bulk-copy the whole knowledge base into the eco-kb R2 bucket (admin):
- *  kb_documents, then the app-photo binaries, the SOP handbook and the AMR
- *  email templates. Each source is cursor-paginated to stay under the
- *  subrequest limit; the manifest lands when the last source finishes.
- *  Reports progress via the optional callback after every page.
- *  Returns the total exported or null on failure. */
+/** Bulk-copy knowledge-base segments into the eco-kb R2 bucket (admin).
+ *  Each source is cursor-paginated to stay under the subrequest limit; call
+ *  it once per segment (e.g. one KB kind, or 'photos'/'sop'/'amr') so the
+ *  copy happens in short toast-confirmed chunks — the 'amr' segment lands
+ *  manifest.json last. Reports progress via the optional callback after
+ *  every page. Returns the total exported or null on failure. */
 export async function exportKbToR2(
+  sources: string[],
   onProgress?: (p: KbR2Progress) => void
 ): Promise<number | null> {
   const token = getStoredToken();
   if (!token) return null;
   let totalSoFar = 0;
-  for (const source of ['documents', 'photos', 'sop', 'amr']) {
+  for (const source of sources) {
     const label = R2_SOURCE_LABELS[source] ?? source;
     let sourceExported = 0;
     let sourceTotal: number | null = null;
