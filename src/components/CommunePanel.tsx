@@ -301,6 +301,9 @@ interface PetOwner {
   pet: CommunePet | null;
 }
 
+type PetBehavior = 'hangout' | 'waiting' | 'following' | 'detour' | 'catchup';
+type PetPose = 'stand' | 'sit' | 'loaf' | 'sniff' | 'play';
+
 interface PetFollower {
   x: number;
   y: number;
@@ -310,12 +313,18 @@ interface PetFollower {
   ownerY: number;
   followAt: number;
   repathAt: number;
+  nextChoiceAt: number;
+  behaviorUntil: number;
+  sideChangeAt: number;
   side: number;
+  pace: number;
   idleAngle: number;
   headingX: number;
   headingY: number;
   ownerWasMoving: boolean;
-  following: boolean;
+  behavior: PetBehavior;
+  pose: PetPose;
+  emote: 'sniff' | 'spark' | null;
   moving: boolean;
   walkPhase: number;
   facingLeft: boolean;
@@ -327,6 +336,8 @@ interface PixelPetView {
   x: number;
   y: number;
   moving: boolean;
+  pose: PetPose;
+  emote: 'sniff' | 'spark' | null;
   walkPhase: number;
   facingLeft: boolean;
 }
@@ -1916,14 +1927,19 @@ function canOccupy(x: number, y: number, radius: number) {
 }
 
 function petSpot(ownerX: number, ownerY: number, angle: number, distance: number) {
-  for (let i = 0; i < 8; i++) {
-    const candidateAngle = angle + i * Math.PI / 4;
-    const x = ownerX + Math.cos(candidateAngle) * distance;
-    const y = ownerY + Math.sin(candidateAngle) * distance * 0.72;
-    if (canOccupy(x, y, 12)) return { x, y };
+  const rings = [distance, distance * 0.78, distance * 1.2, 34, 52, 72];
+  for (const radius of rings) {
+    for (let i = 0; i < 12; i++) {
+      const candidateAngle = angle + i * Math.PI / 6;
+      const x = ownerX + Math.cos(candidateAngle) * radius;
+      const y = ownerY + Math.sin(candidateAngle) * radius * 0.72;
+      if (canOccupy(x, y, 12)) return { x, y };
+    }
   }
   return { x: ownerX + 52, y: ownerY };
 }
+
+const petRandom = (min: number, max: number) => min + Math.random() * (max - min);
 
 function updatePetFollowers(
   owners: PetOwner[],
@@ -1942,24 +1958,32 @@ function updatePetFollowers(
     if (!follower) {
       const idleAngle = Math.random() * Math.PI * 2;
       const start = petSpot(owner.x, owner.y, idleAngle, 54);
+      const startsMoving = owner.moving;
       follower = {
         ...start,
         targetX: start.x,
         targetY: start.y,
         ownerX: owner.x,
         ownerY: owner.y,
-        followAt: now + 650 + Math.random() * 1700,
-        repathAt: 0,
+        followAt: now + petRandom(900, 2600),
+        repathAt: now + petRandom(500, 1300),
+        nextChoiceAt: now + petRandom(1800, 4200),
+        behaviorUntil: now + petRandom(1200, 3000),
+        sideChangeAt: now + petRandom(2800, 6800),
         side: Math.random() < 0.5 ? -1 : 1,
+        pace: petRandom(0.82, 1.22),
         idleAngle,
         headingX: 1,
         headingY: 0,
-        ownerWasMoving: owner.moving,
-        following: false,
+        ownerWasMoving: startsMoving,
+        behavior: startsMoving ? 'waiting' : 'hangout',
+        pose: Math.random() < 0.45 ? 'sit' : 'stand',
+        emote: null,
         moving: false,
         walkPhase: Math.random() * Math.PI * 2,
         facingLeft: false,
       };
+      if (startsMoving) follower.followAt = now + petRandom(700, 2400);
       followers.set(key, follower);
     }
 
@@ -1972,44 +1996,146 @@ function updatePetFollowers(
     }
 
     if (owner.moving && !follower.ownerWasMoving) {
-      // Let the owner get going before the cat decides to trail after them.
-      follower.followAt = now + 650 + Math.random() * 1750;
-      follower.side = Math.random() < 0.5 ? -1 : 1;
-      follower.following = false;
+      // The owner gets a little head start while the cat decides what to do.
+      follower.followAt = now + petRandom(750, 2700);
+      follower.behavior = 'waiting';
+      follower.behaviorUntil = follower.followAt;
+      follower.pose = Math.random() < 0.5 ? 'sniff' : 'sit';
+      follower.emote = follower.pose === 'sniff' ? 'sniff' : null;
+      if (Math.random() < 0.42) {
+        const wander = petSpot(follower.x, follower.y, Math.random() * Math.PI * 2, petRandom(18, 38));
+        follower.targetX = wander.x;
+        follower.targetY = wander.y;
+      } else {
+        follower.targetX = follower.x;
+        follower.targetY = follower.y;
+      }
     } else if (!owner.moving && follower.ownerWasMoving) {
-      follower.followAt = now + 450 + Math.random() * 900;
+      follower.behaviorUntil = now + petRandom(350, 1050);
+      if (follower.behavior === 'waiting') {
+        follower.followAt = now + petRandom(300, 850);
+      }
     }
     follower.ownerWasMoving = owner.moving;
 
     const ownerDistance = Math.hypot(owner.x - follower.x, owner.y - follower.y);
-    if (owner.moving && now >= follower.followAt) follower.following = true;
-    if (!owner.moving && ownerDistance > 105 && now >= follower.followAt) follower.following = true;
 
-    if (follower.following && !owner.moving && ownerDistance < 82) {
-      follower.following = false;
+    if (ownerDistance > 275) {
+      follower.behavior = 'catchup';
+      follower.pose = 'stand';
+      follower.emote = null;
+      follower.repathAt = Math.min(follower.repathAt, now);
+    } else if (follower.behavior === 'catchup' && ownerDistance < 112) {
+      follower.behavior = owner.moving || ownerDistance > 76 ? 'following' : 'hangout';
+      follower.behaviorUntil = now + petRandom(900, 1800);
+      follower.nextChoiceAt = now + petRandom(2500, 5200);
+    } else if (follower.behavior === 'waiting' && now >= follower.followAt) {
+      if (owner.moving || ownerDistance > 112) {
+        follower.behavior = 'following';
+        follower.pose = 'stand';
+        follower.emote = null;
+        follower.repathAt = now;
+      } else {
+        follower.behavior = 'hangout';
+        follower.nextChoiceAt = now + petRandom(1200, 3200);
+      }
+    } else if (follower.behavior === 'following' && !owner.moving && ownerDistance < 76) {
+      // Arrive beside the owner, then choose an unhurried little resting pose.
+      follower.behavior = 'hangout';
       follower.idleAngle = Math.random() * Math.PI * 2;
-      const rest = petSpot(owner.x, owner.y, follower.idleAngle, 54);
+      const rest = petSpot(owner.x, owner.y, follower.idleAngle, petRandom(38, 67));
       follower.targetX = rest.x;
       follower.targetY = rest.y;
+      follower.pose = Math.random() < 0.32 ? 'loaf' : 'sit';
+      follower.emote = null;
+      follower.behaviorUntil = now + petRandom(1300, 3200);
+      follower.nextChoiceAt = now + petRandom(3300, 7200);
     }
 
-    const targetDistance = Math.hypot(follower.targetX - follower.x, follower.targetY - follower.y);
-    if (follower.following && (now >= follower.repathAt || targetDistance < 14)) {
-      let angle = follower.idleAngle;
-      if (owner.moving) {
-        const perpendicular = Math.atan2(follower.headingY, follower.headingX) + follower.side * Math.PI / 2;
-        angle = perpendicular;
-        const behindX = owner.x - follower.headingX * 10;
-        const behindY = owner.y - follower.headingY * 10;
-        const target = petSpot(behindX, behindY, angle, 52);
+    if (follower.behavior === 'detour') {
+      if (ownerDistance > 178) {
+        follower.behavior = ownerDistance > 275 ? 'catchup' : 'following';
+        follower.pose = 'stand';
+        follower.emote = null;
+        follower.repathAt = now;
+      } else if (now >= follower.behaviorUntil) {
+        follower.behavior = owner.moving || ownerDistance > 105 ? 'following' : 'hangout';
+        follower.pose = 'stand';
+        follower.emote = null;
+        follower.nextChoiceAt = now + petRandom(2200, 5600);
+      }
+    }
+
+    if (
+      follower.behavior === 'hangout' &&
+      !owner.moving &&
+      ownerDistance < 122 &&
+      now >= follower.nextChoiceAt
+    ) {
+      const roll = Math.random();
+      follower.emote = null;
+      follower.behaviorUntil = now + petRandom(1300, 3900);
+      if (roll < 0.32) {
+        follower.pose = 'loaf';
+        follower.targetX = follower.x;
+        follower.targetY = follower.y;
+      } else if (roll < 0.62) {
+        follower.pose = 'sniff';
+        follower.emote = 'sniff';
+        const spot = petSpot(follower.x, follower.y, Math.random() * Math.PI * 2, petRandom(20, 48));
+        follower.targetX = spot.x;
+        follower.targetY = spot.y;
+        follower.behavior = 'detour';
+      } else if (roll < 0.84) {
+        follower.pose = 'play';
+        follower.emote = 'spark';
+        const angle = Math.random() * Math.PI * 2;
+        const spot = petSpot(owner.x, owner.y, angle, petRandom(46, 78));
+        follower.targetX = spot.x;
+        follower.targetY = spot.y;
+        follower.behavior = 'detour';
+      } else {
+        follower.pose = 'sit';
+        follower.targetX = follower.x;
+        follower.targetY = follower.y;
+      }
+      follower.nextChoiceAt = follower.behaviorUntil + petRandom(1800, 5100);
+    }
+
+    if (
+      follower.behavior === 'hangout' &&
+      ownerDistance > 135 &&
+      (owner.moving || now >= follower.followAt)
+    ) {
+      follower.behavior = 'following';
+      follower.pose = 'stand';
+      follower.emote = null;
+      follower.repathAt = now;
+    }
+
+    if (follower.behavior === 'hangout' && now >= follower.behaviorUntil && !owner.moving) {
+      if (follower.pose === 'loaf' || follower.pose === 'sit') follower.pose = 'stand';
+    }
+
+    if (follower.behavior === 'following' || follower.behavior === 'catchup') {
+      if (now >= follower.sideChangeAt) {
+        if (Math.random() < 0.72) follower.side *= -1;
+        follower.sideChangeAt = now + petRandom(2800, 7600);
+      }
+      if (now >= follower.repathAt) {
+        const angle = Math.atan2(follower.headingY, follower.headingX);
+        const isCatchingUp = follower.behavior === 'catchup';
+        const behind = petRandom(isCatchingUp ? 8 : 18, isCatchingUp ? 26 : 48);
+        const offset = petRandom(isCatchingUp ? 10 : 24, isCatchingUp ? 26 : 54);
+        const anchorX = owner.x - follower.headingX * behind;
+        const anchorY = owner.y - follower.headingY * behind;
+        const sideAngle = angle + follower.side * Math.PI / 2;
+        const target = petSpot(anchorX, anchorY, sideAngle, offset);
         follower.targetX = target.x;
         follower.targetY = target.y;
-      } else {
-        const rest = petSpot(owner.x, owner.y, angle, 54);
-        follower.targetX = rest.x;
-        follower.targetY = rest.y;
+        follower.pace = petRandom(0.82, isCatchingUp ? 1.38 : 1.2);
+        follower.repathAt = now + petRandom(isCatchingUp ? 500 : 850, isCatchingUp ? 950 : 1850);
       }
-      follower.repathAt = now + 380 + Math.random() * 520;
     }
 
     const oldX = follower.x;
@@ -2018,7 +2144,14 @@ function updatePetFollowers(
     const dy = follower.targetY - follower.y;
     const distance = Math.hypot(dx, dy);
     if (distance > 2) {
-      const speed = Math.min(220, 118 + distance * 0.3);
+      const baseSpeed = follower.behavior === 'catchup'
+        ? 205
+        : follower.behavior === 'detour'
+          ? 88
+          : follower.behavior === 'waiting'
+            ? 66
+            : 112;
+      const speed = Math.min(245, baseSpeed * follower.pace + distance * 0.16);
       const travel = Math.min(distance, speed * dt);
       const nextX = follower.x + (dx / distance) * travel;
       const nextY = follower.y + (dy / distance) * travel;
@@ -2029,7 +2162,7 @@ function updatePetFollowers(
     const movedY = follower.y - oldY;
     follower.moving = Math.hypot(movedX, movedY) > 0.15;
     if (follower.moving) {
-      follower.walkPhase += dt * 8.5;
+      follower.walkPhase += dt * (follower.behavior === 'catchup' ? 12 : 8.5) * follower.pace;
       follower.facingLeft = movedX < -0.1;
     }
     follower.ownerX = owner.x;
@@ -2041,6 +2174,8 @@ function updatePetFollowers(
       x: follower.x,
       y: follower.y,
       moving: follower.moving,
+      pose: follower.pose,
+      emote: follower.emote,
       walkPhase: follower.walkPhase,
       facingLeft: follower.facingLeft,
     });
@@ -2331,6 +2466,30 @@ const CAT_STAND = [
   '.CCCCOCCC.',
   '..LL..LL..',
 ];
+const CAT_SIT = [
+  '..D....D..',
+  '.DDD..DDD.',
+  'DCCCCCCCCD',
+  'DCEECCEECD',
+  'DCCCCCCCCD',
+  '.DCLNWLCD.',
+  '..DCCCCD..',
+  '..TCCCC..',
+  '..LLLL..',
+  '..........',
+];
+const CAT_LOAF = [
+  '..........',
+  '..D....D..',
+  '.DDD..DDD.',
+  'DCCCCCCCCD',
+  'DCEECCEECD',
+  'DCCCCCCCCD',
+  '.DCLNWLCD.',
+  'TCCCCCCCC.',
+  '.CCCCCCCC.',
+  '..LLLLLL..',
+];
 const CAT_WALK_A = [...CAT_STAND.slice(0, 9), '...LL.LL..'];
 const CAT_WALK_B = [...CAT_STAND.slice(0, 9), '..LL.LL...'];
 
@@ -2446,11 +2605,21 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
   const animated = pet.moving && !reduceMotion;
   const rows = animated
     ? (Math.floor(pet.walkPhase * 5) % 2 === 0 ? CAT_WALK_A : CAT_WALK_B)
-    : CAT_STAND;
+    : pet.pose === 'loaf'
+      ? CAT_LOAF
+      : pet.pose === 'sit'
+        ? CAT_SIT
+        : CAT_STAND;
   const width = rows[0].length * cellX;
   const height = rows.length * cellY;
   const left = pet.x - width / 2;
-  const bob = reduceMotion ? 0 : animated ? Math.sin(pet.walkPhase * 2) * 1.2 : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
+  const bob = reduceMotion
+    ? 0
+    : animated
+      ? Math.sin(pet.walkPhase * 2) * 1.2
+      : pet.pose === 'play'
+        ? Math.abs(Math.sin(t * 6 + pet.walkPhase)) * 2.5
+        : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
   const top = pet.y - height + 4 + bob;
   const palette = CAT_PIXEL_PALETTES[pet.catId];
 
@@ -2472,6 +2641,23 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
         Math.ceil(cellX),
         Math.ceil(cellY)
       );
+    }
+  }
+  if (pet.emote && !reduceMotion) {
+    const emoteY = top - 5 - Math.sin(t * 3 + pet.walkPhase) * 2;
+    if (pet.emote === 'sniff') {
+      ctx.fillStyle = '#b8d9c8';
+      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -17 : 13)), Math.round(emoteY), 3, 3);
+      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -22 : 18)), Math.round(emoteY - 5), 2, 2);
+      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -25 : 21)), Math.round(emoteY + 2), 2, 2);
+    } else {
+      const sx = Math.round(pet.x + 15);
+      const sy = Math.round(emoteY - 5);
+      ctx.fillStyle = '#f0d394';
+      ctx.fillRect(sx, sy - 4, 3, 11);
+      ctx.fillRect(sx - 4, sy, 11, 3);
+      ctx.fillStyle = '#fff2cf';
+      ctx.fillRect(sx + 1, sy, 2, 3);
     }
   }
 }
