@@ -75,6 +75,7 @@ import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import CatAssistant from '@/components/CatAssistant';
+import { CatAskPanel } from '@/components/CatAskPanel';
 import { useCatAssistant } from '@/hooks/use-cat-assistant';
 import { useCatPet } from '@/hooks/use-cat-pet';
 import { useKittyHelp } from '@/hooks/use-kitty-help';
@@ -870,6 +871,8 @@ export default function TicketNotesPage() {
   // Roster / Trak) without needing the Shift+D / Shift+S unlock hotkeys.
   const { user: authUser, privileges: authPrivileges, setSpice: setAuthSpice } = useAuth();
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  /** Spotlight-style AI Search ask panel (long-press on cat / Shift+C). */
+  const [askOpen, setAskOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2829,8 +2832,10 @@ Additional information (if needed): ${additional}`;
           pet={catPet.pet}
           onPet={catPet.petCat}
           petCooldown={catPet.petCooldown}
+          onAskOpen={() => setAskOpen(true)}
         />
       )}
+      {askOpen && <CatAskPanel onClose={() => setAskOpen(false)} />}
       {kitty.panelOpen && kitty.result && (
         <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
       )}

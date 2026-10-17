@@ -37,6 +37,8 @@ interface CatAssistantProps {
   /** Double-click the cat → run the Kitty Help routine (persistent cloud
    *  LLM conversation: fill notes → pick sources → write resolution). */
   onKittyHelp?: () => void;
+  /** Long-press the cat (or Shift+C) → open the AI Search ask panel. */
+  onAskOpen?: () => void;
   /** Live stage of the Kitty Help routine — rendered as a persistent
    *  violet bubble above the cat while non-null. */
   kittyStage?: { label: string; detail?: string } | null;
@@ -57,6 +59,7 @@ export function CatAssistant({
   onDismiss,
   moveRequest,
   onKittyHelp,
+  onAskOpen,
   kittyStage,
   pet,
   onPet,
@@ -132,6 +135,26 @@ export function CatAssistant({
   /** True once the active pointer gesture passed the drag threshold. */
   const gestureDragRef = useRef(false);
   const pressStartRef = useRef({ x: 0, y: 0 });
+  /** Long-press (500ms, no drag) → open the AI Search ask panel; the
+   *  release afterwards must not count as a pet. */
+  const askTimerRef = useRef<number | undefined>(undefined);
+  const askFiredRef = useRef(false);
+  /** Shift+C opener — ref pattern keeps the global listener bound once. */
+  const onAskOpenRef = useRef(onAskOpen);
+  onAskOpenRef.current = onAskOpen;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key !== 'C' && e.key !== 'c') return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable))
+        return;
+      e.preventDefault();
+      onAskOpenRef.current?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   /** Brief pet-reaction flash (+Mood). */
   const [pettedAt, setPettedAt] = useState(0);
   /** Napping mirror in a ref so the idle-animation timer sees fresh value. */
@@ -239,13 +262,25 @@ export function CatAssistant({
         x: e.clientX - visiblePosition.x,
         y: e.clientY - visiblePosition.y,
       };
+      // Arm the long-press timer — fires the ask panel unless the gesture
+      // turns into a drag or ends before the 500ms elapse.
+      askFiredRef.current = false;
+      window.clearTimeout(askTimerRef.current);
+      if (onAskOpen) {
+        askTimerRef.current = window.setTimeout(() => {
+          if (pointerDownRef.current && !gestureDragRef.current) {
+            askFiredRef.current = true;
+            onAskOpen();
+          }
+        }, 500);
+      }
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
         // Pointer capture may be unavailable after a browser cancellation.
       }
     },
-    [visiblePosition.x, visiblePosition.y]
+    [visiblePosition.x, visiblePosition.y, onAskOpen]
   );
 
   const onPointerMove = useCallback(
@@ -259,6 +294,7 @@ export function CatAssistant({
         const dy = e.clientY - pressStartRef.current.y;
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         gestureDragRef.current = true;
+        window.clearTimeout(askTimerRef.current);
         setDragging(true);
       }
       const x = e.clientX - dragOffset.current.x;
@@ -270,7 +306,11 @@ export function CatAssistant({
 
   const onPointerUp = useCallback(() => {
     pointerDownRef.current = false;
-    if (!gestureDragRef.current) {
+    window.clearTimeout(askTimerRef.current);
+    if (askFiredRef.current) {
+      // Long-press already opened the ask panel — the release is not a pet.
+      askFiredRef.current = false;
+    } else if (!gestureDragRef.current) {
       // Short press → pet the cat (heart pop clears itself after 900ms).
       const at = Date.now();
       setPettedAt(at);
@@ -363,7 +403,7 @@ export function CatAssistant({
         onKeyDown={onPetKey}
         role="button"
         tabIndex={0}
-        aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet, double-click for Kitty Help`}
+        aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet, long-press or Shift+C to ask, double-click for Kitty Help`}
         className={cn(
           'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-2xl',
           dragging && 'cursor-grabbing',

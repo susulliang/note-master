@@ -14,6 +14,7 @@ import GB_POOLIUS from './npc/GB_Poolius.json';
 import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
 import { CommuneRoom, type CommuneRoomBanner, type CommuneRoomLoadout } from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
+import { handleAsk } from './ask';
 import {
   handleKbCreate,
   handleKbDelete,
@@ -2212,6 +2213,14 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleAmrTemplatesGet(env);
   }
 
+  // Ask the knowledge base — AI Search over the eco-kb R2 bucket + fast
+  // model synthesis (worker/ask.ts). Any logged-in user.
+  if (path === '/api/ask' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleAsk(request, env);
+  }
+
   // SOP handbook — read for any logged-in user; edits admin-only.
   if (path === '/api/sop' && request.method === 'GET') {
     const user = await authBearerUser(request, env);
@@ -2588,6 +2597,7 @@ export default {
       url.pathname.startsWith('/api/amr-templates') ||
       url.pathname.startsWith('/api/sop') ||
       url.pathname.startsWith('/api/kb/') ||
+      url.pathname.startsWith('/api/ask') ||
       url.pathname.startsWith('/api/news')
     ) {
       return handleAuth(request, env);
