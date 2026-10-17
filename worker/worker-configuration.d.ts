@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20261006.1 2026-09-29
 interface __BaseEnv_Env {
 	DB: D1Database;
+	KB_BUCKET: R2Bucket;
 	AI: Ai;
 	DEEPSEEK_API_KEY: string;
 	COMMUNE_ROOM: DurableObjectNamespace<import("./index").CommuneRoom>;

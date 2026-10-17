@@ -160,3 +160,64 @@ export const GBU_MODELS: GbuModelEntry[] = [
 
 /** Total row count (excludes the header row). */
 export const GBU_MODEL_COUNT = GBU_MODELS.length;
+
+/* -------------------------------------------------------------------------- */
+/*              D1 refresh (admin-editable KB, id 'barcode-map')              */
+/* -------------------------------------------------------------------------- */
+
+import { fetchKbDocs } from '@/lib/kb-sync';
+
+type GbuModelsListener = (entries: GbuModelEntry[]) => void;
+const gbuListeners = new Set<GbuModelsListener>();
+let gbuModelsOverride: GbuModelEntry[] | null = null;
+
+/** Parse the barcode-map markdown table (| Internal | Marketing |). */
+function parseGbuMarkdown(body: string): GbuModelEntry[] {
+  const out: GbuModelEntry[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.split('|').map((c) => c.trim());
+    // [ '', internal, marketing, '' ] after the leading/trailing pipes
+    const internal = cells[1] ?? '';
+    const marketing = cells[2] ?? '';
+    if (!internal && !marketing) continue;
+    if (/^internal$/i.test(internal) || /^-{2,}/.test(internal)) continue; // header/sep
+    out.push({ internal, marketing });
+  }
+  return out;
+}
+
+/** Subscribe to D1 refreshes of the barcode map (GbuPopup re-renders). */
+export function subscribeGbuModels(listener: GbuModelsListener): () => void {
+  gbuListeners.add(listener);
+  return () => {
+    gbuListeners.delete(listener);
+  };
+}
+
+/** The live list — D1 override when loaded, bundled rows otherwise. */
+export function getGbuModels(): GbuModelEntry[] {
+  return gbuModelsOverride ?? GBU_MODELS;
+}
+
+/** Refresh the barcode map from the D1 KB (first line). The bundled array
+ *  stays as fallback; an admin tombstone clears the override to empty. */
+export async function refreshGbuModelsFromD1(): Promise<GbuModelEntry[] | null> {
+  const list = await fetchKbDocs('gbu');
+  if (!list) return null;
+  const doc = list.docs.find((d) => d.id === 'barcode-map');
+  if (list.deleted.includes('barcode-map') || (!doc && list.docs.length === 0 && list.deleted.length > 0)) {
+    gbuModelsOverride = [];
+  } else {
+    const parsed = doc ? parseGbuMarkdown(doc.body) : null;
+    if (!parsed) return null;
+    gbuModelsOverride = parsed;
+  }
+  for (const listener of gbuListeners) listener(gbuModelsOverride);
+  return gbuModelsOverride;
+}
+
+/** Drop the D1 override (admin editor calls this after a save/delete). */
+export function resetGbuModelsCache(): void {
+  gbuModelsOverride = null;
+}

@@ -1,4 +1,5 @@
 import { tokenize } from '@/utils/sopIndexer';
+import { fetchKbDocs } from '@/lib/kb-sync';
 
 /**
  * Software updates index — firmware OTA history + ECOVACS HOME app release
@@ -148,15 +149,44 @@ function parseFile(key: string, raw: string): SoftwareUpdateEntry[] {
   return out;
 }
 
-/** Lazily load + parse every software-updates markdown file (cached promise). */
+/** Lazily load + parse every software-updates markdown file (cached promise).
+ *  D1 knowledge base (admin-editable) is the first line: its documents
+ *  override the bundled raw files by stem; tombstoned bundled files are
+ *  hidden; admin-created files are appended. Falls back to the bundled
+ *  markdown when the KB API is unavailable. */
 let suIndexPromise: Promise<SoftwareUpdateEntry[]> | null = null;
 export function loadSoftwareUpdatesIndex(): Promise<SoftwareUpdateEntry[]> {
   if (!suIndexPromise) {
     suIndexPromise = (async () => {
-      const entries = await Promise.all(
+      const bundled = await Promise.all(
         Object.entries(suLoaders).map(async ([key, load]) => [key, await load()] as const)
       );
-      const all = entries.flatMap(([key, raw]) => parseFile(key, raw));
+      const [appDocs, fwDocs] = await Promise.all([
+        fetchKbDocs('app_update'),
+        fetchKbDocs('firmware_update'),
+      ]);
+      const d1 = new Map<string, string>();
+      const deleted = new Set<string>();
+      for (const list of [appDocs, fwDocs]) {
+        if (!list) continue;
+        for (const doc of list.docs) d1.set(doc.id, doc.body);
+        for (const id of list.deleted) deleted.add(id);
+      }
+      const sources: Array<[string, string]> = [];
+      if (d1.size === 0 && deleted.size === 0) {
+        sources.push(...bundled);
+      } else {
+        for (const [key, raw] of bundled) {
+          const stem = key.split('/').pop()?.replace(/\.md$/, '') ?? key;
+          if (deleted.has(stem)) continue;
+          sources.push([key, d1.get(stem) ?? raw]);
+        }
+        for (const [stem, body] of d1) {
+          if (sources.some(([key]) => key.endsWith(`/${stem}.md`)) || deleted.has(stem)) continue;
+          sources.push([`/software_updates/${stem}.md`, body]);
+        }
+      }
+      const all = sources.flatMap(([key, raw]) => parseFile(key, raw));
       // Standardize order once at the data entry: newest first. The Firmwares
       // and App Updates browse tabs slice the first N entries off the index,
       // so it must already be newest-first here. searchSoftwareUpdates() and
@@ -166,6 +196,12 @@ export function loadSoftwareUpdatesIndex(): Promise<SoftwareUpdateEntry[]> {
     })();
   }
   return suIndexPromise;
+}
+
+/** Drop the cached index so the next load re-fetches from the D1 KB
+ *  (called by the admin Knowledge Base editor after a save/delete). */
+export function resetSoftwareUpdatesCache(): void {
+  suIndexPromise = null;
 }
 
 /**

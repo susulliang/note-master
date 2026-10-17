@@ -17,6 +17,14 @@
       "migrations_dir": "migrations"
     }
   ],
+  // R2 copy of the knowledge base (kind/id.md per D1 kb_documents row) —
+  // feeds the Cloudflare AI Search (AutoRAG) "Ask" instance.
+  "r2_buckets": [
+    {
+      "binding": "KB_BUCKET",
+      "bucket_name": "eco-kb"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "COMMUNE_ROOM", "class_name": "CommuneRoom" },

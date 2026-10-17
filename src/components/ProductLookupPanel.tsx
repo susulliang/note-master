@@ -45,6 +45,8 @@ import {
   findModels,
   freeSearch,
   getProductIndex,
+  refreshProductIndexFromD1,
+  subscribeProductIndex,
   type FaqSearchHit,
   type FreeSearchHit,
   type GoatErrorCode,
@@ -194,7 +196,14 @@ export default function ProductLookupPanel({
   templateMatches,
   onOpenTemplate,
 }: ProductLookupPanelProps) {
-  const index = useMemo(() => getProductIndex(), []);
+  // Bundled index renders instantly; the D1 knowledge base (admin-editable
+  // product sheets — SPECS / GBU / Error Codes / Pitch / Scientist) refreshes
+  // it in place once loaded.
+  const [index, setIndex] = useState<ProductIndex>(() => getProductIndex());
+  useEffect(() => {
+    void refreshProductIndexFromD1();
+    return subscribeProductIndex(setIndex);
+  }, []);
   const [manualQuery, setManualQuery] = useState('');
   const [activeTab, setActiveTab] = useState<TabKind>('specs');
   const [pinnedModel, setPinnedModel] = useState<string | null>(null);

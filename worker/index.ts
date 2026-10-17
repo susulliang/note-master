@@ -14,6 +14,15 @@ import GB_POOLIUS from './npc/GB_Poolius.json';
 import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
 import { CommuneRoom, type CommuneRoomBanner, type CommuneRoomLoadout } from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
+import {
+  handleKbCreate,
+  handleKbDelete,
+  handleKbExportR2,
+  handleKbFaqDoc,
+  handleKbList,
+  handleKbPut,
+  isKbKind,
+} from './kb';
 
 export { CommuneRoom } from './commune-room';
 export { RosterRoom } from './roster-room';
@@ -2119,6 +2128,35 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleRosterSocketTicket(request, env, user);
+  }
+
+  /* ------------------------- knowledge base (D1) -------------------------- */
+  /* D1 first line for the product knowledge content (FAQ / product sheets /
+     GBU map / updates); clients keep the bundled blobs as fallback. Reads
+     are any logged-in user; writes are admin-only. */
+
+  if (path.startsWith('/api/kb/')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    const parts = path.split('/').filter(Boolean); // ['api', 'kb', ...]
+    // /api/kb/faq/:id — full FAQ document body
+    if (parts[2] === 'faq' && parts.length === 4 && request.method === 'GET') {
+      return handleKbFaqDoc(request, env, decodeURIComponent(parts[3]));
+    }
+    const kind = parts[2] ?? '';
+    // /api/kb/export-r2 — bulk-copy every D1 doc into the eco-kb R2 bucket
+    // (paginated; feeds the AI Search "Ask" instance). Admin only.
+    if (kind === 'export-r2' && request.method === 'POST') {
+      if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+      return handleKbExportR2(request, env);
+    }
+    if (!isKbKind(kind)) return authJson({ error: 'Unknown knowledge-base kind' }, 404);
+    if (parts.length === 3 && request.method === 'GET') return handleKbList(request, env, kind);
+    if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+    if (parts.length === 3 && request.method === 'POST') return handleKbCreate(request, env, kind, user.username);
+    if (parts.length === 4 && request.method === 'PUT') return handleKbPut(request, env, kind, decodeURIComponent(parts[3]), user.username);
+    if (parts.length === 4 && request.method === 'DELETE') return handleKbDelete(request, env, kind, decodeURIComponent(parts[3]));
+    return authJson({ error: 'Not found' }, 404);
   }
 
   // Spice QA award — any logged-in user, one award per call (client submits

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import {
   Dialog,
@@ -7,7 +7,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { GBU_MODELS, GBU_MODEL_COUNT, type GbuModelEntry } from '@/data/gbuModels';
+import {
+  getGbuModels,
+  refreshGbuModelsFromD1,
+  subscribeGbuModels,
+  type GbuModelEntry,
+} from '@/data/gbuModels';
 
 interface GbuPopupProps {
   open: boolean;
@@ -15,21 +20,32 @@ interface GbuPopupProps {
 }
 
 /** Fullscreen modal showing the GBU (North America) internal model code →
- *  marketing name lookup table. Fetched once from the Feishu "Barcode" sheet
- *  and bundled as static data (src/data/gbuModels.ts). Two-column search
- *  filters both the internal Model # and the marketing name. */
+ *  marketing name lookup table. Bundled static data (src/data/gbuModels.ts)
+ *  is the fallback; the D1 knowledge base (admin-editable 'barcode-map' doc)
+ *  is the first line and refreshes this list when it lands. Two-column
+ *  search filters both the internal Model # and the marketing name. */
 export default function GbuPopup({ open, onOpenChange }: GbuPopupProps) {
   const [query, setQuery] = useState('');
+  const [models, setModels] = useState<GbuModelEntry[]>(() => getGbuModels());
+
+  useEffect(() => {
+    if (!open) return;
+    setModels(getGbuModels());
+    void refreshGbuModelsFromD1();
+    return subscribeGbuModels(setModels);
+  }, [open]);
 
   const rows = useMemo<GbuModelEntry[]>(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return GBU_MODELS;
-    return GBU_MODELS.filter(
+    if (!q) return models;
+    return models.filter(
       (r) =>
         r.internal.toLowerCase().includes(q) ||
         r.marketing.toLowerCase().includes(q)
     );
-  }, [query]);
+  }, [query, models]);
+
+  const totalCount = models.length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -43,7 +59,7 @@ export default function GbuPopup({ open, onOpenChange }: GbuPopupProps) {
               GBU Model Lookup
             </DialogTitle>
             <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {GBU_MODEL_COUNT} models
+              {totalCount} models
             </span>
             <button
               type="button"
@@ -104,7 +120,7 @@ export default function GbuPopup({ open, onOpenChange }: GbuPopupProps) {
         </div>
 
         <div className="shrink-0 border-t border-border/60 px-5 py-2.5 text-[11px] text-muted-foreground">
-          Source: 史上最全GBU (北美) · Barcode sheet · {rows.length} of {GBU_MODEL_COUNT} shown
+          Source: 史上最全GBU (北美) · Barcode sheet · {rows.length} of {totalCount} shown
         </div>
       </DialogContent>
     </Dialog>

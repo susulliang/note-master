@@ -34,6 +34,7 @@ type SheetRecord = {
 // one such character. Static imports force Vite to inline each file
 // individually with no pattern-matching heuristics.
 import { ALL_PRODUCT_MD } from './_productMdImports';
+import { fetchKbDocs } from '@/lib/kb-sync';
 
 function buildSheetRecords(): SheetRecord[] {
   const records: SheetRecord[] = [];
@@ -70,20 +71,6 @@ export const SHEET_RECORDS: SheetRecord[] = buildSheetRecords();
 export const PRODUCT_SHEETS_RAW: Record<string, string> = Object.fromEntries(
   SHEET_RECORDS.map((s) => [s.sheetKey, s.raw])
 );
-
-function pickByPrefix(prefix: number): string | undefined {
-  return SHEET_RECORDS.find((s) => s.numericPrefix === prefix)?.raw;
-}
-
-const sheet01: string = pickByPrefix(1) ?? '';
-const sheet02: string = pickByPrefix(2) ?? '';
-const sheet03: string = pickByPrefix(3) ?? '';
-const sheet04: string = pickByPrefix(4) ?? '';
-const sheet05: string = pickByPrefix(5) ?? '';
-const sheet06: string = pickByPrefix(6) ?? '';
-const sheet07: string = pickByPrefix(7) ?? '';
-const sheet08: string = pickByPrefix(8) ?? '';
-const sheet09: string = pickByPrefix(9) ?? '';
 
 /* -------------------------------------------------------------------------- */
 /*                               Token Utilities                              */
@@ -637,33 +624,30 @@ export interface ProductIndex {
 
 let _index: ProductIndex | null = null;
 
-export function getProductIndex(): ProductIndex {
-  if (_index) return _index;
+/** Build the searchable product index from a set of sheet records.
+ *  (Used both for the bundled sheets at module load and for the D1-merged
+ *  refresh — same parsers, different source documents.) */
+export function buildProductIndex(records: SheetRecord[]): ProductIndex {
+  const byPrefix = (prefix: number): string =>
+    records.find((s) => s.numericPrefix === prefix)?.raw ?? '';
 
-  const deebot = parseComparisonSheet('DEEBOT', sheet01);
-  const goat = parseComparisonSheet('GOAT', sheet02);
-  const winbot = parseComparisonSheet('WINBOT', sheet04);
-  const techSpecs = parseComparisonSheet('TechSpecs', sheet09);
-  const goatErrors = parseGoatErrorCodes(sheet03);
-  const scientistCodes = parseScientistCodes(sheet05);
-  const sellingPoints = parseSellingPoints(sheet08);
+  const deebot = parseComparisonSheet('DEEBOT', byPrefix(1));
+  const goat = parseComparisonSheet('GOAT', byPrefix(2));
+  const winbot = parseComparisonSheet('WINBOT', byPrefix(4));
+  const techSpecs = parseComparisonSheet('TechSpecs', byPrefix(9));
+  const goatErrors = parseGoatErrorCodes(byPrefix(3));
+  const scientistCodes = parseScientistCodes(byPrefix(5));
+  const sellingPoints = parseSellingPoints(byPrefix(8));
   const freeText = [
-    ...parseFreeTextSheet('Troubleshooting', sheet06),
-    ...parseFreeTextSheet('Navigation', sheet07),
+    ...parseFreeTextSheet('Troubleshooting', byPrefix(6)),
+    ...parseFreeTextSheet('Navigation', byPrefix(7)),
   ];
 
   // All GBU sheets (numeric prefix >= 10) are comparison-style tables.
   // Extract the H2 title / sheet heading from the raw MD as a display label,
   // fall back to the file stem if missing.
   const gbuComparisons: ComparisonIndex[] = [];
-  // FAQ entries come from records where isFaq === true (products/FAQ/*.md)
-  const faqs: FaqEntry[] = [];
-  for (const rec of SHEET_RECORDS) {
-    if (rec.isFaq) {
-      const e = parseFaqMd(rec.sheetKey, rec.raw);
-      if (e) faqs.push(e);
-      continue;
-    }
+  for (const rec of records) {
     if (rec.numericPrefix < 10) continue;
     const heading =
       rec.raw.match(/^##\s+(.+)$/m)?.[1]?.trim() ||
@@ -690,27 +674,101 @@ export function getProductIndex(): ProductIndex {
   }
   for (const s of sellingPoints) push(s.model, s.tokens, '卖点');
   for (const s of scientistCodes) push(s.model, s.tokens, '科学家代号');
-  // FAQ models: deduplicate by category+modelSlug combo to avoid blowing up list
-  const faqModelSeen = new Set<string>();
-  for (const f of faqs) {
-    const k = `${f.category}:${f.modelSlug}`;
-    if (faqModelSeen.has(k)) continue;
-    faqModelSeen.add(k);
-    const modelLabel = f.model?.trim() || f.modelSlug?.toUpperCase() || f.category;
-    const tokens = normalizeTokens(`${f.category} ${modelLabel} ${f.modelSlug}`);
-    push(modelLabel, tokens, `FAQ · ${f.category}`);
-  }
 
-  _index = {
+  return {
     comparisons,
     goatErrorCodes: goatErrors,
     scientistCodes,
     sellingPoints,
     freeText,
-    faqs,
+    faqs: [],
     allModels,
   };
+}
+
+export function getProductIndex(): ProductIndex {
+  if (_index) return _index;
+
+  const index = buildProductIndex(SHEET_RECORDS);
+  // Bundled FAQ markdown is not shipped in the JS bundle (answers stream
+  // from the generated static shards / KB API via src/utils/faqData.ts), so
+  // the sync index always carries an empty faqs list here.
+  _index = index;
   return _index;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                  D1 refresh (admin-editable KB documents)                  */
+/* -------------------------------------------------------------------------- */
+
+type IndexListener = (index: ProductIndex) => void;
+const indexListeners = new Set<IndexListener>();
+
+/** Subscribe to D1 index refreshes (ProductLookupPanel re-renders when the
+ *  admin-editable documents land). Returns an unsubscribe fn. */
+export function subscribeProductIndex(listener: IndexListener): () => void {
+  indexListeners.add(listener);
+  return () => {
+    indexListeners.delete(listener);
+  };
+}
+
+function makeSheetRecord(sheetKey: string, raw: string): SheetRecord {
+  const stem = sheetKey.replace(/\.md$/i, '').split('/').pop() ?? sheetKey;
+  const prefixMatch = stem.match(/^(\d{1,2})[_\-]/);
+  return {
+    sheetKey: stem,
+    fileName: stem + '.md',
+    raw,
+    numericPrefix: prefixMatch ? parseInt(prefixMatch[1], 10) : 999,
+    isFaq: false,
+  };
+}
+
+let d1IndexPromise: Promise<ProductIndex | null> | null = null;
+
+/** Drop the cached D1 refresh so the next call to
+ *  refreshProductIndexFromD1() re-fetches (admin editor after save/delete). */
+export function resetProductIndexD1Cache(): void {
+  d1IndexPromise = null;
+}
+
+/**
+ * Refresh the product index from the D1 knowledge base (first line). The
+ * bundled sheets remain the fallback: D1 bodies override the same stem,
+ * tombstoned bundled docs are hidden, admin-created sheets are appended.
+ * Resolves null when D1 is unavailable (bundle keeps serving as-is).
+ */
+export function refreshProductIndexFromD1(): Promise<ProductIndex | null> {
+  if (!d1IndexPromise) {
+    d1IndexPromise = (async () => {
+      const list = await fetchKbDocs('product');
+      if (!list) return null;
+      const d1ByStem = new Map(list.docs.map((d) => [d.id, d.body]));
+      const deleted = new Set(list.deleted);
+      const records: SheetRecord[] = [];
+      const covered = new Set<string>();
+      for (const [fullPath, raw] of Object.entries(ALL_PRODUCT_MD)) {
+        const fileName = fullPath.split('/').pop() ?? '';
+        if (!fileName || fileName === 'README.md') continue;
+        const stem = fileName.replace(/\.md$/i, '');
+        if (deleted.has(stem)) continue;
+        const body = d1ByStem.get(stem);
+        if (body !== undefined) covered.add(stem);
+        records.push(makeSheetRecord(stem, body ?? raw));
+      }
+      for (const [stem, body] of d1ByStem) {
+        if (covered.has(stem) || deleted.has(stem)) continue;
+        records.push(makeSheetRecord(stem, body));
+      }
+      records.sort((a, b) => a.numericPrefix - b.numericPrefix || a.sheetKey.localeCompare(b.sheetKey));
+      const index = buildProductIndex(records);
+      _index = index;
+      for (const listener of indexListeners) listener(index);
+      return index;
+    })().catch(() => null);
+  }
+  return d1IndexPromise;
 }
 
 /* -------------------------------------------------------------------------- */

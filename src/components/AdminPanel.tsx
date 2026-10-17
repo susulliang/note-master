@@ -1,20 +1,23 @@
 /**
  * Admin panel — admin-only management console, toggled with Shift+A (only
  * available while an admin account is logged in; the hotkey is a no-op for
- * everyone else). Two tabs:
+ * everyone else). Three tabs:
  *
  *   • Privileges — per-user Dash / Roster / Trak rail visibility toggles and
  *     force-deleting accounts (the username can then register again).
  *   • Store — launch / edit / retire spice-store products (virtual items,
  *     e.g. "Cat food" to feed the cat assistant).
+ *   • Knowledge — edit the D1-backed knowledge base documents (FAQ / product
+ *     sheets / GBU map / app & firmware updates) with bundled fallback.
  *
  * All data lives in D1 via the Worker auth API.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
+import { BookOpen, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import KnowledgeBaseTab from '@/components/KnowledgeBaseTab';
 import {
   adminDeleteStoreProduct,
   adminDeleteUser,
@@ -38,11 +41,12 @@ const PRIVILEGE_LABELS: { key: PrivilegeKey; label: string }[] = [
   { key: 'trak', label: 'TRAK' },
 ];
 
-type AdminTab = 'privileges' | 'store';
+type AdminTab = 'privileges' | 'store' | 'knowledge';
 
 const TABS: { key: AdminTab; label: string; icon: typeof ShieldCheck }[] = [
   { key: 'privileges', label: 'Privileges', icon: UserCog },
   { key: 'store', label: 'Store', icon: ShoppingBag },
+  { key: 'knowledge', label: 'Knowledge', icon: BookOpen },
 ];
 
 /* ── Product editor draft (shared by the create form and inline edits) ────── */
@@ -263,25 +267,29 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
           <div className="flex-1">
             <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">Admin Panel</h2>
             <p className="text-xs text-muted-foreground">
-              {tab === 'privileges'
-                ? users
-                  ? `${users.length} account${users.length === 1 ? '' : 's'} · toggles apply instantly`
-                  : 'Loading accounts…'
-                : products
-                  ? `${products.length} product${products.length === 1 ? '' : 's'} · live in the spice store`
-                  : 'Loading products…'}
+              {tab === 'knowledge'
+                ? 'D1 knowledge base · bundled blobs as fallback'
+                : tab === 'privileges'
+                  ? users
+                    ? `${users.length} account${users.length === 1 ? '' : 's'} · toggles apply instantly`
+                    : 'Loading accounts…'
+                  : products
+                    ? `${products.length} product${products.length === 1 ? '' : 's'} · live in the spice store`
+                    : 'Loading products…'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => (tab === 'privileges' ? void load() : void loadProducts())}
-            className="glass-btn rounded-lg p-2 text-muted-foreground transition-colors hover:text-foreground"
-            aria-label="Reload"
-          >
-            <RefreshCw
-              className={cn('size-4', (tab === 'privileges' ? users === null : products === null) && 'animate-spin')}
-            />
-          </button>
+          {tab !== 'knowledge' && (
+            <button
+              type="button"
+              onClick={() => (tab === 'privileges' ? void load() : void loadProducts())}
+              className="glass-btn rounded-lg p-2 text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Reload"
+            >
+              <RefreshCw
+                className={cn('size-4', (tab === 'privileges' ? users === null : products === null) && 'animate-spin')}
+              />
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
@@ -710,6 +718,9 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
             </p>
           </div>
         )}
+
+        {/* ── Tab: Knowledge (D1 KB editor) ── */}
+        {tab === 'knowledge' && <KnowledgeBaseTab />}
 
         <p className="mt-3 shrink-0 text-center text-[10px] text-muted-foreground/70">
           Shift+A toggles this panel
