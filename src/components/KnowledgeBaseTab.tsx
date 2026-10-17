@@ -31,6 +31,7 @@ const KIND_LABELS: Array<{ kind: KbKind; label: string; hint: string }> = [
   { kind: 'gbu', label: 'GBU map', hint: 'Barcode map (internal code → marketing name)' },
   { kind: 'app_update', label: 'App updates', hint: 'ECOVACS HOME release notes' },
   { kind: 'firmware_update', label: 'Firmware', hint: 'Firmware OTA history' },
+  { kind: 'app_photo', label: 'App photos', hint: 'app-photos index.json — photo metadata (binaries export to R2)' },
 ];
 
 const NEW_FAQ_TEMPLATE = `---

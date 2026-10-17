@@ -19,6 +19,7 @@ import {
   handleKbDelete,
   handleKbExportR2,
   handleKbFaqDoc,
+  handleKbGet,
   handleKbList,
   handleKbPut,
   isKbKind,
@@ -2152,6 +2153,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     }
     if (!isKbKind(kind)) return authJson({ error: 'Unknown knowledge-base kind' }, 404);
     if (parts.length === 3 && request.method === 'GET') return handleKbList(request, env, kind);
+    // Single non-FAQ document (e.g. the app-photos index under kind
+    // 'app_photo', id 'index') — read for any logged-in user.
+    if (parts.length === 4 && request.method === 'GET') {
+      return handleKbGet(request, env, kind, decodeURIComponent(parts[3]));
+    }
     if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
     if (parts.length === 3 && request.method === 'POST') return handleKbCreate(request, env, kind, user.username);
     if (parts.length === 4 && request.method === 'PUT') return handleKbPut(request, env, kind, decodeURIComponent(parts[3]), user.username);

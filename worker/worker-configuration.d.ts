@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
 	DB: D1Database;
 	KB_BUCKET: R2Bucket;
+	ASSETS: Fetcher;
 	AI: Ai;
 	DEEPSEEK_API_KEY: string;
 	COMMUNE_ROOM: DurableObjectNamespace<import("./index").CommuneRoom>;

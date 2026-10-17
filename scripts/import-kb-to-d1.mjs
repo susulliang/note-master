@@ -99,6 +99,13 @@ for (const name of readdirSync(join(ROOT, 'software_updates'))) {
   docs.push({ kind: 'gbu', id: 'barcode-map', title: 'GBU Barcode Map', body });
 }
 
+// 4b. App Photos index (kind 'app_photo', id 'index') — the whole index.json
+//     as one editable document; photo binaries stay bundled static assets.
+{
+  const raw = readFileSync(join(ROOT, 'public', 'app-photos', 'index.json'), 'utf8');
+  docs.push({ kind: 'app_photo', id: 'index', title: 'App Photos Index', body: raw });
+}
+
 console.log(`[kb-import] ${docs.length} documents (${docs.filter((d) => d.kind === 'faq').length} faq)`);
 
 // 5. Emit statements (hex-encoded, chunked for the 100KB statement cap)

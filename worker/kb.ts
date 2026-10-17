@@ -20,7 +20,7 @@
  * kb_deletions so clients can hide the matching prepackaged blob.
  */
 
-const KB_KINDS = ['faq', 'product', 'gbu', 'app_update', 'firmware_update'] as const;
+const KB_KINDS = ['faq', 'product', 'gbu', 'app_update', 'firmware_update', 'app_photo'] as const;
 export type KbKind = (typeof KB_KINDS)[number];
 
 export function isKbKind(value: string): value is KbKind {
@@ -224,6 +224,27 @@ export async function handleKbList(request: Request, env: Env, kind: KbKind): Pr
   });
 }
 
+/** GET /api/kb/:kind/:id — full body of one non-FAQ document (e.g. the
+ *  app-photos index.json stored under kind 'app_photo', id 'index'). */
+export async function handleKbGet(request: Request, env: Env, kind: KbKind, id: string): Promise<Response> {
+  await ensureKbTables(env);
+  const row = await env.DB.prepare(
+    `SELECT kind, id, title, body, updated_by AS updatedBy, updated_at AS updatedAt
+     FROM kb_documents WHERE kind = ?1 AND id = ?2`
+  )
+    .bind(kind, id)
+    .first<{
+      kind: string;
+      id: string;
+      title: string;
+      body: string;
+      updatedBy: string;
+      updatedAt: string;
+    }>();
+  if (!row) return json({ error: 'Document not found' }, 404);
+  return json(row);
+}
+
 /** GET /api/kb/faq/:id — full markdown body of one FAQ doc (lazy answers). */
 export async function handleKbFaqDoc(request: Request, env: Env, id: string): Promise<Response> {
   await ensureKbTables(env);
@@ -364,24 +385,47 @@ interface ExportRow {
 
 /** POST /api/kb/export-r2 — admin copies D1 kb_documents into the R2 bucket
  *  as {kind}/{id}.md files (one page per call, cursor-paginated so the
- *  request stays far below the subrequest limit). Body: {cursor?, limit?}.
- *  On the final page a manifest.json with per-kind counts lands in the
- *  bucket, ready for an AI Search (AutoRAG) connection to index. */
+ *  request stays far below the subrequest limit). Body: {source?, cursor?,
+ *  limit?} — sources run in order: 'documents' (kb_documents), 'photos'
+ *  (app-photo binaries from the ASSETS binding), 'sop' (sop_entries) and
+ *  'amr' (amr_templates). The 'amr' final page lands manifest.json with
+ *  counts for every source, ready for an AI Search (AutoRAG) connection. */
 export async function handleKbExportR2(request: Request, env: Env): Promise<Response> {
   await ensureKbTables(env);
   if (!env.KB_BUCKET) return json({ error: 'R2 binding KB_BUCKET is not configured' }, 500);
 
-  let payload: { cursor?: string; limit?: number } = {};
+  let payload: { source?: string; cursor?: string; limit?: number } = {};
   try {
-    payload = (await request.json()) as { cursor?: string; limit?: number };
+    payload = (await request.json()) as { source?: string; cursor?: string; limit?: number };
   } catch {
-    // Empty body → first page.
+    // Empty body → first documents page.
   }
   const limit = Math.min(Math.max(Number(payload.limit) || 40, 1), 100);
-
-  // Cursor = "kind\u001Fid" of the last exported row (lexicographic scan).
-  const SEP = '\u001F';
+  const source = (['documents', 'photos', 'sop', 'amr'] as const).includes(
+    payload.source as 'documents' | 'photos' | 'sop' | 'amr'
+  )
+    ? (payload.source as 'documents' | 'photos' | 'sop' | 'amr')
+    : 'documents';
   const cursor = typeof payload.cursor === 'string' && payload.cursor ? payload.cursor : '';
+
+  let result: { exported: number; done: boolean; nextCursor: string | null };
+  if (source === 'photos') {
+    result = await exportPhotosPage(env, limit, cursor);
+  } else if (source === 'sop') {
+    result = await exportSopPage(env, limit, cursor);
+  } else if (source === 'amr') {
+    result = await exportAmrPage(env, limit, cursor);
+  } else {
+    result = await exportDocumentsPage(env, limit, cursor);
+  }
+
+  if (source === 'amr' && result.done) await writeManifest(env);
+  return json(result);
+}
+
+/** 'documents' phase — every kb_documents row (cursor = "kind\u001Fid"). */
+async function exportDocumentsPage(env: Env, limit: number, cursor: string) {
+  const SEP = '\u001F';
   const [cursorKind = '', cursorId = ''] = cursor.split(SEP);
   const rows = cursorKind
     ? (
@@ -399,30 +443,146 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
   const done = rows.length <= limit;
   const page = rows.slice(0, limit);
   for (const row of page) {
-    await env.KB_BUCKET.put(`${row.kind}/${row.id}.md`, row.body, MD_HTTP_METADATA);
+    await env.KB_BUCKET!.put(`${row.kind}/${row.id}.md`, row.body, MD_HTTP_METADATA);
   }
-
-  if (done) {
-    const counts = await env.DB.prepare(`SELECT kind, COUNT(*) AS n FROM kb_documents GROUP BY kind`).all<{
-      kind: string;
-      n: number;
-    }>();
-    const byKind: Record<string, number> = {};
-    let total = 0;
-    for (const r of counts.results ?? []) {
-      byKind[r.kind] = r.n;
-      total += r.n;
-    }
-    await env.KB_BUCKET.put(
-      'manifest.json',
-      JSON.stringify({ exportedAt: new Date().toISOString(), total, counts: byKind }, null, 2),
-      { httpMetadata: { contentType: 'application/json' } }
-    );
-  }
-
-  return json({
+  return {
     exported: page.length,
     done,
     nextCursor: done ? null : `${page[page.length - 1].kind}${SEP}${page[page.length - 1].id}`,
-  });
+  };
+}
+
+/** Photo paths from the app-photos index (D1 doc, bundled asset fallback). */
+async function loadPhotoPaths(env: Env): Promise<string[]> {
+  const row = await env.DB.prepare(`SELECT body FROM kb_documents WHERE kind = 'app_photo' AND id = 'index'`).first<{
+    body: string;
+  }>();
+  let raw = row?.body ?? null;
+  if (!raw) {
+    try {
+      const res = await env.ASSETS?.fetch(new Request('https://assets.local/app-photos/index.json'));
+      raw = res && res.ok ? await res.text() : null;
+    } catch {
+      raw = null;
+    }
+  }
+  if (!raw) return [];
+  try {
+    const index = JSON.parse(raw) as { models: Record<string, Array<{ photos?: Array<{ path: string }> }>> };
+    const paths = new Set<string>();
+    for (const models of Object.values(index.models ?? {})) {
+      for (const model of models ?? []) {
+        for (const photo of model.photos ?? []) if (photo.path) paths.add(photo.path);
+      }
+    }
+    return [...paths];
+  } catch {
+    return [];
+  }
+}
+
+/** 'photos' phase — copy each app-photo binary from the ASSETS binding into
+ *  the bucket under app_photo/app-photos/... (cursor = numeric offset). */
+async function exportPhotosPage(env: Env, limit: number, cursor: string) {
+  const paths = await loadPhotoPaths(env);
+  const start = Number(cursor) || 0;
+  const end = Math.min(start + limit, paths.length);
+  let exported = 0;
+  for (const path of paths.slice(start, end)) {
+    try {
+      const res = await env.ASSETS!.fetch(new Request(`https://assets.local${path}`));
+      if (!res.ok) continue;
+      const bytes = await res.arrayBuffer();
+      const ext = path.split('.').pop()?.toLowerCase() ?? '';
+      const type =
+        ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/webp';
+      await env.KB_BUCKET!.put(`app_photo${path}`, bytes, { httpMetadata: { contentType: type } });
+      exported++;
+    } catch {
+      // Missing asset — skip; the photo index still ships via 'documents'.
+    }
+  }
+  const done = end >= paths.length;
+  return { exported, done, nextCursor: done ? null : String(end) };
+}
+
+interface TableExportRow {
+  id: string;
+}
+
+/** Shared OFFSET-paged scan for the sop/amr live tables (cursor = offset). */
+async function exportTablePage<T extends TableExportRow>(
+  env: Env,
+  limit: number,
+  cursor: string,
+  baseSql: string,
+  toBody: (row: T) => string,
+  prefix: string
+) {
+  const offset = Number(cursor) || 0;
+  const rows = (
+    await env.DB.prepare(`${baseSql} LIMIT ?1 OFFSET ?2`).bind(limit + 1, offset).all<T>()
+  ).results ?? [];
+  const done = rows.length <= limit;
+  const page = rows.slice(0, limit);
+  for (const row of page) {
+    await env.KB_BUCKET!.put(`${prefix}/${row.id}.md`, toBody(row), MD_HTTP_METADATA);
+  }
+  return { exported: page.length, done, nextCursor: done ? null : String(offset + page.length) };
+}
+
+/** 'sop' phase — sop_entries as markdown sections ({sop}/{id}.md). */
+function exportSopPage(env: Env, limit: number, cursor: string) {
+  return exportTablePage<{ id: string; level: number; title: string; body: string }>(
+    env,
+    limit,
+    cursor,
+    `SELECT id, level, title, body FROM sop_entries ORDER BY sort_order`,
+    (row) => `${'#'.repeat(Math.max(1, row.level))} ${row.title}\n\n${row.body}`,
+    'sop'
+  );
+}
+
+/** 'amr' phase — amr_templates as metadata + HTML ({amr}/{id}.md). */
+function exportAmrPage(env: Env, limit: number, cursor: string) {
+  return exportTablePage<{
+    id: string;
+    name: string;
+    folder: string;
+    subject: string;
+    description: string;
+    html: string;
+  }>(
+    env,
+    limit,
+    cursor,
+    `SELECT id, name, folder, subject, description, html FROM amr_templates ORDER BY id`,
+    (row) =>
+      `# ${row.name}\n\n- Folder: ${row.folder}\n- Subject: ${row.subject}\n- Description: ${row.description}\n\n${row.html}`,
+    'amr'
+  );
+}
+
+/** Final 'amr' page → manifest.json with counts for every source. */
+async function writeManifest(env: Env) {
+  const [byKind, sop, amr, photoIndex] = await Promise.all([
+    env.DB.prepare(`SELECT kind, COUNT(*) AS n FROM kb_documents GROUP BY kind`).all<{ kind: string; n: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM sop_entries`).first<{ n: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM amr_templates`).first<{ n: number }>(),
+    loadPhotoPaths(env),
+  ]);
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const r of byKind.results ?? []) {
+    counts[r.kind] = r.n;
+    total += r.n;
+  }
+  counts.sop_sections = sop?.n ?? 0;
+  counts.amr_templates = amr?.n ?? 0;
+  counts.app_photos = photoIndex.length;
+  await env.KB_BUCKET!.put(
+    'manifest.json',
+    JSON.stringify({ exportedAt: new Date().toISOString(), documents: total, counts }, null, 2),
+    { httpMetadata: { contentType: 'application/json' } }
+  );
 }

@@ -8,8 +8,8 @@
 
 import { getApiBase, getStoredToken } from '@/lib/auth-client';
 
-export type KbKind = 'faq' | 'product' | 'gbu' | 'app_update' | 'firmware_update';
-export const KB_KINDS: KbKind[] = ['faq', 'product', 'gbu', 'app_update', 'firmware_update'];
+export type KbKind = 'faq' | 'product' | 'gbu' | 'app_update' | 'firmware_update' | 'app_photo';
+export const KB_KINDS: KbKind[] = ['faq', 'product', 'gbu', 'app_update', 'firmware_update', 'app_photo'];
 
 export interface KbDoc {
   id: string;
@@ -43,6 +43,22 @@ function kbHeaders(token: string | null): HeadersInit {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (token) headers.authorization = `Bearer ${token}`;
   return headers;
+}
+
+/** Fetch one non-FAQ document (body included). Returns null when signed
+ *  out, missing, or the request fails — callers fall back to bundled data. */
+export async function fetchKbDoc(kind: KbKind, id: string): Promise<KbDoc | null> {
+  const token = getStoredToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${getApiBase()}/api/kb/${kind}/${encodeURIComponent(id)}`, {
+      headers: kbHeaders(token),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as KbDoc;
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch one kind's documents. Returns null when D1 is unavailable / logged out. */
@@ -149,30 +165,37 @@ export async function deleteKbDoc(kind: KbKind, id: string): Promise<boolean> {
   }
 }
 
-/** Bulk-copy every D1 knowledge document into the eco-kb R2 bucket (admin).
- *  The worker endpoint is cursor-paginated to stay under the subrequest
- *  limit; this loops until the manifest lands. Returns the total exported
- *  or null on failure. */
+/** Bulk-copy the whole knowledge base into the eco-kb R2 bucket (admin):
+ *  kb_documents, then the app-photo binaries, the SOP handbook and the AMR
+ *  email templates. Each source is cursor-paginated to stay under the
+ *  subrequest limit; the manifest lands when the last source finishes.
+ *  Returns the total exported or null on failure. */
 export async function exportKbToR2(): Promise<number | null> {
   const token = getStoredToken();
   if (!token) return null;
   let exported = 0;
-  let cursor = '';
-  for (let page = 0; page < 500; page++) {
-    try {
-      const res = await fetch(`${getApiBase()}/api/kb/export-r2`, {
-        method: 'POST',
-        headers: kbHeaders(token),
-        body: JSON.stringify(cursor ? { cursor } : {}),
-      });
-      if (!res.ok) return null;
-      const payload = (await res.json()) as { exported?: number; done?: boolean; nextCursor?: string | null };
-      exported += payload.exported ?? 0;
-      if (payload.done) return exported;
-      if (!payload.nextCursor) return exported;
-      cursor = payload.nextCursor;
-    } catch {
-      return null;
+  for (const source of ['documents', 'photos', 'sop', 'amr']) {
+    let cursor = '';
+    for (let page = 0; page < 500; page++) {
+      try {
+        const res = await fetch(`${getApiBase()}/api/kb/export-r2`, {
+          method: 'POST',
+          headers: kbHeaders(token),
+          body: JSON.stringify({ source, ...(cursor ? { cursor } : {}) }),
+        });
+        if (!res.ok) return null;
+        const payload = (await res.json()) as {
+          exported?: number;
+          done?: boolean;
+          nextCursor?: string | null;
+        };
+        exported += payload.exported ?? 0;
+        if (payload.done) break;
+        if (!payload.nextCursor) break;
+        cursor = payload.nextCursor;
+      } catch {
+        return null;
+      }
     }
   }
   return exported;

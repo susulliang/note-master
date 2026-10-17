@@ -40,6 +40,9 @@
   ],
   "assets": {
     "directory": "./dist/client",
+    // Binding lets the worker fetch bundled static files (e.g. app photo
+    // binaries) during the R2 knowledge-base export.
+    "binding": "ASSETS",
     "run_worker_first": ["/api/*"],
     // Serve index.html for unknown routes (SPA) — parity with Vercel rewrites.
     "not_found_handling": "single-page-application",

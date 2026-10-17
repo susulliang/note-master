@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Image as ImageIcon, Loader2, X, ZoomIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { fetchKbDoc } from '@/lib/kb-sync';
 
 interface AppPhoto {
   name: string;
@@ -36,20 +37,35 @@ export default function AppPhotosPanel({ onClose }: AppPhotosPanelProps) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/app-photos/index.json')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: AppPhotosIndex) => {
-        if (cancelled) return;
-        setIndex(data);
-        // Default to the first model of the first product type.
-        const firstType = data.productTypes[0];
-        const firstModel = data.models[firstType]?.[0];
-        if (firstModel) setActiveModelId(firstModel.id);
-      })
-      .catch((e) => !cancelled && setError(String(e?.message || e)));
+    const apply = (data: AppPhotosIndex) => {
+      setIndex(data);
+      // Default to the first model of the first product type.
+      const firstType = data.productTypes[0];
+      const firstModel = data.models[firstType]?.[0];
+      if (firstModel) setActiveModelId(firstModel.id);
+    };
+    const load = async () => {
+      // D1 (admin-editable 'app_photo'/'index' doc) first; the bundled
+      // index.json ships as fallback for signed-out users.
+      const doc = await fetchKbDoc('app_photo', 'index');
+      if (doc) {
+        try {
+          apply(JSON.parse(doc.body) as AppPhotosIndex);
+          return;
+        } catch {
+          // Malformed D1 body — fall through to the bundled index.
+        }
+      }
+      try {
+        const res = await fetch('/app-photos/index.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as AppPhotosIndex;
+        if (!cancelled) apply(data);
+      } catch (e) {
+        if (!cancelled) setError(String(e?.message || e));
+      }
+    };
+    void load();
     return () => { cancelled = true; };
   }, []);
 
