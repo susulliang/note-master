@@ -42,6 +42,7 @@ import {
   DEFAULT_AVATAR,
   fetchCardCollection,
   pickSpiceDrop,
+  refreshCommuneSpiceDrops,
   saveCommuneLoadout,
   type CommuneAgent,
   type CommuneAvatar,
@@ -65,14 +66,19 @@ const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 
 /* ── world layout ──────────────────────────────────────────────────────────── */
 
-const WORLD_W = 1600;
-const WORLD_H = 1200;
+const WORLD_W = 3200;
+const WORLD_H = 2400;
 const GMT8_OFFSET_MS = 8 * 60 * 60 * 1000;
 const PLAZA = { x: 800, y: 620, r: 300 };
 const FOUNTAIN = { x: 800, y: 600, r: 96 }; // collision circle
 const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
+const DUCK_LAGOON = { x: 2580, y: 790, rx: 150, ry: 102 };
+const PONDS = [
+  { id: 'town-pond', ...POND_C },
+  { id: 'duck-lagoon', ...DUCK_LAGOON },
+] as const;
 
 function smoothStep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
@@ -112,8 +118,10 @@ type CommuneAction =
   | { type: 'release-hands'; key: 'H'; label: string; username: string }
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
-  | { type: 'pond'; key: 'E'; label: string }
+  | { type: 'pond'; key: 'E'; label: string; pondId: (typeof PONDS)[number]['id'] }
   | { type: 'serendipity'; key: 'E'; label: string; momentId: number }
+  | { type: 'world-object'; key: 'E'; label: string; objectId: CommuneWorldObjectId }
+  | { type: 'duck-incident'; key: 'E'; label: string; incidentId: number }
   | { type: 'prop'; key: 'E'; label: string; panel: PropPanelKind };
 
 interface FocusedNpc {
@@ -167,6 +175,9 @@ const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 1245, y: 206, w: 170, h: 184 }, // arcade
   { x: 155, y: 864, w: 150, h: 176 }, // west house
   { x: 1295, y: 864, w: 150, h: 176 }, // east house
+  { x: 2318, y: 674, w: 64, h: 38 }, // duck post box
+  { x: 1840, y: 1314, w: 62, h: 36 }, // mushroom throne
+  { x: 2672, y: 1746, w: 56, h: 46 }, // star scope
   { x: 736, y: 312, w: 128, h: 36 }, // bulletin board posts
   { x: 330, y: 742, w: 140, h: 36 }, // showcase counter
   { x: 90, y: 1062, w: 246, h: 18 }, // west fence
@@ -177,6 +188,14 @@ const TREES: [number, number][] = [
   [480, 208], [1120, 208], [560, 260], [1040, 260],
   [64, 470], [1536, 470], [64, 872], [1536, 872],
   [600, 1128], [1000, 1128],
+];
+/** Distant groves are baked into the map so they do not add per-frame sorting work. */
+const REMOTE_TREES: [number, number][] = [
+  [1740, 250], [1830, 310], [1940, 235], [2070, 285], [2180, 220],
+  [2350, 310], [2480, 250], [2800, 240], [2940, 310],
+  [1670, 1120], [1780, 1080], [1900, 1120], [2050, 1150],
+  [1630, 2050], [1760, 2110], [1900, 2040], [2050, 2120],
+  [2290, 2220], [2460, 2130], [2660, 2200], [2840, 2110], [3000, 2210],
 ];
 
 /** Plaza benches — E to sit, E / move keys to stand. */
@@ -199,7 +218,7 @@ const FORTUNES = [
 const FOUNTAIN_RANGE = 155;
 const POND_RANGE = 155;
 
-type SerendipityKind = 'feather' | 'clover' | 'paper-plane' | 'firefly';
+type SerendipityKind = 'feather' | 'clover' | 'paper-plane' | 'firefly' | 'treasure' | 'rubber-duck';
 interface TownSerendipity {
   id: number;
   kind: SerendipityKind;
@@ -212,20 +231,61 @@ interface TownSerendipity {
 
 const SERENDIPITY_SPOTS: [number, number][] = [
   [430, 520], [1170, 520], [410, 785], [1190, 785],
-  [800, 870], [350, 680], [1250, 680],
+  [800, 870], [350, 680], [1250, 680], [1710, 650],
+  [1950, 1040], [1450, 1520], [2380, 1630], [2840, 1120],
 ];
 const SERENDIPITIES: Omit<TownSerendipity, 'id' | 'x' | 'y' | 'expiresAt'>[] = [
   { kind: 'feather', label: 'Look closer at the feather', message: 'A silver feather drifted into your path. The town says hello.' },
   { kind: 'clover', label: 'Find the lucky clover', message: 'Four little leaves. One pocket-sized bit of luck.' },
   { kind: 'paper-plane', label: 'Read the tiny note', message: 'A tiny note says: “Glad you wandered by.”' },
   { kind: 'firefly', label: 'Follow the firefly', message: 'A firefly led you to a quiet corner. Take a little breath.' },
+  { kind: 'treasure', label: 'Open the suspiciously tiny treasure chest', message: 'Treasure! One gold star, three crumbs, and a certificate saying you are Extremely Rich.' },
+  { kind: 'rubber-duck', label: 'Inspect the tiny rubber duck', message: 'The duck squeaks “WHAT THE DUCK?!” and awards you one official pond inspector badge.' },
+];
+
+type CommuneWorldObjectId = 'duck-post' | 'mushroom-throne' | 'star-scope';
+interface CommuneWorldObject {
+  id: CommuneWorldObjectId;
+  x: number;
+  y: number;
+  range: number;
+  label: string;
+  messages: string[];
+}
+const WORLD_OBJECTS: CommuneWorldObject[] = [
+  {
+    id: 'duck-post', x: 2350, y: 720, range: 76, label: 'Check the Duck Post',
+    messages: [
+      'A formal notice: “The pond is not a swimming pool.” It is, in fact, a pond.',
+      'You received a postcard from a duck. It is just a drawing of bread.',
+      'The mailbox quacks. The mailbox should not be able to do that.',
+    ],
+  },
+  {
+    id: 'mushroom-throne', x: 1870, y: 1350, range: 72, label: 'Sit on the tiny mushroom throne',
+    messages: [
+      'The Mushroom Council recognizes you as Deputy Assistant of Vibes.',
+      'A tiny mushroom squeaks. You have been elected mayor by one mushroom.',
+      'The throne grants +3 confidence and absolutely no legal authority.',
+    ],
+  },
+  {
+    id: 'star-scope', x: 2700, y: 1790, range: 82, label: 'Look through the star scope',
+    messages: [
+      'You spot a constellation shaped exactly like a confused vacuum.',
+      'The stars spell “take your break.” The telescope seems very wise.',
+      'A duck is looking back through the other end. Awkward.',
+    ],
+  },
 ];
 const SERENDIPITY_RANGE = 62;
 const SERENDIPITY_LIFETIME_MS = 120_000;
 
 /** Pixel ducks summoned by feeding the pond (E near the water). */
-interface PondDuck { x: number; y: number; vx: number; phase: number; until: number }
+interface PondDuck { x: number; y: number; vx: number; phase: number; until: number; homeX: number; homeY: number }
+interface DuckIncident { id: number; x: number; y: number; anchorX: number; vx: number; phase: number; until: number }
 const DUCK_LIFE_MS = 20_000;
+const DUCK_INCIDENT_LIFETIME_MS = 13_000;
 const SPEED = 240; // player px/s
 const NPC_SPEED = 90;
 interface Banner extends CommuneBanner {
@@ -491,6 +551,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const serendipityRef = useRef<TownSerendipity | null>(null);
   const nextSerendipityAtRef = useRef(0);
   const serendipitySequenceRef = useRef(0);
+  const duckIncidentRef = useRef<DuckIncident | null>(null);
+  const nextDuckIncidentAtRef = useRef(0);
+  const duckIncidentSequenceRef = useRef(0);
+  const [oddityCount, setOddityCount] = useState(0);
   const [focusedNpc, setFocusedNpc] = useState<FocusedNpc | null>(null);
   const focusedNpcRef = useRef<FocusedNpc | null>(null);
   const [touchControls, setTouchControls] = useState(false);
@@ -785,7 +849,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   /* ── spice drops on the square ────────────────────────────────────────────── */
   const dropsRef = useRef<CommuneDrop[]>([]);
-  /** Ids with an in-flight or settled pickup request this session. */
+  /** Ids with a pickup request currently in flight. */
   const pickingRef = useRef<Set<number>>(new Set());
 
   const tryPickDrop = useCallback(
@@ -799,7 +863,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const p = playerRef.current;
         p.says = { text: '+1 spice 🌶', until: Date.now() + 2200 };
       } catch {
-        /* someone else claimed it or offline — it just stays gone visually */
+        pickingRef.current.delete(id);
+        try {
+          const result = await refreshCommuneSpiceDrops();
+          dropsRef.current = result.drops.filter((drop) => !pickingRef.current.has(drop.id));
+        } catch {
+          /* Keep the rest of the map usable while offline. */
+        }
+      } finally {
+        pickingRef.current.delete(id);
       }
     },
     [setSpice]
@@ -811,7 +883,27 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     let stopped = false;
     let reconnectTimer = 0;
     let reconnectAttempt = 0;
+    let dropRefreshTimer = 0;
     let activeSocket: WebSocket | null = null;
+
+    const refreshDrops = async () => {
+      if (stopped || document.visibilityState === 'hidden') return;
+      try {
+        const result = await refreshCommuneSpiceDrops();
+        if (!stopped) {
+          dropsRef.current = result.drops.filter((drop) => !pickingRef.current.has(drop.id));
+        }
+      } catch {
+        /* A later refresh or reconnect will recover the shared drops. */
+      }
+    };
+    const scheduleDropRefresh = () => {
+      dropRefreshTimer = window.setTimeout(() => {
+        void refreshDrops().finally(() => {
+          if (!stopped) scheduleDropRefresh();
+        });
+      }, 45_000 + Math.random() * 45_000);
+    };
 
     const applySnapshot = (agents: CommuneAgent[]) => {
       remoteRef.current.clear();
@@ -940,6 +1032,23 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             removeAgent(event.username);
           } else if (event.type === 'banners') {
             setBanners(parseBanners(event.banners));
+          } else if (event.type === 'public_chat_history' && Array.isArray(event.messages)) {
+            const messages = event.messages.flatMap((value) => {
+              if (!value || typeof value !== 'object') return [];
+              const item = value as Record<string, unknown>;
+              if (
+                typeof item.id !== 'string'
+                || typeof item.from !== 'string'
+                || typeof item.message !== 'string'
+              ) return [];
+              return [{
+                id: item.id,
+                from: item.from,
+                message: item.message,
+                at: Number(item.sentAt) || Date.now(),
+              }];
+            });
+            setSquareMessages(messages.slice(-8));
           } else if (event.type === 'public_chat') {
             const from = typeof event.from === 'string' ? event.from : '';
             const message = typeof event.message === 'string' ? event.message : '';
@@ -947,13 +1056,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               const at = Number(event.sentAt) || Date.now();
               setSquareMessages((items) => [
                 ...items.slice(-7),
-                { id: `${at}-${from}`, from, message, at },
+                {
+                  id: typeof event.id === 'string' ? event.id : `${at}-${from}`,
+                  from,
+                  message,
+                  at,
+                },
               ]);
               if (from !== username) {
                 const remote = remoteRef.current.get(from);
                 if (remote) remote.says = { text: message, until: Date.now() + 6_000 };
               }
             }
+          } else if (event.type === 'public_chat_delete' && typeof event.id === 'string') {
+            setSquareMessages((items) => items.filter((item) => item.id !== event.id));
           } else if (event.type === 'private_chat') {
             if (typeof event.from === 'string' && typeof event.message === 'string') {
               setInbox((items) => [...items.slice(-4), { from: event.from as string, message: event.message as string }]);
@@ -987,10 +1103,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
     };
     void connect();
+    scheduleDropRefresh();
     const heartbeat = window.setInterval(() => sendRoomEvent({ type: 'heartbeat' }), 20_000);
     return () => {
       stopped = true;
       window.clearInterval(heartbeat);
+      window.clearTimeout(dropRefreshTimer);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       activeSocket?.close(1000, 'Leaving the Commune');
       if (socketRef.current === activeSocket) socketRef.current = null;
@@ -1039,13 +1157,25 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               && Math.hypot(player.x - action.x, player.y - action.y) < BENCH_RANGE;
           case 'fountain':
             return Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
-          case 'pond':
-            return Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE
+          case 'pond': {
+            const pond = PONDS.find((item) => item.id === action.pondId);
+            return !!pond
+              && Math.hypot(player.x - pond.x, player.y - pond.y) < POND_RANGE
               && Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) >= FOUNTAIN_RANGE;
+          }
           case 'serendipity': {
             const moment = serendipityRef.current;
             return moment?.id === action.momentId
               && Math.hypot(player.x - moment.x, player.y - moment.y) < SERENDIPITY_RANGE;
+          }
+          case 'world-object': {
+            const object = WORLD_OBJECTS.find((item) => item.id === action.objectId);
+            return !!object && Math.hypot(player.x - object.x, player.y - object.y) < object.range;
+          }
+          case 'duck-incident': {
+            const incident = duckIncidentRef.current;
+            return incident?.id === action.incidentId
+              && Math.hypot(player.x - incident.x, player.y - incident.y) < 76;
           }
           case 'prop': {
             const prop = COMMUNE_PROPS.find((item) => item.kind === action.panel);
@@ -1094,31 +1224,63 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         return;
       case 'pond': {
         const now = Date.now();
+        const pond = PONDS.find((item) => item.id === action.pondId);
+        if (!pond) return;
         for (let i = 0; i < 3; i++) {
           ducksRef.current.push({
-            x: POND_C.x + 70,
-            y: POND_C.y - 30 + i * 30,
+            x: pond.x + 70,
+            y: pond.y - 30 + i * 30,
             vx: -26,
             phase: i * 2.1,
             until: now + DUCK_LIFE_MS,
+            homeX: pond.x,
+            homeY: pond.y,
           });
         }
-        playerRef.current.says = { text: 'Here ducky ducky… 🍞', until: now + 3500 };
+        playerRef.current.says = {
+          text: pond.id === 'duck-lagoon' ? 'Pond meeting! Bring your own bread… 🍞' : 'Here ducky ducky… 🍞',
+          until: now + 3500,
+        };
         return;
       }
       case 'serendipity': {
         const moment = serendipityRef.current;
         if (!moment || moment.id !== action.momentId) return;
         serendipityRef.current = null;
-        nextSerendipityAtRef.current = Date.now() + 60_000 + Math.random() * 120_000;
-        playerRef.current.says = { text: moment.message, until: Date.now() + 5200 };
+        nextSerendipityAtRef.current = Date.now() + 38_000 + Math.random() * 56_000;
+        playerRef.current.says = { text: moment.message, until: Date.now() + 6200 };
+        setOddityCount((count) => count + 1);
+        onCatThought?.(moment.kind === 'treasure' ? 'A treasure chest! I shall guard the crumbs.' : 'We found a tiny town surprise!', 4200);
+        return;
+      }
+      case 'world-object': {
+        const object = WORLD_OBJECTS.find((item) => item.id === action.objectId);
+        if (!object) return;
+        const message = object.messages[Math.floor(Math.random() * object.messages.length)];
+        playerRef.current.says = { text: message, until: Date.now() + 6200 };
+        if (object.id === 'duck-post') {
+          onCatThought?.('The duck has sent us official pond mail.', 4200);
+        }
+        return;
+      }
+      case 'duck-incident': {
+        const incident = duckIncidentRef.current;
+        if (!incident || incident.id !== action.incidentId) return;
+        duckIncidentRef.current = null;
+        nextDuckIncidentAtRef.current = Date.now() + 55_000 + Math.random() * 85_000;
+        playerRef.current.says = {
+          text: 'The duck filed a complaint about “excessive pond.” Case dismissed. 🦆',
+          until: Date.now() + 6500,
+        };
+        setOddityCount((count) => count + 1);
+        onCatThought?.('WHAT THE DUCK! That bird has a tiny briefcase.', 5000);
         return;
       }
       case 'prop':
         setPanel(action.panel);
         return;
     }
-  }, [sendRoomEvent]);
+  }, [onCatThought, sendRoomEvent]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -1298,20 +1460,22 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         .filter((d) => d.until > now)
         .map((d) => {
           d.x += d.vx * dt;
-          if (Math.abs(d.x - POND_C.x) > 88) d.vx *= -1;
-          d.y = POND_C.y + Math.sin(now / 900 + d.phase) * 16;
+          if (Math.abs(d.x - d.homeX) > 88) d.vx *= -1;
+          d.y = d.homeY + Math.sin(now / 900 + d.phase) * 16;
           return d;
         });
 
       if (!nextSerendipityAtRef.current) {
-        nextSerendipityAtRef.current = wallNow + 18_000 + Math.random() * 27_000;
+        nextSerendipityAtRef.current = wallNow + 12_000 + Math.random() * 18_000;
       }
       if (serendipityRef.current && wallNow >= serendipityRef.current.expiresAt) {
         serendipityRef.current = null;
-        nextSerendipityAtRef.current = wallNow + 75_000 + Math.random() * 120_000;
+        nextSerendipityAtRef.current = wallNow + 35_000 + Math.random() * 55_000;
       }
       if (!serendipityRef.current && wallNow >= nextSerendipityAtRef.current) {
-        const surprise = SERENDIPITIES[Math.floor(Math.random() * SERENDIPITIES.length)];
+        const treasureRun = Math.random() < 0.22;
+        const pool = treasureRun ? SERENDIPITIES.slice(4) : SERENDIPITIES.slice(0, 4);
+        const surprise = pool[Math.floor(Math.random() * pool.length)];
         const [x, y] = chooseSerendipitySpot(player.x, player.y);
         serendipityRef.current = {
           ...surprise,
@@ -1319,6 +1483,31 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           x,
           y,
           expiresAt: wallNow + SERENDIPITY_LIFETIME_MS,
+        };
+      }
+
+      if (!nextDuckIncidentAtRef.current) {
+        nextDuckIncidentAtRef.current = wallNow + 38_000 + Math.random() * 45_000;
+      }
+      const duckIncident = duckIncidentRef.current;
+      if (duckIncident && wallNow >= duckIncident.until) {
+        duckIncidentRef.current = null;
+        nextDuckIncidentAtRef.current = wallNow + 55_000 + Math.random() * 85_000;
+      } else if (duckIncident) {
+        if (!reduceMotion) {
+          duckIncident.x += duckIncident.vx * dt;
+          if (Math.abs(duckIncident.x - duckIncident.anchorX) > 64) duckIncident.vx *= -1;
+        }
+      } else if (wallNow >= nextDuckIncidentAtRef.current) {
+        const [x, y] = chooseSerendipitySpot(player.x, player.y);
+        duckIncidentRef.current = {
+          id: ++duckIncidentSequenceRef.current,
+          x,
+          y,
+          anchorX: x,
+          vx: Math.random() < 0.5 ? -76 : 76,
+          phase: Math.random() * 10,
+          until: wallNow + DUCK_INCIDENT_LIFETIME_MS,
         };
       }
 
@@ -1398,11 +1587,28 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         ? BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE)
         : undefined;
       const nearFountain = Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) < FOUNTAIN_RANGE;
-      const nearPond = !nearFountain && Math.hypot(player.x - POND_C.x, player.y - POND_C.y) < POND_RANGE;
       const moment = serendipityRef.current;
       const nearSerendipity = moment
         && Math.hypot(player.x - moment.x, player.y - moment.y) < SERENDIPITY_RANGE
         ? moment
+        : null;
+      const incident = duckIncidentRef.current;
+      const nearDuckIncident = incident
+        && Math.hypot(player.x - incident.x, player.y - incident.y) < 76
+        ? incident
+        : null;
+      const nearWorldObject = WORLD_OBJECTS
+        .map((object) => ({ object, distance: Math.hypot(player.x - object.x, player.y - object.y) }))
+        .filter(({ object, distance }) => distance < object.range)
+        .sort((a, b) => a.distance - b.distance)[0]?.object ?? null;
+      const nearPond = !nearFountain
+        ? PONDS
+          .map((pond) => ({ pond, distance: Math.hypot(player.x - pond.x, player.y - pond.y) }))
+          .filter(({ pond, distance }) =>
+            distance < POND_RANGE
+            && (pond.id !== 'town-pond' || Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) >= FOUNTAIN_RANGE)
+          )
+          .sort((a, b) => a.distance - b.distance)[0]?.pond ?? null
         : null;
       const actions: CommuneAction[] = [];
 
@@ -1422,6 +1628,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           label: nearSerendipity.label,
           momentId: nearSerendipity.id,
         });
+      } else if (nearDuckIncident) {
+        actions.push({
+          type: 'duck-incident',
+          key: 'E',
+          label: 'Ask the duck what the duck',
+          incidentId: nearDuckIncident.id,
+        });
+      } else if (nearWorldObject) {
+        actions.push({
+          type: 'world-object',
+          key: 'E',
+          label: nearWorldObject.label,
+          objectId: nearWorldObject.id,
+        });
       } else if (nearAgent) {
         actions.push({
           type: 'message-agent',
@@ -1434,7 +1654,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       } else if (nearFountain) {
         actions.push({ type: 'fountain', key: 'E', label: 'Toss a coin into the fountain' });
       } else if (nearPond) {
-        actions.push({ type: 'pond', key: 'E', label: 'Feed the ducks' });
+        actions.push({ type: 'pond', key: 'E', label: 'Feed the ducks', pondId: nearPond.id });
       } else if (nearProp) {
         actions.push({ type: 'prop', key: 'E', label: nearProp.label, panel: nearProp.kind });
       }
@@ -1544,7 +1764,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
-      draw(ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners, remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current, clickTargetRef.current, dropsRef.current, ducksRef.current);
+      draw(
+        ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
+        remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
+        clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current
+      );
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -1595,6 +1819,38 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         });
       } else {
         clickTargetRef.current = approachPoint(moment.x, moment.y, player.x, player.y);
+      }
+      return;
+    }
+    const incident = duckIncidentRef.current;
+    if (incident && Math.hypot(wx - incident.x, wy - (incident.y - 24)) < 32) {
+      const player = playerRef.current;
+      if (Math.hypot(player.x - incident.x, player.y - incident.y) < 76) {
+        executeInteraction({
+          type: 'duck-incident',
+          key: 'E',
+          label: 'Ask the duck what the duck',
+          incidentId: incident.id,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(incident.x, incident.y, player.x, player.y);
+      }
+      return;
+    }
+    const worldObject = WORLD_OBJECTS.find(
+      (object) => Math.hypot(wx - object.x, wy - (object.y - 18)) < 38
+    );
+    if (worldObject) {
+      const player = playerRef.current;
+      if (Math.hypot(player.x - worldObject.x, player.y - worldObject.y) < worldObject.range) {
+        executeInteraction({
+          type: 'world-object',
+          key: 'E',
+          label: worldObject.label,
+          objectId: worldObject.id,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(worldObject.x, worldObject.y, player.x, player.y);
       }
       return;
     }
@@ -1746,6 +2002,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
               <span className={cn('size-1.5 rounded-full', connectionState === 'connected' ? 'bg-emerald-400' : 'bg-amber-400')} />
               {connectionState === 'connected' ? 'Live' : connectionState === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+            </span>
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-100">
+              ✦ {oddityCount} oddit{oddityCount === 1 ? 'y' : 'ies'} found
             </span>
         </span>
       </div>
@@ -1933,22 +2192,35 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         </div>
       )}
 
-      {/* Recent square chat is kept in memory only; reconnects do not replay history. */}
+      {/* Short-lived shared history lets everyone remove inappropriate chat. */}
       {squareMessages.length > 0 && (
         <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
           <div
             role="log"
             aria-label="Recent square chat"
             aria-live="polite"
-            className="flex max-h-36 flex-col gap-1 overflow-hidden rounded-xl border border-white/20 bg-card/85 px-3 py-2 shadow-lg backdrop-blur-md"
+            className="pointer-events-auto flex max-h-36 flex-col gap-1 overflow-hidden rounded-xl border border-white/20 bg-card/85 px-3 py-2 shadow-lg backdrop-blur-md"
           >
             {squareMessages.slice(-5).map((item) => (
-              <p key={item.id} className="truncate text-[11px] leading-snug text-foreground">
-                <span className="mr-1.5 font-bold" style={{ color: `hsl(${hueOf(item.from)} 70% 65%)` }}>
-                  {item.from}
-                </span>
-                {item.message}
-              </p>
+              <div key={item.id} className="group flex min-w-0 items-center gap-1">
+                <p className="min-w-0 flex-1 truncate text-[11px] leading-snug text-foreground">
+                  <span className="mr-1.5 font-bold" style={{ color: `hsl(${hueOf(item.from)} 70% 65%)` }}>
+                    {item.from}
+                  </span>
+                  {item.message}
+                </p>
+                {(item.from === username || isAdmin) && (
+                  <button
+                    type="button"
+                    onClick={() => sendRoomEvent({ type: 'public_chat_delete', id: item.id })}
+                    className="shrink-0 rounded p-1 text-muted-foreground/70 transition hover:bg-red-500/15 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                    aria-label={`Delete ${item.from}'s public message`}
+                    title="Delete public message"
+                  >
+                    <X className="size-3" />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -2764,9 +3036,15 @@ function canOccupy(x: number, y: number, radius: number) {
   if (x < radius || x > WORLD_W - radius || y < radius + 120 || y > WORLD_H - radius) return false;
   if (Math.hypot(x - FOUNTAIN.x, y - FOUNTAIN.y) < FOUNTAIN.r + radius) return false;
 
-  const pondX = (x - POND_C.x) / (POND_C.rx + radius);
-  const pondY = (y - POND_C.y) / (POND_C.ry + radius);
-  if (pondX * pondX + pondY * pondY < 1) return false;
+  if (PONDS.some((pond) => {
+    const pondX = (x - pond.x) / (pond.rx + radius);
+    const pondY = (y - pond.y) / (pond.ry + radius);
+    return pondX * pondX + pondY * pondY < 1;
+  })) return false;
+  if (REMOTE_TREES.some(([tx, ty]) =>
+    x > tx - 30 - radius && x < tx + 30 + radius
+    && y > ty - 42 - radius && y < ty + 4 + radius
+  )) return false;
 
   return !SOLID_RECTS.some(
     (s) =>
@@ -2785,7 +3063,8 @@ function chooseSerendipitySpot(originX: number, originY: number): [number, numbe
     const y = Math.round((originY + Math.sin(angle) * distance) / 4) * 4;
     const nearChallenge = CHALLENGE_NPCS.some((npc) => Math.hypot(x - npc.x, y - npc.y) < 130);
     const nearProp = COMMUNE_PROPS.some((prop) => Math.hypot(x - prop.x, y - prop.y) < 115);
-    if (canOccupy(x, y, 28) && !nearChallenge && !nearProp) return [x, y];
+    const nearObject = WORLD_OBJECTS.some((object) => Math.hypot(x - object.x, y - object.y) < 100);
+    if (canOccupy(x, y, 28) && !nearChallenge && !nearProp && !nearObject) return [x, y];
   }
 
   const safeSpots = SERENDIPITY_SPOTS.filter(([x, y]) => canOccupy(x, y, 28));
@@ -3093,7 +3372,8 @@ function draw(
   serendipity: TownSerendipity | null,
   destination: { x: number; y: number } | null,
   drops: CommuneDrop[] = [],
-  ducks: PondDuck[] = []
+  ducks: PondDuck[] = [],
+  incident: DuckIncident | null = null
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -3138,7 +3418,11 @@ function draw(
   type D = { y: number; fn: () => void; bright?: boolean };
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+  for (const object of WORLD_OBJECTS) {
+    items.push({ y: object.y, fn: () => drawCommuneWorldObject(ctx, object) });
+  }
   for (const d of ducks) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
+  if (incident) items.push({ y: incident.y, bright: true, fn: () => drawWhatTheDuck(ctx, incident, t, reduceMotion) });
   if (serendipity) {
     items.push({
       y: serendipity.y,
@@ -3295,6 +3579,8 @@ function drawTownSerendipity(
     clover: '#b6d18c',
     'paper-plane': '#f3d6a2',
     firefly: '#f6dc82',
+    treasure: '#f5c95d',
+    'rubber-duck': '#ffe36e',
   };
   ctx.save();
   ctx.translate(moment.x, moment.y - 15 + bob);
@@ -3332,6 +3618,25 @@ function drawTownSerendipity(
     ctx.lineTo(-1, 0);
     ctx.lineTo(8, -1);
     ctx.stroke();
+  } else if (moment.kind === 'treasure') {
+    ctx.fillStyle = '#8a5a33';
+    ctx.fillRect(-9, -2, 18, 12);
+    ctx.fillStyle = '#d9a441';
+    ctx.fillRect(-10, -6, 20, 6);
+    ctx.fillRect(-2, -6, 4, 16);
+    ctx.fillStyle = '#f5e2a2';
+    ctx.fillRect(-1, -1, 3, 3);
+  } else if (moment.kind === 'rubber-duck') {
+    ctx.fillStyle = '#f3c941';
+    ctx.fillRect(-7, -4, 13, 9);
+    ctx.fillRect(-3, -8, 8, 7);
+    ctx.fillStyle = '#e68b35';
+    ctx.fillRect(5, -5, 5, 3);
+    ctx.fillStyle = '#24303b';
+    ctx.fillRect(1, -6, 2, 2);
+    ctx.fillStyle = '#d97757';
+    ctx.fillRect(-3, -12, 3, 4);
+    ctx.fillRect(-6, -9, 9, 2);
   } else {
     ctx.beginPath();
     ctx.arc(0, 0, 4, 0, Math.PI * 2);
@@ -3342,6 +3647,83 @@ function drawTownSerendipity(
     ctx.fillRect(6, -1, 4, 2);
   }
   ctx.restore();
+}
+
+function drawCommuneWorldObject(ctx: CanvasRenderingContext2D, object: CommuneWorldObject) {
+  const { x, y } = object;
+  drawGroundShadow(ctx, x, y + 3, 25, 7, 0.2);
+  if (object.id === 'duck-post') {
+    ctx.fillStyle = '#79573f';
+    ctx.fillRect(x - 3, y - 38, 6, 38);
+    ctx.fillStyle = '#4e7180';
+    ctx.fillRect(x - 19, y - 34, 34, 25);
+    ctx.fillStyle = '#78a5ad';
+    ctx.fillRect(x - 15, y - 30, 26, 15);
+    ctx.fillStyle = '#f0d394';
+    ctx.fillRect(x - 5, y - 25, 7, 5);
+    ctx.fillStyle = '#fff2cf';
+    ctx.font = "bold 8px 'Schoolbell', ui-monospace, monospace";
+    ctx.textAlign = 'center';
+    ctx.fillText('DUCK MAIL', x, y - 42);
+  } else if (object.id === 'mushroom-throne') {
+    ctx.fillStyle = '#f4e3bf';
+    ctx.fillRect(x - 10, y - 21, 20, 20);
+    ctx.fillStyle = '#d97757';
+    ctx.fillRect(x - 24, y - 31, 48, 12);
+    ctx.fillRect(x - 17, y - 39, 34, 10);
+    ctx.fillStyle = '#f5f3ea';
+    ctx.fillRect(x - 12, y - 32, 5, 4);
+    ctx.fillRect(x + 7, y - 36, 5, 4);
+    ctx.fillStyle = '#788c5d';
+    ctx.fillRect(x - 3, y - 16, 6, 5);
+  } else {
+    ctx.fillStyle = '#6a5948';
+    ctx.fillRect(x - 18, y - 16, 4, 18);
+    ctx.fillRect(x + 13, y - 16, 4, 18);
+    ctx.fillRect(x - 2, y - 18, 4, 20);
+    ctx.fillStyle = '#8a6a4a';
+    ctx.fillRect(x - 22, y - 24, 32, 12);
+    ctx.fillRect(x - 14, y - 29, 23, 9);
+    ctx.fillStyle = '#6a9bcc';
+    ctx.fillRect(x - 17, y - 22, 23, 6);
+    ctx.fillStyle = '#d6b875';
+    ctx.fillRect(x + 10, y - 26, 3, 3);
+  }
+}
+
+function drawWhatTheDuck(ctx: CanvasRenderingContext2D, incident: DuckIncident, t: number, reduceMotion: boolean) {
+  const bob = reduceMotion ? 0 : Math.sin(t * 10 + incident.phase) * 4;
+  const x = Math.round(incident.x);
+  const y = Math.round(incident.y + bob);
+  drawGroundShadow(ctx, x, y + 3, 14, 4, 0.22);
+  ctx.save();
+  ctx.translate(x, y);
+  if (!reduceMotion) ctx.rotate(Math.sin(t * 12 + incident.phase) * 0.09);
+  // A very serious duck, wearing a party hat and carrying a tiny briefcase.
+  ctx.fillStyle = '#f3c941';
+  ctx.fillRect(-9, -12, 18, 10);
+  ctx.fillRect(-2, -19, 11, 10);
+  ctx.fillStyle = '#e68b35';
+  ctx.fillRect(7, -16, 7, 3);
+  ctx.fillStyle = '#24303b';
+  ctx.fillRect(3, -17, 2, 2);
+  ctx.fillStyle = '#d97757';
+  ctx.fillRect(1, -26, 4, 7);
+  ctx.fillRect(-2, -21, 10, 2);
+  ctx.fillStyle = '#58616a';
+  ctx.fillRect(-16, -9, 8, 7);
+  ctx.fillStyle = '#d8c298';
+  ctx.fillRect(-15, -8, 6, 5);
+  ctx.fillStyle = '#e68b35';
+  ctx.fillRect(-7, -2, 4, 4);
+  ctx.fillRect(3, -2, 4, 4);
+  ctx.restore();
+  drawBubble(ctx, x, y - 21, 'WHAT THE DUCK?!');
+  if (!reduceMotion && Math.floor(t * 5) % 3 === 0) {
+    ctx.fillStyle = '#f7f3c8';
+    ctx.fillRect(x + 17, y - 22, 3, 3);
+    ctx.fillRect(x - 20, y - 27, 2, 2);
+  }
 }
 
 function drawGroundShadow(
@@ -3825,8 +4207,20 @@ function getTownLayer(): HTMLCanvasElement {
   px(0, WORLD_H - 16, WORLD_W, 16, '#456b4b');
   px(0, 0, 16, WORLD_H, '#456b4b');
   px(WORLD_W - 16, 0, 16, WORLD_H, '#456b4b');
-  for (const [bx, by] of [[40, 40], [1560, 40], [40, 1160], [1560, 1160]] as const) {
+  for (const [bx, by] of [[40, 40], [3160, 40], [40, 2360], [3160, 2360]] as const) {
     pxEllipse(bx, by, 40, 28, '#527a58');
+  }
+
+  /* A few broad clearings give the new districts their own color without
+   * turning the whole map into a costly field of individual sprites. */
+  pxEllipse(2350, 690, 660, 410, '#6e916b');
+  pxEllipse(1940, 1650, 720, 610, '#6a8a63');
+  pxEllipse(2850, 1790, 420, 430, '#7e9871');
+  for (let i = 0; i < 1900; i++) {
+    const x = 1540 + rand() * 1620;
+    const y = 64 + rand() * 2272;
+    const color = rand() < 0.55 ? '#789b72' : '#668967';
+    px(x, y, 8, 8, color);
   }
 
   /* dirt paths (quadratic curves sampled into grid-aligned slabs) */
@@ -3835,6 +4229,15 @@ function getTownLayer(): HTMLCanvasElement {
     [800, 640, 620, 700, 450, 730], // west → showcase stall
     [800, 640, 980, 700, 1150, 730], // east → challenge tent
     [800, 700, 800, 900, 800, 1150], // south → hedge gate
+    [1150, 730, 1370, 770, 1580, 730], // arcade trail → eastern meadow
+    [1580, 730, 1760, 640, 1900, 590],
+    [1900, 590, 2140, 530, 2350, 650], // duck borough
+    [2350, 650, 2470, 730, 2490, 850], // lagoon shore
+    [800, 1150, 850, 1370, 1040, 1510], // south gate → oddity orchard
+    [1040, 1510, 1330, 1660, 1530, 1600],
+    [1530, 1600, 1700, 1490, 1870, 1350], // mushroom council
+    [1530, 1600, 1810, 1700, 2110, 1710],
+    [2110, 1710, 2370, 1710, 2700, 1790], // star overlook
   ];
   const pathPts: [number, number][] = [];
   for (const [x0, y0, cx, cy, x1, y1] of PATHS) {
@@ -3847,7 +4250,7 @@ function getTownLayer(): HTMLCanvasElement {
       px(wx - 20, wy - 20, 40, 40, '#c8a27b');
     }
   }
-  for (let i = 0; i < 260; i++) {
+  for (let i = 0; i < 540; i++) {
     const [wx, wy] = pathPts[Math.floor(rand() * pathPts.length)];
     px(wx - 20 + rand() * 40, wy - 20 + rand() * 40, 8, 8, rand() < 0.5 ? '#b68e69' : '#e2c69c');
   }
@@ -3907,6 +4310,31 @@ function getTownLayer(): HTMLCanvasElement {
   for (const [rx2, ry2] of [[58, 566], [76, 552], [258, 586]] as const) {
     px(rx2, ry2 - 14, 4, 18, '#2e7d38'); // reeds
     px(rx2 - 2, ry2 - 20, 8, 6, '#3f9a46');
+  }
+
+  /* East lagoon — a second place to feed ducks and find suspicious mail. */
+  pxShadow(DUCK_LAGOON.x + 8, DUCK_LAGOON.y + 18, DUCK_LAGOON.rx + 24, DUCK_LAGOON.ry + 22, 0.23);
+  pxEllipse(DUCK_LAGOON.x, DUCK_LAGOON.y, DUCK_LAGOON.rx + 20, DUCK_LAGOON.ry + 18, '#b99a72');
+  pxEllipse(DUCK_LAGOON.x, DUCK_LAGOON.y, DUCK_LAGOON.rx, DUCK_LAGOON.ry, '#5b8ea2');
+  pxEllipse(DUCK_LAGOON.x - 8, DUCK_LAGOON.y - 6, DUCK_LAGOON.rx - 22, DUCK_LAGOON.ry - 18, '#77abc0');
+  for (let i = 0; i < 72; i++) {
+    const angle = rand() * Math.PI * 2;
+    const radius = Math.sqrt(rand());
+    px(
+      DUCK_LAGOON.x + Math.cos(angle) * radius * (DUCK_LAGOON.rx - 24),
+      DUCK_LAGOON.y + Math.sin(angle) * radius * (DUCK_LAGOON.ry - 20),
+      8,
+      8,
+      i % 3 ? '#94c5d0' : '#b7d8d4'
+    );
+  }
+  // A short dock and reeds make the shore legible from the walking path.
+  pxShadow(2444, 882, 58, 12, 0.22);
+  px(2398, 852, 96, 12, '#876b54');
+  px(2404, 868, 84, 10, '#a38665');
+  for (const [rx, ry] of [[2434, 632], [2508, 594], [2728, 670], [2694, 898]] as const) {
+    px(rx, ry - 15, 5, 22, '#3c7849');
+    px(rx - 3, ry - 21, 11, 7, '#698d58');
   }
 
   /* shared building pieces */
@@ -4056,6 +4484,22 @@ function getTownLayer(): HTMLCanvasElement {
       px(fx + dx, fy + dy, 6, 6, flowerColors[Math.floor(rand() * flowerColors.length)]);
     }
   }
+
+  const districtSign = (x: number, y: number, title: string, color: string) => {
+    pxShadow(x, y + 8, 88, 12, 0.18);
+    px(x - 78, y - 14, 156, 28, '#72573f');
+    px(x - 72, y - 10, 144, 20, color);
+    g.fillStyle = '#fff4da';
+    g.font = "bold 12px 'Schoolbell', ui-monospace, monospace";
+    g.textAlign = 'center';
+    g.fillText(title, x, y + 4);
+  };
+  districtSign(2580, 548, 'DUCK BOROUGH', '#587f85');
+  districtSign(1870, 1190, 'ODDITY ORCHARD', '#71814f');
+  districtSign(2700, 1632, 'STAR OVERLOOK', '#53677f');
+
+  // The far groves are part of the static bake, keeping per-frame work flat.
+  for (const [x, y] of REMOTE_TREES) paintPixelTree(g, x, y);
 
   townLayer = cv;
   return cv;

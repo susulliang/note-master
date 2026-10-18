@@ -49,6 +49,13 @@ interface TicketRow {
   expires_at: number;
 }
 
+interface PublicChatRow {
+  id: string;
+  username: string;
+  message: string;
+  sent_at: number;
+}
+
 type RoomEvent = Record<string, unknown>;
 
 const ROOM_TICKET_TTL_MS = 60_000;
@@ -57,6 +64,8 @@ const MOVE_THROTTLE_MS = 80;
 const CHAT_THROTTLE_MS = 500;
 const MAX_MESSAGE_LENGTH = 90;
 const MAX_SOCKET_MESSAGE_LENGTH = 2_048;
+const COMMUNE_WORLD_W = 3_200;
+const COMMUNE_WORLD_H = 2_400;
 
 function normalizeLoadout(input: unknown): CommuneRoomLoadout {
   const value = input && typeof input === 'object' ? input as Record<string, unknown> : {};
@@ -121,6 +130,14 @@ export class CommuneRoom extends DurableObject<Env> {
           ticket TEXT PRIMARY KEY,
           profile TEXT NOT NULL,
           expires_at INTEGER NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_public_chat_messages (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          message TEXT NOT NULL,
+          sent_at INTEGER NOT NULL
         )
       `);
     });
@@ -197,6 +214,23 @@ export class CommuneRoom extends DurableObject<Env> {
       self: profile.username,
       others: this.listAgents(profile.username),
     });
+    const recentMessages = this.ctx.storage.sql.exec<PublicChatRow>(
+      `SELECT id, username, message, sent_at
+       FROM commune_public_chat_messages
+       WHERE sent_at >= ?
+       ORDER BY sent_at DESC
+       LIMIT 20`,
+      Date.now() - 24 * 60 * 60 * 1000,
+    ).toArray().reverse();
+    send(server, {
+      type: 'public_chat_history',
+      messages: recentMessages.map((row) => ({
+        id: row.id,
+        from: row.username,
+        message: row.message,
+        sentAt: row.sent_at,
+      })),
+    });
     this.broadcast({ type: 'agent_join', agent: this.toAgent(profile) }, profile.username);
 
     return new Response(null, { status: 101, webSocket: client });
@@ -226,6 +260,23 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     const now = Date.now();
+    if (event.type === 'public_chat_delete') {
+      const id = typeof event.id === 'string' ? event.id.slice(0, 64) : '';
+      if (!id) return;
+      const row = this.ctx.storage.sql.exec<{ username: string }>(
+        'SELECT username FROM commune_public_chat_messages WHERE id = ?',
+        id,
+      ).toArray()[0];
+      if (!row) return;
+      if (row.username !== current.username && !current.isAdmin) {
+        send(ws, { type: 'error', code: 'chat_delete_forbidden', message: 'You can only delete your own messages.' });
+        return;
+      }
+      this.ctx.storage.sql.exec('DELETE FROM commune_public_chat_messages WHERE id = ?', id);
+      this.broadcast({ type: 'public_chat_delete', id });
+      return;
+    }
+
     if (event.type === 'loadout') {
       const updated: Presence = {
         ...current,
@@ -255,8 +306,8 @@ export class CommuneRoom extends DurableObject<Env> {
       }
       const updated: Presence = {
         ...current,
-        x: Math.max(24, Math.min(1_576, x)),
-        y: Math.max(144, Math.min(1_176, y)),
+        x: Math.max(24, Math.min(COMMUNE_WORLD_W - 24, x)),
+        y: Math.max(144, Math.min(COMMUNE_WORLD_H - 24, y)),
         status: typeof event.status === 'string' ? event.status.slice(0, 40) : current.status,
         seenAt: now,
         lastMoveAt: now,
@@ -278,7 +329,33 @@ export class CommuneRoom extends DurableObject<Env> {
       }
       ws.serializeAttachment({ ...current, seenAt: now, lastChatAt: now });
       if (event.type === 'public_chat') {
-        this.broadcast({ type: 'public_chat', from: current.username, message: messageText, sentAt: now });
+        const id = crypto.randomUUID();
+        this.ctx.storage.sql.exec(
+          'INSERT INTO commune_public_chat_messages (id, username, message, sent_at) VALUES (?, ?, ?, ?)',
+          id,
+          current.username,
+          messageText,
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `DELETE FROM commune_public_chat_messages
+           WHERE id IN (
+             SELECT id FROM commune_public_chat_messages
+             ORDER BY sent_at DESC
+             LIMIT -1 OFFSET 20
+           )`,
+        );
+        this.ctx.storage.sql.exec(
+          'DELETE FROM commune_public_chat_messages WHERE sent_at < ?',
+          now - 24 * 60 * 60 * 1000,
+        );
+        this.broadcast({
+          type: 'public_chat',
+          id,
+          from: current.username,
+          message: messageText,
+          sentAt: now,
+        });
         return;
       }
 

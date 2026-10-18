@@ -43,6 +43,8 @@ const NPC_PERSONAS: Record<string, { persona: NpcPersona; name: string }> = {
 };
 
 const CHALLENGE_SUCCESS_SPICE = 5;
+const COMMUNE_WORLD_W = 3_200;
+const COMMUNE_WORLD_H = 2_400;
 
 interface TestResultSummary {
   totalSubmissions: number;
@@ -1639,8 +1641,8 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   await ensureSpiceSchema(env);
   const now = Date.now();
   await ensureCommuneDrops(env, now);
-  const x = Math.max(24, Math.min(1_576, Number(payload.x) || 800));
-  const y = Math.max(144, Math.min(1_176, Number(payload.y) || 860));
+  const x = Math.max(24, Math.min(COMMUNE_WORLD_W - 24, Number(payload.x) || 800));
+  const y = Math.max(144, Math.min(COMMUNE_WORLD_H - 24, Number(payload.y) || 860));
   const status = String(payload.status ?? 'hanging out').slice(0, 40);
   const saved = await env.DB.prepare(
     'SELECT cards, pet, phrase, avatar FROM commune_loadout WHERE username = ?1',
@@ -1747,8 +1749,7 @@ async function handleCommuneLoadout(request: Request, env: Env, user: AuthUserRo
 
 /* ── COMMUNE spice drops ────────────────────────────────────────────────────── */
 
-/** Walkable spawn rectangles on the town square (world is 1600×1200). Kept
- *  clear of building footprints, the fountain, the pond, and the fences. */
+/** Shared reward drops are scattered across walkable plaza and district paths. */
 const DROP_SPAWN_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 660, y: 250, w: 280, h: 40 }, // town-hall front strip
   { x: 380, y: 420, w: 280, h: 200 }, // west of plaza
@@ -1758,32 +1759,79 @@ const DROP_SPAWN_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 960, y: 760, w: 300, h: 180 }, // near challenge tent
   { x: 300, y: 560, w: 120, h: 220 }, // west path
   { x: 1180, y: 560, w: 120, h: 220 }, // east path
+  { x: 1640, y: 560, w: 300, h: 150 }, // eastern meadow
+  { x: 2010, y: 470, w: 240, h: 150 }, // duck borough trail
+  { x: 2310, y: 520, w: 170, h: 110 }, // duck post approach
+  { x: 2340, y: 930, w: 180, h: 100 }, // lagoon south bank
+  { x: 1120, y: 1430, w: 260, h: 150 }, // oddity orchard west trail
+  { x: 1450, y: 1630, w: 220, h: 120 }, // oddity orchard
+  { x: 1790, y: 1770, w: 220, h: 130 }, // orchard to overlook
+  { x: 2300, y: 1660, w: 220, h: 120 }, // star overlook trail
+  { x: 2780, y: 1870, w: 180, h: 110 }, // star overlook east
 ];
 
-/** Keep 1–6 spice piles on the square at all times: top up whenever every
- *  drop has been claimed (and sweep stale claimed rows). */
+/** Pick a walkable position, keeping drops away from water and landmarks. */
+function randomCommuneDropPosition(): { x: number; y: number } {
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const rect = DROP_SPAWN_RECTS[Math.floor(Math.random() * DROP_SPAWN_RECTS.length)];
+    const x = Math.round(rect.x + Math.random() * rect.w);
+    const y = Math.round(rect.y + Math.random() * rect.h);
+    const inPond = [
+      { x: 170, y: 640, rx: 150, ry: 110 },
+      { x: 2580, y: 790, rx: 190, ry: 140 },
+    ].some((pond) => ((x - pond.x) / pond.rx) ** 2 + ((y - pond.y) / pond.ry) ** 2 < 1);
+    const tooCloseToLandmark = [
+      [2350, 720],
+      [1870, 1350],
+      [2700, 1790],
+    ].some(([landmarkX, landmarkY]) => Math.hypot(x - landmarkX, y - landmarkY) < 100);
+    if (!inPond && !tooCloseToLandmark) return { x, y };
+  }
+  return { x: 800, y: 980 };
+}
+
+/** Keep a small rotating supply of shared drops around the whole map. */
 async function ensureCommuneDrops(env: Env, now: number): Promise<void> {
+  await env.DB.prepare(
+    `DELETE FROM commune_spice_drops
+     WHERE (picked_at IS NOT NULL AND picked_at < ?1)
+        OR (picked_by IS NULL AND created_at < ?2)`
+  ).bind(now - 3_600_000, now - 5 * 60_000).run();
+
   const open = await env.DB.prepare(
     'SELECT COUNT(*) AS n FROM commune_spice_drops WHERE picked_by IS NULL'
   ).first<{ n: number }>();
-  if (Number(open?.n ?? 0) > 0) return;
-  const count = 1 + Math.floor(Math.random() * 6); // 1–6
-  const stmts: D1PreparedStatement[] = [
-    env.DB.prepare('DELETE FROM commune_spice_drops WHERE picked_at < ?1').bind(now - 3_600_000),
-  ];
+  const currentCount = Number(open?.n ?? 0);
+  if (currentCount >= 3) return;
+  const targetCount = 5 + Math.floor(Math.random() * 3);
+  const stmts: D1PreparedStatement[] = [];
+  const count = targetCount - currentCount;
   for (let i = 0; i < count; i++) {
-    const r = DROP_SPAWN_RECTS[Math.floor(Math.random() * DROP_SPAWN_RECTS.length)];
+    const position = randomCommuneDropPosition();
     stmts.push(
       env.DB.prepare(
         'INSERT INTO commune_spice_drops (x, y, created_at) VALUES (?1, ?2, ?3)'
-      ).bind(
-        Math.round(r.x + Math.random() * r.w),
-        Math.round(r.y + Math.random() * r.h),
-        now
-      )
+      ).bind(position.x, position.y, now)
     );
   }
   await env.DB.batch(stmts);
+}
+
+/** Refresh drops after they expire or are collected. */
+async function handleCommuneSpiceDrops(env: Env): Promise<Response> {
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  await ensureCommuneDrops(env, now);
+  const result = await env.DB.prepare(
+    'SELECT id, x, y FROM commune_spice_drops WHERE picked_by IS NULL',
+  ).all<{ id: number; x: number; y: number }>();
+  const drops = result.results ?? [];
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').publishDrops(drops);
+  } catch {
+    // The authenticated caller still receives the current drop set.
+  }
+  return authJson({ drops });
 }
 
 /** POST /api/commune/spice/pick { id } — first-come-first-serve claim of a
@@ -2256,6 +2304,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSocketTicket(request, env, user);
+  }
+  if (path === '/api/commune/spice/drops' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneSpiceDrops(env);
   }
   if (path === '/api/commune/banners' && request.method === 'POST') {
     const user = await authBearerUser(request, env);

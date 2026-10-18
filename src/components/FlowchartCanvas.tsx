@@ -1067,7 +1067,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           canvas height/width via h-full on the min-h-full anchor.
           Hidden analytics view: only rendered when unlocked (Shift+D). */}
       {activeView === 'caseTrak' && (trakEnabled ?? analyticsEnabled) && (
-        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {caseTrakContent}
         </div>
       )}
@@ -1075,7 +1075,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Self Test workspace — weekly news knowledge quizzes. Always
           available from the left rail, directly under Notes. */}
       {activeView === 'selfTest' && (
-        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {selfTestContent}
         </div>
       )}
@@ -1084,7 +1084,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           Salesforce dashboard snapshot. Hidden analytics view: only rendered
           when unlocked (Shift+D). Same full-canvas layout as Trak. */}
       {activeView === 'dash' && (dashEnabled ?? analyticsEnabled) && (
-        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {dashContent}
         </div>
       )}
@@ -1092,7 +1092,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Shifts workspace — agent roster (hidden work view; unlocked with
           Shift+S). Same full-canvas layout as the Case Trak board. */}
       {activeView === 'shifts' && (
-        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {shiftsContent}
         </div>
       )}
@@ -1101,7 +1101,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           a walk-around canvas world with NPC chit-chat, admin banners and
           personal showcase stubs. */}
       {activeView === 'commune' && communeEnabled && (
-        <div className={`h-full min-h-full w-full ${railCollapsed ? 'pl-4' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {communeContent}
         </div>
       )}

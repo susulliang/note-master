@@ -330,6 +330,12 @@ export interface CommuneDrop {
   y: number;
 }
 
+/** Refresh the shared, randomized spice drops for the town map. */
+export async function refreshCommuneSpiceDrops(): Promise<{ drops: CommuneDrop[] }> {
+  const token = getStoredToken();
+  return call<{ drops: CommuneDrop[] }>('/api/commune/spice/drops', { token });
+}
+
 /** Try to claim a spice drop (first-come-first-serve, server-decided). */
 export async function pickSpiceDrop(id: number): Promise<{ picked: boolean; spice: number }> {
   const token = getStoredToken();
