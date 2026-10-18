@@ -18,8 +18,21 @@
  *   2. Personal showcases — achievement/card displays at the stall.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Megaphone, MessageSquare, Palette, Trophy, Users, X } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  Building2,
+  CalendarDays,
+  GraduationCap,
+  Gamepad2,
+  Megaphone,
+  MessageSquare,
+  Palette,
+  Search,
+  Trophy,
+  Users,
+  X,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -42,6 +55,13 @@ import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
 import { TCG_COLLECTIONS, loadTcgManifest, rarityStyle, type TcgManifestCard } from '@/lib/tcg-manifest';
 import StorePanel from '@/components/StorePanel';
 import ChallengePanel from '@/components/ChallengePanel';
+import { getRoster, ROSTER_MONTHS } from '@/data/roster-index';
+import type { RosterAgent } from '@/data/roster';
+import { fetchRosterMonth, subscribeRosterMonth, type RosterCell } from '@/lib/roster-sync';
+import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
+import type { FaqSearchHit } from '@/utils/productData';
+
+const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 
 /* ── world layout ──────────────────────────────────────────────────────────── */
 
@@ -67,8 +87,22 @@ function getNightOpacity(timestamp: number): number {
   return (1 - daylight) * 0.54;
 }
 
+function gmt8DateKey(timestamp = Date.now()): string {
+  return new Date(timestamp + GMT8_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function isRosterOffDay(code: string): boolean {
+  return !code || /^(OFF|PH|AL|休息|病假|事假|年假|产假|调休|Farewell)$/i.test(code);
+}
+
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
-type PanelKind = PropPanelKind | 'loadout' | 'agent' | null;
+type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | null;
+type BoardTab = 'roster' | 'announcements';
+
+interface CommunePanelProps {
+  onCatThought?: (text: string, ttl?: number) => void;
+  onCatMoveTo?: (position: { x: number; y: number }) => void;
+}
 
 type CommuneAction =
   | { type: 'stand'; key: 'E'; label: string }
@@ -103,7 +137,7 @@ const COMMUNE_PROPS: CommuneProp[] = [
   {
     kind: 'townhall', label: 'Town Hall', x: 800, y: 252, range: 112,
     hitbox: { x: 650, y: 96, w: 300, h: 134 },
-    description: 'The heart of the square. Stop by to see what the community is building together.',
+    description: 'The town library is open. Search product guides, common symptoms, and troubleshooting answers.',
   },
   {
     kind: 'store', label: 'Store', x: 270, y: 420, range: 102,
@@ -113,12 +147,12 @@ const COMMUNE_PROPS: CommuneProp[] = [
   {
     kind: 'arcade', label: 'Arcade', x: 1330, y: 420, range: 102,
     hitbox: { x: 1245, y: 206, w: 170, h: 184 },
-    description: 'The arcade is where the square’s games and collection adventures live.',
+    description: 'Practice tricky customer conversations, take a knowledge quest, and earn spice.',
   },
   {
-    kind: 'banners', label: 'Bulletin Board', x: BOARD.x, y: BOARD.y + 60, range: 110,
+    kind: 'banners', label: 'Roster Board', x: BOARD.x, y: BOARD.y + 60, range: 110,
     hitbox: { x: BOARD.x - BOARD.w / 2, y: BOARD.y - BOARD.h / 2, w: BOARD.w, h: BOARD.h },
-    description: 'Community notes and announcements hung for everyone passing through.',
+    description: 'Check today’s shift coverage, look up a teammate, or browse upcoming schedules and town news.',
   },
   {
     kind: 'showcase', label: 'Showcase Stall', x: STALL.x + 40, y: STALL.y, range: 110,
@@ -401,7 +435,7 @@ interface PixelPetView {
   facingLeft: boolean;
 }
 
-export default function CommunePanel() {
+export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanelProps) {
   const { user, setSpice } = useAuth();
   const username = user?.username ?? 'Guest';
   const isAdmin = !!user?.isAdmin;
@@ -414,6 +448,27 @@ export default function CommunePanel() {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerDraft, setBannerDraft] = useState('');
   const [bannerSending, setBannerSending] = useState(false);
+  const [boardTab, setBoardTab] = useState<BoardTab>('roster');
+  const todayKey = gmt8DateKey();
+  const initialRosterMonth = ROSTER_MONTHS.includes(todayKey.slice(0, 7))
+    ? todayKey.slice(0, 7)
+    : ROSTER_MONTHS.at(-1) ?? '';
+  const [rosterMonth, setRosterMonth] = useState(initialRosterMonth);
+  const [rosterDate, setRosterDate] = useState(
+    ROSTER_MONTHS.includes(todayKey.slice(0, 7)) ? todayKey : `${initialRosterMonth}-01`
+  );
+  const [rosterQuery, setRosterQuery] = useState('');
+  const [rosterSkill, setRosterSkill] = useState('all');
+  const [rosterOverlay, setRosterOverlay] = useState<Record<string, string>>({});
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [faqQuery, setFaqQuery] = useState('');
+  const [faqHits, setFaqHits] = useState<FaqSearchHit[]>([]);
+  const [activeFaq, setActiveFaq] = useState<FaqSearchHit | null>(null);
+  const [faqAnswer, setFaqAnswer] = useState('');
+  const [faqLoading, setFaqLoading] = useState(false);
+  const [faqAnswerLoading, setFaqAnswerLoading] = useState(false);
+  const [faqError, setFaqError] = useState('');
+  const faqRequestRef = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [squareMessages, setSquareMessages] = useState<SquareChatMessage[]>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
@@ -444,6 +499,109 @@ export default function CommunePanel() {
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
   const [chatFocused, setChatFocused] = useState(false);
+
+  const rosterAgents = useMemo(() => getRoster(rosterMonth) ?? [], [rosterMonth]);
+  const rosterShiftOf = useCallback((agent: RosterAgent, iso: string) =>
+    rosterOverlay[`${agent.en}|${iso}`] ?? agent.shifts[iso] ?? '', [rosterOverlay]);
+  const rosterSkillOptions = useMemo(
+    () => [...new Set(rosterAgents.map((agent) => agent.skill).filter(Boolean))].sort(),
+    [rosterAgents]
+  );
+  const visibleRoster = useMemo(() => {
+    const query = rosterQuery.trim().toLowerCase();
+    return rosterAgents.filter((agent) => {
+      const matchesQuery = !query
+        || `${agent.en} ${agent.skill} ${agent.zh}`.toLowerCase().includes(query);
+      return matchesQuery && (rosterSkill === 'all' || agent.skill === rosterSkill);
+    });
+  }, [rosterAgents, rosterQuery, rosterSkill]);
+  const rosterDays = useMemo(() => {
+    const [year, month, day] = rosterDate.split('-').map(Number);
+    if (!year || !month || !day) return [];
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(Date.UTC(year, month - 1, day + index, 12));
+      const iso = date.toISOString().slice(0, 10);
+      return iso.slice(0, 7) === rosterMonth ? iso : '';
+    }).filter(Boolean);
+  }, [rosterDate, rosterMonth]);
+  const rosterOnDuty = rosterAgents.filter((agent) => !isRosterOffDay(rosterShiftOf(agent, rosterDate)));
+
+  useEffect(() => {
+    if (panel !== 'townhall') return;
+    const query = faqQuery.trim();
+    if (query.length < 2) {
+      setFaqHits([]);
+      setFaqLoading(false);
+      setFaqError('');
+      return;
+    }
+    let active = true;
+    setFaqLoading(true);
+    setFaqError('');
+    const timer = window.setTimeout(() => {
+      void searchLoadedFaqs({ query, limit: 10 })
+        .then((hits) => {
+          if (active) setFaqHits(hits);
+        })
+        .catch(() => {
+          if (active) setFaqError('Knowledge search is unavailable right now. Try again in a moment.');
+        })
+        .finally(() => {
+          if (active) setFaqLoading(false);
+        });
+    }, 220);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [faqQuery, panel]);
+
+  useEffect(() => {
+    if (panel !== 'banners' || !rosterMonth) return;
+    let active = true;
+    setRosterLoading(true);
+    const mergeCells = (cells: RosterCell[]) => {
+      if (!active) return;
+      setRosterOverlay((current) => {
+        const next = { ...current };
+        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = cell.code;
+        return next;
+      });
+    };
+    void fetchRosterMonth(rosterMonth)
+      .then(mergeCells)
+      .finally(() => {
+        if (active) setRosterLoading(false);
+      });
+    const unsubscribe = subscribeRosterMonth(rosterMonth, {
+      onCell: (cell) => mergeCells([cell]),
+      onCells: mergeCells,
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [panel, rosterMonth]);
+
+  const openFaq = async (entry: FaqSearchHit) => {
+    const requestId = ++faqRequestRef.current;
+    setActiveFaq(entry);
+    setFaqAnswer('');
+    setFaqAnswerLoading(true);
+    setFaqError('');
+    try {
+      const answer = await loadFaqAnswer(entry);
+      if (requestId === faqRequestRef.current) {
+        setFaqAnswer(answer || 'No answer is available for this article yet.');
+      }
+    } catch {
+      if (requestId === faqRequestRef.current) {
+        setFaqError('This answer could not be loaded. Please try another result.');
+      }
+    } finally {
+      if (requestId === faqRequestRef.current) setFaqAnswerLoading(false);
+    }
+  };
 
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
   playerRef.current.name = username;
@@ -1542,11 +1700,14 @@ export default function CommunePanel() {
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
+  const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz';
   const panelPosition = touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
       ? 'right-4 top-4 z-20'
-      : 'left-1/2 top-14 z-30 -translate-x-1/2';
+      : panel === 'quiz'
+        ? 'left-1/2 top-3 z-30 -translate-x-1/2'
+        : 'left-1/2 top-14 z-30 -translate-x-1/2';
   const primaryAction = nearbyActions.find((action) => action.key === 'E');
   const secondaryAction = nearbyActions.find((action) => action.key === 'H');
   const focusedNpcIsReady = !!focusedNpc && nearbyActions.some(
@@ -1874,8 +2035,16 @@ export default function CommunePanel() {
           className={cn(
             'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
             touchControls
-              ? 'max-h-[min(78dvh,640px)] w-auto'
-              : 'max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))]',
+              ? cn(
+                  panel === 'quiz' ? 'max-h-[min(90dvh,980px)]' : 'max-h-[min(82dvh,780px)]',
+                  'w-auto'
+                )
+              : widePanel
+                ? cn(
+                    panel === 'quiz' ? 'max-h-[calc(100dvh-24px)]' : 'max-h-[min(78vh,780px)]',
+                    'w-[min(720px,calc(100vw-24px))]'
+                  )
+                : 'max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))]',
             panelPosition
           )}
           style={touchControls
@@ -1899,7 +2068,11 @@ export default function CommunePanel() {
             <div className="pr-7">
               <div className="flex items-center gap-2.5">
                 <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
-                  <Building2 className="size-4" />
+                  {panel === 'townhall'
+                    ? <BookOpen className="size-4" />
+                    : panel === 'arcade'
+                      ? <Gamepad2 className="size-4" />
+                      : <Building2 className="size-4" />}
                 </span>
                 <div>
                   <p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-muted-foreground">COMMUNE PLACE</p>
@@ -1911,55 +2084,365 @@ export default function CommunePanel() {
             </div>
           )}
 
-          {panel === 'banners' && (
-            <div>
-              <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                <Megaphone className="size-4 text-primary" /> Town Banners
-              </h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Announcements hung by admins for every agent passing the square.
-              </p>
-              <div className="mt-3 space-y-2">
-                {banners.length === 0 && (
-                  <p className="rounded-lg border border-dashed border-border/60 p-3 text-center text-xs text-muted-foreground">
-                    No banners hung yet.
-                  </p>
-                )}
-                {banners.map((b) => (
-                  <div
-                    key={b.id}
-                    className="rounded-xl border border-primary/25 bg-primary/10 px-3 py-2"
-                    style={{ borderLeft: `4px solid hsl(${b.hue} 70% 55%)` }}
-                  >
-                    <p className="text-xs font-semibold text-foreground">{b.text}</p>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      — {b.author} · {new Date(b.at).toLocaleString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              {isAdmin && (
-                <div className="mt-3 flex gap-1.5">
-                  <input
-                    value={bannerDraft}
-                    onChange={(e) => setBannerDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') hangBanner();
-                      e.stopPropagation();
-                    }}
-                    maxLength={80}
-                    placeholder="Hang a banner…"
-                    className="glass-field h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  />
+          {panel === 'townhall' && (
+            <section className="mt-4 border-t border-border/50 pt-4" aria-label="Knowledge kiosk">
+              {activeFaq ? (
+                <div>
                   <button
                     type="button"
-                    onClick={hangBanner}
-                    disabled={!bannerDraft.trim() || bannerSending}
-                    className="glass-btn h-9 rounded-lg border border-primary/40 bg-primary px-3 text-[11px] font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+                    onClick={() => {
+                      faqRequestRef.current += 1;
+                      setActiveFaq(null);
+                      setFaqAnswer('');
+                      setFaqError('');
+                    }}
+                    className="mb-3 rounded-md px-2 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   >
-                    {bannerSending ? 'Posting…' : 'Hang'}
+                    ← Search results
                   </button>
+                  <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-[9px] font-bold uppercase tracking-wide text-accent">
+                      <BookOpen className="size-3.5" />
+                      {activeFaq.model || 'Product guide'}
+                      {activeFaq.lang && <span className="text-muted-foreground">· {activeFaq.lang}</span>}
+                    </div>
+                    <h4 className="mt-2 text-sm font-bold leading-relaxed text-foreground">{activeFaq.question}</h4>
+                    <div className="mt-3 max-h-64 overflow-y-auto rounded-lg bg-background/50 p-3 text-xs leading-relaxed text-foreground/85">
+                      {faqAnswerLoading
+                        ? <p className="animate-pulse text-muted-foreground">Opening the handbook…</p>
+                        : faqAnswer
+                          ? <p className="whitespace-pre-wrap">{faqAnswer}</p>
+                          : <p className="text-muted-foreground">Answer not loaded.</p>}
+                    </div>
+                    {faqError && <p role="status" className="mt-2 text-[10px] text-amber-300">{faqError}</p>}
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <label className="flex h-11 items-center gap-2 rounded-xl border border-border/70 bg-background/65 px-3 focus-within:border-accent/70 focus-within:ring-2 focus-within:ring-accent/25">
+                    <Search className="size-4 shrink-0 text-accent" />
+                    <input
+                      value={faqQuery}
+                      onChange={(event) => setFaqQuery(event.target.value)}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      placeholder="Search robot, error, symptom…"
+                      aria-label="Search product knowledge"
+                      className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+                    />
+                    {faqLoading && <span className="size-3 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />}
+                  </label>
+                  {faqQuery.trim().length < 2 && (
+                    <div className="mt-3">
+                      <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                        Quick trails
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {['Wi-Fi setup', 'Mapping', 'Charging', 'Water issues', 'Error code'].map((topic) => (
+                          <button
+                            key={topic}
+                            type="button"
+                            onClick={() => setFaqQuery(topic)}
+                            className="rounded-full border border-border/70 bg-background/40 px-2.5 py-1 text-[10px] text-foreground/80 transition hover:border-accent/50 hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          >
+                            {topic}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {faqError && <p role="status" className="mt-3 text-[11px] text-amber-300">{faqError}</p>}
+                  {faqQuery.trim().length >= 2 && !faqLoading && !faqError && faqHits.length === 0 && (
+                    <p className="mt-3 rounded-lg border border-dashed border-border/70 p-4 text-center text-xs text-muted-foreground">
+                      No matching articles yet. Try a model name or a shorter symptom.
+                    </p>
+                  )}
+                  <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
+                    {faqHits.map((hit) => (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        onClick={() => void openFaq(hit)}
+                        className="group flex w-full items-start gap-3 rounded-xl border border-border/50 bg-background/35 px-3 py-2.5 text-left transition hover:border-accent/40 hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      >
+                        <BookOpen className="mt-0.5 size-3.5 shrink-0 text-accent/80" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs font-semibold leading-relaxed text-foreground">{hit.question}</span>
+                          <span className="mt-1 block text-[9px] text-muted-foreground">
+                            {hit.model || 'General'} · {hit.category || 'Product support'} · {hit.lang}
+                          </span>
+                        </span>
+                        <span className="pt-0.5 text-[10px] text-accent opacity-70 transition group-hover:opacity-100">Open</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[9px] text-muted-foreground/70">
+                    Search uses the shared knowledge base, with the bundled handbook as fallback.
+                  </p>
+                </>
+              )}
+            </section>
+          )}
+
+          {panel === 'arcade' && (
+            <section className="mt-4 space-y-3 border-t border-border/50 pt-4" aria-label="Challenge arcade">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Choose a run</p>
+                  <p className="mt-1 text-[11px] text-foreground/80">Practice live conversations or test what you know.</p>
+                </div>
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-amber-300">
+                  <Trophy className="size-4" />
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {CHALLENGE_NPCS.map((npc, index) => (
+                  <button
+                    key={npc.personaId}
+                    type="button"
+                    onClick={() => {
+                      setChallengePersona(npc.personaId);
+                      setPanel('challenges');
+                    }}
+                    className="group flex min-h-24 items-center gap-3 rounded-xl border border-rose-400/25 bg-gradient-to-br from-rose-400/10 to-background/30 p-3 text-left transition hover:-translate-y-0.5 hover:border-rose-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                  >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-full border border-rose-300/30 bg-rose-300/10 font-mono text-xs font-black text-rose-200">
+                      {index === 0 ? 'GB' : 'TH'}
+                    </span>
+                    <span>
+                      <span className="block text-xs font-bold text-foreground">{npc.name}</span>
+                      <span className="mt-1 block text-[10px] leading-relaxed text-muted-foreground">
+                        AI role-play · handle a tricky customer · earn spice
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setPanel('quiz')}
+                  className="group flex min-h-24 items-center gap-3 rounded-xl border border-violet-400/30 bg-gradient-to-br from-violet-400/12 to-background/30 p-3 text-left transition hover:-translate-y-0.5 hover:border-violet-300/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                >
+                  <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-violet-300/35 bg-violet-300/10 text-violet-200">
+                    <GraduationCap className="size-5" />
+                  </span>
+                  <span>
+                    <span className="block text-xs font-bold text-foreground">Knowledge quests</span>
+                    <span className="mt-1 block text-[10px] leading-relaxed text-muted-foreground">
+                      Take a weekly self-test, track your score, and collect spice.
+                    </span>
+                  </span>
+                </button>
+              </div>
+              <p className="text-[9px] text-muted-foreground/70">Your progress and challenge results use the same account systems as the rest of the app.</p>
+            </section>
+          )}
+
+          {panel === 'quiz' && (
+            <section className="flex h-[min(82dvh,820px)] min-h-[420px] flex-col" aria-label="Knowledge quests">
+              <div className="mb-2 flex shrink-0 items-center gap-2 border-b border-border/50 pb-2 pr-8">
+                <button
+                  type="button"
+                  onClick={() => setPanel('arcade')}
+                  className="rounded-md px-2 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  ← Arcade
+                </button>
+                <span className="font-mono text-xs font-bold text-foreground">Knowledge quests</span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-xl">
+                <Suspense fallback={<div className="p-8 text-center text-xs text-muted-foreground">Loading the quest board…</div>}>
+                  <SelfTestWorkspace onCatThought={onCatThought} onCatMoveTo={onCatMoveTo} />
+                </Suspense>
+              </div>
+            </section>
+          )}
+
+          {panel === 'banners' && (
+            <div className="mt-3">
+              <div className="mb-3 flex items-center justify-between gap-3 pr-8">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
+                    {boardTab === 'roster' ? <CalendarDays className="size-4" /> : <Megaphone className="size-4" />}
+                  </span>
+                  <div>
+                    <p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-muted-foreground">THE COMMONS</p>
+                    <h3 className="font-mono text-sm font-extrabold text-foreground">
+                      {boardTab === 'roster' ? 'Agent Roster Board' : 'Town Announcements'}
+                    </h3>
+                  </div>
+                </div>
+                <div className="flex rounded-lg border border-border/70 bg-background/55 p-0.5">
+                  {([
+                    ['roster', 'Shifts'],
+                    ['announcements', 'News'],
+                  ] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setBoardTab(tab)}
+                      className={cn(
+                        'rounded-md px-2.5 py-1.5 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        boardTab === tab ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {boardTab === 'roster' ? (
+                <section aria-label="Agent shift schedule">
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <div className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/8 px-3 py-2.5">
+                      <span className="grid size-9 place-items-center rounded-lg bg-primary/15 text-primary"><Users className="size-4" /></span>
+                      <span>
+                        <span className="block font-mono text-lg font-black leading-none text-foreground">{rosterOnDuty.length}</span>
+                        <span className="mt-1 block text-[9px] font-bold uppercase tracking-wide text-muted-foreground">scheduled on this shift</span>
+                      </span>
+                      <span className="ml-auto text-right text-[9px] text-muted-foreground">
+                        {rosterLoading ? 'Syncing shared board…' : 'Snapshot + live updates'}
+                      </span>
+                    </div>
+                    <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/45 px-3">
+                      <CalendarDays className="size-3.5 text-accent" />
+                      <span className="sr-only">Roster month</span>
+                      <select
+                        value={rosterMonth}
+                        onChange={(event) => {
+                          const nextMonth = event.target.value;
+                          setRosterMonth(nextMonth);
+                          setRosterDate(`${nextMonth}-01`);
+                        }}
+                        className="h-10 bg-transparent text-xs text-foreground outline-none"
+                      >
+                        {ROSTER_MONTHS.map((month) => (
+                          <option key={month} value={month} className="bg-background text-foreground">
+                            {new Date(`${month}-01T12:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
+                    {rosterDays.map((iso) => {
+                      const date = new Date(`${iso}T12:00:00`);
+                      const selectedDay = iso === rosterDate;
+                      return (
+                        <button
+                          key={iso}
+                          type="button"
+                          onClick={() => setRosterDate(iso)}
+                          className={cn(
+                            'min-w-12 rounded-xl border px-2 py-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                            selectedDay
+                              ? 'border-accent/55 bg-accent/15 text-accent'
+                              : 'border-border/60 bg-background/35 text-muted-foreground hover:border-accent/30'
+                          )}
+                        >
+                          <span className="block text-[8px] font-bold uppercase">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                          <span className="mt-0.5 block font-mono text-xs font-bold">{date.getDate()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <label className="flex h-9 min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-2.5">
+                      <Search className="size-3.5 text-muted-foreground" />
+                      <input
+                        value={rosterQuery}
+                        onChange={(event) => setRosterQuery(event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder="Find an agent…"
+                        aria-label="Find an agent on the roster"
+                        className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+                      />
+                    </label>
+                    <select
+                      value={rosterSkill}
+                      onChange={(event) => setRosterSkill(event.target.value)}
+                      aria-label="Filter roster by team"
+                      className="h-9 rounded-lg border border-border/60 bg-background/70 px-2.5 text-[11px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      <option value="all" className="bg-background text-foreground">All teams</option>
+                      {rosterSkillOptions.map((skill) => <option key={skill} value={skill} className="bg-background text-foreground">{skill}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between px-1 text-[9px] text-muted-foreground">
+                    <span>{new Date(`${rosterDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span>
+                    <span>{rosterLoading ? 'Checking live schedule' : 'Read-only · shared schedule'}</span>
+                  </div>
+                  <div className="mt-1 max-h-56 overflow-y-auto rounded-xl border border-border/60 bg-background/25">
+                    {visibleRoster.length === 0 ? (
+                      <p className="p-5 text-center text-xs text-muted-foreground">
+                        {rosterAgents.length ? 'No agents match those filters.' : 'No roster snapshot is available for this month.'}
+                      </p>
+                    ) : visibleRoster.map((agent) => {
+                      const code = rosterShiftOf(agent, rosterDate);
+                      const off = isRosterOffDay(code);
+                      return (
+                        <div key={`${agent.no}-${agent.en}`} className="flex items-center gap-3 border-b border-border/35 px-3 py-2 last:border-0">
+                          <span className={cn('size-2 shrink-0 rounded-full', off ? 'bg-foreground/20' : 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.35)]')} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold text-foreground">{agent.en}</span>
+                            <span className="block text-[9px] text-muted-foreground">{agent.skill}</span>
+                          </span>
+                          <span className={cn(
+                            'min-w-14 rounded-md border px-2 py-1 text-center font-mono text-[10px] font-bold',
+                            off ? 'border-border/50 bg-background/50 text-muted-foreground' : 'border-sky-400/25 bg-sky-400/10 text-sky-200'
+                          )}>
+                            {code || '—'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : (
+                <section aria-label="Town announcements">
+                  <p className="mb-3 text-[11px] text-muted-foreground">Community notes hung for everyone passing through the square.</p>
+                  <div className="max-h-64 space-y-2 overflow-y-auto">
+                    {banners.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-border/60 p-5 text-center text-xs text-muted-foreground">
+                        No announcements yet. Check back after the next town meeting.
+                      </p>
+                    )}
+                    {banners.map((banner) => (
+                      <div
+                        key={banner.id}
+                        className="rounded-xl border border-primary/25 bg-primary/10 px-3 py-2"
+                        style={{ borderLeft: `4px solid hsl(${banner.hue} 70% 55%)` }}
+                      >
+                        <p className="text-xs font-semibold text-foreground">{banner.text}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          — {banner.author} · {new Date(banner.at).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  {isAdmin && (
+                    <div className="mt-3 flex gap-1.5">
+                      <input
+                        value={bannerDraft}
+                        onChange={(event) => setBannerDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') hangBanner();
+                          event.stopPropagation();
+                        }}
+                        maxLength={80}
+                        placeholder="Post a town announcement…"
+                        className="glass-field h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      />
+                      <button
+                        type="button"
+                        onClick={hangBanner}
+                        disabled={!bannerDraft.trim() || bannerSending}
+                        className="glass-btn h-9 rounded-lg border border-primary/40 bg-primary px-3 text-[11px] font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+                      >
+                        {bannerSending ? 'Posting…' : 'Post'}
+                      </button>
+                    </div>
+                  )}
+                </section>
               )}
             </div>
           )}

@@ -2258,7 +2258,7 @@ Additional information (if needed): ${additional}`;
               }
               communeContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Walking to the commune…</div>}>
-                  <CommunePanel />
+                  <CommunePanel onCatThought={cat.pushTip} onCatMoveTo={moveCatTo} />
                 </Suspense>
               }
               communeEnabled={!!authUser}
