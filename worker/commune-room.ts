@@ -22,6 +22,8 @@ export interface CommuneRoomAgent {
   status: string;
   seenAgo: number;
   loadout: CommuneRoomLoadout | null;
+  carId?: string | null;
+  carSeat?: number | null;
 }
 
 export interface CommuneRoomDrop {
@@ -66,6 +68,11 @@ const MAX_MESSAGE_LENGTH = 90;
 const MAX_SOCKET_MESSAGE_LENGTH = 2_048;
 const COMMUNE_WORLD_W = 3_200;
 const COMMUNE_WORLD_H = 2_400;
+const PARKED_CAR_INTERACT_RANGE = 128;
+const PARKED_CARS: Record<string, { x: number; y: number }> = {
+  'meadow-cruiser': { x: 1740, y: 820 },
+  'orchard-wagon': { x: 2300, y: 1880 },
+};
 
 function normalizeLoadout(input: unknown): CommuneRoomLoadout {
   const value = input && typeof input === 'object' ? input as Record<string, unknown> : {};
@@ -260,6 +267,68 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     const now = Date.now();
+    if (event.type === 'car_enter') {
+      const carId = typeof event.carId === 'string' ? event.carId : '';
+      const car = Object.prototype.hasOwnProperty.call(PARKED_CARS, carId)
+        ? PARKED_CARS[carId]
+        : undefined;
+      if (!car || current.carId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
+        send(ws, { type: 'error', code: 'car_unavailable', message: 'You cannot enter that car right now.' });
+        return;
+      }
+      const occupiedSeats = new Set<number>();
+      for (const otherSocket of this.ctx.getWebSockets()) {
+        const other = attachment(otherSocket);
+        if (otherSocket.readyState !== WebSocket.OPEN || !other) continue;
+        if (other.username === current.username && other.carId === carId) {
+          send(ws, { type: 'error', code: 'car_already_entered', message: 'You are already in this car.' });
+          return;
+        }
+        if (other?.carId === carId && other.carSeat !== null && other.carSeat !== undefined) {
+          occupiedSeats.add(other.carSeat);
+        }
+      }
+      const seat = occupiedSeats.has(0) ? 1 : 0;
+      if (occupiedSeats.has(seat)) {
+        send(ws, { type: 'error', code: 'car_full', message: 'Both seats are occupied.' });
+        return;
+      }
+      const updated: Presence = {
+        ...current,
+        carId,
+        carSeat: seat,
+        x: car.x,
+        y: car.y,
+        status: 'having a private car conversation',
+        seenAt: now,
+      };
+      ws.serializeAttachment(updated);
+      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      send(ws, { type: 'car_state', carId, seat, x: car.x, y: car.y });
+      return;
+    }
+
+    if (event.type === 'car_exit') {
+      if (!current.carId || current.carSeat === null || current.carSeat === undefined) return;
+      const car = PARKED_CARS[current.carId];
+      if (!car) return;
+      const x = car.x + (current.carSeat === 0 ? -106 : 106);
+      const y = car.y + 42;
+      const updated: Presence = {
+        ...current,
+        carId: null,
+        carSeat: null,
+        x,
+        y,
+        status: 'stepping out of a parked car',
+        seenAt: now,
+      };
+      ws.serializeAttachment(updated);
+      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      send(ws, { type: 'car_state', carId: null, seat: null, x, y });
+      return;
+    }
+
     if (event.type === 'public_chat_delete') {
       const id = typeof event.id === 'string' ? event.id.slice(0, 64) : '';
       if (!id) return;
@@ -297,6 +366,10 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     if (event.type === 'move') {
+      if (current.carId) {
+        send(ws, { type: 'error', code: 'car_exit_first', message: 'Step out of the car before walking.' });
+        return;
+      }
       if (now - current.lastMoveAt < MOVE_THROTTLE_MS) return;
       const x = Number(event.x);
       const y = Number(event.y);
@@ -317,7 +390,42 @@ export class CommuneRoom extends DurableObject<Env> {
       return;
     }
 
+    if (event.type === 'car_chat') {
+      if (!current.carId) {
+        send(ws, { type: 'error', code: 'not_in_car', message: 'Get into a parked car to use its private chat.' });
+        return;
+      }
+      if (now - current.lastChatAt < CHAT_THROTTLE_MS) {
+        send(ws, { type: 'error', code: 'chat_rate_limited', message: 'Please wait a moment before sending again.' });
+        return;
+      }
+      const messageText = typeof event.message === 'string'
+        ? event.message.trim().slice(0, MAX_MESSAGE_LENGTH)
+        : '';
+      if (!messageText) {
+        send(ws, { type: 'error', code: 'empty_message', message: 'Type a message first.' });
+        return;
+      }
+      const updated = { ...current, seenAt: now, lastChatAt: now };
+      ws.serializeAttachment(updated);
+      const chatEvent = {
+        type: 'car_chat',
+        carId: current.carId,
+        from: current.username,
+        message: messageText,
+        sentAt: now,
+      };
+      for (const recipient of this.ctx.getWebSockets()) {
+        if (attachment(recipient)?.carId === current.carId) send(recipient, chatEvent);
+      }
+      return;
+    }
+
     if (event.type === 'public_chat' || event.type === 'private_chat') {
+      if (event.type === 'public_chat' && current.carId) {
+        send(ws, { type: 'error', code: 'car_chat_required', message: 'Use the private car conversation while inside a car.' });
+        return;
+      }
       if (now - current.lastChatAt < CHAT_THROTTLE_MS) {
         send(ws, { type: 'error', code: 'chat_rate_limited', message: 'Please wait a moment before sending again.' });
         return;

@@ -262,6 +262,8 @@ export interface CommuneAgent {
   status: string;
   seenAgo: number;
   loadout: CommuneLoadout | null;
+  carId?: string | null;
+  carSeat?: number | null;
 }
 
 export interface CommuneBanner {
@@ -328,6 +330,34 @@ export interface CommuneDrop {
   id: number;
   x: number;
   y: number;
+}
+
+export type CommuneTreeholeCategory = 'app-feedback' | 'suggestion' | 'tip' | 'other';
+export interface CommuneTreeholeEntry {
+  id: number;
+  category: CommuneTreeholeCategory;
+  message: string;
+  createdAt: number;
+}
+
+/** Submit feedback without attaching the signed-in username to the record. */
+export async function submitCommuneTreeholeFeedback(
+  category: CommuneTreeholeCategory,
+  message: string
+): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/commune/treehole', {
+    method: 'POST',
+    body: JSON.stringify({ category, message }),
+    token,
+  });
+}
+
+/** Admin-only anonymous feedback inbox. */
+export async function fetchCommuneTreeholeFeedback(): Promise<CommuneTreeholeEntry[]> {
+  const token = getStoredToken();
+  const out = await call<{ entries: CommuneTreeholeEntry[] }>('/api/commune/treehole', { token });
+  return out.entries;
 }
 
 /** Refresh the shared, randomized spice drops for the town map. */

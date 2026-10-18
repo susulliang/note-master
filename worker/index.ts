@@ -1667,6 +1667,8 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
     status,
     seenAgo: 0,
     loadout: me,
+    carId: null,
+    carSeat: null,
   });
   return authJson({
     ticket,
@@ -1832,6 +1834,88 @@ async function handleCommuneSpiceDrops(env: Env): Promise<Response> {
     // The authenticated caller still receives the current drop set.
   }
   return authJson({ drops });
+}
+
+type CommuneTreeholeCategory = 'app-feedback' | 'suggestion' | 'tip' | 'other';
+const COMMUNE_TREEHOLE_CATEGORIES = new Set<CommuneTreeholeCategory>([
+  'app-feedback',
+  'suggestion',
+  'tip',
+  'other',
+]);
+let communeTreeholeSchemaPromise: Promise<void> | null = null;
+
+async function ensureCommuneTreeholeSchema(env: Env): Promise<void> {
+  if (!communeTreeholeSchemaPromise) {
+    communeTreeholeSchemaPromise = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS commune_treehole_feedback (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         category TEXT NOT NULL,
+         message TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+       )`
+    ).run().then(() => undefined);
+  }
+  await communeTreeholeSchemaPromise;
+}
+
+/** Anonymous treehole submissions never persist the authenticated username. */
+async function handleCommuneTreehole(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  await ensureCommuneTreeholeSchema(env);
+  if (request.method === 'GET') {
+    if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+    const result = await env.DB.prepare(
+      `SELECT id, category, message, created_at
+       FROM commune_treehole_feedback
+       ORDER BY created_at DESC, id DESC
+       LIMIT 100`
+    ).all<{ id: number; category: CommuneTreeholeCategory; message: string; created_at: number }>();
+    return authJson({
+      entries: (result.results ?? []).map((entry) => ({
+        id: Number(entry.id),
+        category: entry.category,
+        message: entry.message,
+        createdAt: Number(entry.created_at),
+      })),
+    });
+  }
+  if (request.method !== 'POST') return authJson({ error: 'Method not allowed' }, 405);
+  if (Number(request.headers.get('content-length') ?? 0) > 8_192) {
+    return authJson({ error: 'Request is too large' }, 413);
+  }
+
+  let payload: { category?: unknown; message?: unknown };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const category = String(payload.category ?? '') as CommuneTreeholeCategory;
+  const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+  if (!COMMUNE_TREEHOLE_CATEGORIES.has(category)) {
+    return authJson({ error: 'Choose a feedback category' }, 400);
+  }
+  if (!message || message.length > 2_000) {
+    return authJson({ error: 'Feedback must be between 1 and 2000 characters' }, 400);
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO commune_treehole_feedback (category, message, created_at) VALUES (?1, ?2, ?3)'
+  ).bind(category, message, now).run();
+  await env.DB.prepare(
+    `DELETE FROM commune_treehole_feedback
+     WHERE id NOT IN (
+       SELECT id FROM commune_treehole_feedback
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1000
+     )`
+  ).run();
+  return authJson({ ok: true });
 }
 
 /** POST /api/commune/spice/pick { id } — first-come-first-serve claim of a
@@ -2309,6 +2393,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSpiceDrops(env);
+  }
+  if (path === '/api/commune/treehole' && (request.method === 'GET' || request.method === 'POST')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneTreehole(request, env, user);
   }
   if (path === '/api/commune/banners' && request.method === 'POST') {
     const user = await authBearerUser(request, env);

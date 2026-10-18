@@ -40,16 +40,20 @@ import {
   createCommuneBanner,
   createCommuneSocketTicket,
   DEFAULT_AVATAR,
+  fetchCommuneTreeholeFeedback,
   fetchCardCollection,
   pickSpiceDrop,
   refreshCommuneSpiceDrops,
   saveCommuneLoadout,
+  submitCommuneTreeholeFeedback,
   type CommuneAgent,
   type CommuneAvatar,
   type CommuneBanner,
   type CommuneDrop,
   type CommuneLoadout,
   type CommunePet,
+  type CommuneTreeholeCategory,
+  type CommuneTreeholeEntry,
 } from '@/lib/auth-client';
 import { CAT_CHOICES, CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
@@ -102,8 +106,24 @@ function isRosterOffDay(code: string): boolean {
 }
 
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
-type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | null;
+type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | null;
 type BoardTab = 'roster' | 'announcements';
+type CommuneCarId = 'meadow-cruiser' | 'orchard-wagon';
+
+interface ParkedCar {
+  id: CommuneCarId;
+  label: string;
+  x: number;
+  y: number;
+  body: string;
+  trim: string;
+}
+
+const PARKED_CARS: ParkedCar[] = [
+  { id: 'meadow-cruiser', label: 'Meadow Cruiser', x: 1740, y: 820, body: '#6288a4', trim: '#d5e2e7' },
+  { id: 'orchard-wagon', label: 'Orchard Wagon', x: 2300, y: 1880, body: '#b76552', trim: '#f0d7b3' },
+];
+const TREEHOLE = { x: 1480, y: 1440, range: 108 };
 
 interface CommunePanelProps {
   onCatThought?: (text: string, ttl?: number) => void;
@@ -116,6 +136,8 @@ type CommuneAction =
   | { type: 'message-agent'; key: 'E'; label: string; username: string }
   | { type: 'hold-hands'; key: 'H'; label: string; username: string }
   | { type: 'release-hands'; key: 'H'; label: string; username: string }
+  | { type: 'enter-car'; key: 'E'; label: string; carId: CommuneCarId }
+  | { type: 'exit-car'; key: 'E'; label: string }
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
   | { type: 'pond'; key: 'E'; label: string; pondId: (typeof PONDS)[number]['id'] }
@@ -182,6 +204,8 @@ const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 330, y: 742, w: 140, h: 36 }, // showcase counter
   { x: 90, y: 1062, w: 246, h: 18 }, // west fence
   { x: 1310, y: 1062, w: 216, h: 18 }, // east fence
+  { x: TREEHOLE.x - 26, y: TREEHOLE.y - 54, w: 52, h: 54 }, // treehole oak trunk
+  ...PARKED_CARS.map((car) => ({ x: car.x - 70, y: car.y - 32, w: 140, h: 64 })),
 ];
 /** Oaks drawn dynamically (y-sorted with agents). */
 const TREES: [number, number][] = [
@@ -243,7 +267,7 @@ const SERENDIPITIES: Omit<TownSerendipity, 'id' | 'x' | 'y' | 'expiresAt'>[] = [
   { kind: 'rubber-duck', label: 'Inspect the tiny rubber duck', message: 'The duck squeaks “WHAT THE DUCK?!” and awards you one official pond inspector badge.' },
 ];
 
-type CommuneWorldObjectId = 'duck-post' | 'mushroom-throne' | 'star-scope';
+type CommuneWorldObjectId = 'duck-post' | 'mushroom-throne' | 'star-scope' | 'treehole';
 interface CommuneWorldObject {
   id: CommuneWorldObjectId;
   x: number;
@@ -276,6 +300,11 @@ const WORLD_OBJECTS: CommuneWorldObject[] = [
       'The stars spell “take your break.” The telescope seems very wise.',
       'A duck is looking back through the other end. Awkward.',
     ],
+  },
+  {
+    id: 'treehole', x: TREEHOLE.x, y: TREEHOLE.y, range: TREEHOLE.range,
+    label: 'Leave anonymous feedback in the treehole',
+    messages: [],
   },
 ];
 const SERENDIPITY_RANGE = 62;
@@ -403,6 +432,12 @@ interface SquareChatMessage {
   at: number;
 }
 
+interface CarChatMessage {
+  from: string;
+  message: string;
+  at: number;
+}
+
 interface Agent {
   x: number;
   y: number;
@@ -417,6 +452,8 @@ interface Agent {
   pet?: CommunePet | null;
   /** Optional personalized pixel look (player + remote agents). */
   avatar?: CommuneAvatar | null;
+  carId?: string | null;
+  carSeat?: number | null;
   /** NPC-only: current waypoint + pause state. */
   target?: { x: number; y: number };
   pauseUntil?: number;
@@ -439,6 +476,7 @@ interface RemoteView {
   says: Speech | null;
   moving: boolean;
   bobPhase: number;
+  carId?: string | null;
 }
 
 interface CommuneRoomIncoming {
@@ -508,6 +546,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerDraft, setBannerDraft] = useState('');
   const [bannerSending, setBannerSending] = useState(false);
+  const [treeholeCategory, setTreeholeCategory] = useState<CommuneTreeholeCategory>('app-feedback');
+  const [treeholeMessage, setTreeholeMessage] = useState('');
+  const [treeholeSending, setTreeholeSending] = useState(false);
+  const [treeholeSubmitted, setTreeholeSubmitted] = useState(false);
+  const [treeholeError, setTreeholeError] = useState('');
+  const [treeholeAdminView, setTreeholeAdminView] = useState(false);
+  const [treeholeEntries, setTreeholeEntries] = useState<CommuneTreeholeEntry[]>([]);
+  const [treeholeEntriesLoading, setTreeholeEntriesLoading] = useState(false);
   const [boardTab, setBoardTab] = useState<BoardTab>('roster');
   const todayKey = gmt8DateKey();
   const initialRosterMonth = ROSTER_MONTHS.includes(todayKey.slice(0, 7))
@@ -531,12 +577,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const faqRequestRef = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [squareMessages, setSquareMessages] = useState<SquareChatMessage[]>([]);
+  const [carChatMessages, setCarChatMessages] = useState<CarChatMessage[]>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   /* ── agent→agent interactions ──────────────────────────────────────────────── */
   /** Direct-chat target (selected from a profile or bump interaction). */
   const [messaging, setMessaging] = useState<string | null>(null);
   const messagingRef = useRef<string | null>(null);
   messagingRef.current = messaging;
+  const [carSeat, setCarSeat] = useState<{ carId: CommuneCarId; seat: number } | null>(null);
+  const carSeatRef = useRef(carSeat);
+  carSeatRef.current = carSeat;
   /** Banners popped by direct messages from other agents. */
   const [inbox, setInbox] = useState<{ from: string; message: string }[]>([]);
   /** Hand-holding: { partner, lead } — the first agent to press H leads. */
@@ -670,6 +720,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
   playerRef.current.name = username;
   playerRef.current.hue = hueOf(username);
+  playerRef.current.carId = carSeat?.carId ?? null;
+  playerRef.current.carSeat = carSeat?.seat ?? null;
   const npcsRef = useRef<Agent[]>([
     ...NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 })),
     // Challenge NPCs stand in place (no target/line timer).
@@ -763,6 +815,42 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       setBannerSending(false);
     }
   }, [bannerDraft, bannerSending]);
+
+  const submitTreeholeNote = async () => {
+    const message = treeholeMessage.trim();
+    if (!message || treeholeSending) return;
+    setTreeholeSending(true);
+    setTreeholeError('');
+    try {
+      await submitCommuneTreeholeFeedback(treeholeCategory, message);
+      setTreeholeMessage('');
+      setTreeholeSubmitted(true);
+    } catch (error) {
+      setTreeholeError(error instanceof Error ? error.message : 'Your note could not be sent. Please try again.');
+    } finally {
+      setTreeholeSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (panel !== 'treehole' || !isAdmin || !treeholeAdminView) return;
+    let active = true;
+    setTreeholeEntriesLoading(true);
+    setTreeholeError('');
+    void fetchCommuneTreeholeFeedback()
+      .then((entries) => {
+        if (active) setTreeholeEntries(entries);
+      })
+      .catch((error) => {
+        if (active) setTreeholeError(error instanceof Error ? error.message : 'Unable to load the feedback inbox.');
+      })
+      .finally(() => {
+        if (active) setTreeholeEntriesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [panel, isAdmin, treeholeAdminView]);
 
   /* ── loadout editor data (pets + owned cards) ────────────────────────────── */
 
@@ -1070,6 +1158,31 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             }
           } else if (event.type === 'public_chat_delete' && typeof event.id === 'string') {
             setSquareMessages((items) => items.filter((item) => item.id !== event.id));
+          } else if (
+            event.type === 'car_state'
+            && (event.carId === null || event.carId === 'meadow-cruiser' || event.carId === 'orchard-wagon')
+          ) {
+            const nextCar = event.carId
+              ? { carId: event.carId as CommuneCarId, seat: Number(event.seat) }
+              : null;
+            setCarSeat(nextCar && Number.isInteger(nextCar.seat) ? nextCar : null);
+            playerRef.current.carId = nextCar?.carId ?? null;
+            playerRef.current.carSeat = nextCar?.seat ?? null;
+            playerRef.current.x = Number(event.x) || playerRef.current.x;
+            playerRef.current.y = Number(event.y) || playerRef.current.y;
+            clickTargetRef.current = null;
+            keysRef.current.clear();
+            if (nextCar) {
+              setCarChatMessages([]);
+              setMessaging(null);
+            }
+          } else if (event.type === 'car_chat' && typeof event.message === 'string' && typeof event.from === 'string') {
+            if (event.carId === carSeatRef.current?.carId) {
+              setCarChatMessages((items) => [
+                ...items.slice(-19),
+                { from: event.from as string, message: event.message as string, at: Number(event.sentAt) || Date.now() },
+              ]);
+            }
           } else if (event.type === 'private_chat') {
             if (typeof event.from === 'string' && typeof event.message === 'string') {
               setInbox((items) => [...items.slice(-4), { from: event.from as string, message: event.message as string }]);
@@ -1095,6 +1208,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           if (activeSocket !== socket) return;
           activeSocket = null;
           if (socketRef.current === socket) socketRef.current = null;
+          if (carSeatRef.current) {
+            const car = PARKED_CARS.find((item) => item.id === carSeatRef.current?.carId);
+            if (car) {
+              playerRef.current.x = car.x + (carSeatRef.current.seat === 0 ? -106 : 106);
+              playerRef.current.y = car.y + 42;
+            }
+            setCarSeat(null);
+            playerRef.current.carId = null;
+            playerRef.current.carSeat = null;
+          }
           scheduleReconnect();
         };
         socket.onerror = () => socket.close();
@@ -1152,6 +1275,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }
           case 'release-hands':
             return handsRef.current?.partner === action.username;
+          case 'enter-car': {
+            const car = PARKED_CARS.find((item) => item.id === action.carId);
+            return !carSeatRef.current
+              && !!car
+              && Math.hypot(player.x - car.x, player.y - car.y) < 128
+              && [...remoteRef.current.values()].filter((remote) => remote.agent.carId === action.carId).length < 2;
+          }
+          case 'exit-car':
+            return !!carSeatRef.current;
           case 'sit':
             return BENCHES.some(([x, y]) => x === action.x && y === action.y)
               && Math.hypot(player.x - action.x, player.y - action.y) < BENCH_RANGE;
@@ -1213,6 +1345,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         setHands(null);
         sendRoomEvent({ type: 'interaction', target: action.username, kind: 'hands_release' });
         return;
+      case 'enter-car':
+        if (!sendRoomEvent({ type: 'car_enter', carId: action.carId })) {
+          setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: 'The car connection is unavailable. Try again.' }]);
+        }
+        return;
+      case 'exit-car':
+        sendRoomEvent({ type: 'car_exit' });
+        return;
       case 'sit':
         sittingRef.current = { x: action.x, y: action.y - 2 };
         return;
@@ -1256,6 +1396,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       case 'world-object': {
         const object = WORLD_OBJECTS.find((item) => item.id === action.objectId);
         if (!object) return;
+        if (object.id === 'treehole') {
+          setTreeholeSubmitted(false);
+          setTreeholeError('');
+          setTreeholeAdminView(false);
+          setPanel('treehole');
+          return;
+        }
         const message = object.messages[Math.floor(Math.random() * object.messages.length)];
         playerRef.current.says = { text: message, until: Date.now() + 6200 };
         if (object.id === 'duck-post') {
@@ -1574,6 +1721,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       let nearAgent: { username: string; distance: number } | null = null;
       let handAgent: { username: string; distance: number } | null = null;
       for (const remote of remoteRef.current.values()) {
+        if (remote.agent.carId) continue;
         const distance = Math.hypot(player.x - remote.rx, player.y - remote.ry);
         if (distance < 64 && (!nearAgent || distance < nearAgent.distance)) {
           nearAgent = { username: remote.agent.username, distance };
@@ -1583,6 +1731,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         }
       }
       const held = handsRef.current;
+      const nearCar = !carSeatRef.current
+        ? PARKED_CARS
+          .map((car) => ({
+            car,
+            distance: Math.hypot(player.x - car.x, player.y - car.y),
+            occupied: [...remoteRef.current.values()].filter((remote) => remote.agent.carId === car.id).length,
+          }))
+          .filter(({ distance, occupied }) => distance < 128 && occupied < 2)
+          .sort((a, b) => a.distance - b.distance)[0]?.car ?? null
+        : null;
       const nearBench = !sittingRef.current
         ? BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE)
         : undefined;
@@ -1612,7 +1770,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         : null;
       const actions: CommuneAction[] = [];
 
-      if (sittingRef.current) {
+      if (carSeatRef.current) {
+        actions.push({ type: 'exit-car', key: 'E', label: 'Step out of the car' });
+      } else if (nearCar) {
+        actions.push({ type: 'enter-car', key: 'E', label: `Get in ${nearCar.label}`, carId: nearCar.id });
+      } else if (sittingRef.current) {
         actions.push({ type: 'stand', key: 'E', label: 'Stand up' });
       } else if (nearChallengeNpc) {
         actions.push({
@@ -1659,24 +1821,28 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         actions.push({ type: 'prop', key: 'E', label: nearProp.label, panel: nearProp.kind });
       }
 
-      if (held) {
-        actions.push({
-          type: 'release-hands',
-          key: 'H',
-          label: `Let go of ${held.partner}`,
-          username: held.partner,
-        });
-      } else if (handAgent) {
-        actions.push({
-          type: 'hold-hands',
-          key: 'H',
-          label: `Hold hands with ${handAgent.username}`,
-          username: handAgent.username,
-        });
+      if (!carSeatRef.current) {
+        if (held) {
+          actions.push({
+            type: 'release-hands',
+            key: 'H',
+            label: `Let go of ${held.partner}`,
+            username: held.partner,
+          });
+        } else if (handAgent) {
+          actions.push({
+            type: 'hold-hands',
+            key: 'H',
+            label: `Hold hands with ${handAgent.username}`,
+            username: handAgent.username,
+          });
+        }
       }
       publishNearbyActions(actions);
       const nearKind = nearProp?.kind ?? null;
-      statusRef.current = player.says
+      statusRef.current = player.carId
+        ? 'in a private car conversation'
+        : player.says
         ? 'chatting'
         : nearChallengeNpc
           ? `talking with ${nearChallengeNpc.name}`
@@ -1697,10 +1863,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               : 'hanging out';
 
       const statusChanged = statusRef.current !== lastPositionStatusRef.current;
-      if (
+      if (!player.carId && (
         (player.moving && wallNow - lastPositionSentAtRef.current >= 100) ||
         statusChanged
-      ) {
+      )) {
         if (sendRoomEvent({ type: 'move', x: Math.round(player.x), y: Math.round(player.y), status: statusRef.current })) {
           lastPositionSentAtRef.current = wallNow;
           lastPositionStatusRef.current = statusRef.current;
@@ -1743,13 +1909,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           says: r.says,
           moving: vmoving,
           bobPhase: r.bobPhase,
+          carId: r.agent.carId,
         });
       }
 
       const petViews = updatePetFollowers(
         [
-          { ownerId: player.name, x: player.x, y: player.y, moving: !!player.moving, pet: player.pet ?? null },
-          ...remoteViews.map((remote) => ({
+          ...(!player.carId
+            ? [{ ownerId: player.name, x: player.x, y: player.y, moving: !!player.moving, pet: player.pet ?? null }]
+            : []),
+          ...remoteViews.filter((remote) => !remote.carId).map((remote) => ({
             ownerId: remote.name,
             x: remote.x,
             y: remote.y,
@@ -1797,7 +1966,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
   const handleCanvasTap = (clientX: number, clientY: number) => {
-    if (panelRef.current) return;
+    if (panelRef.current || playerRef.current.carId) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -1837,8 +2006,27 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
       return;
     }
+    const tappedCar = PARKED_CARS.find(
+      (car) => Math.abs(wx - car.x) < 76 && Math.abs(wy - car.y) < 44
+    );
+    if (tappedCar) {
+      const player = playerRef.current;
+      if (Math.hypot(player.x - tappedCar.x, player.y - tappedCar.y) < 128) {
+        executeInteraction({
+          type: 'enter-car',
+          key: 'E',
+          label: `Get in ${tappedCar.label}`,
+          carId: tappedCar.id,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(tappedCar.x, tappedCar.y, player.x, player.y, 108);
+      }
+      return;
+    }
     const worldObject = WORLD_OBJECTS.find(
-      (object) => Math.hypot(wx - object.x, wy - (object.y - 18)) < 38
+      (object) => object.id === 'treehole'
+        ? Math.abs(wx - object.x) < 96 && wy >= object.y - 318 && wy <= object.y + 5
+        : Math.hypot(wx - object.x, wy - (object.y - 18)) < 38
     );
     if (worldObject) {
       const player = playerRef.current;
@@ -1850,7 +2038,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           objectId: worldObject.id,
         });
       } else {
-        clickTargetRef.current = approachPoint(worldObject.x, worldObject.y, player.x, player.y);
+        clickTargetRef.current = approachPoint(
+          worldObject.x,
+          worldObject.y,
+          player.x,
+          player.y,
+          worldObject.id === 'treehole' ? 94 : 58
+        );
       }
       return;
     }
@@ -1935,16 +2129,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const text = chatDraft.trim();
     if (!text) return;
     const recipient = messagingRef.current;
+    const car = carSeatRef.current;
     const sent = sendRoomEvent(
-      recipient
-        ? { type: 'private_chat', target: recipient, message: text }
-        : { type: 'public_chat', message: text },
+      car
+        ? { type: 'car_chat', message: text }
+        : recipient
+          ? { type: 'private_chat', target: recipient, message: text }
+          : { type: 'public_chat', message: text },
     );
     if (!sent) {
       setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: 'Reconnecting; your message was not sent.' }]);
       return;
     }
-    playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
+    if (!car) playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
     setChatDraft('');
   };
 
@@ -1956,7 +2153,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
-  const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz';
+  const currentCar = carSeat ? PARKED_CARS.find((car) => car.id === carSeat.carId) ?? null : null;
+  const carOccupants = carSeat
+    ? others.filter((agent) => agent.carId === carSeat.carId).sort((a, b) => (a.carSeat ?? 0) - (b.carSeat ?? 0))
+    : [];
+  const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
   const panelPosition = touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
@@ -2070,7 +2271,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       )}
 
       {/* Optional touch D-pad; tap-to-walk remains available on the map. */}
-      {touchControls && !panel && !chatFocused && (
+      {touchControls && !panel && !chatFocused && !carSeat && (
         <div
           className="absolute z-20"
           style={{
@@ -2192,8 +2393,39 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         </div>
       )}
 
+      {/* Short-lived messages in parked cars are delivered only to occupants. */}
+      {carSeat && (
+          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+            <div
+              role="log"
+              aria-label="Private parked car conversation"
+              aria-live="polite"
+              className="pointer-events-auto overflow-hidden rounded-xl border border-sky-200/25 bg-slate-950/85 px-3 py-2 shadow-lg backdrop-blur-md"
+            >
+              <div className="mb-1 flex items-center justify-between gap-2 border-b border-white/10 pb-1">
+                <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-sky-200">
+                  Private · {currentCar?.label ?? 'Parked car'}
+                </span>
+                <span className="truncate text-[9px] text-white/55">
+                  {[username, ...carOccupants.map((agent) => agent.username)].slice(0, 2).join(' · ')}
+                </span>
+              </div>
+              <div className="flex max-h-24 flex-col gap-1 overflow-hidden">
+                {carChatMessages.slice(-4).map((item, index) => (
+                  <p key={`${item.at}-${item.from}-${index}`} className="truncate text-[11px] leading-snug text-white/90">
+                    <span className="mr-1.5 font-bold text-sky-200">{item.from}</span>
+                    {item.message}
+                  </p>
+                ))}
+                {carChatMessages.length === 0 && (
+                  <p className="text-[10px] text-white/55">Just the two of you. Start a private conversation.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       {/* Short-lived shared history lets everyone remove inappropriate chat. */}
-      {squareMessages.length > 0 && (
+        {!carSeat && squareMessages.length > 0 && (
         <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
           <div
             role="log"
@@ -2241,7 +2473,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           'absolute left-1/2 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded-2xl border p-2 shadow-xl backdrop-blur-md transition-all duration-200',
           messaging
             ? 'border-primary/70 bg-card/95'
-            : chatFocused || chatDraft
+            : carSeat
+              ? 'border-sky-200/40 bg-slate-950/90'
+              : chatFocused || chatDraft
               ? 'border-white/30 bg-card/95'
               : 'border-white/35 bg-transparent'
         )}
@@ -2273,7 +2507,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             if (e.key === 'Enter') speak();
             e.stopPropagation();
           }}
-          placeholder={messaging ? `Send a message to ${messaging}…` : `Say something to the square, ${username}…`}
+          placeholder={
+            carSeat
+              ? 'Private conversation · only car occupants can hear'
+              : messaging
+                ? `Send a message to ${messaging}…`
+                : `Say something to the square, ${username}…`
+          }
           maxLength={90}
           className="h-10 min-w-0 flex-1 rounded-xl bg-transparent px-3.5 text-sm text-foreground placeholder:text-foreground/60 focus-visible:outline-none"
         />
@@ -2303,7 +2543,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         <div
           role="dialog"
           aria-modal="false"
-          aria-label={activeProp?.label ?? (panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
+          aria-label={activeProp?.label ?? (panel === 'treehole' ? 'Anonymous feedback treehole' : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
           className={cn(
             'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
             touchControls
@@ -2354,6 +2594,120 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{activeProp.description}</p>
               <p className="mt-4 border-t border-border/50 pt-2.5 text-[10px] text-muted-foreground/80">Press Esc to close · Keep exploring with WASD</p>
             </div>
+          )}
+
+          {panel === 'treehole' && (
+            <section className="mt-1 space-y-3 pr-7" aria-label="Anonymous feedback treehole">
+              <div className="flex items-center gap-2.5">
+                <span className="grid size-9 place-items-center rounded-xl bg-emerald-400/12 text-emerald-300">
+                  <MessageSquare className="size-4" />
+                </span>
+                <div>
+                  <p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-muted-foreground">ODDITY ORCHARD</p>
+                  <h3 className="font-mono text-sm font-extrabold text-foreground">
+                    {treeholeAdminView ? 'Treehole inbox' : 'The Feedback Tree'}
+                  </h3>
+                </div>
+              </div>
+
+              <p className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 p-2.5 text-[11px] leading-relaxed text-foreground/80">
+                Leave app feedback, an improvement idea, a useful tip, or anything else. Your username is not saved with your note. Please don’t include contact details or other identifying information.
+              </p>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeholeAdminView((view) => !view);
+                    setTreeholeError('');
+                  }}
+                  className="rounded-lg border border-border/60 px-2.5 py-1.5 text-[10px] font-semibold text-muted-foreground transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {treeholeAdminView ? 'Write a note' : 'Review anonymous notes'}
+                </button>
+              )}
+
+              {treeholeAdminView && isAdmin ? (
+                <div className="max-h-72 space-y-2 overflow-y-auto">
+                  {treeholeEntriesLoading ? (
+                    <p className="animate-pulse py-5 text-center text-xs text-muted-foreground">Opening the treehole…</p>
+                  ) : treeholeEntries.length ? treeholeEntries.map((entry) => (
+                    <article key={entry.id} className="rounded-xl border border-border/60 bg-background/35 p-3">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-bold uppercase text-accent">
+                          {entry.category.replace('-', ' ')}
+                        </span>
+                        <time className="text-[9px] text-muted-foreground">
+                          {new Date(entry.createdAt).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">{entry.message}</p>
+                    </article>
+                  )) : (
+                    <p className="rounded-lg border border-dashed border-border/60 p-5 text-center text-xs text-muted-foreground">
+                      {treeholeEntriesLoading ? 'Loading notes…' : 'The treehole is quiet for now.'}
+                    </p>
+                  )}
+                </div>
+              ) : treeholeSubmitted ? (
+                <div className="rounded-xl border border-emerald-300/25 bg-emerald-300/10 p-4 text-center">
+                  <p className="font-mono text-xs font-bold text-emerald-200">Your note is tucked away.</p>
+                  <p className="mt-1 text-[10px] text-foreground/70">Thanks for helping the town grow.</p>
+                  <button
+                    type="button"
+                    onClick={() => setTreeholeSubmitted(false)}
+                    className="mt-3 rounded-lg border border-emerald-200/25 px-3 py-1.5 text-[10px] font-bold text-emerald-100 hover:bg-emerald-200/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    Leave another note
+                  </button>
+                </div>
+              ) : (
+                <form
+                  className="space-y-2.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitTreeholeNote();
+                  }}
+                >
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">What kind of note?</span>
+                    <select
+                      value={treeholeCategory}
+                      onChange={(event) => setTreeholeCategory(event.target.value as CommuneTreeholeCategory)}
+                      className="h-10 w-full rounded-lg border border-border/70 bg-background/65 px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      <option value="app-feedback">App feedback</option>
+                      <option value="suggestion">Suggestion for improvement</option>
+                      <option value="tip">Tip for the team</option>
+                      <option value="other">Something else</option>
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Your anonymous note</span>
+                    <textarea
+                      value={treeholeMessage}
+                      onChange={(event) => setTreeholeMessage(event.target.value)}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      maxLength={2000}
+                      rows={5}
+                      placeholder="What should we know?"
+                      className="w-full resize-y rounded-lg border border-border/70 bg-background/65 p-3 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    />
+                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] text-muted-foreground">{treeholeMessage.length}/2000</span>
+                    <button
+                      type="submit"
+                      disabled={!treeholeMessage.trim() || treeholeSending}
+                      className="rounded-lg border border-emerald-300/30 bg-emerald-400/15 px-3 py-2 text-[10px] font-bold text-emerald-100 transition hover:bg-emerald-400/25 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      {treeholeSending ? 'Tucking it away…' : 'Leave anonymous note'}
+                    </button>
+                  </div>
+                </form>
+              )}
+              {treeholeError && <p role="alert" className="text-[10px] text-amber-300">{treeholeError}</p>}
+            </section>
           )}
 
           {panel === 'townhall' && (
@@ -3071,15 +3425,15 @@ function chooseSerendipitySpot(originX: number, originY: number): [number, numbe
   return safeSpots[Math.floor(Math.random() * safeSpots.length)] ?? [originX, originY];
 }
 
-function approachPoint(targetX: number, targetY: number, fromX: number, fromY: number) {
+function approachPoint(targetX: number, targetY: number, fromX: number, fromY: number, distance = 58) {
   const baseAngle = Math.atan2(fromY - targetY, fromX - targetX);
   for (let i = 0; i < 8; i++) {
     const angle = baseAngle + i * Math.PI / 4;
-    const x = targetX + Math.cos(angle) * 58;
-    const y = targetY + Math.sin(angle) * 58;
+    const x = targetX + Math.cos(angle) * distance;
+    const y = targetY + Math.sin(angle) * distance;
     if (canOccupy(x, y, 24)) return { x, y };
   }
-  return { x: targetX + 64, y: targetY };
+  return { x: targetX + distance + 8, y: targetY };
 }
 
 function petSpot(ownerX: number, ownerY: number, angle: number, distance: number) {
@@ -3418,6 +3772,13 @@ function draw(
   type D = { y: number; fn: () => void; bright?: boolean };
   const items: D[] = [];
   for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+  for (const car of PARKED_CARS) {
+    const occupants = [
+      ...(player.carId === car.id ? [player.name] : []),
+      ...remotes.filter((remote) => remote.carId === car.id).map((remote) => remote.name),
+    ].slice(0, 2);
+    items.push({ y: car.y + 34, fn: () => drawParkedCar(ctx, car, occupants) });
+  }
   for (const object of WORLD_OBJECTS) {
     items.push({ y: object.y, fn: () => drawCommuneWorldObject(ctx, object) });
   }
@@ -3529,6 +3890,7 @@ function draw(
   /* entities — remotes reveal their loadout phrase when you walk close */
   for (const npc of npcs) items.push({ y: npc.y, bright: true, fn: () => drawAgent(ctx, npc, t) });
   for (const r of remotes) {
+    if (r.carId) continue;
     items.push({
       y: r.y,
       bright: true,
@@ -3547,7 +3909,7 @@ function draw(
       },
     });
   }
-  items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
+  if (!player.carId) items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
   for (const pet of pets) {
     items.push({ y: pet.y, fn: () => drawPixelCat(ctx, pet, t, reduceMotion) });
   }
@@ -3651,6 +4013,21 @@ function drawTownSerendipity(
 
 function drawCommuneWorldObject(ctx: CanvasRenderingContext2D, object: CommuneWorldObject) {
   const { x, y } = object;
+  if (object.id === 'treehole') {
+    drawGroundShadow(ctx, x, y + 4, 48, 14, 0.24);
+    drawPixelTree(ctx, x, y, 1.9);
+    ctx.fillStyle = '#342b25';
+    ctx.fillRect(x - 9, y - 67, 18, 19);
+    ctx.fillStyle = '#806b51';
+    ctx.fillRect(x - 5, y - 64, 10, 12);
+    ctx.fillStyle = '#d6b875';
+    ctx.fillRect(x + 12, y - 57, 3, 3);
+    ctx.fillStyle = '#f2e6c8';
+    ctx.font = "bold 9px 'Schoolbell', ui-monospace, monospace";
+    ctx.textAlign = 'center';
+    ctx.fillText('TREEHOLE', x, y - 92);
+    return;
+  }
   drawGroundShadow(ctx, x, y + 3, 25, 7, 0.2);
   if (object.id === 'duck-post') {
     ctx.fillStyle = '#79573f';
@@ -3689,6 +4066,50 @@ function drawCommuneWorldObject(ctx: CanvasRenderingContext2D, object: CommuneWo
     ctx.fillStyle = '#d6b875';
     ctx.fillRect(x + 10, y - 26, 3, 3);
   }
+}
+
+function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants: string[]) {
+  const { x, y } = car;
+  drawGroundShadow(ctx, x + 2, y + 8, 68, 27, 0.27);
+  ctx.fillStyle = '#303737';
+  ctx.fillRect(x - 55, y - 28, 14, 12);
+  ctx.fillRect(x + 41, y - 28, 14, 12);
+  ctx.fillRect(x - 55, y + 16, 14, 12);
+  ctx.fillRect(x + 41, y + 16, 14, 12);
+  roundRect(ctx, x - 62, y - 31, 124, 64, 17);
+  ctx.fillStyle = car.body;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  roundRect(ctx, x - 36, y - 23, 72, 48, 12);
+  ctx.fillStyle = '#344b52';
+  ctx.fill();
+  ctx.fillStyle = car.trim;
+  ctx.fillRect(x - 48, y - 24, 8, 46);
+  ctx.fillRect(x + 40, y - 24, 8, 46);
+  ctx.fillStyle = '#d9eef0';
+  ctx.fillRect(x - 8, y - 19, 3, 40);
+  ctx.fillRect(x - 33, y - 28, 66, 5);
+  ctx.fillStyle = '#f5df9b';
+  ctx.fillRect(x - 51, y - 28, 9, 5);
+  ctx.fillRect(x + 42, y - 28, 9, 5);
+  ctx.fillStyle = '#f18268';
+  ctx.fillRect(x - 52, y + 25, 9, 4);
+  ctx.fillRect(x + 43, y + 25, 9, 4);
+  for (let seat = 0; seat < 2; seat++) {
+    ctx.fillStyle = occupants[seat] ? '#f3d6a2' : 'rgba(255,255,255,0.22)';
+    ctx.fillRect(x - 23 + seat * 42, y - 11, 8, 8);
+    ctx.fillStyle = occupants[seat] ? '#26333a' : 'rgba(255,255,255,0.1)';
+    ctx.fillRect(x - 21 + seat * 42, y - 9, 2, 2);
+  }
+  ctx.fillStyle = 'rgba(17,24,25,0.76)';
+  roundRect(ctx, x - 43, y + 39, 86, 16, 7);
+  ctx.fill();
+  ctx.fillStyle = '#fff4da';
+  ctx.font = "bold 8px 'Schoolbell', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.fillText(occupants.length ? occupants.join(' · ') : car.label, x, y + 50);
 }
 
 function drawWhatTheDuck(ctx: CanvasRenderingContext2D, incident: DuckIncident, t: number, reduceMotion: boolean) {
@@ -4033,7 +4454,7 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
 /** Chunky pixel oak (dynamic so it y-sorts with the agents), cached as a sprite. */
 let pixelTreeSprite: HTMLCanvasElement | null = null;
 
-function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
+function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number, scale = 1) {
   if (!pixelTreeSprite) {
     pixelTreeSprite = document.createElement('canvas');
     pixelTreeSprite.width = 112;
@@ -4041,7 +4462,7 @@ function drawPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number
     const treeCtx = pixelTreeSprite.getContext('2d');
     if (treeCtx) paintPixelTree(treeCtx, 56, 160);
   }
-  ctx.drawImage(pixelTreeSprite, x - 56, groundY - 160);
+  ctx.drawImage(pixelTreeSprite, x - 56 * scale, groundY - 160 * scale, 112 * scale, 176 * scale);
 }
 
 function paintPixelTree(ctx: CanvasRenderingContext2D, x: number, groundY: number) {
