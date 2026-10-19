@@ -1667,19 +1667,26 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
     if (!ctx) return;
 
     let vw = 0;
     let vh = 0;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    let dpr = 1;
     const resize = () => {
       vw = wrap.clientWidth;
       vh = wrap.clientHeight;
-      canvas.width = Math.round(vw * dpr);
-      canvas.height = Math.round(vh * dpr);
-      canvas.style.width = `${vw}px`;
-      canvas.style.height = `${vh}px`;
+      const cssPixels = Math.max(1, vw * vh);
+      dpr = Math.max(
+        0.85,
+        Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(4_000_000 / cssPixels))
+      );
+      const pixelWidth = Math.round(vw * dpr);
+      const pixelHeight = Math.round(vh * dpr);
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      if (canvas.style.width !== `${vw}px`) canvas.style.width = `${vw}px`;
+      if (canvas.style.height !== `${vh}px`) canvas.style.height = `${vh}px`;
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -1699,7 +1706,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const step = (now: number) => {
       raf = 0;
       if (document.hidden) return;
-      if (now - lastFrame < 1000 / 30) {
+      if (now - lastFrame < 1000 / 60) {
         raf = requestAnimationFrame(step);
         return;
       }
@@ -4210,11 +4217,21 @@ function draw(
   ctx.restore();
   if (destination) drawDestinationMarker(ctx, destination.x, destination.y, t);
 
+  const left = cam.x - 220;
+  const top = cam.y - 220;
+  const right = cam.x + vw + 220;
+  const bottom = cam.y + vh + 220;
+  const isVisible = (x: number, y: number, radiusX = 72, radiusY = 120) =>
+    x + radiusX >= left && x - radiusX <= right && y + radiusY >= top && y - radiusY <= bottom;
+
   /* y-sorted drawables */
   type D = { y: number; fn: () => void; bright?: boolean };
   const items: D[] = [];
-  for (const [tx, ty] of TREES) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+  for (const [tx, ty] of TREES) {
+    if (isVisible(tx, ty, 72, 180)) items.push({ y: ty, fn: () => drawPixelTree(ctx, tx, ty) });
+  }
   for (const car of PARKED_CARS) {
+    if (!isVisible(car.x, car.y, 64, 90)) continue;
     const occupants = [
       ...(player.carId === car.id ? [player.name] : []),
       ...remotes.filter((remote) => remote.carId === car.id).map((remote) => remote.name),
@@ -4222,11 +4239,16 @@ function draw(
     items.push({ y: car.y + 72, fn: () => drawParkedCar(ctx, car, occupants) });
   }
   for (const object of WORLD_OBJECTS) {
+    if (!isVisible(object.x, object.y, 72, object.id === 'treehole' ? 360 : 90)) continue;
     items.push({ y: object.y, fn: () => drawCommuneWorldObject(ctx, object) });
   }
-  for (const d of ducks) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
-  if (incident) items.push({ y: incident.y, bright: true, fn: () => drawWhatTheDuck(ctx, incident, t, reduceMotion) });
-  if (serendipity) {
+  for (const d of ducks) {
+    if (isVisible(d.x, d.y, 32, 28)) items.push({ y: d.y, fn: () => drawDuck(ctx, d, t) });
+  }
+  if (incident && isVisible(incident.x, incident.y, 36, 48)) {
+    items.push({ y: incident.y, bright: true, fn: () => drawWhatTheDuck(ctx, incident, t, reduceMotion) });
+  }
+  if (serendipity && isVisible(serendipity.x, serendipity.y, 36, 36)) {
     items.push({
       y: serendipity.y,
       bright: true,
@@ -4235,10 +4257,12 @@ function draw(
   }
 
   /* spice drops — pixel piles bobbing gently */
-  for (const d of drops) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
+  for (const d of drops) {
+    if (isVisible(d.x, d.y, 32, 32)) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
+  }
 
   /* bulletin board (banners) */
-  items.push({
+  if (isVisible(BOARD.x, BOARD.y, BOARD.w / 2 + 20, BOARD.h + 72)) items.push({
     y: BOARD.y + BOARD.h / 2,
     fn: () => {
       const bx = BOARD.x;
@@ -4313,7 +4337,7 @@ function draw(
   });
 
   /* showcase stall */
-  items.push({
+  if (isVisible(STALL.x, STALL.y, STALL.w / 2 + 24, 100)) items.push({
     y: STALL.y + STALL.h / 2,
     fn: () => {
       const sx = STALL.x;
@@ -4349,9 +4373,11 @@ function draw(
   });
 
   /* entities — remotes reveal their loadout phrase when you walk close */
-  for (const npc of npcs) items.push({ y: npc.y, bright: true, fn: () => drawAgent(ctx, npc, t) });
+  for (const npc of npcs) {
+    if (isVisible(npc.x, npc.y, 72, 132)) items.push({ y: npc.y, bright: true, fn: () => drawAgent(ctx, npc, t) });
+  }
   for (const r of remotes) {
-    if (r.carId) continue;
+    if (r.carId || !isVisible(r.x, r.y, 88, 150)) continue;
     items.push({
       y: r.y,
       bright: true,
@@ -4370,9 +4396,11 @@ function draw(
       },
     });
   }
-  if (!player.carId) items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
+  if (!player.carId && isVisible(player.x, player.y, 88, 150)) {
+    items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
+  }
   for (const pet of pets) {
-    items.push({ y: pet.y, fn: () => drawPixelCat(ctx, pet, t, reduceMotion) });
+    if (isVisible(pet.x, pet.y, 64, 72)) items.push({ y: pet.y, fn: () => drawPixelCat(ctx, pet, t, reduceMotion) });
   }
 
   items.sort((a, b) => a.y - b.y);
