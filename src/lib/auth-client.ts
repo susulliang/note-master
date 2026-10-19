@@ -315,6 +315,28 @@ export async function createCommuneBanner(text: string): Promise<CommuneBanner[]
   return out.banners;
 }
 
+/** Edit an existing shared town announcement. */
+export async function editCommuneBanner(id: string, text: string): Promise<CommuneBanner[]> {
+  const token = getStoredToken();
+  const out = await call<{ banners: CommuneBanner[] }>('/api/commune/banners', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'edit', id, text }),
+    token,
+  });
+  return out.banners;
+}
+
+/** Remove an existing shared town announcement. */
+export async function deleteCommuneBanner(id: string): Promise<CommuneBanner[]> {
+  const token = getStoredToken();
+  const out = await call<{ banners: CommuneBanner[] }>('/api/commune/banners', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'delete', id }),
+    token,
+  });
+  return out.banners;
+}
+
 /** WebSocket URL uses the same Worker origin as the authenticated HTTP API. */
 export function communeSocketUrl(ticket: string): string {
   const origin = new URL(API_BASE || window.location.origin, window.location.origin).origin;

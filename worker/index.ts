@@ -1678,31 +1678,50 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   });
 }
 
-/** Persist a shared town banner; only admins may publish announcements. */
-async function handleCommuneBannerCreate(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+/** Persist shared town announcements; only admins may manage the board. */
+async function handleCommuneBannerMutation(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
   if (Number(request.headers.get('content-length') ?? 0) > 2_048)
     return authJson({ error: 'Request is too large' }, 413);
-  let payload: { text?: unknown };
+  let payload: { action?: unknown; id?: unknown; text?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
   } catch {
     return authJson({ error: 'Invalid JSON body' }, 400);
   }
-  const text = typeof payload.text === 'string' ? payload.text.trim().slice(0, 80) : '';
-  if (!text) return authJson({ error: 'Banner text is required' }, 400);
+  const action = payload.action === undefined ? 'create' : payload.action;
+  const id = typeof payload.id === 'string' ? payload.id.trim().slice(0, 64) : '';
+  const text = typeof payload.text === 'string' ? payload.text.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+  if (action !== 'create' && action !== 'edit' && action !== 'delete') {
+    return authJson({ error: 'Unsupported announcement action' }, 400);
+  }
+  if (action !== 'delete' && !text) return authJson({ error: 'Announcement text is required' }, 400);
+  if (action !== 'create' && !id) return authJson({ error: 'Announcement id is required' }, 400);
 
   await ensureSpiceSchema(env);
-  const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare(
-      'INSERT INTO commune_banners (id, text, author, created_at) VALUES (?1, ?2, ?3, ?4)',
-    ).bind(crypto.randomUUID(), text, user.username, now),
-    env.DB.prepare(
-      `DELETE FROM commune_banners
-       WHERE id NOT IN (SELECT id FROM commune_banners ORDER BY created_at DESC, id DESC LIMIT 6)`,
-    ),
-  ]);
+  if (action === 'create') {
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO commune_banners (id, text, author, created_at) VALUES (?1, ?2, ?3, ?4)',
+      ).bind(crypto.randomUUID(), text, user.username, now),
+      env.DB.prepare(
+        `DELETE FROM commune_banners
+         WHERE id NOT IN (SELECT id FROM commune_banners ORDER BY created_at DESC, id DESC LIMIT 6)`,
+      ),
+    ]);
+  } else if (action === 'edit') {
+    const result = await env.DB.prepare(
+      'UPDATE commune_banners SET text = ?1 WHERE id = ?2',
+    ).bind(text, id).run();
+    if (!result.meta.changes) return authJson({ error: 'Announcement not found' }, 404);
+  } else {
+    const result = await env.DB.prepare(
+      'DELETE FROM commune_banners WHERE id = ?1',
+    ).bind(id).run();
+    if (!result.meta.changes) return authJson({ error: 'Announcement not found' }, 404);
+  }
+
   const banners = await loadCommuneBanners(env);
   try {
     await env.COMMUNE_ROOM.getByName('main-plaza').publishBanners(banners);
@@ -2402,7 +2421,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/commune/banners' && request.method === 'POST') {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleCommuneBannerCreate(request, env, user);
+    return handleCommuneBannerMutation(request, env, user);
   }
   if (path === '/api/commune/loadout' && request.method === 'POST') {
     const user = await authBearerUser(request, env);

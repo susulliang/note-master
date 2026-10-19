@@ -47,7 +47,9 @@ import {
   communeSocketUrl,
   createCommuneBanner,
   createCommuneSocketTicket,
+  deleteCommuneBanner,
   DEFAULT_AVATAR,
+  editCommuneBanner,
   fetchCommuneTreeholeFeedback,
   fetchCardCollection,
   pickSpiceDrop,
@@ -605,6 +607,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerDraft, setBannerDraft] = useState('');
   const [bannerSending, setBannerSending] = useState(false);
+  const [editingBannerId, setEditingBannerId] = useState<string | null>(null);
+  const [bannerEditDraft, setBannerEditDraft] = useState('');
+  const [bannerDeleteId, setBannerDeleteId] = useState<string | null>(null);
+  const [bannerUpdating, setBannerUpdating] = useState(false);
+  const [bannerDeleting, setBannerDeleting] = useState(false);
   const [treeholeCategory, setTreeholeCategory] = useState<CommuneTreeholeCategory>('app-feedback');
   const [treeholeMessage, setTreeholeMessage] = useState('');
   const [treeholeSending, setTreeholeSending] = useState(false);
@@ -888,6 +895,42 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       setBannerSending(false);
     }
   }, [bannerDraft, bannerSending]);
+
+  const saveBannerEdit = async (id: string) => {
+    const text = bannerEditDraft.trim();
+    if (!text || bannerUpdating) return;
+    setBannerUpdating(true);
+    try {
+      const shared = await editCommuneBanner(id, text);
+      setBanners(parseBanners(shared));
+      setEditingBannerId(null);
+      setBannerEditDraft('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to update the town notice.';
+      setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message }]);
+    } finally {
+      setBannerUpdating(false);
+    }
+  };
+
+  const removeBanner = async (id: string) => {
+    if (bannerDeleting) return;
+    setBannerDeleting(true);
+    try {
+      const shared = await deleteCommuneBanner(id);
+      setBanners(parseBanners(shared));
+      setBannerDeleteId(null);
+      if (editingBannerId === id) {
+        setEditingBannerId(null);
+        setBannerEditDraft('');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to remove the town notice.';
+      setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message }]);
+    } finally {
+      setBannerDeleting(false);
+    }
+  };
 
   const submitTreeholeNote = async () => {
     const message = treeholeMessage.trim();
@@ -3128,17 +3171,35 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             <div className="mt-3">
               <div className="mb-3 flex items-center justify-between gap-3 pr-8">
                 <div className="flex items-center gap-2.5">
-                  <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
+                  <span className={cn(
+                    'grid size-9 place-items-center',
+                    boardTab === 'announcements'
+                      ? 'border-2 border-[#785a3c] bg-[#dfc79a] text-[#694d32] shadow-[2px_2px_0_#443322]'
+                      : 'rounded-xl bg-primary/12 text-primary'
+                  )}>
                     {boardTab === 'roster' ? <CalendarDays className="size-4" /> : <Megaphone className="size-4" />}
                   </span>
                   <div>
-                    <p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-muted-foreground">THE COMMONS</p>
-                    <h3 className="font-mono text-sm font-extrabold text-foreground">
-                      {boardTab === 'roster' ? 'Agent Roster Board' : 'Town Announcements'}
+                    <p className={cn(
+                      'font-mono text-[9px] font-bold uppercase tracking-[0.16em]',
+                      boardTab === 'announcements' ? 'text-[#92734c]' : 'text-muted-foreground'
+                    )}>
+                      {boardTab === 'roster' ? 'THE COMMONS' : 'TOWN HALL BULLETIN'}
+                    </p>
+                    <h3 className={cn(
+                      'font-mono text-sm font-extrabold',
+                      boardTab === 'announcements' ? 'text-[#423421]' : 'text-foreground'
+                    )}>
+                      {boardTab === 'roster' ? 'Agent Roster Board' : 'Town Hall News'}
                     </h3>
                   </div>
                 </div>
-                <div className="flex rounded-lg border border-border/70 bg-background/55 p-0.5">
+                <div className={cn(
+                  'flex p-0.5',
+                  boardTab === 'announcements'
+                    ? 'border-2 border-[#785a3c] bg-[#d4b98a] shadow-[2px_2px_0_#443322]'
+                    : 'rounded-lg border border-border/70 bg-background/55'
+                )}>
                   {([
                     ['roster', 'Shifts'],
                     ['announcements', 'News'],
@@ -3148,8 +3209,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       type="button"
                       onClick={() => setBoardTab(tab)}
                       className={cn(
-                        'rounded-md px-2.5 py-1.5 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                        boardTab === tab ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                        'px-2.5 py-1.5 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        boardTab === 'announcements'
+                          ? tab === boardTab
+                            ? 'bg-[#735638] text-[#f8eccf]'
+                            : 'text-[#715536] hover:bg-[#ead6ad]'
+                          : cn(
+                            'rounded-md',
+                            tab === boardTab
+                              ? 'bg-primary/20 text-primary'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )
                       )}
                     >
                       {label}
@@ -3266,48 +3336,169 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                   </div>
                 </section>
               ) : (
-                <section aria-label="Town announcements">
-                  <p className="mb-3 text-[11px] text-muted-foreground">Community notes hung for everyone passing through the square.</p>
-                  <div className="max-h-64 space-y-2 overflow-y-auto">
+                <section aria-label="Town Hall News" className="space-y-3">
+                  <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.7)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.16em]">
+                        TOWN HALL / PINNED NOTICES
+                      </p>
+                      <span className="shrink-0 border border-[#dfc38f]/50 bg-[#59432f] px-1.5 py-0.5 font-mono text-[9px] font-bold">
+                        {banners.length}/6
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">
+                    Short town updates are pinned here and on the wooden board in the square.
+                  </p>
+                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                     {banners.length === 0 && (
-                      <p className="rounded-lg border border-dashed border-border/60 p-5 text-center text-xs text-muted-foreground">
-                        No announcements yet. Check back after the next town meeting.
+                      <p className="border-2 border-dashed border-[#96774f] bg-[#e8d3a9] p-5 text-center font-['Schoolbell'] text-sm text-[#6f5537] shadow-[3px_3px_0_rgba(51,39,25,0.25)]">
+                        The board is clear. Pin the first town notice.
                       </p>
                     )}
-                    {banners.map((banner) => (
-                      <div
-                        key={banner.id}
-                        className="rounded-xl border border-primary/25 bg-primary/10 px-3 py-2"
-                        style={{ borderLeft: `4px solid hsl(${banner.hue} 70% 55%)` }}
-                      >
-                        <p className="text-xs font-semibold text-foreground">{banner.text}</p>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          — {banner.author} · {new Date(banner.at).toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
+                    {banners.map((banner) => {
+                      const editing = editingBannerId === banner.id;
+                      const confirmingDelete = bannerDeleteId === banner.id;
+                      return (
+                        <article
+                          key={banner.id}
+                          className="relative border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2.5 text-[#3c3021] shadow-[3px_3px_0_rgba(51,39,25,0.45)]"
+                          style={{ borderLeftWidth: 5, borderLeftColor: `hsl(${banner.hue} 42% 43%)` }}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="absolute left-2 top-2 size-2 border border-[#784438] bg-[#bc6850]"
+                          />
+                          <div className="flex flex-wrap items-start gap-2 pl-3">
+                            <div className="min-w-0 flex-1">
+                              {editing ? (
+                                <input
+                                  autoFocus
+                                  value={bannerEditDraft}
+                                  onChange={(event) => setBannerEditDraft(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter') void saveBannerEdit(banner.id);
+                                    event.stopPropagation();
+                                  }}
+                                  maxLength={80}
+                                  aria-label="Edit town announcement"
+                                  className="h-9 w-full border-2 border-[#8b6a44] bg-[#fff4d9] px-2 font-['Schoolbell'] text-sm text-[#3c3021] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+                                />
+                              ) : (
+                                <p className="whitespace-pre-wrap break-words font-['Schoolbell'] text-sm font-bold leading-relaxed">
+                                  {banner.text}
+                                </p>
+                              )}
+                              <p className="mt-1.5 font-mono text-[9px] text-[#715b3e]">
+                                PINNED BY {banner.author.toUpperCase()} · {new Date(banner.at).toLocaleString()}
+                              </p>
+                            </div>
+                            {isAdmin && (
+                              <div className="flex shrink-0 gap-1">
+                                {editing ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => void saveBannerEdit(banner.id)}
+                                      disabled={!bannerEditDraft.trim() || bannerUpdating}
+                                      className="border-2 border-[#5b6139] bg-[#788c5d] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#fff4d9] shadow-[2px_2px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                    >
+                                      {bannerUpdating ? 'Saving…' : 'Save'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingBannerId(null);
+                                        setBannerEditDraft('');
+                                      }}
+                                      disabled={bannerUpdating}
+                                      className="border-2 border-[#8b6a44] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBannerDeleteId(null);
+                                        setEditingBannerId(banner.id);
+                                        setBannerEditDraft(banner.text);
+                                      }}
+                                      className="border border-[#92734c] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] hover:bg-[#f8eccf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setBannerDeleteId(banner.id)}
+                                      className="border border-[#9b6250] bg-[#efd0b7] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#714536] hover:bg-[#f7dfc9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                    >
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {isAdmin && confirmingDelete && (
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#bca27a] pt-2">
+                              <span className="font-mono text-[9px] font-bold text-[#715335]">PULL THIS NOTICE DOWN?</span>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setBannerDeleteId(null)}
+                                  disabled={bannerDeleting}
+                                  className="border border-[#92734c] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                >
+                                  Keep
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void removeBanner(banner.id)}
+                                  disabled={bannerDeleting}
+                                  className="border-2 border-[#8a493c] bg-[#ae5b48] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#fff4d9] shadow-[2px_2px_0_#56372c] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                >
+                                  {bannerDeleting ? 'Removing…' : 'Remove'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
                   </div>
-                  {isAdmin && (
-                    <div className="mt-3 flex gap-1.5">
-                      <input
-                        value={bannerDraft}
-                        onChange={(event) => setBannerDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') hangBanner();
-                          event.stopPropagation();
-                        }}
-                        maxLength={80}
-                        placeholder="Post a town announcement…"
-                        className="glass-field h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      />
-                      <button
-                        type="button"
-                        onClick={hangBanner}
-                        disabled={!bannerDraft.trim() || bannerSending}
-                        className="glass-btn h-9 rounded-lg border border-primary/40 bg-primary px-3 text-[11px] font-bold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
-                      >
-                        {bannerSending ? 'Posting…' : 'Post'}
-                      </button>
+                  {isAdmin && !editingBannerId && (
+                    <div className="border-2 border-[#876641] bg-[#dcc399] p-3 shadow-[3px_3px_0_rgba(51,39,25,0.4)]">
+                      <label className="block">
+                        <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.14em] text-[#705335]">
+                          PIN A NEW NOTICE
+                        </span>
+                        <input
+                          value={bannerDraft}
+                          onChange={(event) => setBannerDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') hangBanner();
+                            event.stopPropagation();
+                          }}
+                          maxLength={80}
+                          placeholder="Write a short update for the town…"
+                          aria-label="New town announcement"
+                          className="h-10 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2.5 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+                        />
+                      </label>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="font-mono text-[9px] text-[#785e3e]">{bannerDraft.length}/80 characters</span>
+                        <button
+                          type="button"
+                          onClick={hangBanner}
+                          disabled={!bannerDraft.trim() || bannerSending}
+                          className="border-2 border-[#4f5a37] bg-[#788c5d] px-3 py-1.5 font-mono text-[10px] font-bold uppercase text-[#fff4d9] shadow-[3px_3px_0_#433d28] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                        >
+                          {bannerSending ? 'Pinning…' : 'Pin notice'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </section>
@@ -3615,9 +3806,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
       {/* Banner ticker — hung banners also scroll along the top edge */}
       {bannerWords.length > 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-4 w-[min(680px,calc(100%-200px))] -translate-x-1/2 overflow-hidden rounded-full border border-border/70 bg-card/80 py-1.5 shadow-sm backdrop-blur-xl">
-          <p className="truncate text-center font-mono text-[11px] font-semibold text-primary">
-            📣 {bannerWords[bannerWords.length - 1]}
+        <div className="pointer-events-none absolute left-1/2 top-4 flex w-[min(680px,calc(100%-200px))] -translate-x-1/2 items-center gap-2 overflow-hidden border-2 border-[#725338] bg-[#f0dfb8] px-2.5 py-2 shadow-[4px_4px_0_rgba(36,28,19,0.38)]">
+          <span className="shrink-0 border-2 border-[#5d432d] bg-[#735638] px-1.5 py-0.5 font-mono text-[8px] font-black uppercase tracking-wider text-[#f6e7c8]">
+            News
+          </span>
+          <p className="truncate font-['Schoolbell'] text-sm font-bold text-[#493923]">
+            {bannerWords[bannerWords.length - 1]}
           </p>
         </div>
       )}
@@ -4049,18 +4243,28 @@ function draw(
     fn: () => {
       const bx = BOARD.x;
       const by = BOARD.y;
-      drawGroundShadow(ctx, bx, by + 91, 82, 14, 0.2);
+      drawGroundShadow(ctx, bx, by + 91, 84, 14, 0.22);
       // posts
-      ctx.fillStyle = '#876b54';
+      ctx.fillStyle = '#694a30';
       ctx.fillRect(bx - 70, by + 20, 12, 70);
       ctx.fillRect(bx + 58, by + 20, 12, 70);
-      // frame + cork
-      roundRect(ctx, bx - BOARD.w / 2, by - BOARD.h / 2, BOARD.w, BOARD.h, 10);
-      ctx.fillStyle = '#a87f5c';
-      ctx.fill();
-      roundRect(ctx, bx - BOARD.w / 2 + 8, by - BOARD.h / 2 + 8, BOARD.w - 16, BOARD.h - 16, 6);
+      ctx.fillRect(bx - 74, by + 76, 20, 8);
+      ctx.fillRect(bx + 54, by + 76, 20, 8);
+      // Square timber frame and cork backing.
+      ctx.fillStyle = '#62472f';
+      ctx.fillRect(bx - 100, by - 70, 200, 140);
+      ctx.fillStyle = '#b1845c';
+      ctx.fillRect(bx - 95, by - 65, 190, 130);
+      ctx.fillStyle = '#725338';
+      ctx.fillRect(bx - 88, by - 58, 176, 116);
       ctx.fillStyle = '#d8b889';
-      ctx.fill();
+      ctx.fillRect(bx - 83, by - 53, 166, 106);
+      // Four square nail heads make the sign read as built into the town.
+      ctx.fillStyle = '#e3c999';
+      ctx.fillRect(bx - 92, by - 62, 4, 4);
+      ctx.fillRect(bx + 88, by - 62, 4, 4);
+      ctx.fillRect(bx - 92, by + 58, 4, 4);
+      ctx.fillRect(bx + 88, by + 58, 4, 4);
       // hung banners (up to 3 papers)
       const shown = banners.slice(-3);
       shown.forEach((b, i) => {
@@ -4069,33 +4273,42 @@ function draw(
         ctx.save();
         ctx.translate(px, py);
         ctx.rotate(((i % 2) - 0.5) * 0.12);
-        ctx.fillStyle = `hsl(${b.hue} 75% 78%)`;
+        ctx.fillStyle = '#8b6845';
+        ctx.fillRect(-2, -2, 48, 60);
+        ctx.fillStyle = ['#f3dfb8', '#e8d1a2', '#f7e8c8'][i % 3];
         ctx.fillRect(0, 0, 44, 56);
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillStyle = `hsl(${b.hue} 55% 43%)`;
+        ctx.fillRect(20, 1, 5, 4);
+        ctx.fillStyle = '#493927';
         ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
         ctx.textAlign = 'center';
-        const words = b.text.split(' ');
+        const clippedText = b.text.length > 42 ? `${b.text.slice(0, 39)}…` : b.text;
+        const words = clippedText.split(/\s+/);
         let line = '';
         let ly = 12;
+        let overflow = false;
         for (const w of words) {
-          if ((line + ' ' + w).trim().length > 9) {
-            ctx.fillText(line.trim(), 22, ly);
+          if ((line + ' ' + w).trim().length > 8 && line) {
+            ctx.fillText(line.trim(), 22, ly, 36);
             line = w;
-            ly += 9;
-            if (ly > 50) break;
+            ly += 8;
+            if (ly > 44) {
+              overflow = true;
+              break;
+            }
           } else line += ' ' + w;
         }
-        if (ly <= 50) ctx.fillText(line.trim(), 22, ly);
+        if (line && ly <= 44) ctx.fillText(line.trim(), 22, ly, 36);
+        if (overflow) ctx.fillText('…', 22, 52);
         ctx.restore();
       });
-      // label
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      roundRect(ctx, bx - 46, by + BOARD.h / 2 + 22, 92, 18, 9);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
+      // Small wooden nameplate beneath the papers.
+      ctx.fillStyle = '#5d432d';
+      ctx.fillRect(bx - 50, by + BOARD.h / 2 + 21, 100, 20);
+      ctx.fillStyle = '#dfc496';
       ctx.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
       ctx.textAlign = 'center';
-      ctx.fillText('BULLETIN', bx, by + BOARD.h / 2 + 35);
+      ctx.fillText('TOWN HALL NEWS', bx, by + BOARD.h / 2 + 35);
     },
   });
 
