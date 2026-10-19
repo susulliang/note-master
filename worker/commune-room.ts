@@ -58,6 +58,14 @@ interface PublicChatRow {
   sent_at: number;
 }
 
+interface CommuneCarPosition {
+  id: string;
+  x: number;
+  y: number;
+  heading: number;
+  lastMoveAt: number;
+}
+
 type RoomEvent = Record<string, unknown>;
 
 const ROOM_TICKET_TTL_MS = 60_000;
@@ -68,11 +76,64 @@ const MAX_MESSAGE_LENGTH = 90;
 const MAX_SOCKET_MESSAGE_LENGTH = 2_048;
 const COMMUNE_WORLD_W = 3_200;
 const COMMUNE_WORLD_H = 2_400;
-const PARKED_CAR_INTERACT_RANGE = 128;
-const PARKED_CARS: Record<string, { x: number; y: number }> = {
-  'meadow-cruiser': { x: 1740, y: 820 },
-  'orchard-wagon': { x: 2300, y: 1880 },
+const PARKED_CAR_INTERACT_RANGE = 118;
+const PARKED_CAR_EXIT_DISTANCE = 100;
+const PARKED_CAR_SPEED = 220;
+const CAR_HALF_WIDTH = 39;
+const CAR_HALF_LENGTH = 59;
+const PARKED_CARS: Record<string, Omit<CommuneCarPosition, 'id'>> = {
+  'meadow-cruiser': { x: 1740, y: 820, heading: 0 },
+  'orchard-wagon': { x: 2300, y: 1880, heading: 0 },
 };
+const CAR_STATIC_BLOCKERS: { x: number; y: number; w: number; h: number }[] = [
+  { x: 650, y: 96, w: 300, h: 134 },
+  { x: 161, y: 206, w: 170, h: 184 },
+  { x: 1245, y: 206, w: 170, h: 184 },
+  { x: 155, y: 864, w: 150, h: 176 },
+  { x: 1295, y: 864, w: 150, h: 176 },
+  { x: 2318, y: 674, w: 64, h: 38 },
+  { x: 1840, y: 1314, w: 62, h: 36 },
+  { x: 2672, y: 1746, w: 56, h: 46 },
+  { x: 736, y: 312, w: 128, h: 36 },
+  { x: 330, y: 742, w: 140, h: 36 },
+  { x: 90, y: 1062, w: 246, h: 18 },
+  { x: 1310, y: 1062, w: 216, h: 18 },
+  { x: 1454, y: 1386, w: 52, h: 54 },
+];
+const CAR_BLOCKING_TREES: [number, number][] = [
+  [1740, 250], [1830, 310], [1940, 235], [2070, 285], [2180, 220],
+  [2350, 310], [2480, 250], [2800, 240], [2940, 310],
+  [1670, 1120], [1780, 1080], [1900, 1120], [2050, 1150],
+  [1630, 2050], [1760, 2110], [1900, 2040], [2050, 2120],
+  [2290, 2220], [2460, 2130], [2660, 2200], [2840, 2110], [3000, 2210],
+];
+
+function canCarOccupy(x: number, y: number, carId: string, cars: CommuneCarPosition[]): boolean {
+  const car = cars.find((item) => item.id === carId);
+  const heading = car?.heading ?? 0;
+  const halfX = Math.abs(Math.cos(heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(heading)) * CAR_HALF_LENGTH;
+  const halfY = Math.abs(Math.sin(heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(heading)) * CAR_HALF_LENGTH;
+  if (x < halfX || x > COMMUNE_WORLD_W - halfX || y < 144 + halfY || y > COMMUNE_WORLD_H - halfY) return false;
+  if (((x - 800) / (96 + halfX)) ** 2 + ((y - 600) / (96 + halfY)) ** 2 < 1) return false;
+  const ponds = [
+    { x: 170, y: 640, rx: 115, ry: 75 },
+    { x: 2580, y: 790, rx: 150, ry: 102 },
+  ];
+  if (ponds.some((pond) => ((x - pond.x) / (pond.rx + halfX)) ** 2 + ((y - pond.y) / (pond.ry + halfY)) ** 2 < 1)) return false;
+  if (CAR_STATIC_BLOCKERS.some((blocker) =>
+    x > blocker.x - halfX && x < blocker.x + blocker.w + halfX
+    && y > blocker.y - halfY && y < blocker.y + blocker.h + halfY
+  )) return false;
+  if (CAR_BLOCKING_TREES.some(([treeX, treeY]) =>
+    x > treeX - 30 - halfX && x < treeX + 30 + halfX
+    && y > treeY - 42 - halfY && y < treeY + 4 + halfY
+  )) return false;
+  return !cars.some((car) =>
+    car.id !== carId
+    && Math.abs(x - car.x) < halfX + Math.abs(Math.cos(car.heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(car.heading)) * CAR_HALF_LENGTH
+    && Math.abs(y - car.y) < halfY + Math.abs(Math.sin(car.heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(car.heading)) * CAR_HALF_LENGTH
+  );
+}
 
 function normalizeLoadout(input: unknown): CommuneRoomLoadout {
   const value = input && typeof input === 'object' ? input as Record<string, unknown> : {};
@@ -147,6 +208,24 @@ export class CommuneRoom extends DurableObject<Env> {
           sent_at INTEGER NOT NULL
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_parked_cars (
+          id TEXT PRIMARY KEY,
+          x REAL NOT NULL,
+          y REAL NOT NULL,
+          heading REAL NOT NULL DEFAULT 0,
+          last_move_at INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      for (const [id, car] of Object.entries(PARKED_CARS)) {
+        this.ctx.storage.sql.exec(
+          'INSERT OR IGNORE INTO commune_parked_cars (id, x, y, heading) VALUES (?, ?, ?, ?)',
+          id,
+          car.x,
+          car.y,
+          car.heading,
+        );
+      }
     });
   }
 
@@ -220,6 +299,7 @@ export class CommuneRoom extends DurableObject<Env> {
       type: 'welcome',
       self: profile.username,
       others: this.listAgents(profile.username),
+      cars: this.listCarPositions(),
     });
     const recentMessages = this.ctx.storage.sql.exec<PublicChatRow>(
       `SELECT id, username, message, sent_at
@@ -270,8 +350,8 @@ export class CommuneRoom extends DurableObject<Env> {
     if (event.type === 'car_enter') {
       const carId = typeof event.carId === 'string' ? event.carId : '';
       const car = Object.prototype.hasOwnProperty.call(PARKED_CARS, carId)
-        ? PARKED_CARS[carId]
-        : undefined;
+        ? this.getCarPosition(carId)
+        : null;
       if (!car || current.carId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
         send(ws, { type: 'error', code: 'car_unavailable', message: 'You cannot enter that car right now.' });
         return;
@@ -301,19 +381,22 @@ export class CommuneRoom extends DurableObject<Env> {
         y: car.y,
         status: 'having a private car conversation',
         seenAt: now,
+        lastMoveAt: now,
       };
+      this.ctx.storage.sql.exec('UPDATE commune_parked_cars SET last_move_at = ? WHERE id = ?', now, carId);
       ws.serializeAttachment(updated);
       this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
-      send(ws, { type: 'car_state', carId, seat, x: car.x, y: car.y });
+      send(ws, { type: 'car_state', carId, seat, x: car.x, y: car.y, heading: car.heading });
       return;
     }
 
     if (event.type === 'car_exit') {
       if (!current.carId || current.carSeat === null || current.carSeat === undefined) return;
-      const car = PARKED_CARS[current.carId];
+      const car = this.getCarPosition(current.carId);
       if (!car) return;
-      const x = car.x + (current.carSeat === 0 ? -106 : 106);
-      const y = car.y + 42;
+      const side = current.carSeat === 0 ? -PARKED_CAR_EXIT_DISTANCE : PARKED_CAR_EXIT_DISTANCE;
+      const x = car.x + Math.cos(car.heading) * side;
+      const y = car.y + Math.sin(car.heading) * side;
       const updated: Presence = {
         ...current,
         carId: null,
@@ -326,6 +409,58 @@ export class CommuneRoom extends DurableObject<Env> {
       ws.serializeAttachment(updated);
       this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
       send(ws, { type: 'car_state', carId: null, seat: null, x, y });
+      return;
+    }
+
+    if (event.type === 'car_move') {
+      if (!current.carId) return;
+      const dx = Number(event.dx);
+      const dy = Number(event.dy);
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+      const directionLength = Math.hypot(dx, dy);
+      const car = this.getCarPosition(current.carId);
+      if (!car || !Number.isFinite(directionLength) || now - car.lastMoveAt < MOVE_THROTTLE_MS || directionLength < 0.1) return;
+      const elapsedMs = Math.min(150, Math.max(0, now - car.lastMoveAt));
+      const travel = PARKED_CAR_SPEED * elapsedMs / 1000;
+      const x = car.x + (dx / directionLength) * travel;
+      const y = car.y + (dy / directionLength) * travel;
+      const cars = this.listCarPositions();
+      const heading = Math.atan2(dy, dx) + Math.PI / 2;
+      if (!canCarOccupy(x, y, current.carId, cars.map((item) =>
+        item.id === current.carId ? { ...item, heading } : item
+      ))) {
+        this.ctx.storage.sql.exec(
+          'UPDATE commune_parked_cars SET last_move_at = ? WHERE id = ?',
+          now,
+          current.carId,
+        );
+        const updated = { ...current, seenAt: now, lastMoveAt: now };
+        ws.serializeAttachment(updated);
+        return;
+      }
+
+      this.ctx.storage.sql.exec(
+        'UPDATE commune_parked_cars SET x = ?, y = ?, heading = ?, last_move_at = ? WHERE id = ?',
+        x,
+        y,
+        heading,
+        now,
+        current.carId,
+      );
+      for (const occupantSocket of this.ctx.getWebSockets()) {
+        const occupant = attachment(occupantSocket);
+        if (!occupant || occupant.carId !== current.carId) continue;
+        const updated: Presence = {
+          ...occupant,
+          x,
+          y,
+          seenAt: now,
+          lastMoveAt: now,
+        };
+        occupantSocket.serializeAttachment(updated);
+        this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      }
+      this.broadcast({ type: 'car_update', carId: current.carId, x, y, heading, at: now });
       return;
     }
 
@@ -366,10 +501,7 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     if (event.type === 'move') {
-      if (current.carId) {
-        send(ws, { type: 'error', code: 'car_exit_first', message: 'Step out of the car before walking.' });
-        return;
-      }
+      if (current.carId) return;
       if (now - current.lastMoveAt < MOVE_THROTTLE_MS) return;
       const x = Number(event.x);
       const y = Number(event.y);
@@ -512,6 +644,19 @@ export class CommuneRoom extends DurableObject<Env> {
   private toAgent(presence: Presence): CommuneRoomAgent {
     const { seenAt, lastMoveAt: _lastMoveAt, lastChatAt: _lastChatAt, ...agent } = presence;
     return { ...agent, seenAgo: Math.max(0, Date.now() - seenAt) };
+  }
+
+  private getCarPosition(carId: string): CommuneCarPosition | null {
+    return this.ctx.storage.sql.exec<CommuneCarPosition>(
+      'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars WHERE id = ?',
+      carId,
+    ).toArray()[0] ?? null;
+  }
+
+  private listCarPositions(): CommuneCarPosition[] {
+    return this.ctx.storage.sql.exec<CommuneCarPosition>(
+      'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars ORDER BY id',
+    ).toArray();
   }
 
   private listAgents(exceptUsername?: string): CommuneRoomAgent[] {

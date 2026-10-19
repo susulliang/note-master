@@ -115,14 +115,27 @@ interface ParkedCar {
   label: string;
   x: number;
   y: number;
+  heading: number;
+  targetX: number;
+  targetY: number;
+  targetHeading: number;
   body: string;
   trim: string;
 }
 
 const PARKED_CARS: ParkedCar[] = [
-  { id: 'meadow-cruiser', label: 'Meadow Cruiser', x: 1740, y: 820, body: '#6288a4', trim: '#d5e2e7' },
-  { id: 'orchard-wagon', label: 'Orchard Wagon', x: 2300, y: 1880, body: '#b76552', trim: '#f0d7b3' },
+  { id: 'meadow-cruiser', label: 'Meadow Coupe', x: 1740, y: 820, heading: 0, targetX: 1740, targetY: 820, targetHeading: 0, body: '#6288a4', trim: '#d5e2e7' },
+  { id: 'orchard-wagon', label: 'Orchard Coupe', x: 2300, y: 1880, heading: 0, targetX: 2300, targetY: 1880, targetHeading: 0, body: '#b76552', trim: '#f0d7b3' },
 ];
+const CAR_HALF_WIDTH = 39;
+const CAR_HALF_LENGTH = 59;
+const CAR_EXIT_DISTANCE = 100;
+function carHalfExtents(heading: number) {
+  return {
+    x: Math.abs(Math.cos(heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(heading)) * CAR_HALF_LENGTH,
+    y: Math.abs(Math.sin(heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(heading)) * CAR_HALF_LENGTH,
+  };
+}
 const TREEHOLE = { x: 1480, y: 1440, range: 108 };
 
 interface CommunePanelProps {
@@ -205,7 +218,6 @@ const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 90, y: 1062, w: 246, h: 18 }, // west fence
   { x: 1310, y: 1062, w: 216, h: 18 }, // east fence
   { x: TREEHOLE.x - 26, y: TREEHOLE.y - 54, w: 52, h: 54 }, // treehole oak trunk
-  ...PARKED_CARS.map((car) => ({ x: car.x - 70, y: car.y - 32, w: 140, h: 64 })),
 ];
 /** Oaks drawn dynamically (y-sorted with agents). */
 const TREES: [number, number][] = [
@@ -316,6 +328,7 @@ interface DuckIncident { id: number; x: number; y: number; anchorX: number; vx: 
 const DUCK_LIFE_MS = 20_000;
 const DUCK_INCIDENT_LIFETIME_MS = 13_000;
 const SPEED = 240; // player px/s
+const CAR_MOVE_INTERVAL_MS = 80;
 const NPC_SPEED = 90;
 interface Banner extends CommuneBanner {
   hue: number;
@@ -1112,8 +1125,34 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }
           if (event.type === 'welcome') {
             applySnapshot(Array.isArray(event.others) ? event.others as CommuneAgent[] : []);
+            if (Array.isArray(event.cars)) {
+              for (const value of event.cars) {
+                if (!value || typeof value !== 'object') continue;
+                const incoming = value as Record<string, unknown>;
+                if (incoming.id !== 'meadow-cruiser' && incoming.id !== 'orchard-wagon') continue;
+                const car = PARKED_CARS.find((item) => item.id === incoming.id);
+                if (!car || !Number.isFinite(Number(incoming.x)) || !Number.isFinite(Number(incoming.y))) continue;
+                car.x = Number(incoming.x);
+                car.y = Number(incoming.y);
+                car.heading = Number(incoming.heading) || 0;
+                car.targetX = car.x;
+                car.targetY = car.y;
+                car.targetHeading = car.heading;
+              }
+            }
           } else if (event.type === 'drops' && Array.isArray(event.drops)) {
             dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
+          } else if (event.type === 'car_update' && typeof event.carId === 'string') {
+            const car = PARKED_CARS.find((item) => item.id === event.carId);
+            if (car && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
+              car.targetX = Number(event.x);
+              car.targetY = Number(event.y);
+              car.targetHeading = Number(event.heading) || 0;
+              if (playerRef.current.carId === car.id) {
+                playerRef.current.x = car.targetX;
+                playerRef.current.y = car.targetY;
+              }
+            }
           } else if (event.type === 'agent_join' || event.type === 'agent_update') {
             if (event.agent && typeof event.agent === 'object') upsertAgent(event.agent as CommuneAgent);
           } else if (event.type === 'agent_leave' && typeof event.username === 'string') {
@@ -1170,6 +1209,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             playerRef.current.carSeat = nextCar?.seat ?? null;
             playerRef.current.x = Number(event.x) || playerRef.current.x;
             playerRef.current.y = Number(event.y) || playerRef.current.y;
+            if (nextCar) {
+              const car = PARKED_CARS.find((item) => item.id === nextCar.carId);
+              if (car && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
+                car.x = Number(event.x);
+                car.y = Number(event.y);
+                car.heading = Number(event.heading) || 0;
+                car.targetX = car.x;
+                car.targetY = car.y;
+                car.targetHeading = car.heading;
+              }
+            }
             clickTargetRef.current = null;
             keysRef.current.clear();
             if (nextCar) {
@@ -1200,6 +1250,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               handsRef.current = null;
               setHands(null);
             }
+          } else if (event.type === 'error' && event.code === 'car_exit_first') {
+            return;
           } else if (event.type === 'error' && typeof event.message === 'string') {
             setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: event.message as string }]);
           }
@@ -1211,8 +1263,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           if (carSeatRef.current) {
             const car = PARKED_CARS.find((item) => item.id === carSeatRef.current?.carId);
             if (car) {
-              playerRef.current.x = car.x + (carSeatRef.current.seat === 0 ? -106 : 106);
-              playerRef.current.y = car.y + 42;
+              const side = carSeatRef.current.seat === 0 ? -CAR_EXIT_DISTANCE : CAR_EXIT_DISTANCE;
+              playerRef.current.x = car.x + Math.cos(car.heading) * side;
+              playerRef.current.y = car.y + Math.sin(car.heading) * side;
             }
             setCarSeat(null);
             playerRef.current.carId = null;
@@ -1279,7 +1332,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             const car = PARKED_CARS.find((item) => item.id === action.carId);
             return !carSeatRef.current
               && !!car
-              && Math.hypot(player.x - car.x, player.y - car.y) < 128
+              && Math.hypot(player.x - car.x, player.y - car.y) < 118
               && [...remoteRef.current.values()].filter((remote) => remote.agent.carId === action.carId).length < 2;
           }
           case 'exit-car':
@@ -1460,6 +1513,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
       if (panelRef.current) return; // walking disabled while a panel is open
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        if (playerRef.current.carId) {
+          keysRef.current.add(e.code);
+          return;
+        }
         if (sittingRef.current) sittingRef.current = null; // moving stands up
         if (focusedNpcRef.current) {
           focusedNpcRef.current = null;
@@ -1518,6 +1575,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     let raf = 0;
     let last = performance.now();
     let lastFrame = 0;
+    let lastCarMoveSentAt = 0;
     let cameraReady = false;
     let lightingMinute = -1;
     let nightOpacity = 0;
@@ -1542,12 +1600,32 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       last = now;
       lastFrame = now;
       const tSec = now / 1000;
+      const carFollow = 1 - Math.exp(-dt * 14);
+      for (const car of PARKED_CARS) {
+        car.x += (car.targetX - car.x) * carFollow;
+        car.y += (car.targetY - car.y) * carFollow;
+        const headingDelta = Math.atan2(
+          Math.sin(car.targetHeading - car.heading),
+          Math.cos(car.targetHeading - car.heading)
+        );
+        car.heading += headingDelta * carFollow;
+      }
 
       /* update player */
       const player = playerRef.current;
       const hands = handsRef.current;
       const sitting = sittingRef.current;
-      if (sitting) {
+      if (player.carId) {
+        const keys = keysRef.current;
+        const dx = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+        const dy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
+        const directionLength = Math.hypot(dx, dy);
+        player.moving = directionLength > 0;
+        if (directionLength > 0 && !panelRef.current && !chatFocusedRef.current && wallNow - lastCarMoveSentAt >= CAR_MOVE_INTERVAL_MS) {
+          sendRoomEvent({ type: 'car_move', dx: dx / directionLength, dy: dy / directionLength });
+          lastCarMoveSentAt = wallNow;
+        }
+      } else if (sitting) {
         // Pinned to the bench seat; E or a move key stands up.
         player.x = sitting.x;
         player.y = sitting.y;
@@ -1738,7 +1816,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             distance: Math.hypot(player.x - car.x, player.y - car.y),
             occupied: [...remoteRef.current.values()].filter((remote) => remote.agent.carId === car.id).length,
           }))
-          .filter(({ distance, occupied }) => distance < 128 && occupied < 2)
+          .filter(({ distance, occupied }) => distance < 118 && occupied < 2)
           .sort((a, b) => a.distance - b.distance)[0]?.car ?? null
         : null;
       const nearBench = !sittingRef.current
@@ -1771,7 +1849,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       const actions: CommuneAction[] = [];
 
       if (carSeatRef.current) {
-        actions.push({ type: 'exit-car', key: 'E', label: 'Step out of the car' });
+        actions.push({ type: 'exit-car', key: 'E', label: 'Leave car' });
       } else if (nearCar) {
         actions.push({ type: 'enter-car', key: 'E', label: `Get in ${nearCar.label}`, carId: nearCar.id });
       } else if (sittingRef.current) {
@@ -2006,12 +2084,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
       return;
     }
-    const tappedCar = PARKED_CARS.find(
-      (car) => Math.abs(wx - car.x) < 76 && Math.abs(wy - car.y) < 44
-    );
+    const tappedCar = PARKED_CARS.find((car) => {
+      const bounds = carHalfExtents(car.heading);
+      return Math.abs(wx - car.x) < bounds.x + 10 && Math.abs(wy - car.y) < bounds.y + 10;
+    });
     if (tappedCar) {
       const player = playerRef.current;
-      if (Math.hypot(player.x - tappedCar.x, player.y - tappedCar.y) < 128) {
+      if (Math.hypot(player.x - tappedCar.x, player.y - tappedCar.y) < 118) {
         executeInteraction({
           type: 'enter-car',
           key: 'E',
@@ -2019,7 +2098,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           carId: tappedCar.id,
         });
       } else {
-        clickTargetRef.current = approachPoint(tappedCar.x, tappedCar.y, player.x, player.y, 108);
+        clickTargetRef.current = approachPoint(tappedCar.x, tappedCar.y, player.x, player.y, 100);
       }
       return;
     }
@@ -2271,7 +2350,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       )}
 
       {/* Optional touch D-pad; tap-to-walk remains available on the map. */}
-      {touchControls && !panel && !chatFocused && !carSeat && (
+      {touchControls && !panel && !chatFocused && (
         <div
           className="absolute z-20"
           style={{
@@ -2410,6 +2489,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                   {[username, ...carOccupants.map((agent) => agent.username)].slice(0, 2).join(' · ')}
                 </span>
               </div>
+              <p className="mb-1 text-[9px] text-sky-100/60">WASD / arrows or touch Move controls to drive · E to leave</p>
               <div className="flex max-h-24 flex-col gap-1 overflow-hidden">
                 {carChatMessages.slice(-4).map((item, index) => (
                   <p key={`${item.at}-${item.from}-${index}`} className="truncate text-[11px] leading-snug text-white/90">
@@ -3386,7 +3466,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 /* ── movement ─────────────────────────────────────────────────────────────── */
 
 /** Axis-separated collision checks keep diagonal walking from snagging on walls. */
-function canOccupy(x: number, y: number, radius: number) {
+function canOccupy(x: number, y: number, radius: number, ignoreCarId?: CommuneCarId) {
   if (x < radius || x > WORLD_W - radius || y < radius + 120 || y > WORLD_H - radius) return false;
   if (Math.hypot(x - FOUNTAIN.x, y - FOUNTAIN.y) < FOUNTAIN.r + radius) return false;
 
@@ -3399,6 +3479,12 @@ function canOccupy(x: number, y: number, radius: number) {
     x > tx - 30 - radius && x < tx + 30 + radius
     && y > ty - 42 - radius && y < ty + 4 + radius
   )) return false;
+  if (PARKED_CARS.some((car) => {
+    if (car.id === ignoreCarId) return false;
+    const bounds = carHalfExtents(car.heading);
+    return x > car.x - bounds.x - radius && x < car.x + bounds.x + radius
+      && y > car.y - bounds.y - radius && y < car.y + bounds.y + radius;
+  })) return false;
 
   return !SOLID_RECTS.some(
     (s) =>
@@ -3777,7 +3863,7 @@ function draw(
       ...(player.carId === car.id ? [player.name] : []),
       ...remotes.filter((remote) => remote.carId === car.id).map((remote) => remote.name),
     ].slice(0, 2);
-    items.push({ y: car.y + 34, fn: () => drawParkedCar(ctx, car, occupants) });
+    items.push({ y: car.y + 72, fn: () => drawParkedCar(ctx, car, occupants) });
   }
   for (const object of WORLD_OBJECTS) {
     items.push({ y: object.y, fn: () => drawCommuneWorldObject(ctx, object) });
@@ -4070,46 +4156,65 @@ function drawCommuneWorldObject(ctx: CanvasRenderingContext2D, object: CommuneWo
 
 function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants: string[]) {
   const { x, y } = car;
-  drawGroundShadow(ctx, x + 2, y + 8, 68, 27, 0.27);
-  ctx.fillStyle = '#303737';
-  ctx.fillRect(x - 55, y - 28, 14, 12);
-  ctx.fillRect(x + 41, y - 28, 14, 12);
-  ctx.fillRect(x - 55, y + 16, 14, 12);
-  ctx.fillRect(x + 41, y + 16, 14, 12);
-  roundRect(ctx, x - 62, y - 31, 124, 64, 17);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(car.heading);
+  ctx.scale(1, 1.3);
+  const cx = 0;
+  const cy = 0;
+  drawGroundShadow(ctx, cx + 2, cy + 8, 42, 39, 0.25);
+  ctx.fillStyle = '#293338';
+  ctx.fillRect(cx - 32, cy - 29, 9, 16);
+  ctx.fillRect(cx + 23, cy - 29, 9, 16);
+  ctx.fillRect(cx - 32, cy + 13, 9, 16);
+  ctx.fillRect(cx + 23, cy + 13, 9, 16);
+
+  ctx.fillRect(cx - 21, cy - 43, 42, 86);
+  ctx.fillRect(cx - 30, cy - 36, 60, 72);
+  ctx.fillRect(cx - 36, cy - 25, 72, 50);
   ctx.fillStyle = car.body;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  roundRect(ctx, x - 36, y - 23, 72, 48, 12);
-  ctx.fillStyle = '#344b52';
-  ctx.fill();
+  ctx.fillRect(cx - 18, cy - 40, 36, 80);
+  ctx.fillRect(cx - 27, cy - 33, 54, 66);
+  ctx.fillRect(cx - 33, cy - 22, 66, 44);
+
   ctx.fillStyle = car.trim;
-  ctx.fillRect(x - 48, y - 24, 8, 46);
-  ctx.fillRect(x + 40, y - 24, 8, 46);
-  ctx.fillStyle = '#d9eef0';
-  ctx.fillRect(x - 8, y - 19, 3, 40);
-  ctx.fillRect(x - 33, y - 28, 66, 5);
+  ctx.fillRect(cx - 20, cy - 35, 40, 3);
+  ctx.fillStyle = '#38545d';
+  ctx.fillRect(cx - 20, cy - 29, 40, 11);
+  ctx.fillRect(cx - 22, cy - 14, 44, 41);
+  ctx.fillStyle = '#253940';
+  ctx.fillRect(cx - 18, cy - 10, 36, 32);
+  ctx.fillStyle = '#7da5ad';
+  ctx.fillRect(cx - 18, cy + 28, 36, 6);
+  ctx.fillStyle = car.trim;
+  ctx.fillRect(cx - 28, cy - 12, 4, 38);
+  ctx.fillRect(cx + 24, cy - 12, 4, 38);
+  ctx.fillRect(cx - 1, cy - 16, 2, 42);
+
   ctx.fillStyle = '#f5df9b';
-  ctx.fillRect(x - 51, y - 28, 9, 5);
-  ctx.fillRect(x + 42, y - 28, 9, 5);
+  ctx.fillRect(cx - 22, cy - 42, 8, 3);
+  ctx.fillRect(cx + 14, cy - 42, 8, 3);
   ctx.fillStyle = '#f18268';
-  ctx.fillRect(x - 52, y + 25, 9, 4);
-  ctx.fillRect(x + 43, y + 25, 9, 4);
+  ctx.fillRect(cx - 21, cy + 39, 8, 3);
+  ctx.fillRect(cx + 13, cy + 39, 8, 3);
+
   for (let seat = 0; seat < 2; seat++) {
     ctx.fillStyle = occupants[seat] ? '#f3d6a2' : 'rgba(255,255,255,0.22)';
-    ctx.fillRect(x - 23 + seat * 42, y - 11, 8, 8);
+    ctx.fillRect(cx - 17 + seat * 23, cy + 1, 13, 14);
     ctx.fillStyle = occupants[seat] ? '#26333a' : 'rgba(255,255,255,0.1)';
-    ctx.fillRect(x - 21 + seat * 42, y - 9, 2, 2);
+    ctx.fillRect(cx - 13 + seat * 23, cy + 4, 3, 3);
   }
+  ctx.restore();
+
   ctx.fillStyle = 'rgba(17,24,25,0.76)';
-  roundRect(ctx, x - 43, y + 39, 86, 16, 7);
-  ctx.fill();
+  ctx.fillRect(x - 49, y + 62, 98, 14);
   ctx.fillStyle = '#fff4da';
-  ctx.font = "bold 8px 'Schoolbell', ui-monospace, monospace";
+  ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
   ctx.textAlign = 'center';
-  ctx.fillText(occupants.length ? occupants.join(' · ') : car.label, x, y + 50);
+  const occupantsLabel = occupants.length
+    ? `${occupants.map((name) => name.slice(0, 6)).join(' + ')} · ${occupants.length}/2`
+    : `${car.label} · E`;
+  ctx.fillText(occupantsLabel, x, y + 72);
 }
 
 function drawWhatTheDuck(ctx: CanvasRenderingContext2D, incident: DuckIncident, t: number, reduceMotion: boolean) {
