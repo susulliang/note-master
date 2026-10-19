@@ -456,16 +456,16 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const railReserved = railCollapsed ? 0 : LEFT_RAIL_RESERVED;
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
-  // Work-view pills shown in the rail. Case Trak + KPI Dashboard are hidden
-  // analytics views (unlocked together with Shift+D via analyticsEnabled, or
-  // individually via auth privileges); the Shifts roster is a hidden view
-  // (activated with Shift+S or a Roster privilege grant).
+  // COMMUNE leads the signed-in workspace; support tools follow in workflow
+  // order. Restricted work views still require their existing grants/unlocks.
   const railViews = useMemo<WorkView[]>(() => {
-    const views: WorkView[] = ['callNotes', 'selfTest'];
-    if (communeEnabled) views.push('commune'); // town square — every logged-in user
+    const views: WorkView[] = [];
+    if (communeEnabled) views.push('commune');
+    views.push('callNotes');
     if (trakEnabled ?? analyticsEnabled) views.push('caseTrak');
     if (dashEnabled ?? analyticsEnabled) views.push('dash');
     if (shiftsEnabled) views.push('shifts');
+    views.push('selfTest');
     return views;
   }, [analyticsEnabled, dashEnabled, trakEnabled, shiftsEnabled, communeEnabled]);
 
@@ -1072,8 +1072,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         </div>
       )}
 
-      {/* Self Test workspace — weekly news knowledge quizzes. Always
-          available from the left rail, directly under Notes. */}
+      {/* Self Test workspace — weekly news knowledge quizzes. Kept after the
+          support workspaces at the end of the rail. */}
       {activeView === 'selfTest' && (
         <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {selfTestContent}
@@ -1148,9 +1148,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               center (cap radius = 32px; pill h-12 = 48px → center at
               8 + 24 = 32px). pb-4 keeps the bottom controls as before. */}
           <div className="relative z-10 flex h-full flex-col items-center pt-2 pb-4">
-            {/* Work views (Notes / Trak / [Shifts]) — sliding green highlight
-                tracks the active view. The Shifts pill stays hidden until the
-                user unlocks it with Shift+S (ShiftsEnabled prop). */}
+            {/* Work views — COMMUNE first, support tools next, Self Test last.
+                Restricted tools remain hidden until granted or unlocked. */}
             <div className="relative flex flex-col gap-1">
               <span
                 className="pointer-events-none absolute inset-x-0 z-0 rounded-full bg-primary shadow-[0_0_14px_color-mix(in_oklab,var(--primary)_50%,transparent)] transition-[top] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"

@@ -1,5 +1,5 @@
 /**
- * Authentication panel — centered glass modal opened with Shift+R.
+ * Agent sign-in gate — required on entry, then available as an account modal.
  *
  * Two tabs:
  *   • Login — username dropdown + password.
@@ -33,9 +33,10 @@ const USERNAME_OPTIONS: string[] = (() => {
 
 interface AuthPanelProps {
   onClose: () => void;
+  required?: boolean;
 }
 
-export default function AuthPanel({ onClose }: AuthPanelProps) {
+export default function AuthPanel({ onClose, required = false }: AuthPanelProps) {
   const { user, login, register, logout } = useAuth();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -69,28 +70,33 @@ export default function AuthPanel({ onClose }: AuthPanelProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className={cn(
+        'fixed inset-0 z-[90] flex items-center justify-center backdrop-blur-sm',
+        required ? 'bg-background/95' : 'bg-black/40'
+      )}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (!required && e.target === e.currentTarget) onClose();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        if (e.key === 'Escape' && !required) onClose();
       }}
     >
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Authentication"
+        aria-label={required ? 'Agent sign in' : 'Authentication'}
         className="glass-panel relative w-[min(420px,calc(100vw-32px))] rounded-2xl border-violet-400/30 p-6 shadow-2xl"
       >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-          aria-label="Close"
-        >
-          <X className="size-4" />
-        </button>
+        {!required && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-3 top-3 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="size-4" />
+          </button>
+        )}
 
         {/* Header */}
         <div className="mb-4 flex items-center gap-3">
@@ -98,8 +104,12 @@ export default function AuthPanel({ onClose }: AuthPanelProps) {
             <KeyRound className="size-6 text-violet-300" />
           </div>
           <div>
-            <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">Authentication</h2>
-            <p className="text-xs text-muted-foreground">Accounts are stored server-side (D1)</p>
+            <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">
+              {required ? 'Agent sign in' : 'Authentication'}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {required ? 'Sign in to enter the support workspace' : 'Accounts are stored server-side (D1)'}
+            </p>
           </div>
         </div>
 
