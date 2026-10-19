@@ -20,15 +20,23 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Armchair,
   BookOpen,
   Building2,
   CalendarDays,
+  CarFront,
+  Coins,
+  DoorOpen,
+  Fish,
   GraduationCap,
   Gamepad2,
+  Hand,
+  MessageCircle,
   Megaphone,
   MessageSquare,
   Palette,
   Search,
+  Sparkles,
   Trophy,
   Users,
   X,
@@ -158,6 +166,44 @@ type CommuneAction =
   | { type: 'world-object'; key: 'E'; label: string; objectId: CommuneWorldObjectId }
   | { type: 'duck-incident'; key: 'E'; label: string; incidentId: number }
   | { type: 'prop'; key: 'E'; label: string; panel: PropPanelKind };
+
+function touchActionIcon(action: CommuneAction) {
+  switch (action.type) {
+    case 'enter-car': return <CarFront className="size-6" />;
+    case 'exit-car': return <DoorOpen className="size-6" />;
+    case 'sit':
+    case 'stand': return <Armchair className="size-6" />;
+    case 'challenge': return <Gamepad2 className="size-6" />;
+    case 'message-agent': return <MessageCircle className="size-6" />;
+    case 'hold-hands':
+    case 'release-hands': return <Hand className="size-6" />;
+    case 'fountain': return <Coins className="size-6" />;
+    case 'pond': return <Fish className="size-6" />;
+    case 'serendipity':
+    case 'duck-incident':
+    case 'world-object': return <Sparkles className="size-6" />;
+    case 'prop': return <Building2 className="size-6" />;
+  }
+}
+
+function touchActionLabel(action: CommuneAction): string {
+  switch (action.type) {
+    case 'enter-car': return 'Drive';
+    case 'exit-car': return 'Leave car';
+    case 'sit': return 'Sit';
+    case 'stand': return 'Stand';
+    case 'challenge': return 'Talk';
+    case 'message-agent': return 'Chat';
+    case 'hold-hands': return 'Hold hands';
+    case 'release-hands': return 'Let go';
+    case 'fountain': return 'Toss coin';
+    case 'pond': return 'Feed ducks';
+    case 'serendipity': return 'Discover';
+    case 'duck-incident': return 'Ask duck';
+    case 'world-object': return 'Explore';
+    case 'prop': return 'Open';
+  }
+}
 
 interface FocusedNpc {
   personaId: string;
@@ -621,7 +667,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [focusedNpc, setFocusedNpc] = useState<FocusedNpc | null>(null);
   const focusedNpcRef = useRef<FocusedNpc | null>(null);
   const [touchControls, setTouchControls] = useState(false);
-  const [movePadOpen, setMovePadOpen] = useState(false);
+  const [joystickActive, setJoystickActive] = useState(false);
+  const joystickBaseRef = useRef<HTMLDivElement | null>(null);
+  const joystickKnobRef = useRef<HTMLDivElement | null>(null);
+  const joystickPointerIdRef = useRef<number | null>(null);
+  const movementInputRef = useRef({ x: 0, y: 0 });
   const canvasPointerRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
@@ -798,6 +848,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     coarsePointer.addEventListener('change', updateTouchMode);
     return () => coarsePointer.removeEventListener('change', updateTouchMode);
   }, []);
+
+  useEffect(() => {
+    if (!panel && !chatFocused) return;
+    joystickPointerIdRef.current = null;
+    movementInputRef.current = { x: 0, y: 0 };
+    keysRef.current.clear();
+    joystickKnobRef.current?.style.setProperty('--stick-x', '0px');
+    joystickKnobRef.current?.style.setProperty('--stick-y', '0px');
+    setJoystickActive(false);
+  }, [panel, chatFocused]);
 
   /* ── my loadout ───────────────────────────────────────────────────────────── */
   const [loadout, setLoadout] = useState<CommuneLoadout>(() => ({ cards: [], pet: carriedPet(username), phrase: '', avatar: loadAvatar() }));
@@ -1526,11 +1586,21 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
     };
     const up = (e: KeyboardEvent) => keysRef.current.delete(e.code);
+    const releaseInputs = () => {
+      keysRef.current.clear();
+      joystickPointerIdRef.current = null;
+      movementInputRef.current = { x: 0, y: 0 };
+      joystickKnobRef.current?.style.setProperty('--stick-x', '0px');
+      joystickKnobRef.current?.style.setProperty('--stick-y', '0px');
+      setJoystickActive(false);
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
+    window.addEventListener('blur', releaseInputs);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', releaseInputs);
     };
   }, [executeInteraction]);
 
@@ -1617,12 +1687,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       const sitting = sittingRef.current;
       if (player.carId) {
         const keys = keysRef.current;
-        const dx = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
-        const dy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
+        const joystick = movementInputRef.current;
+        const dx = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0)
+          - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + joystick.x;
+        const dy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0)
+          - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) + joystick.y;
         const directionLength = Math.hypot(dx, dy);
-        player.moving = directionLength > 0;
-        if (directionLength > 0 && !panelRef.current && !chatFocusedRef.current && wallNow - lastCarMoveSentAt >= CAR_MOVE_INTERVAL_MS) {
-          sendRoomEvent({ type: 'car_move', dx: dx / directionLength, dy: dy / directionLength });
+        player.moving = directionLength > 0.12;
+        if (directionLength > 0.12 && !panelRef.current && !chatFocusedRef.current && wallNow - lastCarMoveSentAt >= CAR_MOVE_INTERVAL_MS) {
+          sendRoomEvent({ type: 'car_move', dx, dy });
           lastCarMoveSentAt = wallNow;
         }
       } else if (sitting) {
@@ -1648,25 +1721,29 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         }
       } else if (!panelRef.current && !chatFocusedRef.current) {
         const k = keysRef.current;
-        let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-        let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
-        if (dx !== 0 || dy !== 0) clickTargetRef.current = null;
-        if (dx === 0 && dy === 0 && clickTargetRef.current) {
+        const joystick = movementInputRef.current;
+        let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
+          - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
+        let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
+          - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) + joystick.y;
+        let len = Math.hypot(dx, dy);
+        if (len > 0.12) clickTargetRef.current = null;
+        if (len <= 0.12 && clickTargetRef.current) {
           const tx = clickTargetRef.current.x - player.x;
           const ty = clickTargetRef.current.y - player.y;
           const d = Math.hypot(tx, ty);
           if (d > 6) {
             dx = tx / d;
             dy = ty / d;
+            len = 1;
           } else {
             clickTargetRef.current = null;
           }
         }
-        const len = Math.hypot(dx, dy);
-        player.moving = len > 0;
-        if (len > 0) {
-          const nx = player.x + (dx / len) * SPEED * dt;
-          const ny = player.y + (dy / len) * SPEED * dt;
+        player.moving = len > 0.12;
+        if (len > 0.12) {
+          const nx = player.x + (dx / len) * SPEED * dt * Math.min(1, len);
+          const ny = player.y + (dy / len) * SPEED * dt * Math.min(1, len);
           moveWithCollision(player, nx, ny);
           player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
         }
@@ -2170,6 +2247,60 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     clickTargetRef.current = { x: wx, y: wy };
   };
 
+  const updateJoystick = (clientX: number, clientY: number) => {
+    const base = joystickBaseRef.current;
+    if (!base) return;
+    const rect = base.getBoundingClientRect();
+    const maxRadius = rect.width * 0.34;
+    const rawX = (clientX - (rect.left + rect.width / 2)) / maxRadius;
+    const rawY = (clientY - (rect.top + rect.height / 2)) / maxRadius;
+    const distance = Math.hypot(rawX, rawY);
+    const visualScale = Math.min(1, distance);
+    const deadZone = 0.12;
+    const movementScale = visualScale <= deadZone
+      ? 0
+      : (visualScale - deadZone) / (1 - deadZone);
+    const unitX = distance > 0 ? rawX / distance : 0;
+    const unitY = distance > 0 ? rawY / distance : 0;
+    movementInputRef.current = {
+      x: unitX * movementScale,
+      y: unitY * movementScale,
+    };
+    joystickKnobRef.current?.style.setProperty('--stick-x', `${unitX * visualScale * maxRadius}px`);
+    joystickKnobRef.current?.style.setProperty('--stick-y', `${unitY * visualScale * maxRadius}px`);
+  };
+
+  const stopJoystick = (pointerId?: number) => {
+    if (pointerId !== undefined && joystickPointerIdRef.current !== pointerId) return;
+    joystickPointerIdRef.current = null;
+    movementInputRef.current = { x: 0, y: 0 };
+    joystickKnobRef.current?.style.setProperty('--stick-x', '0px');
+    joystickKnobRef.current?.style.setProperty('--stick-y', '0px');
+    setJoystickActive(false);
+  };
+
+  const onJoystickPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    joystickPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setJoystickActive(true);
+    clickTargetRef.current = null;
+    if (sittingRef.current) sittingRef.current = null;
+    updateJoystick(event.clientX, event.clientY);
+  };
+
+  const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (joystickPointerIdRef.current === event.pointerId) {
+      event.preventDefault();
+      updateJoystick(event.clientX, event.clientY);
+    }
+  };
+
+  const onJoystickPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    stopJoystick(event.pointerId);
+  };
+
   const onCanvasPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     canvasPointerRef.current = {
@@ -2249,11 +2380,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const focusedNpcIsReady = !!focusedNpc && nearbyActions.some(
     (action) => action.type === 'challenge' && action.personaId === focusedNpc.personaId
   );
-  const moveDirections = [
-    null, { code: 'ArrowUp', label: 'Move up' }, null,
-    { code: 'ArrowLeft', label: 'Move left' }, null, { code: 'ArrowRight', label: 'Move right' },
-    null, { code: 'ArrowDown', label: 'Move down' }, null,
-  ];
 
   return (
     <div ref={wrapRef} className="relative h-full min-h-full w-full overflow-hidden bg-[#607c61]">
@@ -2266,7 +2392,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onClick={onCanvasClick}
         className="absolute inset-0 cursor-crosshair outline-none"
         role="application"
-        aria-label="COMMUNE town square. Tap or click the ground to walk. Use the nearby action buttons, or WASD, arrow keys, E, and H."
+        aria-label="COMMUNE town square. Tap the ground to walk. On touchscreens, use the left joystick and nearby action buttons. Keyboard: WASD or arrow keys to move, E and H to interact."
         style={{ touchAction: 'manipulation' }}
         tabIndex={0}
       />
@@ -2289,22 +2415,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         </span>
       </div>
 
-      {/* Focused NPC approach and shared nearby actions */}
-      {!panel && (focusedNpc && !focusedNpcIsReady || nearbyActions.length > 0) && (
+      {/* Desktop keeps compact labeled actions centered above the chat bar. */}
+      {!touchControls && !panel && (focusedNpc && !focusedNpcIsReady || nearbyActions.length > 0) && (
         <div
           aria-live="polite"
-          className={cn(
-            'absolute z-20 flex max-w-[calc(100%-24px)] flex-col gap-1.5 animate-in fade-in',
-            touchControls
-              ? 'items-end'
-              : 'bottom-[4.75rem] left-1/2 -translate-x-1/2 items-center'
-          )}
-          style={touchControls
-            ? {
-                bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.25rem)',
-                right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
-              }
-            : undefined}
+          className="absolute bottom-[4.75rem] left-1/2 z-20 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-col items-center gap-1.5 animate-in fade-in"
         >
           {focusedNpc && !focusedNpcIsReady && (
             <div className="flex items-center gap-2 rounded-xl border border-accent/40 bg-card/95 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
@@ -2328,91 +2443,134 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               key={`${action.key}-${action.type}`}
               type="button"
               onClick={() => executeInteraction(action)}
-              aria-label={`${action.label}${touchControls ? '' : `, press ${action.key}`}`}
-              title={touchControls ? action.label : `${action.label} (${action.key})`}
+              aria-label={`${action.label}, press ${action.key}`}
+              title={`${action.label} (${action.key})`}
               className={cn(
                 'glass-btn flex min-h-11 max-w-[min(72vw,360px)] items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold shadow-lg backdrop-blur-xl transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                touchControls && 'w-[min(46vw,220px)]',
                 action.key === 'E'
                   ? 'border-primary/50 bg-card/95 text-foreground hover:border-primary'
                   : 'border-accent/40 bg-card/90 text-foreground/90 hover:border-accent'
               )}
             >
-              {!touchControls && (
-                <kbd className="rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">
-                  {action.key}
-                </kbd>
-              )}
+              <kbd className="rounded-md bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary-foreground">
+                {action.key}
+              </kbd>
               <span className="truncate">{action.label}</span>
             </button>
           ))}
         </div>
       )}
 
-      {/* Optional touch D-pad; tap-to-walk remains available on the map. */}
+      {touchControls && !panel && !chatFocused && focusedNpc && !focusedNpcIsReady && (
+        <div
+          aria-live="polite"
+          className="absolute z-20 flex items-center gap-2 rounded-xl border border-accent/40 bg-card/95 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 15rem)',
+            right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+          }}
+        >
+          <span className="max-w-[34vw] truncate">Walking to {focusedNpc.name}</span>
+          <button
+            type="button"
+            onClick={() => {
+              clickTargetRef.current = null;
+              focusedNpcRef.current = null;
+              setFocusedNpc(null);
+            }}
+            className="rounded-md px-2 py-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label={`Cancel approach to ${focusedNpc.name}`}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Dota-style thumb zones: a shared walk/drive stick and contextual actions. */}
       {touchControls && !panel && !chatFocused && (
         <div
-          className="absolute z-20"
+          ref={joystickBaseRef}
+          role="group"
+          aria-label={carSeat ? 'Car steering joystick' : 'Movement joystick'}
+          className="absolute z-20 size-[clamp(116px,34vw,144px)] touch-none select-none rounded-full border border-white/30 bg-slate-950/25 shadow-[inset_0_0_22px_rgba(0,0,0,0.4),0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-sm"
           style={{
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.25rem)',
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.5rem)',
             left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
             touchAction: 'none',
           }}
+          onPointerDown={onJoystickPointerDown}
+          onPointerMove={onJoystickPointerMove}
+          onPointerUp={onJoystickPointerUp}
+          onPointerCancel={onJoystickPointerUp}
+          onLostPointerCapture={onJoystickPointerUp}
         >
-          {movePadOpen ? (
-            <div
-              id="commune-move-controls"
-              role="group"
-              aria-label="Directional movement controls"
-              className="grid grid-cols-3 gap-1 rounded-2xl border border-white/25 bg-card/75 p-1.5 shadow-lg backdrop-blur-xl"
-            >
-              {moveDirections.map((direction, index) => direction ? (
+          <span className="pointer-events-none absolute inset-[12%] rounded-full border border-white/15" />
+          <span className="pointer-events-none absolute inset-[28%] rounded-full border border-white/10" />
+          <span
+            ref={joystickKnobRef}
+            className={cn(
+              'absolute left-1/2 top-1/2 grid size-[54px] place-items-center rounded-full border shadow-lg',
+              joystickActive ? 'transition-none' : 'transition-transform duration-100',
+              carSeat
+                ? 'border-sky-100/50 bg-sky-300/75 text-slate-950 shadow-sky-950/30'
+                : 'border-primary-foreground/50 bg-primary/90 text-primary-foreground shadow-emerald-950/35'
+            )}
+            style={{
+              transform: 'translate(calc(-50% + var(--stick-x, 0px)), calc(-50% + var(--stick-y, 0px)))',
+            }}
+          >
+            <span className="size-2 rounded-full bg-current opacity-80" />
+          </span>
+          <span className="pointer-events-none absolute bottom-[10%] left-1/2 -translate-x-1/2 font-mono text-[8px] font-bold tracking-[0.18em] text-white/55">
+            {carSeat ? 'DRIVE' : 'MOVE'}
+          </span>
+        </div>
+      )}
+
+      {touchControls && !panel && !chatFocused && nearbyActions.length > 0 && (
+        <div
+          role="group"
+          aria-label="Nearby actions"
+          className="absolute z-20 flex items-end gap-2.5"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.5rem)',
+            right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+          }}
+        >
+          {[secondaryAction, primaryAction]
+            .filter((action): action is CommuneAction => !!action)
+            .map((action) => {
+              const isPrimary = action.key === 'E';
+              return (
                 <button
-                  key={direction.code}
+                  key={`${action.key}-${action.type}`}
                   type="button"
-                  aria-label={direction.label}
-                  className="grid size-10 touch-none place-items-center rounded-xl border border-border/70 bg-background/70 text-lg font-bold text-foreground shadow-sm active:scale-95 active:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    keysRef.current.add(direction.code);
-                    if (sittingRef.current) sittingRef.current = null;
-                  }}
-                  onPointerUp={() => keysRef.current.delete(direction.code)}
-                  onPointerCancel={() => keysRef.current.delete(direction.code)}
-                  onLostPointerCapture={() => keysRef.current.delete(direction.code)}
+                  onClick={() => executeInteraction(action)}
+                  aria-label={action.label}
+                  title={action.label}
+                  className="group flex w-[68px] touch-manipulation flex-col items-center gap-1 rounded-xl text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  {direction.code === 'ArrowUp' ? '^' : direction.code === 'ArrowDown' ? 'v' : direction.code === 'ArrowLeft' ? '<' : '>'}
+                  <span
+                    className={cn(
+                      'relative grid place-items-center rounded-full border shadow-xl backdrop-blur-md transition-transform active:scale-90',
+                      isPrimary
+                        ? 'size-[68px] border-primary/70 bg-slate-950/75 text-primary-foreground shadow-primary/20 group-active:bg-primary'
+                        : 'mx-1 size-[54px] border-accent/55 bg-slate-950/75 text-accent shadow-accent/15 group-active:bg-accent/30'
+                    )}
+                  >
+                    {touchActionIcon(action)}
+                    {!isPrimary && (
+                      <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full border border-white/30 bg-card text-[9px] font-extrabold text-foreground">
+                        H
+                      </span>
+                    )}
+                  </span>
+                  <span className="max-w-full truncate rounded-full border border-white/15 bg-slate-950/65 px-2 py-0.5 text-[9px] font-bold text-white/90 shadow backdrop-blur-sm">
+                    {touchActionLabel(action)}
+                  </span>
                 </button>
-              ) : (
-                <span key={`empty-${index}`} className="size-10" aria-hidden="true" />
-              ))}
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setMovePadOpen(true)}
-              className="glass-btn min-h-11 rounded-xl border border-white/25 bg-card/85 px-3 text-xs font-bold text-foreground shadow-lg backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              aria-expanded={movePadOpen}
-              aria-controls="commune-move-controls"
-            >
-              Move controls
-            </button>
-          )}
-          {movePadOpen && (
-            <button
-              type="button"
-              onClick={() => {
-                keysRef.current.clear();
-                setMovePadOpen(false);
-              }}
-              className="mt-1 w-full rounded-lg border border-border/50 bg-card/85 px-2 py-1 text-[10px] font-semibold text-muted-foreground shadow backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              aria-expanded={true}
-              aria-controls="commune-move-controls"
-            >
-              Hide controls
-            </button>
-          )}
+              );
+            })}
         </div>
       )}
 
@@ -2489,7 +2647,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                   {[username, ...carOccupants.map((agent) => agent.username)].slice(0, 2).join(' · ')}
                 </span>
               </div>
-              <p className="mb-1 text-[9px] text-sky-100/60">WASD / arrows or touch Move controls to drive · E to leave</p>
+              <p className="mb-1 text-[9px] text-sky-100/60">
+                {touchControls ? 'Left joystick to drive · action button to leave' : 'WASD / arrow keys to drive · E to leave'}
+              </p>
               <div className="flex max-h-24 flex-col gap-1 overflow-hidden">
                 {carChatMessages.slice(-4).map((item, index) => (
                   <p key={`${item.at}-${item.from}-${index}`} className="truncate text-[11px] leading-snug text-white/90">
@@ -2672,7 +2832,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 </div>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{activeProp.description}</p>
-              <p className="mt-4 border-t border-border/50 pt-2.5 text-[10px] text-muted-foreground/80">Press Esc to close · Keep exploring with WASD</p>
+              <p className="mt-4 border-t border-border/50 pt-2.5 text-[10px] text-muted-foreground/80">
+                {touchControls ? 'Close to return · Use the joystick to explore' : 'Press Esc to close · Keep exploring with WASD'}
+              </p>
             </div>
           )}
 

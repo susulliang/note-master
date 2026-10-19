@@ -419,9 +419,9 @@ export class CommuneRoom extends DurableObject<Env> {
       if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
       const directionLength = Math.hypot(dx, dy);
       const car = this.getCarPosition(current.carId);
-      if (!car || !Number.isFinite(directionLength) || now - car.lastMoveAt < MOVE_THROTTLE_MS || directionLength < 0.1) return;
+      if (!car || !Number.isFinite(directionLength) || now - car.lastMoveAt < MOVE_THROTTLE_MS || directionLength < 0.12) return;
       const elapsedMs = Math.min(150, Math.max(0, now - car.lastMoveAt));
-      const travel = PARKED_CAR_SPEED * elapsedMs / 1000;
+      const travel = PARKED_CAR_SPEED * Math.min(1, directionLength) * elapsedMs / 1000;
       const x = car.x + (dx / directionLength) * travel;
       const y = car.y + (dy / directionLength) * travel;
       const cars = this.listCarPositions();
