@@ -1,13 +1,12 @@
 ﻿/**
  * CommunePanel — COMMUNE, the agents' town square (摩尔庄园-inspired).
- * A cozy walk-around canvas world where logged-in agents stroll between the
+ * A cozy isometric town where logged-in agents stroll between the
  * fountain, the bulletin board, the showcase stall and the challenge tent,
  * chit-chat with villager NPCs and each other via speech bubbles.
  *
  * LIVE SCOPE:
- *   • Pixel-art town — the static map (town hall, café, arcade, houses, pond,
- *     paths, lamps, fences, flowers) is baked once into an offscreen canvas.
- *   • Pixel human sprites for the player, villager NPCs and remote agents.
+ *   • Low-poly Three.js world with instanced scenery and animated agents.
+ *   • Ground-plane raycasting maps taps back into the existing world coordinates.
  *   • Live presence — positions and status stream over the room WebSocket.
  *   • Loadouts — up to 3 collection cards from your inventory, one pet
  *     snapshot, one phrase (revealed when someone walks close).
@@ -75,6 +74,7 @@ import type { RosterAgent } from '@/data/roster';
 import { fetchRosterMonth, subscribeRosterMonth, type RosterCell } from '@/lib/roster-sync';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import type { FaqSearchHit } from '@/utils/productData';
+import { CommuneThreeRenderer, type CommuneThreeFrame } from '@/lib/commune-three-renderer';
 
 const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 
@@ -601,6 +601,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const labelsCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const communeRendererRef = useRef<CommuneThreeRenderer | null>(null);
+  const [mapZoom, setMapZoom] = useState(1);
+  const mapZoomRef = useRef(1);
+  mapZoomRef.current = mapZoom;
   const [panel, setPanel] = useState<PanelKind>(null);
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
@@ -1667,8 +1672,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-    if (!ctx) return;
+    const labelsCanvas = labelsCanvasRef.current;
+    if (!labelsCanvas) return;
+    const threeRenderer = CommuneThreeRenderer.create(canvas, labelsCanvas);
+    communeRendererRef.current = threeRenderer;
+    const ctx = threeRenderer ? null : canvas.getContext('2d', { alpha: false, desynchronized: true });
+    if (!threeRenderer && !ctx) return;
 
     let vw = 0;
     let vh = 0;
@@ -1676,6 +1685,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const resize = () => {
       vw = wrap.clientWidth;
       vh = wrap.clientHeight;
+      if (threeRenderer) {
+        threeRenderer.resize(vw, vh);
+        return;
+      }
       const cssPixels = Math.max(1, vw * vh);
       dpr = Math.max(
         0.85,
@@ -1693,6 +1706,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     ro.observe(wrap);
 
     let raf = 0;
+    let renderRaf = 0;
     let last = performance.now();
     let lastFrame = 0;
     let lastCarMoveSentAt = 0;
@@ -1702,11 +1716,22 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduceMotion = reduceMotionQuery.matches;
     const petFollowers = new Map<string, PetFollower>();
+    let latestFrame: CommuneThreeFrame | null = null;
+
+    const renderStep = (now: number) => {
+      renderRaf = 0;
+      if (document.hidden) return;
+      if (threeRenderer && latestFrame) {
+        latestFrame.time = now / 1000;
+        threeRenderer.render(latestFrame);
+      }
+      renderRaf = requestAnimationFrame(renderStep);
+    };
 
     const step = (now: number) => {
       raf = 0;
       if (document.hidden) return;
-      if (now - lastFrame < 1000 / 60) {
+      if (now - lastFrame < 1000 / 30) {
         raf = requestAnimationFrame(step);
         return;
       }
@@ -2138,11 +2163,31 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
-      draw(
-        ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
-        remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
-        clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current
-      );
+      if (threeRenderer) {
+        latestFrame = {
+          time: tSec,
+          zoom: mapZoomRef.current,
+          player,
+          npcs: npcsRef.current,
+          remotes: remoteViews,
+          pets: petViews,
+          cars: PARKED_CARS,
+          drops: dropsRef.current,
+          ducks: ducksRef.current,
+          incident: duckIncidentRef.current,
+          serendipity: serendipityRef.current,
+          destination: clickTargetRef.current,
+          clickTarget: clickTargetRef.current,
+          nightOpacity,
+          reduceMotion,
+        };
+      } else if (ctx) {
+        draw(
+          ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
+          remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
+          clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current
+        );
+      }
       raf = requestAnimationFrame(step);
     };
     const onMotionChange = (event: MediaQueryListEvent) => {
@@ -2152,19 +2197,26 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const onVisibilityChange = () => {
       if (document.hidden) {
         cancelAnimationFrame(raf);
+        cancelAnimationFrame(renderRaf);
         raf = 0;
+        renderRaf = 0;
       } else if (!raf) {
         last = performance.now();
         raf = requestAnimationFrame(step);
+        if (threeRenderer) renderRaf = requestAnimationFrame(renderStep);
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     raf = requestAnimationFrame(step);
+    if (threeRenderer) renderRaf = requestAnimationFrame(renderStep);
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(renderRaf);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       reduceMotionQuery.removeEventListener('change', onMotionChange);
       ro.disconnect();
+      if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
+      threeRenderer?.dispose();
     };
   }, [banners, publishNearbyActions, sendRoomEvent]);
 
@@ -2175,8 +2227,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const wx = clientX - rect.left + camRef.current.x;
-    const wy = clientY - rect.top + camRef.current.y;
+    const worldPoint = communeRendererRef.current?.screenToWorld(clientX, clientY, rect);
+    const wx = worldPoint?.x ?? clientX - rect.left + camRef.current.x;
+    const wy = worldPoint?.y ?? clientY - rect.top + camRef.current.y;
     // A target tap also stands the player up before selecting the target.
     if (sittingRef.current) sittingRef.current = null;
     const moment = serendipityRef.current;
@@ -2385,6 +2438,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     handleCanvasTap(event.clientX, event.clientY);
   };
 
+  const adjustMapZoom = (delta: number) => {
+    setMapZoom((current) => Number(Math.min(2.2, Math.max(0.7, current + delta)).toFixed(2)));
+  };
+
+  const onMapZoomChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setMapZoom(Number(event.currentTarget.value));
+  };
+
+  const onCanvasWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    const step = Math.max(0.05, Math.min(0.25, Math.abs(event.deltaY) * 0.001));
+    adjustMapZoom(event.deltaY < 0 ? step : -step);
+  };
+
   const speak = () => {
     const text = chatDraft.trim();
     if (!text) return;
@@ -2440,12 +2507,42 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onPointerUp={onCanvasPointerUp}
         onPointerCancel={onCanvasPointerCancel}
         onClick={onCanvasClick}
+        onWheel={onCanvasWheel}
         className="absolute inset-0 cursor-crosshair outline-none"
         role="application"
         aria-label="COMMUNE town square. Tap the ground to walk. On touchscreens, use the left joystick and nearby action buttons. Keyboard: WASD or arrow keys to move, E and H to interact."
         style={{ touchAction: 'manipulation' }}
         tabIndex={0}
       />
+      <canvas
+        ref={labelsCanvasRef}
+        className="pointer-events-none absolute inset-0 size-full"
+        aria-hidden="true"
+      />
+
+      {touchControls && !panel && !chatFocused && (
+        <div
+          role="group"
+          aria-label="Map zoom controls"
+          className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full border border-white/30 bg-slate-950/30 px-2 py-3 shadow-lg backdrop-blur-sm"
+        >
+          <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">ZOOM</span>
+          <input
+            type="range"
+            min="0.7"
+            max="2.2"
+            step="0.05"
+            value={mapZoom}
+            onChange={onMapZoomChange}
+            aria-label="Map zoom"
+            className="h-32 w-6 accent-primary"
+            style={{ writingMode: 'vertical-lr', direction: 'rtl', touchAction: 'none' }}
+          />
+          <output className="font-mono text-[9px] font-bold tabular-nums text-white/80">
+            {mapZoom.toFixed(1)}x
+          </output>
+        </div>
+      )}
 
       {/* Compact world identity */}
       <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 rounded-2xl border border-white/35 bg-card/85 px-3.5 py-2 text-foreground shadow-lg backdrop-blur-xl">
@@ -2638,6 +2735,32 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       >
         <Palette className="size-3.5" /> <span>Loadout</span>
       </button>
+
+      {!touchControls && !panel && !chatFocused && (
+        <div
+          role="group"
+          aria-label="Map zoom controls"
+          className="absolute right-4 top-16 z-20 flex items-center gap-2 rounded-full border border-white/25 bg-slate-950/35 px-2 py-1.5 font-mono text-[10px] text-white/80 shadow-lg backdrop-blur-sm"
+        >
+          <button
+            type="button"
+            onClick={() => adjustMapZoom(-0.1)}
+            aria-label="Zoom out map"
+            className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            −
+          </button>
+          <output className="min-w-9 text-center tabular-nums">{mapZoom.toFixed(1)}x</output>
+          <button
+            type="button"
+            onClick={() => adjustMapZoom(0.1)}
+            aria-label="Zoom in map"
+            className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            +
+          </button>
+        </div>
+      )}
 
       {/* Direct-message banners (from bumps / hand-holds) */}
       {inbox.length > 0 && (
