@@ -32,11 +32,22 @@ export interface CommuneRoomDrop {
   y: number;
 }
 
+export type CommuneRoomBannerKind = 'pin' | 'priority' | 'sketch';
+export type CommuneRoomBannerPriority = 'normal' | 'high' | 'urgent';
+
+export interface CommuneRoomBannerStroke {
+  color: string;
+  points: Array<{ x: number; y: number }>;
+}
+
 export interface CommuneRoomBanner {
   id: string;
   text: string;
   author: string;
   at: number;
+  kind: CommuneRoomBannerKind;
+  priority: CommuneRoomBannerPriority;
+  strokes: CommuneRoomBannerStroke[];
 }
 
 interface Presence extends CommuneRoomAgent {

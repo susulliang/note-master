@@ -151,12 +151,17 @@ if (emailFile) {
 const histFile = pick(files, /historical[\s_-]*metrics.*\.csv$/i);
 if (histFile) {
   const r = parseHistoricalMetricsCsv(readText(histFile.name), histFile.name);
-  out.historical = r;
-  (out.sources as Record<string, string>).historical = histFile.name;
-  console.log(`  Hist  <- ${histFile.name} (${r.agents.length} agents, ${r.queues.length} queues)`);
   // Team call aggregates now derive from the same report's agent rows —
   // MTD Call Data.csv is retired from the routine.
   const call = callMetricsFromHistorical(r);
+  // Keep raw Salesforce logins local to parsing; they are not needed by the
+  // dashboard and must never be included in the publicly readable R2 object.
+  out.historical = {
+    ...r,
+    agents: r.agents.map((agent) => ({ ...agent, login: '' })),
+  };
+  (out.sources as Record<string, string>).historical = histFile.name;
+  console.log(`  Hist  <- ${histFile.name} (${r.agents.length} agents, ${r.queues.length} queues)`);
   out.call = call;
   (out.sources as Record<string, string>).call = `${histFile.name} (agent rows)`;
   console.log(`  Call  <- ${histFile.name} agent rows (${call.handled} handled, SL ${call.serviceLevel20.toFixed(1)}%)`);

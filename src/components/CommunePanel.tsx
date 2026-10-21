@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import CommuneBoardSketchPad, { CommuneBoardSketchPreview } from '@/components/CommuneBoardSketchPad';
 import {
   communeSocketUrl,
   createCommuneBanner,
@@ -58,6 +59,9 @@ import {
   type CommuneAgent,
   type CommuneAvatar,
   type CommuneBanner,
+  type CommuneBannerKind,
+  type CommuneBannerPriority,
+  type CommuneBannerStroke,
   type CommuneDrop,
   type CommuneLoadout,
   type CommunePet,
@@ -382,6 +386,81 @@ interface Banner extends CommuneBanner {
   hue: number;
 }
 
+interface BoardNoteEditorProps {
+  text: string;
+  onTextChange: (text: string) => void;
+  kind: CommuneBannerKind;
+  onKindChange: (kind: CommuneBannerKind) => void;
+  priority: CommuneBannerPriority;
+  onPriorityChange: (priority: CommuneBannerPriority) => void;
+  strokes: CommuneBannerStroke[];
+  onStrokesChange: (strokes: CommuneBannerStroke[]) => void;
+  onSubmit: () => void;
+  label: string;
+}
+
+function BoardNoteEditor({
+  text,
+  onTextChange,
+  kind,
+  onKindChange,
+  priority,
+  onPriorityChange,
+  strokes,
+  onStrokesChange,
+  onSubmit,
+  label,
+}: BoardNoteEditorProps) {
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block min-w-0">
+          <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">Card format</span>
+          <select
+            value={kind}
+            onChange={(event) => onKindChange(event.target.value as CommuneBannerKind)}
+            className="h-9 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2 font-['Schoolbell'] text-sm font-bold text-[#3c3021] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+          >
+            <option value="pin">Pinned note</option>
+            <option value="priority">Priority card</option>
+            <option value="sketch">Whiteboard sketch</option>
+          </select>
+        </label>
+        {kind === 'priority' && (
+          <label className="block min-w-0">
+            <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">Priority</span>
+            <select
+              value={priority}
+              onChange={(event) => onPriorityChange(event.target.value as CommuneBannerPriority)}
+              className="h-9 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2 font-['Schoolbell'] text-sm font-bold text-[#3c3021] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+            >
+              <option value="normal">Standard</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </label>
+        )}
+      </div>
+      <label className="block">
+        <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">{label}</span>
+        <input
+          value={text}
+          onChange={(event) => onTextChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onSubmit();
+            event.stopPropagation();
+          }}
+          maxLength={80}
+          aria-label={label}
+          placeholder={kind === 'priority' ? 'What needs attention?' : kind === 'sketch' ? 'Label this drawing…' : 'Write a short town note…'}
+          className="h-10 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2.5 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+        />
+      </label>
+      {kind === 'sketch' && <CommuneBoardSketchPad strokes={strokes} onChange={onStrokesChange} />}
+    </div>
+  );
+}
+
 /** The cat this agent already carries as their workspace companion (the
  *  "Cat companion" pick in Settings) — the loadout defaults to it so the
  *  square shows the same pet without manual setup. */
@@ -475,13 +554,37 @@ function isCommuneBanner(value: unknown): value is CommuneBanner {
     && Number.isFinite(Number(banner.at));
 }
 
+function isCommuneBannerStroke(value: unknown): value is CommuneBannerStroke {
+  if (!value || typeof value !== 'object') return false;
+  const stroke = value as Record<string, unknown>;
+  return typeof stroke.color === 'string'
+    && Array.isArray(stroke.points)
+    && stroke.points.length <= 48
+    && stroke.points.every((point) => (
+      !!point
+      && typeof point === 'object'
+      && Number.isFinite(Number((point as Record<string, unknown>).x))
+      && Number.isFinite(Number((point as Record<string, unknown>).y))
+    ));
+}
+
 function parseBanners(value: unknown): Banner[] {
   if (!Array.isArray(value)) return [];
-  return value.filter(isCommuneBanner).slice(-6).map((banner) => ({
-    ...banner,
-    at: Number(banner.at),
-    hue: hueOf(banner.author),
-  }));
+  return value.filter(isCommuneBanner).slice(-6).map((banner) => {
+    const kind: CommuneBannerKind = banner.kind === 'priority' || banner.kind === 'sketch' ? banner.kind : 'pin';
+    const priority: CommuneBannerPriority = banner.priority === 'high' || banner.priority === 'urgent'
+      ? banner.priority
+      : 'normal';
+    const strokes = Array.isArray(banner.strokes) ? banner.strokes.filter(isCommuneBannerStroke).slice(0, 8) : [];
+    return {
+      ...banner,
+      kind,
+      priority: kind === 'priority' ? priority : 'normal',
+      strokes: kind === 'sketch' ? strokes : [],
+      at: Number(banner.at),
+      hue: hueOf(banner.author),
+    };
+  });
 }
 
 interface Speech { text: string; until: number }
@@ -603,17 +706,23 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const labelsCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const communeRendererRef = useRef<CommuneThreeRenderer | null>(null);
-  const [mapZoom, setMapZoom] = useState(1);
-  const mapZoomRef = useRef(1);
+  const [mapZoom, setMapZoom] = useState(1.5);
+  const mapZoomRef = useRef(1.5);
   mapZoomRef.current = mapZoom;
   const [panel, setPanel] = useState<PanelKind>(null);
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
   const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerDraft, setBannerDraft] = useState('');
+  const [bannerKind, setBannerKind] = useState<CommuneBannerKind>('pin');
+  const [bannerPriority, setBannerPriority] = useState<CommuneBannerPriority>('normal');
+  const [bannerStrokes, setBannerStrokes] = useState<CommuneBannerStroke[]>([]);
   const [bannerSending, setBannerSending] = useState(false);
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null);
   const [bannerEditDraft, setBannerEditDraft] = useState('');
+  const [bannerEditKind, setBannerEditKind] = useState<CommuneBannerKind>('pin');
+  const [bannerEditPriority, setBannerEditPriority] = useState<CommuneBannerPriority>('normal');
+  const [bannerEditStrokes, setBannerEditStrokes] = useState<CommuneBannerStroke[]>([]);
   const [bannerDeleteId, setBannerDeleteId] = useState<string | null>(null);
   const [bannerUpdating, setBannerUpdating] = useState(false);
   const [bannerDeleting, setBannerDeleting] = useState(false);
@@ -887,29 +996,45 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const hangBanner = useCallback(async () => {
     const text = bannerDraft.trim();
-    if (!text || bannerSending) return;
+    if (!text || bannerSending || (bannerKind === 'sketch' && !bannerStrokes.length)) return;
     setBannerSending(true);
     try {
-      const shared = await createCommuneBanner(text);
+      const shared = await createCommuneBanner({
+        text,
+        kind: bannerKind,
+        priority: bannerKind === 'priority' ? bannerPriority : 'normal',
+        strokes: bannerKind === 'sketch' ? bannerStrokes : [],
+      });
       setBanners(parseBanners(shared));
       setBannerDraft('');
+      setBannerKind('pin');
+      setBannerPriority('normal');
+      setBannerStrokes([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to hang the banner.';
       setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message }]);
     } finally {
       setBannerSending(false);
     }
-  }, [bannerDraft, bannerSending]);
+  }, [bannerDraft, bannerKind, bannerPriority, bannerSending, bannerStrokes]);
 
   const saveBannerEdit = async (id: string) => {
     const text = bannerEditDraft.trim();
-    if (!text || bannerUpdating) return;
+    if (!text || bannerUpdating || (bannerEditKind === 'sketch' && !bannerEditStrokes.length)) return;
     setBannerUpdating(true);
     try {
-      const shared = await editCommuneBanner(id, text);
+      const shared = await editCommuneBanner(id, {
+        text,
+        kind: bannerEditKind,
+        priority: bannerEditKind === 'priority' ? bannerEditPriority : 'normal',
+        strokes: bannerEditKind === 'sketch' ? bannerEditStrokes : [],
+      });
       setBanners(parseBanners(shared));
       setEditingBannerId(null);
       setBannerEditDraft('');
+      setBannerEditKind('pin');
+      setBannerEditPriority('normal');
+      setBannerEditStrokes([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to update the town notice.';
       setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message }]);
@@ -928,6 +1053,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (editingBannerId === id) {
         setEditingBannerId(null);
         setBannerEditDraft('');
+        setBannerEditKind('pin');
+        setBannerEditPriority('normal');
+        setBannerEditStrokes([]);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to remove the town notice.';
@@ -2439,7 +2567,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const adjustMapZoom = (delta: number) => {
-    setMapZoom((current) => Number(Math.min(2.2, Math.max(0.7, current + delta)).toFixed(2)));
+    setMapZoom((current) => Number(Math.min(4, Math.max(1.5, current + delta)).toFixed(2)));
   };
 
   const onMapZoomChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2485,6 +2613,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     ? others.filter((agent) => agent.carId === carSeat.carId).sort((a, b) => (a.carSeat ?? 0) - (b.carSeat ?? 0))
     : [];
   const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
+  const paperPanel = panel === 'banners' || panel === 'agent';
   const panelPosition = touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
@@ -2529,8 +2658,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">ZOOM</span>
           <input
             type="range"
-            min="0.7"
-            max="2.2"
+            min="1.5"
+            max="4"
             step="0.05"
             value={mapZoom}
             onChange={onMapZoomChange}
@@ -2545,18 +2674,18 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       )}
 
       {/* Compact world identity */}
-      <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 rounded-2xl border border-white/35 bg-card/85 px-3.5 py-2 text-foreground shadow-lg backdrop-blur-xl">
-        <span className="grid size-8 place-items-center rounded-xl bg-primary/15 text-primary">
+      <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 border-2 border-[#785a3c] bg-[#f0dfb9] px-3.5 py-2 text-[#493927] shadow-[3px_3px_0_rgba(36,28,19,0.42)]">
+        <span className="grid size-8 place-items-center border-2 border-[#8b6a44] bg-[#735638] text-[#f8eccf]">
           <Users className="size-4" />
         </span>
           <span>
-          <span className="block font-mono text-[11px] font-extrabold tracking-[0.12em]">COMMUNE</span>
-            <span className="block text-[10px] text-muted-foreground">Town square · {others.length + 1} here</span>
-            <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
-              <span className={cn('size-1.5 rounded-full', connectionState === 'connected' ? 'bg-emerald-400' : 'bg-amber-400')} />
+          <span className="block font-['Schoolbell'] text-sm font-bold tracking-wide">COMMUNE</span>
+            <span className="block text-[10px] text-[#715b3e]">Town square · {others.length + 1} here</span>
+            <span className="flex items-center gap-1.5 text-[9px] text-[#715b3e]">
+              <span className={cn('size-1.5 border border-[#493927]/40', connectionState === 'connected' ? 'bg-[#788c5d]' : 'bg-[#d6a646]')} />
               {connectionState === 'connected' ? 'Live' : connectionState === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
             </span>
-            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-100">
+            <span className="mt-1 inline-flex items-center gap-1 border border-[#8b6a44] bg-[#ead6ad] px-2 py-0.5 font-['Schoolbell'] text-[10px] font-bold text-[#5c472e]">
               ✦ {oddityCount} oddit{oddityCount === 1 ? 'y' : 'ies'} found
             </span>
         </span>
@@ -2744,7 +2873,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         >
           <button
             type="button"
-            onClick={() => adjustMapZoom(-0.1)}
+            onClick={() => adjustMapZoom(-0.25)}
             aria-label="Zoom out map"
             className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
@@ -2753,7 +2882,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           <output className="min-w-9 text-center tabular-nums">{mapZoom.toFixed(1)}x</output>
           <button
             type="button"
-            onClick={() => adjustMapZoom(0.1)}
+            onClick={() => adjustMapZoom(0.25)}
             aria-label="Zoom in map"
             className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
@@ -2958,7 +3087,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-modal="false"
           aria-label={activeProp?.label ?? (panel === 'treehole' ? 'Anonymous feedback treehole' : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
           className={cn(
-            'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
+            paperPanel
+              ? 'absolute overflow-y-auto border-[3px] border-[#785a3c] bg-[#dcc399] p-3 text-[#493927] shadow-[5px_5px_0_rgba(36,28,19,0.48)]'
+              : 'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
             touchControls
               ? cn(
                   panel === 'quiz' ? 'max-h-[min(90dvh,980px)]' : 'max-h-[min(82dvh,780px)]',
@@ -2983,7 +3114,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           <button
             type="button"
             onClick={() => setPanel(null)}
-            className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className={cn(
+              'absolute right-2.5 top-2.5 p-1.5 transition focus-visible:outline-none focus-visible:ring-2',
+              paperPanel
+                ? 'border-2 border-[#8b6a44] bg-[#ead6ad] text-[#5c472e] shadow-[2px_2px_0_#6c5034] hover:bg-[#f8eccf] focus-visible:ring-[#7d6848]'
+                : 'rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:ring-accent'
+            )}
             aria-label="Close"
           >
             <X className="size-4" />
@@ -3299,37 +3435,21 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
           {panel === 'banners' && (
             <div className="mt-3">
-              <div className="mb-3 flex items-center justify-between gap-3 pr-8">
+              <div className="mb-3 flex items-center justify-between gap-3 border-2 border-[#785a3c] bg-[#735638] p-2.5 pr-8 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.55)]">
                 <div className="flex items-center gap-2.5">
-                  <span className={cn(
-                    'grid size-9 place-items-center',
-                    boardTab === 'announcements'
-                      ? 'border-2 border-[#785a3c] bg-[#dfc79a] text-[#694d32] shadow-[2px_2px_0_#443322]'
-                      : 'rounded-xl bg-primary/12 text-primary'
-                  )}>
+                  <span className="grid size-9 place-items-center border-2 border-[#8b6a44] bg-[#f0dfb9] text-[#694d32] shadow-[2px_2px_0_#443322]">
                     {boardTab === 'roster' ? <CalendarDays className="size-4" /> : <Megaphone className="size-4" />}
                   </span>
                   <div>
-                    <p className={cn(
-                      'font-mono text-[9px] font-bold uppercase tracking-[0.16em]',
-                      boardTab === 'announcements' ? 'text-[#92734c]' : 'text-muted-foreground'
-                    )}>
+                    <p className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-[0.12em] text-[#ead6ad]">
                       {boardTab === 'roster' ? 'THE COMMONS' : 'TOWN HALL BULLETIN'}
                     </p>
-                    <h3 className={cn(
-                      'font-mono text-sm font-extrabold',
-                      boardTab === 'announcements' ? 'text-[#423421]' : 'text-foreground'
-                    )}>
+                    <h3 className="font-['Schoolbell'] text-lg font-bold leading-tight text-[#fff4d9]">
                       {boardTab === 'roster' ? 'Agent Roster Board' : 'Town Hall News'}
                     </h3>
                   </div>
                 </div>
-                <div className={cn(
-                  'flex p-0.5',
-                  boardTab === 'announcements'
-                    ? 'border-2 border-[#785a3c] bg-[#d4b98a] shadow-[2px_2px_0_#443322]'
-                    : 'rounded-lg border border-border/70 bg-background/55'
-                )}>
+                <div className="flex border-2 border-[#785a3c] bg-[#d4b98a] p-0.5 shadow-[2px_2px_0_#443322]">
                   {([
                     ['roster', 'Shifts'],
                     ['announcements', 'News'],
@@ -3339,17 +3459,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       type="button"
                       onClick={() => setBoardTab(tab)}
                       className={cn(
-                        'px-2.5 py-1.5 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                        boardTab === 'announcements'
-                          ? tab === boardTab
-                            ? 'bg-[#735638] text-[#f8eccf]'
-                            : 'text-[#715536] hover:bg-[#ead6ad]'
-                          : cn(
-                            'rounded-md',
-                            tab === boardTab
-                              ? 'bg-primary/20 text-primary'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )
+                        'px-2.5 py-1.5 font-["Schoolbell"] text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]',
+                        tab === boardTab
+                          ? 'bg-[#735638] text-[#f8eccf] shadow-[2px_2px_0_#443322]'
+                          : 'text-[#715536] hover:bg-[#ead6ad]'
                       )}
                     >
                       {label}
@@ -3361,18 +3474,18 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               {boardTab === 'roster' ? (
                 <section aria-label="Agent shift schedule">
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                    <div className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/8 px-3 py-2.5">
-                      <span className="grid size-9 place-items-center rounded-lg bg-primary/15 text-primary"><Users className="size-4" /></span>
+                    <div className="flex items-center gap-3 border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2.5 shadow-[2px_2px_0_rgba(51,39,25,0.35)]">
+                      <span className="grid size-9 place-items-center border-2 border-[#5b6139] bg-[#788c5d] text-[#fff4d9]"><Users className="size-4" /></span>
                       <span>
-                        <span className="block font-mono text-lg font-black leading-none text-foreground">{rosterOnDuty.length}</span>
-                        <span className="mt-1 block text-[9px] font-bold uppercase tracking-wide text-muted-foreground">scheduled on this shift</span>
+                        <span className="block font-['Schoolbell'] text-xl font-bold leading-none text-[#493927]">{rosterOnDuty.length}</span>
+                        <span className="mt-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wide text-[#715b3e]">scheduled on this shift</span>
                       </span>
-                      <span className="ml-auto text-right text-[9px] text-muted-foreground">
+                      <span className="ml-auto text-right font-['Schoolbell'] text-[11px] text-[#715b3e]">
                         {rosterLoading ? 'Syncing shared board…' : 'Snapshot + live updates'}
                       </span>
                     </div>
-                    <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/45 px-3">
-                      <CalendarDays className="size-3.5 text-accent" />
+                    <label className="flex items-center gap-2 border-2 border-[#8b6a44] bg-[#ead6ad] px-3 shadow-[2px_2px_0_rgba(51,39,25,0.28)]">
+                      <CalendarDays className="size-3.5 text-[#788c5d]" />
                       <span className="sr-only">Roster month</span>
                       <select
                         value={rosterMonth}
@@ -3381,10 +3494,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                           setRosterMonth(nextMonth);
                           setRosterDate(`${nextMonth}-01`);
                         }}
-                        className="h-10 bg-transparent text-xs text-foreground outline-none"
+                        className="h-10 bg-transparent font-['Schoolbell'] text-sm text-[#493927] outline-none"
                       >
                         {ROSTER_MONTHS.map((month) => (
-                          <option key={month} value={month} className="bg-background text-foreground">
+                          <option key={month} value={month} className="bg-[#fff4d9] text-[#493927]">
                             {new Date(`${month}-01T12:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
                           </option>
                         ))}
@@ -3401,62 +3514,62 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                           type="button"
                           onClick={() => setRosterDate(iso)}
                           className={cn(
-                            'min-w-12 rounded-xl border px-2 py-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                            'min-w-12 border-2 px-2 py-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]',
                             selectedDay
-                              ? 'border-accent/55 bg-accent/15 text-accent'
-                              : 'border-border/60 bg-background/35 text-muted-foreground hover:border-accent/30'
+                              ? 'border-[#5b6139] bg-[#788c5d] text-[#fff4d9] shadow-[2px_2px_0_#433d28]'
+                              : 'border-[#a88a5f] bg-[#f0dfb9] text-[#715b3e] hover:bg-[#f8eccf]'
                           )}
                         >
-                          <span className="block text-[8px] font-bold uppercase">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
-                          <span className="mt-0.5 block font-mono text-xs font-bold">{date.getDate()}</span>
+                          <span className="block font-['Schoolbell'] text-[10px] font-bold uppercase">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                          <span className="mt-0.5 block font-['Schoolbell'] text-sm font-bold">{date.getDate()}</span>
                         </button>
                       );
                     })}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <label className="flex h-9 min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-2.5">
-                      <Search className="size-3.5 text-muted-foreground" />
+                    <label className="flex h-9 min-w-[180px] flex-1 items-center gap-2 border-2 border-[#a88a5f] bg-[#fff4d9] px-2.5">
+                      <Search className="size-3.5 text-[#788c5d]" />
                       <input
                         value={rosterQuery}
                         onChange={(event) => setRosterQuery(event.target.value)}
                         onKeyDown={(event) => event.stopPropagation()}
                         placeholder="Find an agent…"
                         aria-label="Find an agent on the roster"
-                        className="min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+                        className="min-w-0 flex-1 bg-transparent font-['Schoolbell'] text-sm text-[#493927] outline-none placeholder:text-[#9a805b]"
                       />
                     </label>
                     <select
                       value={rosterSkill}
                       onChange={(event) => setRosterSkill(event.target.value)}
                       aria-label="Filter roster by team"
-                      className="h-9 rounded-lg border border-border/60 bg-background/70 px-2.5 text-[11px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      className="h-9 border-2 border-[#a88a5f] bg-[#fff4d9] px-2.5 font-['Schoolbell'] text-sm text-[#493927] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                     >
-                      <option value="all" className="bg-background text-foreground">All teams</option>
-                      {rosterSkillOptions.map((skill) => <option key={skill} value={skill} className="bg-background text-foreground">{skill}</option>)}
+                      <option value="all" className="bg-[#fff4d9] text-[#493927]">All teams</option>
+                      {rosterSkillOptions.map((skill) => <option key={skill} value={skill} className="bg-[#fff4d9] text-[#493927]">{skill}</option>)}
                     </select>
                   </div>
-                  <div className="mt-2 flex items-center justify-between px-1 text-[9px] text-muted-foreground">
+                  <div className="mt-2 flex items-center justify-between border-b border-[#a88a5f] px-1 pb-1 font-['Schoolbell'] text-xs text-[#715b3e]">
                     <span>{new Date(`${rosterDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span>
                     <span>{rosterLoading ? 'Checking live schedule' : 'Read-only · shared schedule'}</span>
                   </div>
-                  <div className="mt-1 max-h-56 overflow-y-auto rounded-xl border border-border/60 bg-background/25">
+                  <div className="mt-2 max-h-56 overflow-y-auto border-2 border-[#8b6a44] bg-[#f0dfb9] shadow-[3px_3px_0_rgba(51,39,25,0.35)]">
                     {visibleRoster.length === 0 ? (
-                      <p className="p-5 text-center text-xs text-muted-foreground">
+                      <p className="p-5 text-center font-['Schoolbell'] text-sm text-[#715b3e]">
                         {rosterAgents.length ? 'No agents match those filters.' : 'No roster snapshot is available for this month.'}
                       </p>
                     ) : visibleRoster.map((agent) => {
                       const code = rosterShiftOf(agent, rosterDate);
                       const off = isRosterOffDay(code);
                       return (
-                        <div key={`${agent.no}-${agent.en}`} className="flex items-center gap-3 border-b border-border/35 px-3 py-2 last:border-0">
-                          <span className={cn('size-2 shrink-0 rounded-full', off ? 'bg-foreground/20' : 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.35)]')} />
+                        <div key={`${agent.no}-${agent.en}`} className="flex items-center gap-3 border-b border-[#c5ab7d] px-3 py-2 last:border-0 even:bg-[#ead6ad]/70">
+                          <span className={cn('size-2 shrink-0 border border-[#493927]/30', off ? 'bg-[#c5ab7d]' : 'bg-[#788c5d]')} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold text-foreground">{agent.en}</span>
-                            <span className="block text-[9px] text-muted-foreground">{agent.skill}</span>
+                            <span className="block truncate font-['Schoolbell'] text-sm font-bold text-[#493927]">{agent.en}</span>
+                            <span className="block font-['Schoolbell'] text-[11px] text-[#715b3e]">{agent.skill}</span>
                           </span>
                           <span className={cn(
-                            'min-w-14 rounded-md border px-2 py-1 text-center font-mono text-[10px] font-bold',
-                            off ? 'border-border/50 bg-background/50 text-muted-foreground' : 'border-sky-400/25 bg-sky-400/10 text-sky-200'
+                            'min-w-14 border-2 px-2 py-1 text-center font-["Schoolbell"] text-xs font-bold',
+                            off ? 'border-[#a88a5f] bg-[#ead6ad] text-[#715b3e]' : 'border-[#587044] bg-[#788c5d] text-[#fff4d9] shadow-[2px_2px_0_#5b6139]'
                           )}>
                             {code || '—'}
                           </span>
@@ -3469,57 +3582,98 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 <section aria-label="Town Hall News" className="space-y-3">
                   <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.7)]">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.16em]">
-                        TOWN HALL / PINNED NOTICES
+                      <p className="font-['Schoolbell'] text-xs font-bold uppercase tracking-[0.12em]">
+                        TOWN HALL / MIXED-MEDIA BOARD
                       </p>
-                      <span className="shrink-0 border border-[#dfc38f]/50 bg-[#59432f] px-1.5 py-0.5 font-mono text-[9px] font-bold">
+                      <span className="shrink-0 border border-[#dfc38f]/50 bg-[#59432f] px-1.5 py-0.5 font-['Schoolbell'] text-xs font-bold">
                         {banners.length}/6
                       </span>
                     </div>
                   </div>
-                  <p className="text-[10px] leading-relaxed text-muted-foreground">
-                    Short town updates are pinned here and on the wooden board in the square.
+                  <p className="font-['Schoolbell'] text-sm leading-relaxed text-[#715b3e]">
+                    Mix pinned notes, priority alerts, and quick whiteboard sketches for the whole square.
                   </p>
                   <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                     {banners.length === 0 && (
                       <p className="border-2 border-dashed border-[#96774f] bg-[#e8d3a9] p-5 text-center font-['Schoolbell'] text-sm text-[#6f5537] shadow-[3px_3px_0_rgba(51,39,25,0.25)]">
-                        The board is clear. Pin the first town notice.
+                        The board is clear. Pin a note, flag a priority, or sketch an idea.
                       </p>
                     )}
                     {banners.map((banner) => {
                       const editing = editingBannerId === banner.id;
                       const confirmingDelete = bannerDeleteId === banner.id;
+                      const kind = editing ? bannerEditKind : banner.kind ?? 'pin';
+                      const priority = editing ? bannerEditPriority : banner.priority ?? 'normal';
+                      const paperColor = kind === 'priority'
+                        ? priority === 'urgent' ? '#f2c8b9' : priority === 'high' ? '#f1ddb0' : '#f0dfb9'
+                        : kind === 'sketch' ? '#e4ead8' : '#f0dfb9';
                       return (
                         <article
                           key={banner.id}
                           className="relative border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2.5 text-[#3c3021] shadow-[3px_3px_0_rgba(51,39,25,0.45)]"
-                          style={{ borderLeftWidth: 5, borderLeftColor: `hsl(${banner.hue} 42% 43%)` }}
+                          style={{
+                            borderLeftWidth: 5,
+                            borderLeftColor: kind === 'priority'
+                              ? priority === 'urgent' ? '#ae5141' : priority === 'high' ? '#b07831' : '#8b6a44'
+                              : kind === 'sketch' ? '#788c5d' : `hsl(${banner.hue} 42% 43%)`,
+                            backgroundColor: paperColor,
+                          }}
                         >
                           <span
                             aria-hidden="true"
                             className="absolute left-2 top-2 size-2 border border-[#784438] bg-[#bc6850]"
+                            style={{
+                              backgroundColor: kind === 'priority'
+                                ? priority === 'urgent' ? '#ae5141' : priority === 'high' ? '#d6a646' : '#8b6a44'
+                                : kind === 'sketch' ? '#788c5d' : `hsl(${banner.hue} 55% 43%)`,
+                            }}
                           />
                           <div className="flex flex-wrap items-start gap-2 pl-3">
                             <div className="min-w-0 flex-1">
                               {editing ? (
-                                <input
-                                  autoFocus
-                                  value={bannerEditDraft}
-                                  onChange={(event) => setBannerEditDraft(event.target.value)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter') void saveBannerEdit(banner.id);
-                                    event.stopPropagation();
-                                  }}
-                                  maxLength={80}
-                                  aria-label="Edit town announcement"
-                                  className="h-9 w-full border-2 border-[#8b6a44] bg-[#fff4d9] px-2 font-['Schoolbell'] text-sm text-[#3c3021] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+                                <BoardNoteEditor
+                                  text={bannerEditDraft}
+                                  onTextChange={setBannerEditDraft}
+                                  kind={bannerEditKind}
+                                  onKindChange={setBannerEditKind}
+                                  priority={bannerEditPriority}
+                                  onPriorityChange={setBannerEditPriority}
+                                  strokes={bannerEditStrokes}
+                                  onStrokesChange={setBannerEditStrokes}
+                                  onSubmit={() => void saveBannerEdit(banner.id)}
+                                  label="EDIT BOARD ITEM"
                                 />
                               ) : (
-                                <p className="whitespace-pre-wrap break-words font-['Schoolbell'] text-sm font-bold leading-relaxed">
-                                  {banner.text}
-                                </p>
+                                <>
+                                  <div className="mb-1 flex flex-wrap gap-1.5">
+                                    <span className="border border-[#8b6a44]/60 bg-[#fff4d9]/60 px-1.5 py-0.5 font-['Schoolbell'] text-[10px] font-bold uppercase tracking-wider text-[#705335]">
+                                      {kind === 'priority' ? 'PRIORITY' : kind === 'sketch' ? 'SKETCH' : 'PIN'}
+                                    </span>
+                                    {kind === 'priority' && (
+                                      <span className={cn(
+                                        'border px-1.5 py-0.5 font-["Schoolbell"] text-[10px] font-bold uppercase tracking-wider',
+                                        priority === 'urgent'
+                                          ? 'border-[#9c4538] bg-[#ae5b48] text-[#fff4d9]'
+                                          : priority === 'high'
+                                            ? 'border-[#9a6a2e] bg-[#d6a646] text-[#3c3021]'
+                                            : 'border-[#8b6a44] bg-[#ead6ad] text-[#5c472e]'
+                                      )}>
+                                        {priority}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {kind === 'sketch' && banner.strokes.length > 0 && (
+                                    <CommuneBoardSketchPreview
+                                      strokes={banner.strokes}
+                                      className="mb-2 block h-20 w-full border-2 border-[#8b6a44]"
+                                    />
+                                  )}
+                                  <p className="whitespace-pre-wrap break-words font-['Schoolbell'] text-sm font-bold leading-relaxed">
+                                    {banner.text}
+                                  </p>
+                                </>
                               )}
-                              <p className="mt-1.5 font-mono text-[9px] text-[#715b3e]">
+                              <p className="mt-1.5 font-['Schoolbell'] text-[11px] text-[#715b3e]">
                                 PINNED BY {banner.author.toUpperCase()} · {new Date(banner.at).toLocaleString()}
                               </p>
                             </div>
@@ -3530,8 +3684,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                     <button
                                       type="button"
                                       onClick={() => void saveBannerEdit(banner.id)}
-                                      disabled={!bannerEditDraft.trim() || bannerUpdating}
-                                      className="border-2 border-[#5b6139] bg-[#788c5d] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#fff4d9] shadow-[2px_2px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                      disabled={
+                                        !bannerEditDraft.trim()
+                                        || bannerUpdating
+                                        || (bannerEditKind === 'sketch' && !bannerEditStrokes.length)
+                                      }
+                                      className="border-2 border-[#5b6139] bg-[#788c5d] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#fff4d9] shadow-[2px_2px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                     >
                                       {bannerUpdating ? 'Saving…' : 'Save'}
                                     </button>
@@ -3540,9 +3698,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                       onClick={() => {
                                         setEditingBannerId(null);
                                         setBannerEditDraft('');
+                                        setBannerEditKind('pin');
+                                        setBannerEditPriority('normal');
+                                        setBannerEditStrokes([]);
                                       }}
                                       disabled={bannerUpdating}
-                                      className="border-2 border-[#8b6a44] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                      className="border-2 border-[#8b6a44] bg-[#ead6ad] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                     >
                                       Cancel
                                     </button>
@@ -3555,15 +3716,18 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                         setBannerDeleteId(null);
                                         setEditingBannerId(banner.id);
                                         setBannerEditDraft(banner.text);
+                                        setBannerEditKind(banner.kind);
+                                        setBannerEditPriority(banner.priority);
+                                        setBannerEditStrokes(banner.strokes);
                                       }}
-                                      className="border border-[#92734c] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] hover:bg-[#f8eccf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                      className="border-2 border-[#92734c] bg-[#ead6ad] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#5c472e] shadow-[2px_2px_0_#92734c] hover:bg-[#f8eccf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                     >
                                       Edit
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => setBannerDeleteId(banner.id)}
-                                      className="border border-[#9b6250] bg-[#efd0b7] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#714536] hover:bg-[#f7dfc9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                      className="border-2 border-[#9b6250] bg-[#efd0b7] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#714536] shadow-[2px_2px_0_#9b6250] hover:bg-[#f7dfc9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                     >
                                       Delete
                                     </button>
@@ -3574,13 +3738,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                           </div>
                           {isAdmin && confirmingDelete && (
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#bca27a] pt-2">
-                              <span className="font-mono text-[9px] font-bold text-[#715335]">PULL THIS NOTICE DOWN?</span>
+                              <span className="font-['Schoolbell'] text-xs font-bold text-[#715335]">Pull this notice down?</span>
                               <div className="flex gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => setBannerDeleteId(null)}
                                   disabled={bannerDeleting}
-                                  className="border border-[#92734c] bg-[#ead6ad] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                  className="border-2 border-[#92734c] bg-[#ead6ad] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#5c472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                 >
                                   Keep
                                 </button>
@@ -3588,7 +3752,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                   type="button"
                                   onClick={() => void removeBanner(banner.id)}
                                   disabled={bannerDeleting}
-                                  className="border-2 border-[#8a493c] bg-[#ae5b48] px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#fff4d9] shadow-[2px_2px_0_#56372c] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                                  className="border-2 border-[#8a493c] bg-[#ae5b48] px-2 py-1 font-['Schoolbell'] text-xs font-bold text-[#fff4d9] shadow-[2px_2px_0_#56372c] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
                                 >
                                   {bannerDeleting ? 'Removing…' : 'Remove'}
                                 </button>
@@ -3601,32 +3765,33 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                   </div>
                   {isAdmin && !editingBannerId && (
                     <div className="border-2 border-[#876641] bg-[#dcc399] p-3 shadow-[3px_3px_0_rgba(51,39,25,0.4)]">
-                      <label className="block">
-                        <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.14em] text-[#705335]">
-                          PIN A NEW NOTICE
-                        </span>
-                        <input
-                          value={bannerDraft}
-                          onChange={(event) => setBannerDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') hangBanner();
-                            event.stopPropagation();
-                          }}
-                          maxLength={80}
-                          placeholder="Write a short update for the town…"
-                          aria-label="New town announcement"
-                          className="h-10 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2.5 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
-                        />
-                      </label>
+                      <BoardNoteEditor
+                        text={bannerDraft}
+                        onTextChange={setBannerDraft}
+                        kind={bannerKind}
+                        onKindChange={setBannerKind}
+                        priority={bannerPriority}
+                        onPriorityChange={setBannerPriority}
+                        strokes={bannerStrokes}
+                        onStrokesChange={setBannerStrokes}
+                        onSubmit={() => void hangBanner()}
+                        label="NEW BOARD ITEM"
+                      />
                       <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className="font-mono text-[9px] text-[#785e3e]">{bannerDraft.length}/80 characters</span>
+                        <span className="font-['Schoolbell'] text-xs text-[#785e3e]">
+                          {bannerDraft.length}/80 · {bannerKind === 'sketch' ? `${bannerStrokes.length}/8 strokes` : bannerKind === 'priority' ? `${bannerPriority} priority` : 'pinned note'}
+                        </span>
                         <button
                           type="button"
                           onClick={hangBanner}
-                          disabled={!bannerDraft.trim() || bannerSending}
-                          className="border-2 border-[#4f5a37] bg-[#788c5d] px-3 py-1.5 font-mono text-[10px] font-bold uppercase text-[#fff4d9] shadow-[3px_3px_0_#433d28] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                          disabled={
+                            !bannerDraft.trim()
+                            || bannerSending
+                            || (bannerKind === 'sketch' && !bannerStrokes.length)
+                          }
+                          className="border-2 border-[#4f5a37] bg-[#788c5d] px-3 py-1.5 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848] disabled:opacity-50"
                         >
-                          {bannerSending ? 'Pinning…' : 'Pin notice'}
+                          {bannerSending ? 'Pinning…' : bannerKind === 'sketch' ? 'Pin sketch' : bannerKind === 'priority' ? 'Post priority' : 'Pin note'}
                         </button>
                       </div>
                     </div>
@@ -3859,36 +4024,38 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           )}
 
           {panel === 'agent' && selected && (
-            <div>
-              <h3 className="flex items-center gap-2 pr-6 font-mono text-sm font-extrabold text-foreground">
-                {selected.isAdmin && <span className="text-primary">★</span>}
-                {selected.username}
-              </h3>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <div className="space-y-2">
+              <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 pr-8 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.5)]">
+                <h3 className="flex items-center gap-2 font-['Schoolbell'] text-lg font-bold">
+                  {selected.isAdmin && <span className="text-[#f0d17c]">★</span>}
+                  {selected.username}
+                </h3>
+              </div>
+              <p className="inline-block border border-[#a88a5f] bg-[#ead6ad] px-2 py-1 font-['Schoolbell'] text-xs text-[#715b3e]">
                 {selected.status || 'hanging out'} · seen {Math.max(1, Math.round(selected.seenAgo / 1000))}s ago
               </p>
               <button
                 type="button"
                 onClick={() => startDirectMessage(selected.username)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/15 px-3 py-2 text-xs font-bold text-primary transition hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="flex w-full items-center justify-center gap-2 border-2 border-[#5b6139] bg-[#788c5d] px-3 py-2 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] transition hover:-translate-y-0.5 hover:bg-[#697b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
               >
                 <MessageSquare className="size-3.5" /> Message {selected.username}
               </button>
               {selected.loadout?.phrase && (
-                <blockquote className="mt-2 rounded-lg border-l-4 border-primary/60 bg-primary/10 px-3 py-2 text-xs italic text-foreground">
+                <blockquote className="border-l-4 border-[#788c5d] bg-[#f0dfb9] px-3 py-2 font-['Schoolbell'] text-sm italic text-[#493927] shadow-[2px_2px_0_rgba(51,39,25,0.22)]">
                   “{selected.loadout.phrase}”
                 </blockquote>
               )}
               {selected.loadout && selected.loadout.cards.length > 0 && (
                 <>
-                  <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Collection cards</p>
+                  <p className="mb-1 font-['Schoolbell'] text-sm font-bold text-[#715b3e]">Collection cards</p>
                   <div className="grid grid-cols-3 gap-1.5">
                     {selected.loadout.cards.map((id) => {
                       const card = cardIndex?.get(id);
                       return card ? (
                         <div
                           key={id}
-                          className={cn('relative aspect-[5/7] overflow-hidden rounded-lg border bg-white/5', rarityStyle(card.rarity).border)}
+                          className={cn('relative aspect-[5/7] overflow-hidden border-2 bg-[#ead6ad]', rarityStyle(card.rarity).border)}
                           title={`${card.name} — ${card.rarity}`}
                         >
                           <img src={card.image} alt={card.name} className="size-full object-cover" />
@@ -3897,7 +4064,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                           </span>
                         </div>
                       ) : (
-                        <div key={id} className="flex aspect-[5/7] items-center justify-center rounded-lg border border-dashed border-border/50 font-mono text-xs text-muted-foreground/50">
+                        <div key={id} className="flex aspect-[5/7] items-center justify-center border-2 border-dashed border-[#a88a5f] bg-[#ead6ad] font-['Schoolbell'] text-sm text-[#9a805b]">
                           ???
                         </div>
                       );
@@ -3907,25 +4074,30 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               )}
               {selected.loadout?.pet && (
                 <>
-                  <p className="mt-3 mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Pet</p>
-                  <div className="rounded-lg border border-border/50 bg-background/20 px-3 py-2">
-                    <p className="text-xs font-extrabold text-foreground">
-                      {selected.loadout.pet.name} <span className="font-normal text-muted-foreground">· {selected.loadout.pet.stage}</span>
+                  <p className="mb-1 font-['Schoolbell'] text-sm font-bold text-[#715b3e]">Pet companion</p>
+                  <div className="border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2 shadow-[2px_2px_0_rgba(51,39,25,0.3)]">
+                    <p className="font-['Schoolbell'] text-sm font-bold text-[#493927]">
+                      {selected.loadout.pet.name} <span className="font-normal text-[#715b3e]">· {selected.loadout.pet.stage}</span>
                     </p>
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-background/60">
-                      <div
-                        className="h-full rounded-full bg-emerald-400"
-                        style={{ width: `${Math.round(selected.loadout.pet.mood)}%` }}
-                      />
+                    <div className="mt-2 flex gap-1" aria-label={`Mood ${Math.round(selected.loadout.pet.mood)} out of 100`}>
+                      {Array.from({ length: 5 }, (_, index) => (
+                        <span
+                          key={index}
+                          className={cn(
+                            'h-2 flex-1 border border-[#8b6a44]',
+                            selected.loadout!.pet!.mood >= (index + 1) * 20 ? 'bg-[#788c5d]' : 'bg-[#d6c199]'
+                          )}
+                        />
+                      ))}
                     </div>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
+                    <p className="mt-1 font-['Schoolbell'] text-xs text-[#715b3e]">
                       Mood {Math.round(selected.loadout.pet.mood)}/100 · Bond XP {selected.loadout.pet.xp}
                     </p>
                   </div>
                 </>
               )}
               {!selected.loadout?.phrase && !selected.loadout?.cards.length && !selected.loadout?.pet && (
-                <p className="mt-3 rounded-lg border border-dashed border-border/60 p-3 text-center text-xs text-muted-foreground">
+                <p className="border-2 border-dashed border-[#a88a5f] bg-[#f0dfb9] p-3 text-center font-['Schoolbell'] text-sm text-[#715b3e]">
                   {selected.username} hasn't set up a loadout yet.
                 </p>
               )}
@@ -3937,8 +4109,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       {/* Banner ticker — hung banners also scroll along the top edge */}
       {bannerWords.length > 0 && (
         <div className="pointer-events-none absolute left-1/2 top-4 flex w-[min(680px,calc(100%-200px))] -translate-x-1/2 items-center gap-2 overflow-hidden border-2 border-[#725338] bg-[#f0dfb8] px-2.5 py-2 shadow-[4px_4px_0_rgba(36,28,19,0.38)]">
-          <span className="shrink-0 border-2 border-[#5d432d] bg-[#735638] px-1.5 py-0.5 font-mono text-[8px] font-black uppercase tracking-wider text-[#f6e7c8]">
-            News
+          <span className="shrink-0 border-2 border-[#5d432d] bg-[#735638] px-1.5 py-0.5 font-['Schoolbell'] text-[10px] font-bold uppercase tracking-wider text-[#f6e7c8]">
+            {banners[banners.length - 1]?.kind === 'priority'
+              ? `${banners[banners.length - 1].priority} priority`
+              : banners[banners.length - 1]?.kind === 'sketch' ? 'Sketch' : 'Notice'}
           </span>
           <p className="truncate font-['Schoolbell'] text-sm font-bold text-[#493923]">
             {bannerWords[bannerWords.length - 1]}
@@ -4422,31 +4596,78 @@ function draw(
         ctx.rotate(((i % 2) - 0.5) * 0.12);
         ctx.fillStyle = '#8b6845';
         ctx.fillRect(-2, -2, 48, 60);
-        ctx.fillStyle = ['#f3dfb8', '#e8d1a2', '#f7e8c8'][i % 3];
+        ctx.fillStyle = b.kind === 'priority'
+          ? b.priority === 'urgent' ? '#f1c5b3' : b.priority === 'high' ? '#f0dcae' : '#f3dfb8'
+          : b.kind === 'sketch' ? '#e4ead8' : ['#f3dfb8', '#e8d1a2', '#f7e8c8'][i % 3];
         ctx.fillRect(0, 0, 44, 56);
-        ctx.fillStyle = `hsl(${b.hue} 55% 43%)`;
+        ctx.fillStyle = b.kind === 'priority'
+          ? b.priority === 'urgent' ? '#ae5141' : b.priority === 'high' ? '#b07831' : '#8b6845'
+          : b.kind === 'sketch' ? '#788c5d' : `hsl(${b.hue} 55% 43%)`;
         ctx.fillRect(20, 1, 5, 4);
-        ctx.fillStyle = '#493927';
-        ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
-        ctx.textAlign = 'center';
-        const clippedText = b.text.length > 42 ? `${b.text.slice(0, 39)}…` : b.text;
-        const words = clippedText.split(/\s+/);
-        let line = '';
-        let ly = 12;
-        let overflow = false;
-        for (const w of words) {
-          if ((line + ' ' + w).trim().length > 8 && line) {
-            ctx.fillText(line.trim(), 22, ly, 36);
-            line = w;
-            ly += 8;
-            if (ly > 44) {
-              overflow = true;
-              break;
+        if (b.kind === 'sketch' && b.strokes.length) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(3, 4, 38, 34);
+          ctx.clip();
+          for (const stroke of b.strokes) {
+            const points = stroke.points;
+            const first = points[0];
+            if (!first) continue;
+            if (points.length === 1) {
+              ctx.fillStyle = stroke.color;
+              ctx.fillRect(2 + first.x * 38, 3 + first.y * 34, 2, 2);
+              continue;
             }
-          } else line += ' ' + w;
+            ctx.beginPath();
+            ctx.moveTo(3 + first.x * 38, 4 + first.y * 34);
+            for (const point of points.slice(1)) {
+              ctx.lineTo(3 + point.x * 38, 4 + point.y * 34);
+            }
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'square';
+            ctx.lineJoin = 'miter';
+            ctx.stroke();
+          }
+          ctx.restore();
+          ctx.fillStyle = '#493927';
+          ctx.fillRect(2, 42, 40, 11);
+          ctx.fillStyle = '#f7e8c8';
+          ctx.font = "bold 6px 'Schoolbell', ui-monospace, monospace";
+          ctx.textAlign = 'center';
+          ctx.fillText(b.text.slice(0, 12), 22, 50, 37);
+        } else {
+          const isPriority = b.kind === 'priority';
+          if (isPriority) {
+            ctx.fillStyle = b.priority === 'urgent' ? '#ae5141' : b.priority === 'high' ? '#b07831' : '#8b6845';
+            ctx.fillRect(3, 4, 38, 7);
+            ctx.fillStyle = '#fff4d9';
+            ctx.font = "bold 5px ui-monospace, monospace";
+            ctx.textAlign = 'center';
+            ctx.fillText(`${b.priority.toUpperCase()} PRIORITY`, 22, 9, 36);
+          }
+          ctx.fillStyle = '#493927';
+          ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
+          ctx.textAlign = 'center';
+          const clippedText = b.text.length > 42 ? `${b.text.slice(0, 39)}…` : b.text;
+          const words = clippedText.split(/\s+/);
+          let line = '';
+          let ly = isPriority ? 20 : 12;
+          let overflow = false;
+          for (const w of words) {
+            if ((line + ' ' + w).trim().length > 8 && line) {
+              ctx.fillText(line.trim(), 22, ly, 36);
+              line = w;
+              ly += 8;
+              if (ly > 44) {
+                overflow = true;
+                break;
+              }
+            } else line += ' ' + w;
+          }
+          if (line && ly <= 44) ctx.fillText(line.trim(), 22, ly, 36);
+          if (overflow) ctx.fillText('…', 22, 52);
         }
-        if (line && ly <= 44) ctx.fillText(line.trim(), 22, ly, 36);
-        if (overflow) ctx.fillText('…', 22, 52);
         ctx.restore();
       });
       // Small wooden nameplate beneath the papers.

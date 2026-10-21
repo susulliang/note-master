@@ -266,9 +266,28 @@ export interface CommuneAgent {
   carSeat?: number | null;
 }
 
-export interface CommuneBanner {
-  id: string;
+export type CommuneBannerKind = 'pin' | 'priority' | 'sketch';
+export type CommuneBannerPriority = 'normal' | 'high' | 'urgent';
+
+export interface CommuneBannerPoint {
+  x: number;
+  y: number;
+}
+
+export interface CommuneBannerStroke {
+  color: string;
+  points: CommuneBannerPoint[];
+}
+
+export interface CommuneBannerContent {
   text: string;
+  kind: CommuneBannerKind;
+  priority: CommuneBannerPriority;
+  strokes: CommuneBannerStroke[];
+}
+
+export interface CommuneBanner extends CommuneBannerContent {
+  id: string;
   author: string;
   at: number;
 }
@@ -304,23 +323,23 @@ export async function saveCommuneLoadout(loadout: CommuneLoadout): Promise<void>
   });
 }
 
-/** Hang an admin announcement on the shared town board. */
-export async function createCommuneBanner(text: string): Promise<CommuneBanner[]> {
+/** Pin an admin-authored note, priority alert, or whiteboard sketch. */
+export async function createCommuneBanner(content: CommuneBannerContent): Promise<CommuneBanner[]> {
   const token = getStoredToken();
   const out = await call<{ banners: CommuneBanner[] }>('/api/commune/banners', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(content),
     token,
   });
   return out.banners;
 }
 
-/** Edit an existing shared town announcement. */
-export async function editCommuneBanner(id: string, text: string): Promise<CommuneBanner[]> {
+/** Edit an existing shared town board item. */
+export async function editCommuneBanner(id: string, content: CommuneBannerContent): Promise<CommuneBanner[]> {
   const token = getStoredToken();
   const out = await call<{ banners: CommuneBanner[] }>('/api/commune/banners', {
     method: 'POST',
-    body: JSON.stringify({ action: 'edit', id, text }),
+    body: JSON.stringify({ action: 'edit', id, ...content }),
     token,
   });
   return out.banners;

@@ -18,6 +18,15 @@ fi
 
 REQUIRE_COMPLETE_DASHBOARD_DATA=1 npm --prefix "$ROOT" run sync:reports
 
+node --input-type=module - "$ROOT/dashboard_publish/dashboard-data.json" <<'NODE'
+import { readFileSync } from 'node:fs';
+
+const snapshot = readFileSync(process.argv[2], 'utf8');
+if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(snapshot)) {
+  throw new Error('Refusing to publish dashboard data containing an email address');
+}
+NODE
+
 wrangler r2 object put \
   "${R2_BUCKET}/${DASHBOARD_DATA_KEY:-dashboard-data.json}" \
   --file "$ROOT/dashboard_publish/dashboard-data.json" \

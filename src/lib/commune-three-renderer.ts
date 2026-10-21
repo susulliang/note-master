@@ -6,6 +6,8 @@ const MAX_ACTORS = 256;
 const TEMP_COLOR = new THREE.Color();
 const DAY_BACKGROUND = new THREE.Color('#78956f');
 const NIGHT_BACKGROUND = new THREE.Color('#24344d');
+const LANTERN_DAY_COLOR = new THREE.Color('#b28c50');
+const LANTERN_NIGHT_COLOR = new THREE.Color('#ffe3a1');
 const LANDMARKS = [
   { text: 'TOWN HALL', x: 800, z: 155, height: 132 },
   { text: 'SPICE STORE', x: 270, z: 298, height: 110 },
@@ -46,7 +48,17 @@ type RenderCar = {
   trim: string;
 };
 
-type RenderPet = { x: number; y: number; pet?: { mood?: number } | null; pose?: string };
+type RenderPet = {
+  x: number;
+  y: number;
+  catId?: string;
+  stage?: string;
+  moving?: boolean;
+  pose?: string;
+  emote?: string | null;
+  walkPhase?: number;
+  facingLeft?: boolean;
+};
 type RenderDrop = { x: number; y: number };
 type RenderDuck = { x: number; y: number; phase?: number };
 type RenderDiscovery = { x: number; y: number };
@@ -73,6 +85,15 @@ function material(color: THREE.ColorRepresentation): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({ color, flatShading: true });
 }
 
+const CAT_COATS: Record<string, { body: string; light: string; dark: string; accent: string; patch: string }> = {
+  hunao: { body: '#aeb8c0', light: '#dce3e7', dark: '#58616a', accent: '#7eaaa7', patch: '#707b84' },
+  siam: { body: '#6a9bcc', light: '#b6d0e1', dark: '#3e5368', accent: '#d4bd6d', patch: '#526f8b' },
+  heyhey: { body: '#41444c', light: '#858993', dark: '#292c32', accent: '#d6bd65', patch: '#33363e' },
+  heyheyhey: { body: '#30333a', light: '#70747d', dark: '#202228', accent: '#cbb66a', patch: '#282b31' },
+  ailu: { body: '#6478c2', light: '#bcc9ef', dark: '#3f4e82', accent: '#75a5cb', patch: '#4f619d' },
+  bella: { body: '#fff8e9', light: '#fffaf0', dark: '#51483f', accent: '#d97757', patch: '#d97757' },
+};
+
 function addBox(
   parent: THREE.Object3D,
   x: number,
@@ -85,6 +106,8 @@ function addBox(
 ): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material(color));
   mesh.position.set(x, y + height / 2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
 }
@@ -105,6 +128,7 @@ function addGroundDisc(
   );
   mesh.scale.set(radiusX, 1, radiusZ);
   mesh.position.set(x, height / 2, z);
+  mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
 }
@@ -136,11 +160,13 @@ function addPath(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.computeVertexNormals();
-  parent.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
+  const path = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
     color,
     side: THREE.DoubleSide,
     flatShading: true,
-  })));
+  }));
+  path.receiveShadow = true;
+  parent.add(path);
 }
 
 function addBuilding(
@@ -161,6 +187,8 @@ function addBuilding(
   );
   roof.rotation.y = Math.PI / 4;
   roof.position.set(x, height + height * 0.29 + 3, z);
+  roof.castShadow = true;
+  roof.receiveShadow = true;
   parent.add(roof);
   addBox(parent, x, 4, z + depth * 0.505, width * 0.22, height * 0.58, 3, '#654a36');
 }
@@ -194,6 +222,9 @@ function addTreeInstances(scene: THREE.Scene, positions: readonly [number, numbe
   });
   trunk.computeBoundingSphere();
   canopy.computeBoundingSphere();
+  trunk.castShadow = true;
+  canopy.castShadow = true;
+  canopy.receiveShadow = true;
   scene.add(trunk, canopy);
 }
 
@@ -233,19 +264,23 @@ function drawLabel(
   text: string,
   small = false
 ): void {
-  ctx.font = `${small ? 10 : 12}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  const width = ctx.measureText(text).width + 14;
-  const height = small ? 19 : 21;
+  const maxChars = small ? 30 : 28;
+  const label = text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+  ctx.font = `bold ${small ? 10 : 12}px 'Schoolbell', ui-monospace, monospace`;
+  const width = Math.min(small ? 188 : 194, Math.ceil(ctx.measureText(label).width) + 16);
+  const height = small ? 17 : 21;
   const left = Math.round(x - width / 2);
   const top = Math.round(y - height);
-  ctx.fillStyle = 'rgba(18, 28, 22, 0.76)';
-  ctx.beginPath();
-  ctx.roundRect(left, top, width, height, 6);
-  ctx.fill();
-  ctx.fillStyle = '#f5f4e9';
+  ctx.fillStyle = 'rgba(36, 28, 19, 0.42)';
+  ctx.fillRect(left + 2, top + 3, width, height);
+  ctx.fillStyle = '#785a3c';
+  ctx.fillRect(left, top, width, height);
+  ctx.fillStyle = '#f0dfb9';
+  ctx.fillRect(left + 2, top + 2, width - 4, height - 4);
+  ctx.fillStyle = '#493927';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x, top + height / 2, width - 8);
+  ctx.fillText(label, Math.round(x), top + height / 2, width - 10);
 }
 
 export class CommuneThreeRenderer {
@@ -263,6 +298,14 @@ export class CommuneThreeRenderer {
   private readonly transform = new THREE.Object3D();
   private readonly ambient: THREE.AmbientLight;
   private readonly sun: THREE.DirectionalLight;
+  private readonly sunTarget = new THREE.Object3D();
+  private readonly nightLightColor = new THREE.Color('#9cb7e1');
+  private readonly dayLightColor = new THREE.Color('#e4f1d8');
+  private readonly daySunColor = new THREE.Color('#fff2d4');
+  private readonly nightSunColor = new THREE.Color('#8298c4');
+  private readonly lanternLights: THREE.PointLight[] = [];
+  private readonly lanternBulbs: THREE.Mesh[] = [];
+  private readonly lanternHalos: THREE.Mesh[] = [];
   private readonly actorBody: THREE.InstancedMesh;
   private readonly actorHead: THREE.InstancedMesh;
   private readonly actorHair: THREE.InstancedMesh;
@@ -270,6 +313,16 @@ export class CommuneThreeRenderer {
   private readonly actorShadows: THREE.InstancedMesh;
   private readonly petBodies: THREE.InstancedMesh;
   private readonly petHeads: THREE.InstancedMesh;
+  private readonly petEars: THREE.InstancedMesh;
+  private readonly petInnerEars: THREE.InstancedMesh;
+  private readonly petLegs: THREE.InstancedMesh;
+  private readonly petMuzzles: THREE.InstancedMesh;
+  private readonly petTails: THREE.InstancedMesh;
+  private readonly petShadows: THREE.InstancedMesh;
+  private readonly petSparkles: THREE.InstancedMesh;
+  private readonly petPatches: THREE.InstancedMesh;
+  private readonly petEyes: THREE.InstancedMesh;
+  private readonly petColorSlots: { id: string }[] = [];
   private readonly duckMeshes: THREE.InstancedMesh;
   private readonly dropMeshes: THREE.InstancedMesh;
   private readonly discoveryMeshes: THREE.InstancedMesh;
@@ -325,13 +378,26 @@ export class CommuneThreeRenderer {
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor('#78956f');
     this.camera.up.set(0, 1, 0);
 
     this.ambient = new THREE.AmbientLight('#e4f1d8', 1.35);
     this.sun = new THREE.DirectionalLight('#fff2d4', 1.5);
-    this.sun.position.set(-500, 1500, 750);
-    this.scene.add(this.ambient, this.sun);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.camera.left = -1350;
+    this.sun.shadow.camera.right = 1350;
+    this.sun.shadow.camera.top = 1350;
+    this.sun.shadow.camera.bottom = -1350;
+    this.sun.shadow.camera.near = 100;
+    this.sun.shadow.camera.far = 3600;
+    this.sun.shadow.bias = -0.00018;
+    this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.radius = 3;
+    this.scene.add(this.ambient, this.sun, this.sunTarget);
+    this.sun.target = this.sunTarget;
     this.buildWorld();
 
     this.actorBody = makeInstanceMesh(new THREE.CapsuleGeometry(8, 10, 2, 5), '#ffffff', MAX_ACTORS);
@@ -343,10 +409,33 @@ export class CommuneThreeRenderer {
 
     this.petBodies = makeInstanceMesh(new THREE.DodecahedronGeometry(8, 0), '#d5c2a1', MAX_ACTORS);
     this.petHeads = makeInstanceMesh(new THREE.DodecahedronGeometry(5, 0), '#d5c2a1', MAX_ACTORS);
+    this.petEars = makeInstanceMesh(new THREE.ConeGeometry(3.6, 8, 4), '#d5c2a1', MAX_ACTORS * 2);
+    this.petInnerEars = makeInstanceMesh(new THREE.ConeGeometry(1.8, 4, 4), '#d9878f', MAX_ACTORS * 2);
+    this.petLegs = makeInstanceMesh(new THREE.BoxGeometry(3.8, 7, 4), '#d5c2a1', MAX_ACTORS * 4);
+    this.petMuzzles = makeInstanceMesh(new THREE.SphereGeometry(2.2, 5, 4), '#f1e4d0', MAX_ACTORS);
+    this.petEyes = makeInstanceMesh(new THREE.SphereGeometry(0.9, 5, 4), '#292c32', MAX_ACTORS * 2);
+    this.petTails = makeInstanceMesh(new THREE.CapsuleGeometry(2, 10, 2, 4), '#d5c2a1', MAX_ACTORS);
+    this.petShadows = makeInstanceMesh(new THREE.CircleGeometry(9, 8), '#18251e', MAX_ACTORS, true);
+    this.petSparkles = makeInstanceMesh(new THREE.OctahedronGeometry(2.8, 0), '#f5dc8a', MAX_ACTORS * 3);
+    this.petPatches = makeInstanceMesh(new THREE.DodecahedronGeometry(3.2, 0), '#526f8b', MAX_ACTORS * 2);
     this.duckMeshes = makeInstanceMesh(new THREE.DodecahedronGeometry(7, 0), '#e8c56a', 64);
+    this.scene.add(
+      this.petShadows,
+      this.petTails,
+      this.petLegs,
+      this.petBodies,
+      this.petPatches,
+      this.petHeads,
+      this.petEars,
+      this.petInnerEars,
+      this.petMuzzles,
+      this.petEyes,
+      this.petSparkles,
+      this.duckMeshes,
+    );
     this.dropMeshes = makeInstanceMesh(new THREE.OctahedronGeometry(7, 0), '#e6ad48', 96);
     this.discoveryMeshes = makeInstanceMesh(new THREE.OctahedronGeometry(9, 0), '#8fe0b0', 2);
-    this.scene.add(this.petBodies, this.petHeads, this.duckMeshes, this.dropMeshes, this.discoveryMeshes);
+    this.scene.add(this.dropMeshes, this.discoveryMeshes);
 
     this.addMarkerMeshes();
     this.buildCars();
@@ -396,7 +485,7 @@ export class CommuneThreeRenderer {
 
   render(frame: CommuneThreeFrame): void {
     if (!this.width || !this.height) return;
-    const zoom = THREE.MathUtils.clamp(frame.zoom, 0.7, 2.2);
+    const zoom = THREE.MathUtils.clamp(frame.zoom, 1.5, 4);
     if (Math.abs(this.camera.zoom - zoom) > 0.001) {
       this.camera.zoom = zoom;
       this.camera.updateProjectionMatrix();
@@ -421,11 +510,17 @@ export class CommuneThreeRenderer {
     const night = THREE.MathUtils.clamp(frame.nightOpacity / 0.54, 0, 1);
     this.ambient.intensity = 1.35 - night * 0.78;
     this.sun.intensity = 1.5 - night * 1.1;
+    this.ambient.color.copy(this.dayLightColor).lerp(this.nightLightColor, night);
+    this.sun.color.copy(this.daySunColor).lerp(this.nightSunColor, night);
+    this.sunTarget.position.set(this.focus.x, 0, this.focus.z);
+    this.sun.position.set(this.focus.x - 850, 1650, this.focus.z + 1050);
+    this.sun.target.updateMatrixWorld();
+    this.updateLanterns(night, frame.time);
     this.scene.background = this.backgroundColor.copy(DAY_BACKGROUND).lerp(NIGHT_BACKGROUND, night);
 
     this.updateCars(frame.cars);
     this.updateActors(frame, 1 - Math.exp(-delta * 26));
-    this.updatePets(frame.pets, frame.time);
+    this.updatePets(frame.pets, frame.time, frame.reduceMotion);
     this.updateMarkers(frame, frame.time);
     this.drawLabels(frame);
     this.renderer.render(this.scene, this.camera);
@@ -443,12 +538,14 @@ export class CommuneThreeRenderer {
   }
 
   private buildWorld(): void {
-    this.scene.add(new THREE.Mesh(
+    const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_W, WORLD_H),
       material('#78976b')
-    ));
-    this.scene.children.at(-1)!.rotation.x = -Math.PI / 2;
-    this.scene.children.at(-1)!.position.set(WORLD_W / 2, -5, WORLD_H / 2);
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(WORLD_W / 2, -5, WORLD_H / 2);
+    ground.receiveShadow = true;
+    this.scene.add(ground);
 
     addGroundDisc(this.scene, 800, 620, 320, 270, '#b9b18b', 5, 32);
     addGroundDisc(this.scene, 800, 620, 278, 232, '#c6bc91', 2, 32);
@@ -480,6 +577,10 @@ export class CommuneThreeRenderer {
     this.addBoardAndStall();
     this.addBenchesAndFences();
     this.addFlowers();
+    this.addLantern(585, 455);
+    this.addLantern(1015, 455);
+    this.addLantern(585, 805);
+    this.addLantern(1015, 805);
 
     const treePositions: [number, number][] = [
       [480, 208], [1120, 208], [560, 260], [1040, 260],
@@ -493,6 +594,48 @@ export class CommuneThreeRenderer {
       [1480, 1440],
     ];
     addTreeInstances(this.scene, treePositions);
+  }
+
+  private addLantern(x: number, z: number): void {
+    addBox(this.scene, x, 0, z, 7, 64, 7, '#624d38');
+    addBox(this.scene, x, 60, z, 22, 5, 22, '#624d38');
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(7, 8, 6),
+      new THREE.MeshBasicMaterial({ color: '#ffe3a1' })
+    );
+    bulb.position.set(x, 70, z);
+    this.scene.add(bulb);
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(44, 8, 6),
+      new THREE.MeshBasicMaterial({ color: '#ffc96b', transparent: true, opacity: 0, depthWrite: false })
+    );
+    halo.position.set(x, 70, z);
+    halo.scale.y = 0.72;
+    this.scene.add(halo);
+    const light = new THREE.PointLight('#ffc878', 0, 270, 2);
+    light.position.set(x, 70, z);
+    this.scene.add(light);
+    this.lanternBulbs.push(bulb);
+    this.lanternHalos.push(halo);
+    this.lanternLights.push(light);
+  }
+
+  private updateLanterns(night: number, time: number): void {
+    this.lanternLights.forEach((light, index) => {
+      const shimmer = 0.94 + Math.sin(time * 2.2 + index * 1.7) * 0.06;
+      light.intensity = night * 2.1 * shimmer;
+      const halo = this.lanternHalos[index];
+      const bulb = this.lanternBulbs[index];
+      if (halo) {
+        (halo.material as THREE.MeshBasicMaterial).opacity = night * 0.11 * shimmer;
+      }
+      if (bulb) {
+        bulb.scale.setScalar(0.9 + night * 0.1 * shimmer);
+        (bulb.material as THREE.MeshBasicMaterial).color.copy(
+          TEMP_COLOR.copy(LANTERN_DAY_COLOR).lerp(LANTERN_NIGHT_COLOR, night)
+        );
+      }
+    });
   }
 
   private addFountain(): void {
@@ -713,26 +856,185 @@ export class CommuneThreeRenderer {
     }
   }
 
-  private updatePets(pets: readonly RenderPet[], time: number): void {
+  private updatePets(pets: readonly RenderPet[], time: number, reduceMotion: boolean): void {
     const count = Math.min(pets.length, MAX_ACTORS);
+    let eyeCount = 0;
+    let patchCount = 0;
+    let sparkleCount = 0;
+    let colorsChanged = false;
     for (let index = 0; index < count; index++) {
       const pet = pets[index];
-      const bob = Math.sin(time * 3 + index) * 1.6;
-      this.transform.position.set(pet.x, 9 + bob, pet.y);
+      const catId = pet.catId ?? 'hunao';
+      const coat = CAT_COATS[catId] ?? CAT_COATS.hunao;
+      let colorSlot = this.petColorSlots[index];
+      if (!colorSlot || colorSlot.id !== catId) {
+        this.petBodies.setColorAt(index, TEMP_COLOR.set(coat.body));
+        this.petHeads.setColorAt(index, TEMP_COLOR.set(coat.light));
+        this.petEars.setColorAt(index * 2, TEMP_COLOR.set(coat.body));
+        this.petEars.setColorAt(index * 2 + 1, TEMP_COLOR.set(coat.body));
+        this.petInnerEars.setColorAt(index * 2, TEMP_COLOR.set('#d9878f'));
+        this.petInnerEars.setColorAt(index * 2 + 1, TEMP_COLOR.set('#d9878f'));
+        this.petLegs.setColorAt(index * 4, TEMP_COLOR.set(coat.dark));
+        this.petLegs.setColorAt(index * 4 + 1, TEMP_COLOR.set(coat.dark));
+        this.petLegs.setColorAt(index * 4 + 2, TEMP_COLOR.set(coat.dark));
+        this.petLegs.setColorAt(index * 4 + 3, TEMP_COLOR.set(coat.dark));
+        this.petMuzzles.setColorAt(index, TEMP_COLOR.set(coat.light));
+        this.petTails.setColorAt(index, TEMP_COLOR.set(coat.body));
+        this.petPatches.setColorAt(index * 2, TEMP_COLOR.set(coat.patch));
+        this.petPatches.setColorAt(index * 2 + 1, TEMP_COLOR.set(catId === 'bella' ? coat.dark : coat.accent));
+        colorSlot = { id: catId };
+        this.petColorSlots[index] = colorSlot;
+        colorsChanged = true;
+      }
+
+      const walking = !reduceMotion && !!pet.moving;
+      const phase = pet.walkPhase ?? time * 8;
+      const direction = pet.facingLeft ? -1 : 1;
+      const hop = !reduceMotion && pet.pose === 'play' ? Math.abs(Math.sin(time * 7 + index)) * 6 : 0;
+      const walkBob = walking ? Math.abs(Math.sin(phase)) * 2 : 0;
+      const idleBreath = reduceMotion ? 0 : Math.sin(time * 1.7 + index * 1.9) * 0.45;
+      const bob = hop + walkBob + idleBreath;
+      const bodyY = 9 + bob;
+      const loafing = pet.pose === 'loaf';
+      const sitting = pet.pose === 'sit';
+      const bodyScaleY = loafing ? 0.56 : sitting ? 0.76 : 0.8;
+      const bodyScaleX = loafing ? 1.25 : sitting ? 1.06 : 1.16;
+      const headY = bodyY + (loafing ? 7 : sitting ? 11 : 13);
+      const sniffDip = !reduceMotion && pet.pose === 'sniff' ? Math.sin(time * 4 + index) * 1.3 : 0;
+      const tailSwish = reduceMotion ? 0 : Math.sin(time * 2.8 + index * 1.6) * 0.42;
+      const earFlick = !reduceMotion && Math.sin(time * 1.25 + index * 2.3) > 0.94 ? 0.16 : 0;
+      const stageScale = pet.stage === 'Kitten' ? 0.78 : pet.stage === 'Elder' ? 1.04 : 0.92;
+
+      this.transform.position.set(pet.x, bodyY, pet.y);
       this.transform.rotation.set(0, 0, 0);
-      this.transform.scale.set(1.2, 0.8, 1);
-      setInstance(this.petBodies, index, this.transform, pet.pet?.mood !== undefined && pet.pet.mood < 25 ? '#9b9a92' : '#d5c2a1');
-      this.transform.position.set(pet.x + 8, 12 + bob, pet.y - 2);
+      this.transform.scale.set(bodyScaleX * stageScale, bodyScaleY * stageScale, stageScale);
+      setInstance(this.petBodies, index, this.transform);
+
+      this.transform.position.set(pet.x - direction * 4, bodyY + 1, pet.y + 5);
       this.transform.rotation.set(0, 0, 0);
-      this.transform.scale.set(0.7, 0.7, 0.7);
-      setInstance(this.petHeads, index, this.transform, '#ded0b7');
+      this.transform.scale.set(0.54, 0.66, 0.58);
+      setInstance(this.petPatches, patchCount++, this.transform);
+      this.transform.position.set(pet.x + direction * 4, bodyY + 2, pet.y + 2);
+      this.transform.scale.set(0.44, 0.52, 0.5);
+      setInstance(this.petPatches, patchCount++, this.transform);
+
+      this.transform.position.set(pet.x + direction * 4, headY - sniffDip, pet.y + 2);
+      this.transform.rotation.set(0, 0, direction * (sniffDip * 0.05));
+      this.transform.scale.set(0.78 * stageScale, 0.78 * stageScale, 0.78 * stageScale);
+      setInstance(this.petHeads, index, this.transform);
+
+      for (let ear = 0; ear < 2; ear++) {
+        const earIndex = index * 2 + ear;
+        const earX = pet.x + direction * (4 + (ear ? 3 : -3));
+        const earTilt = ear === 0 ? -0.12 : 0.12;
+        this.transform.position.set(earX, headY + 4 - sniffDip, pet.y + 2);
+        this.transform.rotation.set(earTilt + earFlick, 0, direction * earTilt);
+        this.transform.scale.set(stageScale, stageScale, stageScale);
+        setInstance(this.petEars, earIndex, this.transform);
+        this.transform.position.set(earX, headY + 5.2 - sniffDip, pet.y + 4.2);
+        this.transform.rotation.set(earTilt + earFlick, 0, direction * earTilt);
+        this.transform.scale.set(stageScale, stageScale, stageScale);
+        setInstance(this.petInnerEars, earIndex, this.transform);
+      }
+
+      this.transform.position.set(pet.x + direction * 6, headY - 1 - sniffDip, pet.y + 6);
+      this.transform.rotation.set(0, 0, 0);
+      this.transform.scale.set(stageScale, stageScale, stageScale);
+      setInstance(this.petMuzzles, index, this.transform);
+      for (let eye = 0; eye < 2; eye++) {
+        const eyeIndex = eyeCount++;
+        this.transform.position.set(pet.x + direction * (5 + (eye ? 2 : -2)), headY + 1 - sniffDip, pet.y + 7);
+        this.transform.rotation.set(0, 0, 0);
+        this.transform.scale.set(stageScale, stageScale, stageScale);
+        setInstance(this.petEyes, eyeIndex, this.transform, '#252a32');
+      }
+
+      this.transform.position.set(pet.x - direction * 8, bodyY + 7, pet.y - 1);
+      this.transform.rotation.set(0, 0, direction * (0.42 + tailSwish));
+      this.transform.scale.set(stageScale, stageScale * 1.18, stageScale);
+      setInstance(this.petTails, index, this.transform);
+
+      for (let leg = 0; leg < 4; leg++) {
+        const legIndex = index * 4 + leg;
+        const side = leg % 2 ? 1 : -1;
+        const front = leg < 2;
+        const stride = walking ? Math.sin(phase + (front === (side < 0) ? 0 : Math.PI)) * 2.1 : 0;
+        const lift = walking ? Math.max(0, Math.sin(phase + (front === (side < 0) ? 0 : Math.PI))) * 1.3 : 0;
+        this.transform.position.set(
+          pet.x + (front ? 4 : -4) + stride * direction,
+          4 + lift + (loafing ? -1.4 : 0),
+          pet.y + side * 3
+        );
+        this.transform.rotation.set(0, 0, stride * 0.08);
+        this.transform.scale.set(stageScale, stageScale, stageScale);
+        setInstance(this.petLegs, legIndex, this.transform);
+      }
+
+      this.transform.position.set(pet.x, 2, pet.y);
+      this.transform.rotation.set(-Math.PI / 2, 0, 0);
+      this.transform.scale.set(stageScale * (loafing ? 1.05 : 1), 1, stageScale * 0.75);
+      setInstance(this.petShadows, index, this.transform);
+
+      const showSparkle = !reduceMotion && (pet.emote === 'spark' || pet.pose === 'play');
+      const showSniff = !reduceMotion && pet.emote === 'sniff';
+      if (showSparkle || showSniff) {
+        for (let sparkle = 0; sparkle < 3; sparkle++) {
+          const sparkleIndex = sparkleCount++;
+          const orbit = time * (showSniff ? 1.8 : 2.5) + sparkle * (Math.PI * 2 / 3) + index;
+          const radius = showSniff ? 7 : 12;
+          this.transform.position.set(
+            pet.x + direction * 9 + Math.cos(orbit) * radius,
+            headY + 8 + Math.sin(orbit) * 2,
+            pet.y + 5 + Math.sin(orbit) * radius * 0.45
+          );
+          this.transform.rotation.set(orbit, orbit, 0);
+          this.transform.scale.setScalar(showSniff ? 0.5 : 0.7 + Math.sin(orbit) * 0.18);
+          setInstance(this.petSparkles, sparkleIndex, this.transform, showSniff ? '#b8d9c8' : '#f5dc8a');
+        }
+      }
     }
     this.petBodies.count = count;
     this.petHeads.count = count;
-    this.petBodies.instanceMatrix.needsUpdate = true;
-    this.petHeads.instanceMatrix.needsUpdate = true;
-    if (this.petBodies.instanceColor) this.petBodies.instanceColor.needsUpdate = true;
-    if (this.petHeads.instanceColor) this.petHeads.instanceColor.needsUpdate = true;
+    this.petEars.count = count * 2;
+    this.petInnerEars.count = count * 2;
+    this.petLegs.count = count * 4;
+    this.petMuzzles.count = count;
+    this.petEyes.count = eyeCount;
+    this.petTails.count = count;
+    this.petShadows.count = count;
+    this.petPatches.count = patchCount;
+    this.petSparkles.count = sparkleCount;
+    for (const mesh of [
+      this.petBodies,
+      this.petHeads,
+      this.petEars,
+      this.petInnerEars,
+      this.petLegs,
+      this.petMuzzles,
+      this.petEyes,
+      this.petTails,
+      this.petShadows,
+      this.petPatches,
+      this.petSparkles,
+    ]) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (colorsChanged) {
+      for (const mesh of [
+        this.petBodies,
+        this.petHeads,
+        this.petEars,
+        this.petInnerEars,
+        this.petLegs,
+        this.petMuzzles,
+        this.petTails,
+        this.petPatches,
+      ]) {
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      }
+    }
+    if (this.petEyes.instanceColor) this.petEyes.instanceColor.needsUpdate = true;
+    if (this.petSparkles.instanceColor) this.petSparkles.instanceColor.needsUpdate = true;
   }
 
   private updateMarkers(frame: CommuneThreeFrame, time: number): void {
@@ -812,17 +1114,24 @@ export class CommuneThreeRenderer {
     }
     const drawActorLabel = (actor: RenderActor) => {
       if (actor.carId) return;
-      this.projectedPoint.set(actor.x, 66, actor.y).project(this.camera);
+      const visual = this.visualPositions.get(actor.name);
+      const actorX = visual?.x ?? actor.x;
+      const actorZ = visual?.z ?? actor.y;
+      const bob = actor.moving && !frame.reduceMotion
+        ? Math.abs(Math.sin(frame.time * 10 + (actor.bobPhase ?? 0))) * 2
+        : 0;
+      this.projectedPoint.set(actorX, 66 + bob, actorZ).project(this.camera);
       const point = this.projectedPoint;
       if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) return;
-      const x = (point.x * 0.5 + 0.5) * this.width;
-      const y = (-point.y * 0.5 + 0.5) * this.height;
+      const pixelStep = 1 / this.labelPixelRatio;
+      const x = Math.round(((point.x * 0.5 + 0.5) * this.width) / pixelStep) * pixelStep;
+      const y = Math.round(((-point.y * 0.5 + 0.5) * this.height) / pixelStep) * pixelStep;
       const name = actor.admin ? `★ ${actor.name}` : actor.name;
       drawLabel(ctx, x, y, name);
       if (actor.says && actor.says.until > Date.now()) {
         drawLabel(ctx, x, y - 25, actor.says.text.slice(0, 52), true);
       } else if (actor.status && (actor === frame.player || actor.status.length < 28)) {
-        drawLabel(ctx, x, y - 23, actor.status.slice(0, 26), true);
+        drawLabel(ctx, x, y + 19, actor.status.slice(0, 26), true);
       }
     };
     drawActorLabel(frame.player);

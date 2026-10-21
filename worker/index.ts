@@ -12,7 +12,14 @@
 import { TCG_SETS } from './tcg-manifest.gen';
 import GB_POOLIUS from './npc/GB_Poolius.json';
 import TOPUS_HUNDRIUS from './npc/Topus_Hundrius.json';
-import { CommuneRoom, type CommuneRoomBanner, type CommuneRoomLoadout } from './commune-room';
+import {
+  CommuneRoom,
+  type CommuneRoomBanner,
+  type CommuneRoomBannerKind,
+  type CommuneRoomBannerPriority,
+  type CommuneRoomBannerStroke,
+  type CommuneRoomLoadout,
+} from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
 import { handleAsk } from './ask';
 import {
@@ -894,9 +901,27 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            id TEXT PRIMARY KEY,
            text TEXT NOT NULL,
            author TEXT NOT NULL,
-           created_at INTEGER NOT NULL
+           created_at INTEGER NOT NULL,
+           kind TEXT NOT NULL DEFAULT 'pin',
+           priority TEXT NOT NULL DEFAULT 'normal',
+           strokes_json TEXT NOT NULL DEFAULT '[]'
          )`
       ).run();
+      try {
+        await env.DB.prepare("ALTER TABLE commune_banners ADD COLUMN kind TEXT NOT NULL DEFAULT 'pin'").run();
+      } catch {
+        /* column already exists */
+      }
+      try {
+        await env.DB.prepare("ALTER TABLE commune_banners ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal'").run();
+      } catch {
+        /* column already exists */
+      }
+      try {
+        await env.DB.prepare("ALTER TABLE commune_banners ADD COLUMN strokes_json TEXT NOT NULL DEFAULT '[]'").run();
+      } catch {
+        /* column already exists */
+      }
       // Older deployments created the table without the avatar column.
       try {
         await env.DB.prepare('ALTER TABLE commune_loadout ADD COLUMN avatar TEXT NOT NULL DEFAULT \'\'').run();
@@ -1615,15 +1640,64 @@ function parseStoredCommuneLoadout(row: {
   }
 }
 
+const COMMUNE_BANNER_SKETCH_COLORS = new Set([
+  '#403428',
+  '#bc6850',
+  '#6a9bcc',
+  '#788c5d',
+  '#d6a646',
+]);
+
+function normalizeCommuneBannerStrokes(value: unknown): CommuneRoomBannerStroke[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((entry): CommuneRoomBannerStroke[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const stroke = entry as Record<string, unknown>;
+    if (!Array.isArray(stroke.points)) return [];
+    const points = stroke.points.slice(0, 48).flatMap((rawPoint): Array<{ x: number; y: number }> => {
+      if (!rawPoint || typeof rawPoint !== 'object') return [];
+      const point = rawPoint as Record<string, unknown>;
+      const x = Number(point.x);
+      const y = Number(point.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+      return [{ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) }];
+    });
+    if (!points.length) return [];
+    const color = typeof stroke.color === 'string' && COMMUNE_BANNER_SKETCH_COLORS.has(stroke.color)
+      ? stroke.color
+      : '#403428';
+    return [{ color, points }];
+  });
+}
+
+function parseCommuneBannerStrokes(value: string | null): CommuneRoomBannerStroke[] {
+  try {
+    return normalizeCommuneBannerStrokes(value ? JSON.parse(value) as unknown : []);
+  } catch {
+    return [];
+  }
+}
+
 async function loadCommuneBanners(env: Env): Promise<CommuneRoomBanner[]> {
   const result = await env.DB.prepare(
-    'SELECT id, text, author, created_at FROM commune_banners ORDER BY created_at ASC, id ASC LIMIT 6',
-  ).all<{ id: string; text: string; author: string; created_at: number }>();
+    'SELECT id, text, author, created_at, kind, priority, strokes_json FROM commune_banners ORDER BY created_at ASC, id ASC LIMIT 6',
+  ).all<{
+    id: string;
+    text: string;
+    author: string;
+    created_at: number;
+    kind: string;
+    priority: string;
+    strokes_json: string | null;
+  }>();
   return (result.results ?? []).map((banner) => ({
     id: banner.id,
     text: banner.text,
     author: banner.author,
     at: Number(banner.created_at),
+    kind: banner.kind === 'priority' || banner.kind === 'sketch' ? banner.kind : 'pin',
+    priority: banner.priority === 'high' || banner.priority === 'urgent' ? banner.priority : 'normal',
+    strokes: parseCommuneBannerStrokes(banner.strokes_json),
   }));
 }
 
@@ -1681,9 +1755,9 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
 /** Persist shared town announcements; only admins may manage the board. */
 async function handleCommuneBannerMutation(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
-  if (Number(request.headers.get('content-length') ?? 0) > 2_048)
+  if (Number(request.headers.get('content-length') ?? 0) > 24_576)
     return authJson({ error: 'Request is too large' }, 413);
-  let payload: { action?: unknown; id?: unknown; text?: unknown };
+  let payload: { action?: unknown; id?: unknown; text?: unknown; kind?: unknown; priority?: unknown; strokes?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
   } catch {
@@ -1692,28 +1766,52 @@ async function handleCommuneBannerMutation(request: Request, env: Env, user: Aut
   const action = payload.action === undefined ? 'create' : payload.action;
   const id = typeof payload.id === 'string' ? payload.id.trim().slice(0, 64) : '';
   const text = typeof payload.text === 'string' ? payload.text.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+  const kind = payload.kind === undefined ? 'pin' : payload.kind;
+  const priority = payload.priority === undefined ? 'normal' : payload.priority;
+  const strokes = normalizeCommuneBannerStrokes(payload.strokes);
   if (action !== 'create' && action !== 'edit' && action !== 'delete') {
     return authJson({ error: 'Unsupported announcement action' }, 400);
   }
   if (action !== 'delete' && !text) return authJson({ error: 'Announcement text is required' }, 400);
   if (action !== 'create' && !id) return authJson({ error: 'Announcement id is required' }, 400);
+  if (action !== 'delete' && kind !== 'pin' && kind !== 'priority' && kind !== 'sketch') {
+    return authJson({ error: 'Unsupported announcement type' }, 400);
+  }
+  if (action !== 'delete' && priority !== 'normal' && priority !== 'high' && priority !== 'urgent') {
+    return authJson({ error: 'Unsupported announcement priority' }, 400);
+  }
+  if (action !== 'delete' && kind === 'sketch' && !strokes.length) {
+    return authJson({ error: 'Add a sketch before pinning this item' }, 400);
+  }
+  const storedPriority = kind === 'priority' ? priority as CommuneRoomBannerPriority : 'normal';
+  const storedStrokes = kind === 'sketch' ? strokes : [];
 
   await ensureSpiceSchema(env);
   if (action === 'create') {
     const now = Date.now();
     await env.DB.batch([
       env.DB.prepare(
-        'INSERT INTO commune_banners (id, text, author, created_at) VALUES (?1, ?2, ?3, ?4)',
-      ).bind(crypto.randomUUID(), text, user.username, now),
+        `INSERT INTO commune_banners
+         (id, text, author, created_at, kind, priority, strokes_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      ).bind(crypto.randomUUID(), text, user.username, now, kind, storedPriority, JSON.stringify(storedStrokes)),
       env.DB.prepare(
         `DELETE FROM commune_banners
          WHERE id NOT IN (SELECT id FROM commune_banners ORDER BY created_at DESC, id DESC LIMIT 6)`,
       ),
     ]);
   } else if (action === 'edit') {
-    const result = await env.DB.prepare(
-      'UPDATE commune_banners SET text = ?1 WHERE id = ?2',
-    ).bind(text, id).run();
+    const result = payload.kind === undefined
+      && payload.priority === undefined
+      && payload.strokes === undefined
+      ? await env.DB.prepare(
+        'UPDATE commune_banners SET text = ?1 WHERE id = ?2',
+      ).bind(text, id).run()
+      : await env.DB.prepare(
+        `UPDATE commune_banners
+         SET text = ?1, kind = ?2, priority = ?3, strokes_json = ?4
+         WHERE id = ?5`,
+      ).bind(text, kind, storedPriority, JSON.stringify(storedStrokes), id).run();
     if (!result.meta.changes) return authJson({ error: 'Announcement not found' }, 404);
   } else {
     const result = await env.DB.prepare(
