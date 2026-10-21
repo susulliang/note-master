@@ -109,7 +109,7 @@ export default function SopPanel({
   // into D1 and the panel reassembles its raw markdown from the patched
   // rows (Kitty Help shares the same D1-first loader).
   const { user: authUser, setSpice } = useAuth();
-  const isAdmin = authUser?.isAdmin ?? false;
+  const isAdmin = authUser?.canAccessAdmin ?? false;
   const [sopRows, setSopRows] = useState<SopEntry[] | null>(null);
   const [sopEditing, setSopEditing] = useState<{ title: string; body: string } | null>(null);
   const [sopSaving, setSopSaving] = useState(false);

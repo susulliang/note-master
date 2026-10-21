@@ -128,7 +128,13 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
                 ]
                   .filter(Boolean)
                   .join(' · ') || 'none granted'}
-                {user.isAdmin ? ' · Admin' : ''}
+                {user.isSuperAdmin
+                  ? ' · Super Admin'
+                  : user.isAdmin
+                    ? ' · Admin'
+                    : user.isManagement
+                      ? ' · Management'
+                      : ''}
               </p>
             </div>
             <button

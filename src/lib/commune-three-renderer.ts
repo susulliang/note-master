@@ -36,6 +36,7 @@ type RenderActor = {
   bobPhase?: number;
   avatar?: AvatarColors | null;
   admin?: boolean;
+  superAdmin?: boolean;
   status?: string;
   says?: { text: string; until: number } | null;
   carId?: string | null;
@@ -287,7 +288,8 @@ function drawLabel(
   x: number,
   y: number,
   text: string,
-  small = false
+  small = false,
+  superAdmin = false
 ): void {
   const maxChars = small ? 30 : 28;
   const label = text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
@@ -296,13 +298,13 @@ function drawLabel(
   const height = small ? 17 : 21;
   const left = Math.round(x - width / 2);
   const top = Math.round(y - height);
-  ctx.fillStyle = 'rgba(36, 28, 19, 0.42)';
+  ctx.fillStyle = superAdmin ? 'rgba(72, 51, 19, 0.58)' : 'rgba(36, 28, 19, 0.42)';
   ctx.fillRect(left + 2, top + 3, width, height);
-  ctx.fillStyle = '#785a3c';
+  ctx.fillStyle = superAdmin ? '#a77a2f' : '#785a3c';
   ctx.fillRect(left, top, width, height);
-  ctx.fillStyle = '#f0dfb9';
+  ctx.fillStyle = superAdmin ? '#f3d87c' : '#f0dfb9';
   ctx.fillRect(left + 2, top + 2, width - 4, height - 4);
-  ctx.fillStyle = '#493927';
+  ctx.fillStyle = superAdmin ? '#3b2d13' : '#493927';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, Math.round(x), top + height / 2, width - 10);
@@ -1279,8 +1281,8 @@ export class CommuneThreeRenderer {
       const pixelStep = 1 / this.labelPixelRatio;
       const x = Math.round(((point.x * 0.5 + 0.5) * this.width) / pixelStep) * pixelStep;
       const y = Math.round(((-point.y * 0.5 + 0.5) * this.height) / pixelStep) * pixelStep;
-      const name = actor.admin ? `★ ${actor.name}` : actor.name;
-      drawLabel(ctx, x, y, name);
+      const name = actor.superAdmin ? `ROOT · ${actor.name}` : actor.admin ? `★ ${actor.name}` : actor.name;
+      drawLabel(ctx, x, y, name, false, !!actor.superAdmin);
       if (actor.says && actor.says.until > Date.now()) {
         drawLabel(ctx, x, y - 25, actor.says.text.slice(0, 52), true);
       } else if (actor.status && (actor === frame.player || actor.status.length < 28)) {

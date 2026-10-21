@@ -82,7 +82,7 @@ export default function KnowledgeBaseTab() {
   const [isNew, setIsNew] = useState(false);
   const [r2, setR2] = useState<KbR2Progress | null>(null);
 
-  const isAdmin = user?.isAdmin ?? false;
+  const isAdmin = user?.canAccessAdmin ?? false;
   const meta = KIND_LABELS.find((k) => k.kind === kind)!;
 
   useEffect(() => {

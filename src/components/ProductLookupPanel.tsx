@@ -741,7 +741,7 @@ function AmrTemplatesTab({
   onSaved: (updated: AmrTemplate) => void;
 }) {
   const { user, setSpice } = useAuth();
-  const isAdmin = user?.isAdmin ?? false;
+  const isAdmin = user?.canAccessAdmin ?? false;
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AmrTemplate | null>(null);
   const [saving, setSaving] = useState(false);
@@ -921,7 +921,7 @@ function NewsTab({
   onIndexUpdated: (items: NewsItem[]) => void;
 }) {
   const { user, setSpice } = useAuth();
-  const isAdmin = user?.isAdmin ?? false;
+  const isAdmin = user?.canAccessAdmin ?? false;
   const [openId, setOpenId] = useState<string | null>(null);
   // Admin editor state — null = closed; draft holds the form fields.
   const [draft, setDraft] = useState<{ id?: string; date: string; title: string; author: string; body: string } | null>(null);

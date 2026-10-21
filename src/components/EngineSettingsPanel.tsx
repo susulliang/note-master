@@ -415,11 +415,15 @@ export default function EngineSettingsPanel({
               <div
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-lg',
-                  authUser.isAdmin ? 'border border-sky-400/40 bg-sky-400/10' : 'border border-emerald-400/40 bg-emerald-500/10'
+                  authUser.isSuperAdmin
+                    ? 'border border-amber-400/40 bg-amber-400/10'
+                    : authUser.canAccessAdmin
+                      ? 'border border-sky-400/40 bg-sky-400/10'
+                      : 'border border-emerald-400/40 bg-emerald-500/10'
                 )}
               >
-                {authUser.isAdmin ? (
-                  <ShieldCheck className="size-4 text-sky-300" />
+                {authUser.canAccessAdmin ? (
+                  <ShieldCheck className={cn('size-4', authUser.isSuperAdmin ? 'text-amber-300' : 'text-sky-300')} />
                 ) : (
                   <LogIn className="size-4 text-emerald-300" />
                 )}
@@ -427,19 +431,33 @@ export default function EngineSettingsPanel({
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 truncate text-sm font-bold text-foreground">
                   <span className="truncate">{authUser.username}</span>
-                  {authUser.isAdmin &&
+                  {authUser.canAccessAdmin &&
                     (onOpenAdmin ? (
                       <button
                         type="button"
                         onClick={onOpenAdmin}
-                        className="shrink-0 rounded bg-sky-400/20 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-sky-300 transition-colors hover:bg-sky-400/35"
+                        className={cn(
+                          'shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider transition-colors',
+                          authUser.isSuperAdmin
+                            ? 'bg-amber-400/20 text-amber-300 hover:bg-amber-400/35'
+                            : authUser.isManagement
+                              ? 'bg-violet-400/20 text-violet-300 hover:bg-violet-400/35'
+                              : 'bg-sky-400/20 text-sky-300 hover:bg-sky-400/35'
+                        )}
                         title="Open the admin panel (Shift+A)"
                       >
-                        Admin
+                        {authUser.isSuperAdmin ? 'Super Admin' : authUser.isManagement ? 'Management' : 'Admin'}
                       </button>
                     ) : (
-                      <span className="shrink-0 rounded bg-sky-400/20 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-sky-300">
-                        Admin
+                      <span className={cn(
+                        'shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider',
+                        authUser.isSuperAdmin
+                          ? 'bg-amber-400/20 text-amber-300'
+                          : authUser.isManagement
+                            ? 'bg-violet-400/20 text-violet-300'
+                            : 'bg-sky-400/20 text-sky-300'
+                      )}>
+                        {authUser.isSuperAdmin ? 'Super Admin' : authUser.isManagement ? 'Management' : 'Admin'}
                       </span>
                     ))}
                 </p>

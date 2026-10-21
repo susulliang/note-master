@@ -93,6 +93,8 @@ interface AuthUserRow {
   username: string;
   hash: string;
   is_admin: number;
+  is_management: number;
+  is_super_admin: number;
   dash_visible: number;
   roster_visible: number;
   trak_visible: number;
@@ -103,6 +105,10 @@ interface AuthUserRow {
 interface AuthUser {
   username: string;
   isAdmin: boolean;
+  isManagement: boolean;
+  isSuperAdmin: boolean;
+  canAccessAdmin: boolean;
+  canManageStore: boolean;
   spice: number;
   privileges: { dash: boolean; roster: boolean; trak: boolean };
 }
@@ -148,9 +154,12 @@ interface PrivilegesPayload {
   dash?: unknown;
   roster?: unknown;
   trak?: unknown;
+  admin?: unknown;
+  management?: unknown;
 }
 
 const AUTH_ADMIN_USERNAMES = new Set(['dezzy', 'hoi', 'alexia']);
+const SUPER_ADMIN_USERNAME = 'dezzy';
 const AUTH_EXTRA_NAMES = ['Dezzy', 'Jingyang', 'Troy', 'Yolanda'];
 const AUTH_NAME_RE = /^[A-Za-z][A-Za-z .'-]{0,31}$/;
 const AUTH_MIN_PASSWORD_LEN = 4;
@@ -616,10 +625,33 @@ function authNormalizeName(raw: unknown): string | null {
   return AUTH_NAME_RE.test(name) ? name : null;
 }
 
+function isSuperAdminUser(user: AuthUserRow): boolean {
+  return user.username.toLowerCase() === SUPER_ADMIN_USERNAME && Number(user.is_super_admin) === 1;
+}
+
+function isManagementUser(user: AuthUserRow): boolean {
+  return Number(user.is_management) === 1;
+}
+
+function hasAdminAccess(user: AuthUserRow): boolean {
+  return Number(user.is_admin) === 1 || isManagementUser(user) || isSuperAdminUser(user);
+}
+
+function canManageStore(user: AuthUserRow): boolean {
+  return Number(user.is_admin) === 1 || isSuperAdminUser(user);
+}
+
 function authPublicUser(user: AuthUserRow): AuthUser {
+  const isAdmin = Number(user.is_admin) === 1;
+  const isSuperAdmin = isSuperAdminUser(user);
+  const isManagement = isManagementUser(user) && !isAdmin && !isSuperAdmin;
   return {
     username: user.username,
-    isAdmin: Number(user.is_admin) === 1,
+    isAdmin,
+    isManagement,
+    isSuperAdmin,
+    canAccessAdmin: isAdmin || isManagement || isSuperAdmin,
+    canManageStore: canManageStore(user),
     spice: Number(user.spice ?? 0),
     privileges: {
       dash: Number(user.dash_visible) === 1,
@@ -675,16 +707,18 @@ async function handleAuthRegister(request: Request, env: Env): Promise<Response>
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await authHashPassword(payload.password, salt);
   const now = Date.now();
-  const isAdmin = AUTH_ADMIN_USERNAMES.has(username.toLowerCase()) ? 1 : 0;
+  const isSuperAdmin = username.toLowerCase() === SUPER_ADMIN_USERNAME ? 1 : 0;
+  const isAdmin = AUTH_ADMIN_USERNAMES.has(username.toLowerCase()) || isSuperAdmin ? 1 : 0;
   // New accounts start with SHIFTS/roster only — DASH and TRAK are unlocked
   // per-user by an admin. Admin usernames keep everything from day one.
   const dashVisible = isAdmin;
   const trakVisible = isAdmin;
   const insert = await env.DB.prepare(
-    `INSERT INTO auth_users (username, hash, is_admin, dash_visible, roster_visible, trak_visible, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+    `INSERT INTO auth_users
+       (username, hash, is_admin, is_management, is_super_admin, dash_visible, roster_visible, trak_visible, created_at, updated_at)
+     VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?, ?)`,
   )
-    .bind(username, hash, isAdmin, dashVisible, trakVisible, now, now)
+    .bind(username, hash, isAdmin, isSuperAdmin, dashVisible, trakVisible, now, now)
     .run();
   if (!insert.success) return authJson({ error: 'Registration failed' }, 500);
 
@@ -748,7 +782,8 @@ async function handleAuthLogin(request: Request, env: Env): Promise<Response> {
 
 async function handleAdminUsers(_request: Request, env: Env): Promise<Response> {
   const result = await env.DB.prepare(
-    `SELECT username, is_admin, dash_visible, roster_visible, trak_visible, spice, created_at
+    `SELECT username, is_admin, is_management, is_super_admin,
+            dash_visible, roster_visible, trak_visible, spice, created_at
      FROM auth_users ORDER BY username COLLATE NOCASE`,
   ).all<AuthUserRow>();
   return authJson({
@@ -760,7 +795,7 @@ async function handleAdminUsers(_request: Request, env: Env): Promise<Response> 
   });
 }
 
-async function handleAdminPrivileges(request: Request, env: Env): Promise<Response> {
+async function handleAdminPrivileges(request: Request, env: Env, actor: AuthUserRow): Promise<Response> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
   let payload: PrivilegesPayload;
@@ -771,22 +806,75 @@ async function handleAdminPrivileges(request: Request, env: Env): Promise<Respon
   }
   const username = authNormalizeName(payload.username);
   if (!username) return authJson({ error: 'Invalid username' }, 400);
-  const asInt = (v: unknown) => (v === undefined ? null : v ? 1 : 0);
+
+  const patchValues = [payload.dash, payload.roster, payload.trak, payload.admin, payload.management];
+  if (patchValues.some((value) => value !== undefined && typeof value !== 'boolean')) {
+    return authJson({ error: 'Privilege values must be booleans' }, 400);
+  }
+  if (patchValues.every((value) => value === undefined)) {
+    return authJson({ error: 'Choose a privilege to update' }, 400);
+  }
+  if (payload.admin !== undefined && !isSuperAdminUser(actor)) {
+    return authJson({ error: 'Only the Super Admin can grant or revoke Admin access' }, 403);
+  }
+  if (payload.management !== undefined && !hasAdminAccess(actor)) {
+    return authJson({ error: 'Admin access is required to manage this role' }, 403);
+  }
+
+  const target = await env.DB.prepare(
+    'SELECT * FROM auth_users WHERE username = ?1 COLLATE NOCASE',
+  ).bind(username).first<AuthUserRow>();
+  if (!target) return authJson({ error: 'User not found' }, 404);
+  const changingAdmin = payload.admin !== undefined;
+  const changingManagement = payload.management !== undefined;
+  if (isSuperAdminUser(target) && (changingAdmin || changingManagement)) {
+    return authJson({ error: 'The Super Admin role is fixed to Dezzy' }, 409);
+  }
+  if (
+    payload.management === true
+    && Number(target.is_admin) === 1
+    && payload.admin !== false
+  ) {
+    return authJson({ error: 'Demote this Admin before granting Management' }, 409);
+  }
+
+  const asInt = (value: unknown) => (value === undefined ? null : value ? 1 : 0);
+  let managementBit = asInt(payload.management);
+  if (changingAdmin && managementBit === null) managementBit = 0;
   const update = await env.DB.prepare(
     `UPDATE auth_users SET
-       dash_visible = COALESCE(?2, dash_visible),
-       roster_visible = COALESCE(?3, roster_visible),
-       trak_visible = COALESCE(?4, trak_visible),
-       updated_at = ?5
+       is_admin = COALESCE(?2, is_admin),
+       is_management = COALESCE(?3, is_management),
+       dash_visible = COALESCE(?4, dash_visible),
+       roster_visible = COALESCE(?5, roster_visible),
+       trak_visible = COALESCE(?6, trak_visible),
+       updated_at = ?7
      WHERE username = ?1 COLLATE NOCASE`,
   )
-    .bind(username, asInt(payload.dash), asInt(payload.roster), asInt(payload.trak), Date.now())
+    .bind(
+      username,
+      asInt(payload.admin),
+      managementBit,
+      asInt(payload.dash),
+      asInt(payload.roster),
+      asInt(payload.trak),
+      Date.now(),
+    )
     .run();
-  if (!update.meta.changes) return authJson({ error: 'User not found' }, 404);
   const user = await env.DB.prepare('SELECT * FROM auth_users WHERE username = ?1 COLLATE NOCASE')
     .bind(username)
     .first<AuthUserRow>();
-  return authJson({ user: user ? authPublicUser(user) : null });
+  if (!user) return authJson({ error: 'User not found' }, 404);
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').updateAgentRoles(user.username, {
+      isAdmin: hasAdminAccess(user),
+      isManagement: isManagementUser(user),
+      isSuperAdmin: isSuperAdminUser(user),
+    });
+  } catch {
+    // The updated D1 role is authoritative; reconnecting agents receive it in their ticket.
+  }
+  return authJson({ user: authPublicUser(user), updated: update.meta.changes > 0 });
 }
 
 async function handleAdminDelete(request: Request, env: Env): Promise<Response> {
@@ -800,8 +888,16 @@ async function handleAdminDelete(request: Request, env: Env): Promise<Response> 
   }
   const username = authNormalizeName(payload.username);
   if (!username) return authJson({ error: 'Invalid username' }, 400);
-  if (AUTH_ADMIN_USERNAMES.has(username.toLowerCase()))
-    return authJson({ error: 'Cannot delete the admin account' }, 400);
+  const target = await env.DB.prepare(
+    'SELECT * FROM auth_users WHERE username = ?1 COLLATE NOCASE',
+  ).bind(username).first<AuthUserRow>();
+  if (!target) return authJson({ error: 'User not found' }, 404);
+  if (
+    isSuperAdminUser(target)
+    || Number(target.is_admin) === 1
+    || isManagementUser(target)
+    || AUTH_ADMIN_USERNAMES.has(username.toLowerCase())
+  ) return authJson({ error: 'Remove staff roles before deleting this account' }, 400);
   await env.DB.prepare('DELETE FROM auth_sessions WHERE username = ?1 COLLATE NOCASE').bind(username).run();
   const del = await env.DB.prepare('DELETE FROM auth_users WHERE username = ?1 COLLATE NOCASE').bind(username).run();
   if (!del.meta.changes) return authJson({ error: 'User not found' }, 404);
@@ -1747,7 +1843,9 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   }
   const ticket = await env.COMMUNE_ROOM.getByName('main-plaza').createTicket({
     username: user.username,
-    isAdmin: Number(user.is_admin) === 1,
+    isAdmin: hasAdminAccess(user),
+    isManagement: isManagementUser(user),
+    isSuperAdmin: isSuperAdminUser(user),
     x,
     y,
     status,
@@ -1783,7 +1881,7 @@ async function handleCommuneBannerMutation(request: Request, env: Env, user: Aut
   if (action !== 'create' && action !== 'edit' && action !== 'delete') {
     return authJson({ error: 'Unsupported announcement action' }, 400);
   }
-  if (action !== 'create' && Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+  if (action !== 'create' && !hasAdminAccess(user)) return authJson({ error: 'Admin only' }, 403);
   if (action !== 'delete' && !text) return authJson({ error: 'Announcement text is required' }, 400);
   if (action !== 'create' && !id) return authJson({ error: 'Announcement id is required' }, 400);
   if (action !== 'delete' && kind !== 'pin' && kind !== 'priority' && kind !== 'sketch') {
@@ -1996,7 +2094,7 @@ async function handleCommuneTreehole(
 ): Promise<Response> {
   await ensureCommuneTreeholeSchema(env);
   if (request.method === 'GET') {
-    if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+    if (!hasAdminAccess(user)) return authJson({ error: 'Admin only' }, 403);
     const result = await env.DB.prepare(
       `SELECT id, category, message, created_at
        FROM commune_treehole_feedback
@@ -2657,7 +2755,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     // /api/kb/export-r2 — bulk-copy every D1 doc into the eco-kb R2 bucket
     // (paginated; feeds the AI Search "Ask" instance). Admin only.
     if (kind === 'export-r2' && request.method === 'POST') {
-      if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+      if (!hasAdminAccess(user)) return authJson({ error: 'Admin only' }, 403);
       return handleKbExportR2(request, env);
     }
     if (!isKbKind(kind)) return authJson({ error: 'Unknown knowledge-base kind' }, 404);
@@ -2667,7 +2765,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (parts.length === 4 && request.method === 'GET') {
       return handleKbGet(request, env, kind, decodeURIComponent(parts[3]));
     }
-    if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+    if (!hasAdminAccess(user)) return authJson({ error: 'Admin only' }, 403);
     if (parts.length === 3 && request.method === 'POST') return handleKbCreate(request, env, kind, user.username);
     if (parts.length === 4 && request.method === 'PUT') return handleKbPut(request, env, kind, decodeURIComponent(parts[3]), user.username);
     if (parts.length === 4 && request.method === 'DELETE') return handleKbDelete(request, env, kind, decodeURIComponent(parts[3]));
@@ -2812,14 +2910,17 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     return handleChallengeAward(request, env, user);
   }
 
-  // Admin routes — bearer must belong to an is_admin account.
+  // Admin routes are available to Admin, Management, and Super Admin roles.
   const admin = await authBearerUser(request, env);
-  if (!admin || Number(admin.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
+  if (!admin || !hasAdminAccess(admin)) return authJson({ error: 'Admin only' }, 403);
   if (path === '/api/admin/users' && request.method === 'GET') return handleAdminUsers(request, env);
-  if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env);
+  if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env, admin);
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
   if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
-  if (path === '/api/admin/store' && request.method === 'POST') return handleAdminStorePost(request, env);
+  if (path === '/api/admin/store' && request.method === 'POST') {
+    if (!canManageStore(admin)) return authJson({ error: 'Only Admins can change Store items' }, 403);
+    return handleAdminStorePost(request, env);
+  }
   if (path === '/api/admin/amr-template' && request.method === 'POST') return handleAmrTemplatePost(request, env, admin);
   if (path === '/api/admin/sop-entry' && request.method === 'POST') return handleSopEntryPost(request, env, admin);
   if (path === '/api/admin/news-entry' && request.method === 'POST') return handleNewsEntryPost(request, env, admin);
@@ -3049,7 +3150,7 @@ async function handleKeywordAlerts(request: Request, env: Env): Promise<Response
   // Admin-only writes — the old shared-password gate is gone; a logged-in
   // admin session (bearer token) is the single source of authority.
   const admin = await authBearerUser(request, env);
-  if (!admin || Number(admin.is_admin) !== 1) return json({ error: 'Admin only' }, 403);
+  if (!admin || !hasAdminAccess(admin)) return json({ error: 'Admin only' }, 403);
 
   try {
     const statements = [

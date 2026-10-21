@@ -17,6 +17,8 @@ export interface CommuneRoomLoadout {
 export interface CommuneRoomAgent {
   username: string;
   isAdmin: boolean;
+  isManagement: boolean;
+  isSuperAdmin: boolean;
   x: number;
   y: number;
   status: string;
@@ -319,6 +321,19 @@ export class CommuneRoom extends DurableObject<Env> {
       const current = attachment(ws);
       if (!current) continue;
       const updated = { ...current, loadout, seenAt: now };
+      ws.serializeAttachment(updated);
+      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) });
+    }
+  }
+
+  updateAgentRoles(
+    username: string,
+    roles: { isAdmin: boolean; isManagement: boolean; isSuperAdmin: boolean },
+  ): void {
+    for (const ws of this.ctx.getWebSockets(username)) {
+      const current = attachment(ws);
+      if (!current) continue;
+      const updated: Presence = { ...current, ...roles, seenAt: Date.now() };
       ws.serializeAttachment(updated);
       this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) });
     }

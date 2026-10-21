@@ -907,11 +907,11 @@ export default function TicketNotesPage() {
       if (e.code === 'KeyR') {
         setAuthPanelOpen((open) => authRequired || !open);
       }
-      else if (authUser?.isAdmin) setAdminPanelOpen((open) => !open); // Shift+A — Dezzy only
+      else if (authUser?.canAccessAdmin) setAdminPanelOpen((open) => !open);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authRequired, authUser?.isAdmin]);
+  }, [authRequired, authUser?.canAccessAdmin]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'KeyS' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2848,7 +2848,7 @@ Additional information (if needed): ${additional}`;
 
       {/* Required sign-in on entry; Shift+R opens the account panel afterwards. */}
       {authPanelOpen && <AuthPanel required={authRequired} onClose={() => setAuthPanelOpen(false)} />}
-      {adminPanelOpen && authUser?.isAdmin && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
+      {adminPanelOpen && authUser?.canAccessAdmin && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
 
       {/* Keep the floating mascot out of the pixel-world scene. */}
       {workView !== 'commune' && (

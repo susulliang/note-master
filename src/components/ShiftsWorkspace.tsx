@@ -404,7 +404,7 @@ export default function ShiftsWorkspace() {
 
   const setShift = (en: string, iso: string, code: string) => {
     setEdits((prev) => ({ ...prev, [`${en}|${iso}`]: code }));
-    if (!authUser?.isAdmin || ROSTER.length === 0) return;
+    if (!authUser?.canAccessAdmin || ROSTER.length === 0) return;
     if (d1MonthRef.current.get(monthKey) === false) {
       // First submit for this month → upload the entire table.
       setD1Status('syncing');
@@ -499,7 +499,7 @@ export default function ShiftsWorkspace() {
           <Download className="size-3" />
           XLSX
         </button>
-        {authUser?.isAdmin && (
+        {authUser?.canAccessAdmin && (
           <span
             className={cn(
               'flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold',

@@ -720,6 +720,8 @@ interface Agent {
   status?: string;
   /** Admin badge (gold star). */
   admin?: boolean;
+  /** Public root marker reserved for the Super Admin. */
+  superAdmin?: boolean;
   /** Optional pixel companion shown beside this agent. */
   pet?: CommunePet | null;
   /** Optional personalized pixel look (player + remote agents). */
@@ -743,6 +745,7 @@ interface RemoteView {
   phrase: string | null;
   status?: string;
   admin?: boolean;
+  superAdmin?: boolean;
   pet: CommunePet | null;
   avatar: CommuneAvatar | null;
   says: Speech | null;
@@ -808,7 +811,8 @@ interface PixelPetView {
 export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanelProps) {
   const { user, setSpice } = useAuth();
   const username = user?.username ?? 'Guest';
-  const isAdmin = !!user?.isAdmin;
+  const isAdmin = !!user?.canAccessAdmin;
+  const isSuperAdmin = !!user?.isSuperAdmin;
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2674,7 +2678,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           hue: hueOf(r.agent.username),
           phrase: r.agent.loadout?.phrase || null,
           status: r.agent.status,
-          admin: r.agent.isAdmin,
+          admin: r.agent.isAdmin && !r.agent.isManagement && !r.agent.isSuperAdmin,
+          superAdmin: r.agent.isSuperAdmin,
           pet: r.agent.loadout?.pet ?? null,
           avatar: r.agent.loadout?.avatar ?? null,
           says: r.says,
@@ -2704,11 +2709,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       // Bump shake — jitter the camera for a moment when someone bumps us.
       // (rAF `now` is performance.now(); the deadline is epoch-based.)
       const shakeCam = Date.now() < shakeUntilRef.current ? { x: cam.x + (Math.random() - 0.5) * 10, y: cam.y + (Math.random() - 0.5) * 10 } : cam;
+      const renderedPlayer: Agent = {
+        ...player,
+        admin: !!user?.isAdmin && !isSuperAdmin,
+        superAdmin: isSuperAdmin,
+      };
       if (threeRenderer) {
         latestFrame = {
           time: tSec,
           zoom: mapZoomRef.current,
-          player,
+          player: renderedPlayer,
           npcs: npcsRef.current,
           remotes: remoteViews,
           pets: petViews,
@@ -2729,7 +2739,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         };
       } else if (ctx) {
         draw(
-          ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
+          ctx, vw, vh, dpr, shakeCam, tSec, renderedPlayer, npcsRef.current, banners,
           remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
           clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current,
           soccerBallRef.current, golfBallMotionRef.current, bowlingBallMotionRef.current,
@@ -2766,7 +2776,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
       threeRenderer?.dispose();
     };
-  }, [banners, publishNearbyActions, sendRoomEvent]);
+  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, user?.isAdmin]);
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
@@ -4525,7 +4535,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             <div className="space-y-2">
               <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 pr-8 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.5)]">
                 <h3 className="flex items-center gap-2 font-['Schoolbell'] text-lg font-bold">
-                  {selected.isAdmin && <span className="text-[#f0d17c]">★</span>}
+                  {selected.isSuperAdmin ? (
+                    <span className="border border-[#b78a36] bg-[#f0d17c] px-1.5 py-0.5 font-mono text-[9px] font-extrabold tracking-wide text-[#493719]">
+                      SUPER ADMIN
+                    </span>
+                  ) : selected.isAdmin && !selected.isManagement ? (
+                    <span className="text-[#f0d17c]">★</span>
+                  ) : null}
                   {selected.username}
                 </h3>
               </div>
@@ -5293,7 +5309,7 @@ function draw(
             : null;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, superAdmin: r.superAdmin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
@@ -5858,12 +5874,12 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   }
   ctx.font = "bold 11px 'Schoolbell', ui-monospace, monospace";
   ctx.textAlign = 'center';
-  const tag = (a.admin ? '★ ' : '') + a.name;
+  const tag = a.superAdmin ? `ROOT · ${a.name}` : (a.admin ? '★ ' : '') + a.name;
   const w = ctx.measureText(tag).width + 14;
   roundRect(ctx, a.x - w / 2, a.y + 12, w, 17, 8);
-  ctx.fillStyle = isPlayer ? 'rgba(217,119,87,0.94)' : 'rgba(20,20,19,0.74)';
+  ctx.fillStyle = a.superAdmin ? '#d6a646' : isPlayer ? 'rgba(217,119,87,0.94)' : 'rgba(20,20,19,0.74)';
   ctx.fill();
-  ctx.fillStyle = isPlayer ? '#1a1a1a' : '#fff';
+  ctx.fillStyle = a.superAdmin || isPlayer ? '#1a1a1a' : '#fff';
   ctx.fillText(tag, a.x, a.y + 24);
   if (a.status && !isPlayer) {
     ctx.font = "9px 'Schoolbell', ui-monospace, monospace";

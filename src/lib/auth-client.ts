@@ -7,6 +7,10 @@
 export interface AuthUser {
   username: string;
   isAdmin: boolean;
+  isManagement: boolean;
+  isSuperAdmin: boolean;
+  canAccessAdmin: boolean;
+  canManageStore: boolean;
   spice: number;
   privileges: { dash: boolean; roster: boolean; trak: boolean };
 }
@@ -139,7 +143,7 @@ export async function adminListUsers(): Promise<AdminUserRow[]> {
 
 export async function adminSetPrivileges(
   username: string,
-  patch: { dash?: boolean; roster?: boolean; trak?: boolean }
+  patch: { dash?: boolean; roster?: boolean; trak?: boolean; admin?: boolean; management?: boolean }
 ): Promise<AuthUser> {
   const token = getStoredToken();
   const out = await call<{ user: AuthUser }>('/api/admin/privileges', {
@@ -256,7 +260,10 @@ export interface CommuneLoadout {
 /** Another agent currently walking the square. */
 export interface CommuneAgent {
   username: string;
+  /** Effective admin access for shared Commune moderation. */
   isAdmin: boolean;
+  isManagement: boolean;
+  isSuperAdmin: boolean;
   x: number;
   y: number;
   status: string;

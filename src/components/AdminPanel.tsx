@@ -34,6 +34,7 @@ interface AdminPanelProps {
 }
 
 type PrivilegeKey = 'dash' | 'roster' | 'trak';
+type StaffRoleKey = 'admin' | 'management';
 
 const PRIVILEGE_LABELS: { key: PrivilegeKey; label: string }[] = [
   { key: 'dash', label: 'DASH' },
@@ -95,6 +96,8 @@ async function fileToProductImage(file: File): Promise<string> {
 
 export default function AdminPanel({ onClose }: AdminPanelProps) {
   const { user, refresh: refreshSelf } = useAuth();
+  const canAccessAdmin = user?.canAccessAdmin ?? false;
+  const canManageStore = user?.canManageStore ?? false;
   const [tab, setTab] = useState<AdminTab>('privileges');
 
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
@@ -146,6 +149,23 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
       if (user?.username === updated.username) void refreshSelf();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update privileges');
+    } finally {
+      setBusyName(null);
+    }
+  };
+
+  const toggleStaffRole = async (row: AdminUserRow, role: StaffRoleKey) => {
+    if (busyName || row.isSuperAdmin) return;
+    setBusyName(row.username);
+    setError(null);
+    try {
+      const updated = await adminSetPrivileges(row.username, {
+        [role]: role === 'admin' ? !row.isAdmin : !row.isManagement,
+      });
+      setUsers((prev) => (prev ? prev.map((u) => (u.username === updated.username ? { ...u, ...updated } : u)) : prev));
+      if (user?.username === updated.username) void refreshSelf();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to update ${role} role`);
     } finally {
       setBusyName(null);
     }
@@ -333,23 +353,42 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               <p className="py-8 text-center text-sm text-muted-foreground">No accounts registered yet.</p>
             )}
             {users?.map((row) => {
-              const isAdminRow = row.isAdmin;
+              const isStaffRow = row.isAdmin || row.isManagement || row.isSuperAdmin;
               const busy = busyName === row.username;
               return (
                 <div
                   key={row.username}
                   className={cn(
                     'rounded-xl border p-3 transition-colors',
-                    isAdminRow ? 'border-sky-400/40 bg-sky-500/10' : 'border-border/60 bg-background/35'
+                    row.isSuperAdmin
+                      ? 'border-amber-400/50 bg-amber-500/10'
+                      : row.isAdmin
+                        ? 'border-sky-400/40 bg-sky-500/10'
+                        : row.isManagement
+                          ? 'border-violet-400/40 bg-violet-500/10'
+                          : 'border-border/60 bg-background/35'
                   )}
                 >
                   <div className="flex items-center gap-2">
-                    <UserCog className={cn('size-4 shrink-0', isAdminRow ? 'text-sky-300' : 'text-muted-foreground')} />
+                    <UserCog className={cn(
+                      'size-4 shrink-0',
+                      row.isSuperAdmin ? 'text-amber-300' : row.isAdmin ? 'text-sky-300' : row.isManagement ? 'text-violet-300' : 'text-muted-foreground'
+                    )} />
                     <p className="flex-1 truncate text-sm font-extrabold text-foreground">
                       {row.username}
-                      {isAdminRow && (
+                      {row.isSuperAdmin && (
+                        <span className="ml-2 rounded bg-amber-400/20 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                          Super Admin
+                        </span>
+                      )}
+                      {row.isAdmin && !row.isSuperAdmin && (
                         <span className="ml-2 rounded bg-sky-400/20 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wider text-sky-300">
                           Admin
+                        </span>
+                      )}
+                      {row.isManagement && (
+                        <span className="ml-2 rounded bg-violet-400/20 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wider text-violet-300">
+                          Management
                         </span>
                       )}
                       {user?.username === row.username && (
@@ -360,6 +399,47 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {canAccessAdmin && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy || row.isSuperAdmin || (row.isAdmin && !row.isManagement)}
+                          aria-pressed={row.isManagement}
+                          onClick={() => void toggleStaffRole(row, 'management')}
+                          className={cn(
+                            'rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-45',
+                            row.isManagement
+                              ? 'border-violet-400/50 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                              : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/70'
+                          )}
+                          title={row.isAdmin ? 'The Super Admin must demote this user before Management can be assigned' : `${row.isManagement ? 'Remove' : 'Grant'} Management role`}
+                        >
+                          Management {row.isManagement ? '✓' : '✕'}
+                        </button>
+                        {user?.isSuperAdmin && !row.isSuperAdmin && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            aria-pressed={row.isAdmin}
+                            onClick={() => void toggleStaffRole(row, 'admin')}
+                            className={cn(
+                              'rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:opacity-50',
+                              row.isAdmin
+                                ? 'border-sky-400/50 bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
+                                : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/70'
+                            )}
+                            title={`${row.isAdmin ? 'Revoke' : 'Grant'} Admin role`}
+                          >
+                            Admin {row.isAdmin ? '✓' : '✕'}
+                          </button>
+                        )}
+                        {row.isSuperAdmin && (
+                          <span className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-200">
+                            Root role locked
+                          </span>
+                        )}
+                      </>
+                    )}
                     {PRIVILEGE_LABELS.map(({ key, label }) => {
                       const on = row.privileges[key];
                       return (
@@ -383,8 +463,8 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                       );
                     })}
 
-                    {/* Force delete — disabled for the admin account */}
-                    {isAdminRow ? (
+                    {/* Staff accounts must be demoted before they can be removed. */}
+                    {isStaffRow ? (
                       <span className="ml-auto text-[10px] text-muted-foreground/70">protected</span>
                     ) : confirmDelete === row.username ? (
                       <span className="ml-auto flex items-center gap-1">
@@ -428,8 +508,13 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         {/* ── Tab: Store ── */}
         {tab === 'store' && (
           <div className="custom-scrollbar -mx-1 min-h-0 flex-1 space-y-2 overflow-y-auto px-1">
+            {!canManageStore && (
+              <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold text-amber-200">
+                Read-only catalog. Only Admins can create, edit, or remove Store items.
+              </p>
+            )}
             {/* Editor — create new or edit existing */}
-            {draft ? (
+            {canManageStore && (draft ? (
               <div className="rounded-xl border border-amber-400/40 bg-amber-500/[0.06] p-3">
                 <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-400">
                   {draft.id ? `Edit: ${draft.name}` : 'New product'}
@@ -622,7 +707,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               >
                 <Plus className="size-4" /> Launch a store product
               </button>
-            )}
+            ))}
 
             {/* Product list */}
             {products === null && !error && (
@@ -634,7 +719,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
             )}
             {products?.length === 0 && draft === null && (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                No products yet — launch the first one for your team.
+                {canManageStore ? 'No products yet — launch the first one for your team.' : 'No products are available yet.'}
               </p>
             )}
             {products?.map((product) => {
@@ -670,7 +755,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                     )}
                     <p className="mt-0.5 text-[11px] font-bold tabular-nums text-amber-400">🌶️ {product.price}</p>
                   </div>
-                  <span className="flex shrink-0 items-center gap-1">
+                  {canManageStore && <span className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
                       disabled={busy}
@@ -709,7 +794,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                         <Trash2 className="size-3.5" />
                       </button>
                     )}
-                  </span>
+                  </span>}
                 </div>
               );
             })}
