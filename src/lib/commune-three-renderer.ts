@@ -83,6 +83,14 @@ type RenderPhysicsBall = {
   duration: number;
   arc: number;
 };
+type RenderMower = {
+  x: number;
+  y: number;
+  heading: number;
+  mode: 'mowing' | 'zoomies' | 'confused' | 'napping' | 'reverse';
+  says: { text: string; until: number } | null;
+};
+type RenderMowerTrack = { fromX: number; fromY: number; x: number; y: number; at: number };
 
 export interface CommuneThreeFrame {
   time: number;
@@ -103,6 +111,8 @@ export interface CommuneThreeFrame {
   bowlingBall: RenderPhysicsBall;
   bowlingPinsDown: readonly number[];
   bowlingPinsKnockedAt: number;
+  mower: RenderMower;
+  mowerTracks: readonly RenderMowerTrack[];
   nightOpacity: number;
   reduceMotion: boolean;
 }
@@ -358,6 +368,11 @@ export class CommuneThreeRenderer {
   private readonly bowlingBallMesh: THREE.Mesh;
   private readonly bowlingPins: THREE.Mesh[] = [];
   private readonly bowlingPinHomes: THREE.Vector3[] = [];
+  private readonly mowerGroup = new THREE.Group();
+  private readonly mowerWheels: THREE.Mesh[] = [];
+  private readonly mowerBeam: THREE.Mesh;
+  private readonly mowerTrackGeometry = new THREE.BufferGeometry();
+  private readonly mowerTrackMesh: THREE.LineSegments;
   private readonly cars = new Map<string, THREE.Group>();
   private readonly canvas: HTMLCanvasElement;
   private readonly labels: HTMLCanvasElement;
@@ -477,6 +492,75 @@ export class CommuneThreeRenderer {
     this.bowlingBallMesh.castShadow = true;
     this.scene.add(this.golfBallMesh, this.bowlingBallMesh);
 
+    const mowerBox = (
+      x: number,
+      y: number,
+      z: number,
+      width: number,
+      height: number,
+      depth: number,
+      color: THREE.ColorRepresentation,
+    ) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material(color));
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.mowerGroup.add(mesh);
+      return mesh;
+    };
+    mowerBox(0, 12, 0, 72, 12, 94, '#282d31');
+    mowerBox(0, 24, -1, 74, 16, 84, '#f1f0e9');
+    mowerBox(0, 34, -4, 60, 8, 62, '#fffdf5');
+    mowerBox(0, 18, 44, 76, 8, 9, '#30363a');
+    mowerBox(0, 31, 41, 34, 9, 3, '#20282d');
+    mowerBox(0, 31, 43, 9, 3, 2, '#56d3ff');
+    const stopButton = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 3, 8), material('#e54c46'));
+    stopButton.position.set(-12, 40, -18);
+    stopButton.castShadow = true;
+    this.mowerGroup.add(stopButton);
+    for (const side of [-1, 1]) {
+      for (const z of [-27, 28]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, 8, 8), material('#252a2e'));
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(side * 38, 13, z);
+        wheel.castShadow = true;
+        this.mowerWheels.push(wheel);
+        this.mowerGroup.add(wheel);
+      }
+    }
+    const beamGeometry = new THREE.BufferGeometry();
+    beamGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 4, 43,
+      -50, 4, 126,
+      50, 4, 126,
+    ], 3));
+    beamGeometry.computeVertexNormals();
+    this.mowerBeam = new THREE.Mesh(
+      beamGeometry,
+      new THREE.MeshBasicMaterial({
+        color: '#55cfff',
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    this.mowerGroup.add(this.mowerBeam);
+    this.scene.add(this.mowerGroup);
+
+    const trackCapacity = 420;
+    this.mowerTrackGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(trackCapacity * 2 * 3), 3).setUsage(THREE.DynamicDrawUsage)
+    );
+    this.mowerTrackGeometry.setDrawRange(0, 0);
+    this.mowerTrackMesh = new THREE.LineSegments(
+      this.mowerTrackGeometry,
+      new THREE.LineBasicMaterial({ color: '#b3ce89', transparent: true, opacity: 0.62, depthWrite: false })
+    );
+    this.mowerTrackMesh.frustumCulled = false;
+    this.scene.add(this.mowerTrackMesh);
+
     this.addMarkerMeshes();
     this.buildCars();
   }
@@ -566,6 +650,7 @@ export class CommuneThreeRenderer {
     this.updatePhysicsBall(this.golfBallMesh, frame.golfBall);
     this.updatePhysicsBall(this.bowlingBallMesh, frame.bowlingBall);
     this.updateBowlingPins(frame.bowlingPinsDown, frame.bowlingPinsKnockedAt, frame.time * 1000);
+    this.updateMower(frame.mower, frame.mowerTracks, frame.time, frame.reduceMotion);
     this.drawLabels(frame);
     this.renderer.render(this.scene, this.camera);
   }
@@ -573,7 +658,7 @@ export class CommuneThreeRenderer {
   dispose(): void {
     this.renderer.dispose();
     this.scene.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh) {
+      if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh || object instanceof THREE.Line) {
         object.geometry.dispose();
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         materials.forEach((entry) => entry.dispose());
@@ -749,6 +834,54 @@ export class CommuneThreeRenderer {
       pin.rotation.x = 1.2 * tilt;
       pin.rotation.z = (index % 2 ? 0.48 : -0.48) * tilt;
     });
+  }
+
+  private updateMower(
+    mower: RenderMower,
+    tracks: readonly RenderMowerTrack[],
+    time: number,
+    reduceMotion: boolean,
+  ): void {
+    const moving = mower.mode === 'mowing' || mower.mode === 'zoomies' || mower.mode === 'reverse';
+    const bounce = reduceMotion || !moving
+      ? 0
+      : Math.abs(Math.sin(time * (mower.mode === 'zoomies' ? 23 : 14))) * (mower.mode === 'zoomies' ? 3 : 1);
+    this.mowerGroup.visible = true;
+    this.mowerGroup.position.set(mower.x, -7 + bounce, mower.y);
+    this.mowerGroup.rotation.set(
+      mower.mode === 'napping' ? -0.08 : mower.mode === 'confused' ? Math.sin(time * 1.4) * 0.035 : 0,
+      Math.PI / 2 - mower.heading,
+      mower.mode === 'zoomies' && !reduceMotion ? Math.sin(time * 18) * 0.035 : 0,
+    );
+    const wheelRate = mower.mode === 'zoomies' ? 16 : mower.mode === 'reverse' ? -4 : 3.5;
+    this.mowerWheels.forEach((wheel) => {
+      wheel.rotation.x = time * wheelRate;
+    });
+    const beamMaterial = this.mowerBeam.material as THREE.MeshBasicMaterial;
+    this.mowerBeam.visible = mower.mode !== 'napping';
+    beamMaterial.opacity = mower.mode === 'confused'
+      ? 0.2 + Math.sin(time * 2) * 0.08
+      : mower.mode === 'zoomies' ? 0.52 : 0.3;
+
+    const capacity = (this.mowerTrackGeometry.getAttribute('position').array as Float32Array).length / 6;
+    const visibleTracks = tracks.slice(-capacity);
+    const positions = this.mowerTrackGeometry.getAttribute('position').array as Float32Array;
+    let segmentCount = 0;
+    const now = Date.now();
+    for (const track of visibleTracks) {
+      if (now - track.at > 180_000) continue;
+      const offset = segmentCount * 6;
+      positions[offset] = track.fromX;
+      positions[offset + 1] = -4;
+      positions[offset + 2] = track.fromY;
+      positions[offset + 3] = track.x;
+      positions[offset + 4] = -4;
+      positions[offset + 5] = track.y;
+      segmentCount++;
+    }
+    const positionAttribute = this.mowerTrackGeometry.getAttribute('position') as THREE.BufferAttribute;
+    positionAttribute.needsUpdate = true;
+    this.mowerTrackGeometry.setDrawRange(0, segmentCount * 2);
   }
 
   private addLantern(x: number, z: number): void {
@@ -1266,6 +1399,21 @@ export class CommuneThreeRenderer {
         landmark.text,
         true
       );
+    }
+    const mower = frame.mower;
+    this.projectedPoint.set(mower.x, 55, mower.y).project(this.camera);
+    if (
+      this.projectedPoint.z >= -1 && this.projectedPoint.z <= 1
+      && Math.abs(this.projectedPoint.x) <= 1.08 && Math.abs(this.projectedPoint.y) <= 1.1
+    ) {
+      const mowerX = (this.projectedPoint.x * 0.5 + 0.5) * this.width;
+      const mowerY = (-this.projectedPoint.y * 0.5 + 0.5) * this.height;
+      drawLabel(ctx, mowerX, mowerY, 'T-REX');
+      if (mower.says && mower.says.until > Date.now()) {
+        drawLabel(ctx, mowerX, mowerY - 24, mower.says.text.slice(0, 48), true);
+      } else if (mower.mode !== 'mowing') {
+        drawLabel(ctx, mowerX, mowerY - 24, mower.mode.toUpperCase(), true);
+      }
     }
     const drawActorLabel = (actor: RenderActor) => {
       if (actor.carId) return;

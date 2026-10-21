@@ -120,6 +120,71 @@ const BOWLING_PINS: [number, number][] = [
   [132, 67],
 ];
 const BOWLING_APPROACH = { x: MINI_GAME_ZONES.bowling.x, y: 1460 };
+type TRexMode = 'mowing' | 'zoomies' | 'confused' | 'napping' | 'reverse';
+interface MowerTrack {
+  fromX: number;
+  fromY: number;
+  x: number;
+  y: number;
+  at: number;
+}
+interface TRexState {
+  x: number;
+  y: number;
+  heading: number;
+  mode: TRexMode;
+  modeStartedAt: number;
+  modeUntil: number;
+  nextMoodAt: number;
+  panicCooldownUntil: number;
+  lawnIndex: number;
+  rowIndex: number;
+  rowPass: 0 | 1;
+  rowDirection: 1 | -1;
+  path: { x: number; y: number }[];
+  pathIndex: number;
+  goalX: number;
+  goalY: number;
+  lastTrackX: number;
+  lastTrackY: number;
+  trackDistance: number;
+  says: { text: string; until: number } | null;
+}
+const T_REX_LAWNS = [
+  { left: 1690, right: 1950, top: 800, bottom: 1010 },
+  { left: 1980, right: 2250, top: 800, bottom: 1010 },
+  { left: 2370, right: 2600, top: 1490, bottom: 1650 },
+] as const;
+const MOWER_ROW_SPACING = 38;
+const MOWER_TRACK_SPACING = 14;
+const MOWER_NAV_GRID = 36;
+
+function createTRexState(): TRexState {
+  const now = Date.now();
+  return {
+    x: 1710,
+    y: 818,
+    heading: 0,
+    mode: 'mowing',
+    modeStartedAt: now,
+    modeUntil: 0,
+    nextMoodAt: now + 18_000,
+    panicCooldownUntil: 0,
+    lawnIndex: 0,
+    rowIndex: 0,
+    rowPass: 1,
+    rowDirection: 1,
+    path: [],
+    pathIndex: 0,
+    goalX: 1932,
+    goalY: 818,
+    lastTrackX: 1710,
+    lastTrackY: 818,
+    trackDistance: 0,
+    says: { text: 'T-rex has detected suspiciously tall grass.', until: now + 5500 },
+  };
+}
+
 interface PhysicsBallMotion {
   x: number;
   y: number;
@@ -851,6 +916,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     duration: 0,
     arc: 0,
   });
+  const tRexRef = useRef<TRexState>(createTRexState());
+  const mowerTracksRef = useRef<MowerTrack[]>([]);
   const [soccerBall, setSoccerBall] = useState<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
   const soccerBallRef = useRef<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
   soccerBallRef.current = soccerBall;
@@ -2422,6 +2489,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         }
       }
 
+      updateTRex(tRexRef.current, player, remoteRef.current.values(), dt, wallNow, mowerTracksRef.current);
+
       /* camera follows the player, clamped to the world */
       const cam = camRef.current;
       const targetX = Math.min(Math.max(player.x - vw / 2, 0), Math.max(0, WORLD_W - vw));
@@ -2734,6 +2803,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           bowlingBall: bowlingBallMotionRef.current,
           bowlingPinsDown: bowlingPinsDownRef.current,
           bowlingPinsKnockedAt: bowlingPinsKnockedAtRef.current,
+          mower: tRexRef.current,
+          mowerTracks: mowerTracksRef.current,
           nightOpacity,
           reduceMotion,
         };
@@ -2743,7 +2814,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
           clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current,
           soccerBallRef.current, golfBallMotionRef.current, bowlingBallMotionRef.current,
-          bowlingPinsDownRef.current, bowlingPinsKnockedAtRef.current
+          bowlingPinsDownRef.current, tRexRef.current, mowerTracksRef.current, bowlingPinsKnockedAtRef.current
         );
       }
       raf = requestAnimationFrame(step);
@@ -4987,6 +5058,332 @@ function moveWithCollision(a: Agent, nx: number, ny: number) {
   if (canOccupy(a.x, clampedY, radius)) a.y = clampedY;
 }
 
+interface MowerPathNode {
+  id: number;
+  col: number;
+  row: number;
+  cost: number;
+  score: number;
+}
+
+function pushMowerHeap(heap: MowerPathNode[], node: MowerPathNode): void {
+  let index = heap.length;
+  heap.push(node);
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (heap[parent].score <= node.score) break;
+    heap[index] = heap[parent];
+    index = parent;
+  }
+  heap[index] = node;
+}
+
+function popMowerHeap(heap: MowerPathNode[]): MowerPathNode | undefined {
+  const first = heap[0];
+  const last = heap.pop();
+  if (!first || !last || heap.length === 0) return first;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    if (left >= heap.length) break;
+    const child = right < heap.length && heap[right].score < heap[left].score ? right : left;
+    if (heap[child].score >= last.score) break;
+    heap[index] = heap[child];
+    index = child;
+  }
+  heap[index] = last;
+  return first;
+}
+
+function nearestMowerCell(point: { x: number; y: number }, cols: number, rows: number) {
+  const centerCol = Math.max(0, Math.min(cols - 1, Math.round((point.x - MOWER_NAV_GRID / 2) / MOWER_NAV_GRID)));
+  const centerRow = Math.max(0, Math.min(rows - 1, Math.round((point.y - MOWER_NAV_GRID / 2) / MOWER_NAV_GRID)));
+  for (let radius = 0; radius <= 6; radius++) {
+    for (let row = centerRow - radius; row <= centerRow + radius; row++) {
+      for (let col = centerCol - radius; col <= centerCol + radius; col++) {
+        if (
+          col < 0 || col >= cols || row < 0 || row >= rows ||
+          Math.max(Math.abs(col - centerCol), Math.abs(row - centerRow)) !== radius
+        ) continue;
+        const x = col * MOWER_NAV_GRID + MOWER_NAV_GRID / 2;
+        const y = row * MOWER_NAV_GRID + MOWER_NAV_GRID / 2;
+        if (canOccupy(x, y, 15)) return { col, row, x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function findMowerPath(start: { x: number; y: number }, goal: { x: number; y: number }) {
+  const cols = Math.ceil(WORLD_W / MOWER_NAV_GRID);
+  const rows = Math.ceil(WORLD_H / MOWER_NAV_GRID);
+  const startCell = nearestMowerCell(start, cols, rows);
+  const goalCell = nearestMowerCell(goal, cols, rows);
+  if (!startCell || !goalCell) return [];
+  const startId = startCell.row * cols + startCell.col;
+  const goalId = goalCell.row * cols + goalCell.col;
+  if (startId === goalId) return [{ x: goalCell.x, y: goalCell.y }];
+
+  const total = cols * rows;
+  const costs = new Float32Array(total);
+  costs.fill(Infinity);
+  const parents = new Int32Array(total);
+  parents.fill(-1);
+  const closed = new Uint8Array(total);
+  const open: MowerPathNode[] = [];
+  const heuristic = (col: number, row: number) => Math.hypot(goalCell.col - col, goalCell.row - row);
+  costs[startId] = 0;
+  pushMowerHeap(open, { id: startId, col: startCell.col, row: startCell.row, cost: 0, score: heuristic(startCell.col, startCell.row) });
+
+  const directions: [number, number, number][] = [
+    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+  ];
+  let visits = 0;
+  while (open.length && visits++ < 2400) {
+    const current = popMowerHeap(open);
+    if (!current || closed[current.id]) continue;
+    if (current.id === goalId) {
+      const ids = [goalId];
+      let cursor = goalId;
+      while (cursor !== startId) {
+        cursor = parents[cursor];
+        if (cursor < 0) return [];
+        ids.push(cursor);
+      }
+      ids.reverse();
+      return ids.slice(1).map((id) => ({
+        x: (id % cols) * MOWER_NAV_GRID + MOWER_NAV_GRID / 2,
+        y: Math.floor(id / cols) * MOWER_NAV_GRID + MOWER_NAV_GRID / 2,
+      }));
+    }
+    closed[current.id] = 1;
+
+    for (const [dc, dr, distanceCost] of directions) {
+      const col = current.col + dc;
+      const row = current.row + dr;
+      if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+      const x = col * MOWER_NAV_GRID + MOWER_NAV_GRID / 2;
+      const y = row * MOWER_NAV_GRID + MOWER_NAV_GRID / 2;
+      if (!canOccupy(x, y, 15)) continue;
+      if (dc && dr) {
+        const sideX = current.col * MOWER_NAV_GRID + MOWER_NAV_GRID / 2 + dc * MOWER_NAV_GRID;
+        const sideY = current.row * MOWER_NAV_GRID + MOWER_NAV_GRID / 2 + dr * MOWER_NAV_GRID;
+        if (!canOccupy(sideX, current.row * MOWER_NAV_GRID + MOWER_NAV_GRID / 2, 15)
+          || !canOccupy(current.col * MOWER_NAV_GRID + MOWER_NAV_GRID / 2, sideY, 15)) continue;
+      }
+      const id = row * cols + col;
+      if (closed[id]) continue;
+      const cost = current.cost + distanceCost;
+      if (cost >= costs[id]) continue;
+      costs[id] = cost;
+      parents[id] = current.id;
+      pushMowerHeap(open, { id, col, row, cost, score: cost + heuristic(col, row) });
+    }
+  }
+  return [];
+}
+
+function nextMowerRowGoal(mower: TRexState): { x: number; y: number } {
+  let lawn = T_REX_LAWNS[mower.lawnIndex];
+  const rows = Math.floor((lawn.bottom - lawn.top - 32) / MOWER_ROW_SPACING) + 1;
+  if (mower.rowIndex >= rows) {
+    mower.lawnIndex = (mower.lawnIndex + 1) % T_REX_LAWNS.length;
+    mower.rowIndex = 0;
+    mower.rowPass = 0;
+    mower.rowDirection = 1;
+    lawn = T_REX_LAWNS[mower.lawnIndex];
+  }
+  const y = lawn.top + 18 + mower.rowIndex * MOWER_ROW_SPACING;
+  const startsLeft = mower.rowDirection > 0;
+  const x = mower.rowPass === 0
+    ? startsLeft ? lawn.left + 18 : lawn.right - 18
+    : startsLeft ? lawn.right - 18 : lawn.left + 18;
+  if (mower.rowPass === 0) {
+    mower.rowPass = 1;
+  } else {
+    mower.rowPass = 0;
+    mower.rowIndex++;
+    mower.rowDirection = mower.rowDirection === 1 ? -1 : 1;
+  }
+  return { x, y };
+}
+
+function assignMowerPath(mower: TRexState, goal: { x: number; y: number }): boolean {
+  const path = findMowerPath(mower, goal);
+  if (!path.length && Math.hypot(goal.x - mower.x, goal.y - mower.y) > MOWER_NAV_GRID) return false;
+  mower.goalX = goal.x;
+  mower.goalY = goal.y;
+  mower.path = path;
+  mower.pathIndex = 0;
+  return true;
+}
+
+function planNextMowerRow(mower: TRexState): boolean {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const goal = nextMowerRowGoal(mower);
+    if (assignMowerPath(mower, goal)) return true;
+  }
+  return false;
+}
+
+function startMowerZoomies(
+  mower: TRexState,
+  threat: { x: number; y: number },
+  now: number,
+): void {
+  let angle = Math.atan2(mower.y - threat.y, mower.x - threat.x);
+  if (!Number.isFinite(angle)) angle = Math.random() * Math.PI * 2;
+  mower.mode = 'zoomies';
+  mower.modeStartedAt = now;
+  mower.modeUntil = now + 1900 + Math.random() * 800;
+  mower.panicCooldownUntil = now + 7000;
+  mower.lastTrackX = mower.x;
+  mower.lastTrackY = mower.y;
+  mower.trackDistance = 0;
+  mower.says = {
+    text: ['NOPE NOPE NOPE!', 'T-rex has detected a large mammal!', 'Retreating to a safer lawn!', 'This mower has places to be!'][Math.floor(Math.random() * 4)],
+    until: now + 2600,
+  };
+  for (const turn of [0, 0.45, -0.45, 0.9, -0.9, Math.PI]) {
+    const fleeAngle = angle + turn;
+    const goal = {
+      x: Math.max(70, Math.min(WORLD_W - 70, mower.x + Math.cos(fleeAngle) * 340)),
+      y: Math.max(170, Math.min(WORLD_H - 70, mower.y + Math.sin(fleeAngle) * 340)),
+    };
+    if (assignMowerPath(mower, goal)) return;
+  }
+  mower.path = [];
+  mower.pathIndex = 0;
+}
+
+function followMowerPath(
+  mower: TRexState,
+  speed: number,
+  dt: number,
+  now: number,
+  tracks: MowerTrack[],
+  leaveTrack: boolean,
+): void {
+  let waypoint = mower.path[mower.pathIndex];
+  if (!waypoint) {
+    if (mower.mode !== 'mowing' || !planNextMowerRow(mower)) return;
+    waypoint = mower.path[mower.pathIndex];
+    if (!waypoint) return;
+  }
+  const dx = waypoint.x - mower.x;
+  const dy = waypoint.y - mower.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 7) {
+    mower.pathIndex++;
+    if (mower.pathIndex >= mower.path.length && mower.mode === 'mowing') planNextMowerRow(mower);
+    return;
+  }
+
+  const heading = Math.atan2(dy, dx);
+  const headingDelta = Math.atan2(Math.sin(heading - mower.heading), Math.cos(heading - mower.heading));
+  mower.heading += headingDelta * Math.min(1, dt * (mower.mode === 'zoomies' ? 8 : 3.2));
+  const travel = Math.min(distance, speed * dt);
+  const oldX = mower.x;
+  const oldY = mower.y;
+  const nextX = mower.x + (dx / distance) * travel;
+  const nextY = mower.y + (dy / distance) * travel;
+  if (canOccupy(nextX, nextY, 15)) {
+    mower.x = nextX;
+    mower.y = nextY;
+  } else {
+    mower.path = findMowerPath(mower, { x: mower.goalX, y: mower.goalY });
+    mower.pathIndex = 0;
+    if (!mower.path.length && mower.mode === 'mowing') planNextMowerRow(mower);
+    return;
+  }
+  if (!leaveTrack) return;
+  mower.trackDistance += Math.hypot(mower.x - oldX, mower.y - oldY);
+  if (mower.trackDistance >= MOWER_TRACK_SPACING) {
+    tracks.push({ fromX: mower.lastTrackX, fromY: mower.lastTrackY, x: mower.x, y: mower.y, at: now });
+    mower.lastTrackX = mower.x;
+    mower.lastTrackY = mower.y;
+    mower.trackDistance = 0;
+    if (tracks.length > 420) tracks.splice(0, tracks.length - 420);
+  }
+}
+
+function updateTRex(
+  mower: TRexState,
+  player: Agent,
+  remotes: Iterable<{ rx: number; ry: number; agent: { carId?: string | null } }>,
+  dt: number,
+  now: number,
+  tracks: MowerTrack[],
+): void {
+  if (mower.says && mower.says.until <= now) mower.says = null;
+  let nearestThreat: { x: number; y: number } | null = null;
+  let nearestDistance = Math.hypot(player.x - mower.x, player.y - mower.y);
+  if (nearestDistance < 150) nearestThreat = player;
+  for (const remote of remotes) {
+    const distance = Math.hypot(remote.rx - mower.x, remote.ry - mower.y);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestThreat = { x: remote.rx, y: remote.ry };
+    }
+  }
+  if (nearestThreat && nearestDistance < 145 && now >= mower.panicCooldownUntil && mower.mode !== 'zoomies') {
+    startMowerZoomies(mower, nearestThreat, now);
+  }
+
+  if (mower.mode !== 'mowing' && now >= mower.modeUntil) {
+    mower.mode = 'mowing';
+    mower.modeUntil = 0;
+    mower.path = [];
+    mower.pathIndex = 0;
+    mower.lastTrackX = mower.x;
+    mower.lastTrackY = mower.y;
+    mower.trackDistance = 0;
+    mower.nextMoodAt = now + 17_000 + Math.random() * 24_000;
+  }
+  if (mower.mode === 'zoomies') {
+    followMowerPath(mower, 285, dt, now, tracks, false);
+    return;
+  }
+  if (mower.mode === 'confused') {
+    mower.heading += dt * 0.48;
+    return;
+  }
+  if (mower.mode === 'napping') return;
+  if (mower.mode === 'reverse') {
+    const distance = 30 * dt;
+    const nextX = mower.x - Math.cos(mower.heading) * distance;
+    const nextY = mower.y - Math.sin(mower.heading) * distance;
+    if (canOccupy(nextX, nextY, 15)) {
+      mower.x = nextX;
+      mower.y = nextY;
+    } else {
+      mower.heading += dt * 1.1;
+    }
+    return;
+  }
+
+  if (now >= mower.nextMoodAt) {
+    const mood = Math.random();
+    mower.mode = mood < 0.48 ? 'confused' : mood < 0.72 ? 'napping' : 'reverse';
+    mower.modeStartedAt = now;
+    mower.modeUntil = now + (mower.mode === 'confused' ? 6200 : mower.mode === 'napping' ? 3900 : 1800);
+    mower.says = {
+      text: mower.mode === 'confused'
+        ? ['Which way is north? I am a mower.', 'I have mowed this exact pixel before.', 'Grass detected. Grass... still detected.'][Math.floor(Math.random() * 3)]
+        : mower.mode === 'napping'
+          ? 'Zzz... dreaming of an uncut hedge.'
+          : 'Reverse mowing! For science!',
+      until: mower.modeUntil,
+    };
+    return;
+  }
+
+  if (!mower.path[mower.pathIndex]) planNextMowerRow(mower);
+  followMowerPath(mower, 46, dt, now, tracks, true);
+}
+
 /* ── drawing ──────────────────────────────────────────────────────────────── */
 
 type Cam = { x: number; y: number };
@@ -5014,6 +5411,8 @@ function draw(
   golfBall: PhysicsBallMotion,
   bowlingBall: PhysicsBallMotion,
   bowlingPinsDown: readonly number[],
+  mower: TRexState,
+  mowerTracks: readonly MowerTrack[],
   bowlingPinsKnockedAt = 0
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -5130,6 +5529,23 @@ function draw(
   }
   if (isVisible(bowlingBallPosition.x, bowlingBallPosition.y, 24, 30)) {
     items.push({ y: bowlingBallPosition.y, bright: true, fn: () => drawPhysicsBall(ctx, bowlingBall, 'bowling', t) });
+  }
+  for (const track of mowerTracks) {
+    const middleX = (track.fromX + track.x) / 2;
+    const middleY = (track.fromY + track.y) / 2;
+    if (isVisible(middleX, middleY, 20, 20)) {
+      items.push({
+        y: middleY,
+        fn: () => drawMowerTrack(ctx, track),
+      });
+    }
+  }
+  if (isVisible(mower.x, mower.y, 48, 52)) {
+    items.push({
+      y: mower.y + 20,
+      bright: true,
+      fn: () => drawTRexMower(ctx, mower, t),
+    });
   }
 
   /* bulletin board (banners) */
@@ -5703,6 +6119,86 @@ function drawBowlingPin(
   ctx.fillStyle = '#d8c7a5';
   ctx.fillRect(-2, -11, 2, 2);
   ctx.restore();
+}
+
+function drawMowerTrack(ctx: CanvasRenderingContext2D, track: MowerTrack) {
+  const age = Date.now() - track.at;
+  const alpha = Math.max(0.08, 0.34 * (1 - age / 180_000));
+  ctx.save();
+  ctx.strokeStyle = `rgba(188, 217, 148, ${alpha})`;
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  ctx.moveTo(track.fromX, track.fromY);
+  ctx.lineTo(track.x, track.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTRexMower(ctx: CanvasRenderingContext2D, mower: TRexState, t: number) {
+  const zoomies = mower.mode === 'zoomies';
+  const bounce = zoomies ? Math.sin(t * 26) * 2.2 : mower.mode === 'mowing' ? Math.sin(t * 12) * 0.6 : 0;
+  drawGroundShadow(ctx, mower.x + 3, mower.y + 7, 27, 10, 0.28);
+  ctx.save();
+  ctx.translate(Math.round(mower.x), Math.round(mower.y - bounce));
+  ctx.rotate(mower.heading - Math.PI / 2);
+
+  const beamPulse = mower.mode === 'confused' ? 0.32 + Math.sin(t * 3) * 0.2 : zoomies ? 0.55 : 0.28;
+  ctx.fillStyle = `rgba(76, 197, 255, ${beamPulse})`;
+  ctx.beginPath();
+  ctx.moveTo(0, 16);
+  ctx.lineTo(-22, 56);
+  ctx.lineTo(22, 56);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#242b30';
+  ctx.fillRect(-21, -24, 42, 50);
+  ctx.fillStyle = '#30383d';
+  ctx.fillRect(-23, -15, 6, 14);
+  ctx.fillRect(17, -15, 6, 14);
+  ctx.fillRect(-23, 9, 6, 14);
+  ctx.fillRect(17, 9, 6, 14);
+  const wheelStripe = Math.sin(t * (zoomies ? 22 : 7)) > 0 ? '#667078' : '#3c444a';
+  ctx.fillStyle = wheelStripe;
+  ctx.fillRect(-22, -10, 4, 3);
+  ctx.fillRect(18, 14, 4, 3);
+
+  ctx.fillStyle = '#e9e9e1';
+  roundRect(ctx, -18, -23, 36, 43, 7);
+  ctx.fill();
+  ctx.fillStyle = '#fffdf5';
+  roundRect(ctx, -15, -20, 30, 35, 6);
+  ctx.fill();
+  ctx.fillStyle = '#d7d8d3';
+  ctx.fillRect(-13, -16, 26, 3);
+  ctx.fillStyle = '#23292e';
+  roundRect(ctx, -14, 12, 28, 8, 3);
+  ctx.fill();
+  ctx.fillStyle = '#58d1ff';
+  ctx.fillRect(-5, 14, 10, 2);
+  ctx.fillStyle = '#df4e48';
+  ctx.beginPath();
+  ctx.arc(-8, -11, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#b3bac0';
+  ctx.fillRect(6, -16, 5, 2);
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = "bold 9px 'Schoolbell', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  const name = 'T-REX';
+  const nameWidth = ctx.measureText(name).width + 10;
+  roundRect(ctx, mower.x - nameWidth / 2, mower.y - 40, nameWidth, 14, 5);
+  ctx.fillStyle = '#493927';
+  ctx.fill();
+  ctx.fillStyle = '#f3d87c';
+  ctx.fillText(name, mower.x, mower.y - 30);
+  ctx.restore();
+  if (mower.says && mower.says.until > Date.now()) {
+    drawBubble(ctx, mower.x, mower.y - 43, mower.says.text);
+  }
 }
 
 function drawDestinationMarker(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
