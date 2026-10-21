@@ -103,6 +103,30 @@ const MINI_GAME_ZONES = {
   bowling: { x: 2250, y: 1290, range: 220 },
   soccer: { left: 850, right: 1280, top: 1820, bottom: 2120, x: 1065, y: 1970 },
 } as const;
+const GOLF_TEE = { x: 2725, y: 1260 };
+const GOLF_WORLD_SCALE = 0.9;
+function golfWorldPosition(localX: number, localY: number) {
+  return {
+    x: GOLF_TEE.x + (localX - 28) * GOLF_WORLD_SCALE,
+    y: GOLF_TEE.y + (localY - 60) * GOLF_WORLD_SCALE,
+  };
+}
+const BOWLING_PINS: [number, number][] = [
+  [114, 25], [126, 25], [138, 25], [150, 25],
+  [120, 39], [132, 39], [144, 39],
+  [126, 53], [138, 53],
+  [132, 67],
+];
+const BOWLING_APPROACH = { x: MINI_GAME_ZONES.bowling.x, y: 1460 };
+interface PhysicsBallMotion {
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  startedAt: number;
+  duration: number;
+  arc: number;
+}
 const INITIAL_SOCCER_BALL: CommuneSoccerBall = {
   x: MINI_GAME_ZONES.soccer.x,
   y: MINI_GAME_ZONES.soccer.y,
@@ -138,7 +162,7 @@ function isRosterOffDay(code: string): boolean {
 }
 
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
-type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | 'golf' | 'bowling' | null;
+type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | null;
 type BoardTab = 'roster' | 'announcements';
 type CommuneCarId = 'meadow-cruiser' | 'orchard-wagon';
 
@@ -229,7 +253,7 @@ function touchActionLabel(action: CommuneAction): string {
     case 'serendipity': return 'Discover';
     case 'duck-incident': return 'Ask duck';
     case 'world-object': return 'Explore';
-    case 'mini-game': return action.game === 'golf' ? 'Play golf' : 'Bowl';
+    case 'mini-game': return action.label;
     case 'soccer-kick': return 'Kick +1 spice';
     case 'prop': return 'Open';
   }
@@ -730,19 +754,35 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const mapZoomRef = useRef(1.5);
   mapZoomRef.current = mapZoom;
   const [panel, setPanel] = useState<PanelKind>(null);
-  const [miniGameRoundId, setMiniGameRoundId] = useState<string | null>(null);
-  const [miniGameBusy, setMiniGameBusy] = useState(false);
-  const [miniGameMessage, setMiniGameMessage] = useState('');
-  const [golfAim, setGolfAim] = useState(0);
-  const [golfPower, setGolfPower] = useState(74);
-  const [golfBall, setGolfBall] = useState({ x: 28, y: 60 });
-  const [golfStrokes, setGolfStrokes] = useState(0);
-  const [golfShots, setGolfShots] = useState<{ aim: number; power: number }[]>([]);
-  const [golfFinished, setGolfFinished] = useState(false);
-  const [bowlingAim, setBowlingAim] = useState(0);
-  const [bowlingPower, setBowlingPower] = useState(68);
-  const [bowlingPinsDown, setBowlingPinsDown] = useState<number[]>([]);
-  const [bowlingFinished, setBowlingFinished] = useState(false);
+  const golfRoundRef = useRef({
+    roundId: null as string | null,
+    localX: 28,
+    localY: 60,
+    shots: [] as { aim: number; power: number }[],
+    busy: false,
+    finished: false,
+  });
+  const golfBallMotionRef = useRef<PhysicsBallMotion>({
+    x: GOLF_TEE.x,
+    y: GOLF_TEE.y,
+    fromX: GOLF_TEE.x,
+    fromY: GOLF_TEE.y,
+    startedAt: 0,
+    duration: 0,
+    arc: 0,
+  });
+  const bowlingBusyRef = useRef(false);
+  const bowlingPinsDownRef = useRef<number[]>([]);
+  const bowlingPinsKnockedAtRef = useRef(0);
+  const bowlingBallMotionRef = useRef<PhysicsBallMotion>({
+    x: BOWLING_APPROACH.x,
+    y: BOWLING_APPROACH.y,
+    fromX: BOWLING_APPROACH.x,
+    fromY: BOWLING_APPROACH.y,
+    startedAt: 0,
+    duration: 0,
+    arc: 0,
+  });
   const [soccerBall, setSoccerBall] = useState<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
   const soccerBallRef = useRef<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
   soccerBallRef.current = soccerBall;
@@ -1607,6 +1647,147 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     return () => window.clearTimeout(timer);
   }, [loadout]);
 
+  const swingGolfBall = useCallback(async () => {
+    const session = golfRoundRef.current;
+    if (session.busy) return;
+    session.busy = true;
+    try {
+      if (!session.roundId || session.finished) {
+        const round = await startCommuneMiniGame('golf');
+        session.roundId = round.roundId;
+        session.localX = 28;
+        session.localY = 60;
+        session.shots = [];
+        session.finished = false;
+        golfBallMotionRef.current = {
+          x: GOLF_TEE.x,
+          y: GOLF_TEE.y,
+          fromX: GOLF_TEE.x,
+          fromY: GOLF_TEE.y,
+          startedAt: 0,
+          duration: 0,
+          arc: 0,
+        };
+        playerRef.current.says = {
+          text: 'Tee is set! Walk up to the ball and give it a mighty thwack.',
+          until: Date.now() + 4200,
+        };
+        return;
+      }
+
+      const player = playerRef.current;
+      const aim = Math.max(-12, Math.min(12, Math.round((player.y - golfWorldPosition(session.localX, session.localY).y) / 7)));
+      const runUp = player.moving ? 18 : 0;
+      const power = Math.max(20, Math.min(100, Math.round(62 + runUp + Math.random() * 12)));
+      const angle = aim * Math.PI / 180;
+      const travel = power * 1.8;
+      session.localX = Math.max(16, Math.min(258, session.localX + Math.cos(angle) * travel));
+      session.localY = Math.max(18, Math.min(102, session.localY - Math.sin(angle) * travel * 0.55));
+      session.shots.push({ aim, power });
+      const next = golfWorldPosition(session.localX, session.localY);
+      const motionFrom = golfBallMotionRef.current;
+      const duration = Math.round(820 - power * 2.2);
+      golfBallMotionRef.current = {
+        x: next.x,
+        y: next.y,
+        fromX: motionFrom.x,
+        fromY: motionFrom.y,
+        startedAt: Date.now(),
+        duration,
+        arc: 16 + power * 0.16,
+      };
+      player.says = { text: `FORE! ${['a suspiciously confident putt', 'the tiny golf ball', 'a very brave shot'][Math.floor(Math.random() * 3)]} is away!`, until: Date.now() + duration };
+      await new Promise<void>((resolve) => window.setTimeout(resolve, duration));
+      const holed = Math.hypot(250 - session.localX, 60 - session.localY) <= 12;
+      if (holed || session.shots.length >= 4) {
+        session.finished = true;
+        const result = await finishCommuneMiniGame('golf', session.roundId!, { shots: session.shots });
+        setSpice(result.spice);
+        player.says = {
+          text: result.awarded ? 'HOLE IN ONE! The golf ball has achieved enlightenment. +10 spice!' : 'The ball has joined the hedge. Four strokes; no hole this time.',
+          until: Date.now() + 5200,
+        };
+        session.roundId = null;
+      } else {
+        player.says = {
+          text: holed ? 'THE CUP! The ball is home!' : `Putt ${session.shots.length}/4. The ball is ${Math.round(Math.hypot(250 - session.localX, 60 - session.localY))} yards from glory.`,
+          until: Date.now() + 3600,
+        };
+      }
+    } catch (error) {
+      session.roundId = null;
+      playerRef.current.says = {
+        text: error instanceof Error ? error.message : 'The golf ball declined to cooperate.',
+        until: Date.now() + 3500,
+      };
+    } finally {
+      session.busy = false;
+    }
+  }, [setSpice]);
+
+  const rollBowlingBall = useCallback(async () => {
+    if (bowlingBusyRef.current) return;
+    bowlingBusyRef.current = true;
+    const player = playerRef.current;
+    try {
+      const round = await startCommuneMiniGame('bowling');
+      const aim = Math.max(-30, Math.min(30, Math.round((player.x - MINI_GAME_ZONES.bowling.x) / 2)));
+      const power = Math.max(20, Math.min(100, Math.round(58 + (player.moving ? 22 : 0) + Math.random() * 18)));
+      const aimX = 132 + aim * 0.7;
+      const scatter = 5 + power * 0.1;
+      const knocked = BOWLING_PINS.flatMap(([pinX, pinY], index) => (
+        Math.abs(pinX - aimX) <= scatter + (pinY < 40 ? 2 : 0) ? [index] : []
+      ));
+      const ballX = BOWLING_APPROACH.x + (aimX - 132) * 1.5;
+      const ballFrom = { x: ballX, y: BOWLING_APPROACH.y };
+      const ballTo = { x: ballX, y: MINI_GAME_ZONES.bowling.y - 170 };
+      const duration = Math.round(1480 - power * 6);
+      bowlingPinsDownRef.current = [];
+      bowlingPinsKnockedAtRef.current = 0;
+      bowlingBallMotionRef.current = {
+        x: ballTo.x,
+        y: ballTo.y,
+        fromX: ballFrom.x,
+        fromY: ballFrom.y,
+        startedAt: Date.now(),
+        duration,
+        arc: 6 + power * 0.08,
+      };
+      player.says = { text: 'ROLLING! The lane has requested a safety helmet.', until: Date.now() + duration };
+      await new Promise<void>((resolve) => window.setTimeout(resolve, duration));
+      bowlingPinsDownRef.current = knocked;
+      bowlingPinsKnockedAtRef.current = performance.now();
+      const result = await finishCommuneMiniGame('bowling', round.roundId, { aim, power });
+      setSpice(result.spice);
+      player.says = {
+        text: `${['PIN PANIC!', 'A most respectable kerplunk!', 'The pins have filed a complaint!'][Math.floor(Math.random() * 3)]} ${result.pinsDown ?? 0} down · +${result.awarded} spice.`,
+        until: Date.now() + 5200,
+      };
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 3200));
+      bowlingPinsDownRef.current = [];
+      bowlingPinsKnockedAtRef.current = 0;
+      bowlingBallMotionRef.current = {
+        x: BOWLING_APPROACH.x,
+        y: BOWLING_APPROACH.y,
+        fromX: BOWLING_APPROACH.x,
+        fromY: BOWLING_APPROACH.y,
+        startedAt: 0,
+        duration: 0,
+        arc: 0,
+      };
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 800));
+    } catch (error) {
+      bowlingPinsDownRef.current = [];
+      bowlingPinsKnockedAtRef.current = 0;
+      player.says = {
+        text: error instanceof Error ? error.message : 'The bowling ball rolled away from the paperwork.',
+        until: Date.now() + 3500,
+      };
+    } finally {
+      bowlingBusyRef.current = false;
+    }
+  }, [setSpice]);
+
   const executeInteraction = useCallback((action: CommuneAction, direct = false) => {
     if (panelRef.current) return;
     if (!direct) {
@@ -1665,7 +1846,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }
           case 'mini-game': {
             const zone = MINI_GAME_ZONES[action.game];
-            return Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range;
+            if (action.game === 'golf') {
+              const session = golfRoundRef.current;
+              if (session.busy) return false;
+              if (session.roundId) {
+                const ball = golfWorldPosition(session.localX, session.localY);
+                return Math.hypot(player.x - ball.x, player.y - ball.y) <= 104;
+              }
+              return Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range;
+            }
+            return !bowlingBusyRef.current
+              && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
           }
           case 'soccer-kick': {
             const field = MINI_GAME_ZONES.soccer;
@@ -1788,19 +1979,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         return;
       }
       case 'mini-game':
-        setMiniGameRoundId(null);
-        setMiniGameMessage('');
-        setGolfAim(0);
-        setGolfPower(74);
-        setGolfBall({ x: 28, y: 60 });
-        setGolfStrokes(0);
-        setGolfShots([]);
-        setGolfFinished(false);
-        setBowlingAim(0);
-        setBowlingPower(68);
-        setBowlingPinsDown([]);
-        setBowlingFinished(false);
-        setPanel(action.game);
+        if (action.game === 'golf') void swingGolfBall();
+        else void rollBowlingBall();
         return;
       case 'soccer-kick': {
         const ball = soccerBallRef.current;
@@ -1843,7 +2023,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         setPanel(action.panel);
         return;
     }
-  }, [onCatThought, sendRoomEvent, setSpice]);
+  }, [onCatThought, rollBowlingBall, sendRoomEvent, setSpice, swingGolfBall]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -2244,9 +2424,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         .map((object) => ({ object, distance: Math.hypot(player.x - object.x, player.y - object.y) }))
         .filter(({ object, distance }) => distance < object.range)
         .sort((a, b) => a.distance - b.distance)[0]?.object ?? null;
+      const golfSession = golfRoundRef.current;
+      const currentGolfBall = golfWorldPosition(golfSession.localX, golfSession.localY);
       const nearbyGame = (['golf', 'bowling'] as const)
         .map((game) => ({ game, distance: Math.hypot(player.x - MINI_GAME_ZONES[game].x, player.y - MINI_GAME_ZONES[game].y) }))
-        .filter(({ game, distance }) => distance <= MINI_GAME_ZONES[game].range)
+        .filter(({ game, distance }) => (
+          game === 'golf' && golfSession.roundId
+            ? !golfSession.busy && Math.hypot(player.x - currentGolfBall.x, player.y - currentGolfBall.y) <= 104
+            : game === 'bowling'
+              ? !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82
+              : distance <= MINI_GAME_ZONES.golf.range
+        ))
         .sort((a, b) => a.distance - b.distance)[0]?.game ?? null;
       const soccerField = MINI_GAME_ZONES.soccer;
       const nearSoccerBall = player.x >= soccerField.left && player.x <= soccerField.right
@@ -2317,7 +2505,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         actions.push({
           type: 'mini-game',
           key: 'E',
-          label: nearbyGame === 'golf' ? 'Play golf' : 'Play bowling',
+          label: nearbyGame === 'golf'
+            ? golfSession.roundId ? 'Swing the golf ball · +10 goal' : 'Tee off · sink for +10 spice'
+            : 'Roll the bowling ball · +1 per pin',
           game: nearbyGame,
         });
       } else if (nearAgent) {
@@ -2465,6 +2655,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           destination: clickTargetRef.current,
           clickTarget: clickTargetRef.current,
           soccerBall: soccerBallRef.current,
+          golfBall: golfBallMotionRef.current,
+          bowlingBall: bowlingBallMotionRef.current,
+          bowlingPinsDown: bowlingPinsDownRef.current,
+          bowlingPinsKnockedAt: bowlingPinsKnockedAtRef.current,
           nightOpacity,
           reduceMotion,
         };
@@ -2473,7 +2667,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
           remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
           clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current,
-          soccerBallRef.current
+          soccerBallRef.current, golfBallMotionRef.current, bowlingBallMotionRef.current,
+          bowlingPinsDownRef.current, bowlingPinsKnockedAtRef.current
         );
       }
       raf = requestAnimationFrame(step);
@@ -2585,20 +2780,32 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     }
     const tappedGame = (['golf', 'bowling'] as const).find((game) => {
       const zone = MINI_GAME_ZONES[game];
-      return Math.abs(wx - zone.x) < 210 && Math.abs(wy - zone.y) < 130;
+      return game === 'golf'
+        ? Math.abs(wx - zone.x) < 210 && Math.abs(wy - zone.y) < 130
+        : Math.abs(wx - zone.x) < 82 && Math.abs(wy - zone.y) < 205;
     });
     if (tappedGame) {
       const player = playerRef.current;
       const zone = MINI_GAME_ZONES[tappedGame];
-      if (Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range) {
+      const session = golfRoundRef.current;
+      const golfBall = golfWorldPosition(session.localX, session.localY);
+      const target = tappedGame === 'golf'
+        ? session.roundId ? golfBall : zone
+        : BOWLING_APPROACH;
+      const inRange = tappedGame === 'golf' && session.roundId
+        ? !session.busy && Math.hypot(player.x - golfBall.x, player.y - golfBall.y) <= 104
+        : tappedGame === 'golf'
+          ? Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range
+          : !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
+      if (inRange) {
         executeInteraction({
           type: 'mini-game',
           key: 'E',
-          label: tappedGame === 'golf' ? 'Play golf' : 'Play bowling',
+          label: tappedGame === 'golf' ? 'Swing the golf ball' : 'Roll the bowling ball',
           game: tappedGame,
         });
       } else {
-        clickTargetRef.current = approachPoint(zone.x, zone.y, player.x, player.y, 92);
+        clickTargetRef.current = approachPoint(target.x, target.y, player.x, player.y, 92);
       }
       return;
     }
@@ -2798,91 +3005,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     window.requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
-  const beginMiniGameRound = async (game: CommuneMiniGame) => {
-    setMiniGameBusy(true);
-    setMiniGameMessage('');
-    try {
-      const round = await startCommuneMiniGame(game);
-      setMiniGameRoundId(round.roundId);
-      setMiniGameMessage(game === 'golf' ? 'Round started. Sink the putt for +10 spice.' : 'Frame started. Each pin is worth +1 spice.');
-      if (game === 'golf') {
-        setGolfBall({ x: 28, y: 60 });
-        setGolfStrokes(0);
-      setGolfShots([]);
-        setGolfFinished(false);
-      } else {
-        setBowlingPinsDown([]);
-        setBowlingFinished(false);
-      }
-    } catch (error) {
-      setMiniGameMessage(error instanceof Error ? error.message : 'Could not start this round.');
-    } finally {
-      setMiniGameBusy(false);
-    }
-  };
-
-  const settleMiniGameRound = async (
-    game: CommuneMiniGame,
-    roundId: string,
-    result: { shots: { aim: number; power: number }[] } | { aim: number; power: number }
-  ) => {
-    try {
-      const outcome = await finishCommuneMiniGame(game, roundId, result);
-      setSpice(outcome.spice);
-      setMiniGameMessage(
-        game === 'golf'
-          ? outcome.awarded ? 'Putt sunk! +10 spice!' : 'Round complete. Next time, sink it!'
-          : `Pins down: ${outcome.pinsDown ?? 0}. +${outcome.awarded} spice!`
-      );
-    } catch (error) {
-      setMiniGameMessage(error instanceof Error ? error.message : 'Could not settle this round.');
-    } finally {
-      setMiniGameRoundId(null);
-      setMiniGameBusy(false);
-    }
-  };
-
-  const takeGolfStroke = () => {
-    if (!miniGameRoundId || miniGameBusy || golfFinished) return;
-    const angle = golfAim * Math.PI / 180;
-    const travel = golfPower * 1.8;
-    const nextBall = {
-      x: Math.max(16, Math.min(258, golfBall.x + Math.cos(angle) * travel)),
-      y: Math.max(18, Math.min(102, golfBall.y - Math.sin(angle) * travel * 0.55)),
-    };
-    const strokes = golfStrokes + 1;
-    const shots = [...golfShots, { aim: golfAim, power: golfPower }];
-    const holed = Math.hypot(250 - nextBall.x, 60 - nextBall.y) <= 12;
-    setGolfBall(nextBall);
-    setGolfStrokes(strokes);
-    setGolfShots(shots);
-    if (holed || strokes >= 4) {
-      setGolfFinished(true);
-      setMiniGameBusy(true);
-      void settleMiniGameRound('golf', miniGameRoundId, { shots });
-    }
-  };
-
-  const rollBowlingBall = async () => {
-    if (!miniGameRoundId || miniGameBusy || bowlingFinished) return;
-    setMiniGameBusy(true);
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 520));
-    const pins: [number, number][] = [
-      [114, 25], [126, 25], [138, 25], [150, 25],
-      [120, 39], [132, 39], [144, 39],
-      [126, 53], [138, 53],
-      [132, 67],
-    ];
-    const aimX = 132 + bowlingAim * 0.7;
-    const scatter = 5 + bowlingPower * 0.1;
-    const knocked = pins.flatMap(([x, y], index) => (
-      Math.abs(x - aimX) <= scatter + (y < 40 ? 2 : 0) ? [index] : []
-    ));
-    setBowlingPinsDown(knocked);
-    setBowlingFinished(true);
-    await settleMiniGameRound('bowling', miniGameRoundId, { aim: bowlingAim, power: bowlingPower });
-  };
-
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
   const currentCar = carSeat ? PARKED_CARS.find((car) => car.id === carSeat.carId) ?? null : null;
@@ -2890,7 +3012,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     ? others.filter((agent) => agent.carId === carSeat.carId).sort((a, b) => (a.carSeat ?? 0) - (b.carSeat ?? 0))
     : [];
   const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
-  const paperPanel = panel === 'banners' || panel === 'agent' || panel === 'golf' || panel === 'bowling';
+  const paperPanel = panel === 'banners' || panel === 'agent';
   const panelPosition = touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
@@ -3364,9 +3486,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-modal="false"
           aria-label={activeProp?.label ?? (
             panel === 'treehole' ? 'Anonymous feedback treehole'
-              : panel === 'golf' ? 'Cloverleaf golf mini-game'
-                : panel === 'bowling' ? 'Meadow bowling mini-game'
-                  : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details'
+              : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details'
           )}
           className={cn(
             paperPanel
@@ -3427,105 +3547,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 {touchControls ? 'Close to return · Use the joystick to explore' : 'Press Esc to close · Keep exploring with WASD'}
               </p>
             </div>
-          )}
-
-          {panel === 'golf' && (
-            <section className="mt-1 space-y-3 pr-7" aria-label="Cloverleaf Links golf">
-              <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.45)]">
-                <p className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#ead6ad]">CLOVERLEAF LINKS</p>
-                <h3 className="font-['Schoolbell'] text-lg font-bold">A tiny putting challenge</h3>
-              </div>
-              <p className="font-['Schoolbell'] text-sm text-[#715b3e]">
-                Aim, set your power, and sink the putt in four strokes or fewer to earn <strong>+10 spice</strong>.
-              </p>
-              <svg viewBox="0 0 280 120" role="img" aria-label={`Golf ball at stroke ${golfStrokes + 1} of 4`} className="block h-32 w-full border-2 border-[#8b6a44] bg-[#82a95f] shadow-[3px_3px_0_rgba(51,39,25,0.3)]">
-                <rect x="8" y="16" width="264" height="88" fill="#80a75f" />
-                <path d="M12 30H268M12 90H268" stroke="#9abb72" strokeWidth="2" strokeDasharray="5 7" />
-                <circle cx="250" cy="60" r="10" fill="#263a2a" />
-                <circle cx="250" cy="60" r="15" fill="none" stroke="#f0dfb9" strokeWidth="2" />
-                <path d={`M${golfBall.x} ${golfBall.y} L250 60`} stroke="#f0dfb9" strokeWidth="1.5" strokeDasharray="4 5" opacity=".75" />
-                <circle cx={golfBall.x} cy={golfBall.y} r="6" fill="#fff8e9" stroke="#493927" strokeWidth="2" />
-                <rect x="22" y="50" width="3" height="22" fill="#785a3c" />
-                <path d="M25 50h15l-5 7H25" fill="#d97757" />
-                <text x="22" y="96" fill="#fff4d9" fontSize="9" fontFamily="Schoolbell">TEE</text>
-                <text x="250" y="39" fill="#fff4d9" textAnchor="middle" fontSize="9" fontFamily="Schoolbell">CUP</text>
-              </svg>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
-                  Aim · {golfAim}°
-                  <input type="range" min="-12" max="12" step="1" value={golfAim} onChange={(event) => setGolfAim(Number(event.target.value))} aria-label="Golf aim" className="mt-1 block h-5 w-full accent-[#788c5d]" />
-                </label>
-                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
-                  Power · {golfPower}
-                  <input type="range" min="20" max="100" step="1" value={golfPower} onChange={(event) => setGolfPower(Number(event.target.value))} aria-label="Golf shot power" className="mt-1 block h-5 w-full accent-[#788c5d]" />
-                </label>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-['Schoolbell'] text-xs text-[#715b3e]">{golfFinished ? 'Cup reached' : `Stroke ${Math.min(golfStrokes + 1, 4)} / 4`}</span>
-                <button
-                  type="button"
-                  disabled={miniGameBusy}
-                  onClick={() => golfFinished || !miniGameRoundId ? void beginMiniGameRound('golf') : takeGolfStroke()}
-                  className="border-2 border-[#5b6139] bg-[#788c5d] px-3 py-2 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
-                >
-                  {miniGameBusy ? 'Playing…' : !miniGameRoundId ? golfFinished ? 'Play again' : 'Start round' : 'Putt!'}
-                </button>
-              </div>
-              {miniGameMessage && <p role="status" className="border border-[#a88a5f] bg-[#ead6ad] px-2 py-1.5 font-['Schoolbell'] text-sm text-[#493927]">{miniGameMessage}</p>}
-            </section>
-          )}
-
-          {panel === 'bowling' && (
-            <section className="mt-1 space-y-3 pr-7" aria-label="Meadow bowling lane">
-              <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.45)]">
-                <p className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#ead6ad]">MEADOW BOWLING</p>
-                <h3 className="font-['Schoolbell'] text-lg font-bold">Ten-pin in the meadow</h3>
-              </div>
-              <p className="font-['Schoolbell'] text-sm text-[#715b3e]">
-                Line up your roll. Every pin you knock down earns <strong>+1 spice</strong>.
-              </p>
-              <svg viewBox="0 0 264 142" role="img" aria-label={`${10 - bowlingPinsDown.length} bowling pins standing`} className="block h-36 w-full border-2 border-[#6b4c34] bg-[#b88b5c] shadow-[3px_3px_0_rgba(51,39,25,0.3)]">
-                <rect x="25" y="8" width="214" height="126" fill="#d0a673" />
-                <path d="M28 12V130M236 12V130" stroke="#765338" strokeWidth="5" />
-                <path d="M28 116H236" stroke="#ead6ad" strokeWidth="2" />
-                {[
-                  [114, 25], [126, 25], [138, 25], [150, 25],
-                  [120, 39], [132, 39], [144, 39],
-                  [126, 53], [138, 53], [132, 67],
-                ].map(([x, y], index) => (
-                  <g key={index} transform={bowlingPinsDown.includes(index) ? `rotate(68 ${x} ${y}) translate(8 5)` : undefined}>
-                    <rect x={x - 4} y={y - 9} width="8" height="18" fill="#fff8e9" stroke="#785a3c" strokeWidth="1" />
-                    <path d={`M${x - 3} ${y - 3}h6`} stroke="#bc6850" strokeWidth="2" />
-                  </g>
-                ))}
-                <circle cx={132 + bowlingAim * 0.7} cy="112" r="9" fill="#403428" stroke="#f0dfb9" strokeWidth="2" />
-                <circle cx={132 + bowlingAim * 0.7 - 3} cy="109" r="1.5" fill="#f0dfb9" />
-              </svg>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
-                  Aim · {bowlingAim}
-                  <input type="range" min="-30" max="30" step="1" value={bowlingAim} onChange={(event) => setBowlingAim(Number(event.target.value))} aria-label="Bowling aim" className="mt-1 block h-5 w-full accent-[#788c5d]" />
-                </label>
-                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
-                  Power · {bowlingPower}
-                  <input type="range" min="20" max="100" step="1" value={bowlingPower} onChange={(event) => setBowlingPower(Number(event.target.value))} aria-label="Bowling power" className="mt-1 block h-5 w-full accent-[#788c5d]" />
-                </label>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-['Schoolbell'] text-xs text-[#715b3e]">
-                  {bowlingFinished ? `${bowlingPinsDown.length} / 10 down` : 'One roll · ten pins'}
-                </span>
-                <button
-                  type="button"
-                  disabled={miniGameBusy}
-                  onClick={() => bowlingFinished || !miniGameRoundId ? void beginMiniGameRound('bowling') : void rollBowlingBall()}
-                  className="border-2 border-[#5b6139] bg-[#788c5d] px-3 py-2 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
-                >
-                  {miniGameBusy ? 'Rolling…' : !miniGameRoundId ? bowlingFinished ? 'Play again' : 'Start frame' : 'Roll!'}
-                </button>
-              </div>
-              {miniGameMessage && <p role="status" className="border border-[#a88a5f] bg-[#ead6ad] px-2 py-1.5 font-['Schoolbell'] text-sm text-[#493927]">{miniGameMessage}</p>}
-            </section>
           )}
 
           {panel === 'treehole' && (
@@ -4853,7 +4874,11 @@ function draw(
   drops: CommuneDrop[] = [],
   ducks: PondDuck[] = [],
   incident: DuckIncident | null = null,
-  soccerBall: CommuneSoccerBall = INITIAL_SOCCER_BALL
+  soccerBall: CommuneSoccerBall = INITIAL_SOCCER_BALL,
+  golfBall: PhysicsBallMotion,
+  bowlingBall: PhysicsBallMotion,
+  bowlingPinsDown: readonly number[],
+  bowlingPinsKnockedAt = 0
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -4945,6 +4970,30 @@ function draw(
   const soccerBallY = soccerBall.fromY + (soccerBall.y - soccerBall.fromY) * ballProgress;
   if (isVisible(soccerBallX, soccerBallY, 24, 28)) {
     items.push({ y: soccerBallY, bright: true, fn: () => drawSoccerBall(ctx, soccerBallX, soccerBallY, t) });
+  }
+
+  const bowlingPinPositions = BOWLING_PINS.map(([pinX, pinY]) => ({
+    x: MINI_GAME_ZONES.bowling.x + (pinX - 132) * 1.5,
+    y: MINI_GAME_ZONES.bowling.y - 150 + (pinY - 25) * 3,
+  }));
+  const pinFall = bowlingPinsKnockedAt
+    ? Math.min(1, Math.max(0, (performance.now() - bowlingPinsKnockedAt) / 330))
+    : 1;
+  const golfBallPosition = physicsBallPosition(golfBall);
+  const bowlingBallPosition = physicsBallPosition(bowlingBall);
+  bowlingPinPositions.forEach((pin, index) => {
+    if (isVisible(pin.x, pin.y, 18, 24)) {
+      items.push({
+        y: pin.y,
+        fn: () => drawBowlingPin(ctx, pin.x, pin.y, bowlingPinsDown.includes(index), index, pinFall),
+      });
+    }
+  });
+  if (isVisible(golfBallPosition.x, golfBallPosition.y, 22, 28)) {
+    items.push({ y: golfBallPosition.y, bright: true, fn: () => drawPhysicsBall(ctx, golfBall, 'golf', t) });
+  }
+  if (isVisible(bowlingBallPosition.x, bowlingBallPosition.y, 24, 30)) {
+    items.push({ y: bowlingBallPosition.y, bright: true, fn: () => drawPhysicsBall(ctx, bowlingBall, 'bowling', t) });
   }
 
   /* bulletin board (banners) */
@@ -5452,6 +5501,73 @@ function drawSoccerBall(ctx: CanvasRenderingContext2D, x: number, y: number, t: 
   ctx.restore();
 }
 
+function drawPhysicsBall(
+  ctx: CanvasRenderingContext2D,
+  ball: PhysicsBallMotion,
+  kind: 'golf' | 'bowling',
+  t: number
+) {
+  const position = physicsBallPosition(ball);
+  const radius = kind === 'golf' ? 7 : 12;
+  ctx.save();
+  drawGroundShadow(ctx, position.x + 2, position.y + 5, radius + position.height * 0.3, 4, 0.28);
+  ctx.translate(Math.round(position.x), Math.round(position.y - position.height - radius));
+  ctx.rotate(t * (kind === 'golf' ? 7 : 4));
+  ctx.fillStyle = kind === 'golf' ? '#fff8e9' : '#403428';
+  ctx.strokeStyle = kind === 'golf' ? '#5d4935' : '#ead6ad';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = kind === 'golf' ? '#b9aa8c' : '#f0dfb9';
+  if (kind === 'golf') {
+    ctx.fillRect(-3, -2, 2, 2);
+    ctx.fillRect(2, -4, 2, 2);
+    ctx.fillRect(2, 2, 2, 2);
+    ctx.fillRect(-4, 3, 2, 2);
+  } else {
+    ctx.fillRect(-5, -3, 3, 3);
+    ctx.fillRect(1, -5, 3, 3);
+    ctx.fillRect(3, 2, 3, 3);
+  }
+  ctx.restore();
+}
+
+function physicsBallPosition(ball: PhysicsBallMotion) {
+  const progress = ball.duration > 0
+    ? Math.min(1, Math.max(0, (Date.now() - ball.startedAt) / ball.duration))
+    : 1;
+  return {
+    x: ball.fromX + (ball.x - ball.fromX) * progress,
+    y: ball.fromY + (ball.y - ball.fromY) * progress,
+    height: Math.sin(progress * Math.PI) * ball.arc,
+  };
+}
+
+function drawBowlingPin(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  fallen: boolean,
+  index: number,
+  fallProgress: number
+) {
+  ctx.save();
+  const fall = fallen ? fallProgress : 0;
+  ctx.translate(Math.round(x + (index % 2 ? 7 : -7) * fall), Math.round(y + 5 * fall));
+  if (fallen) ctx.rotate((index % 2 ? 0.9 : -0.9) * fall);
+  drawGroundShadow(ctx, 1, 5, 7 + fall * 5, 3, 0.25);
+  ctx.fillStyle = '#fff8e9';
+  ctx.fillRect(-4, -13, 8, 20);
+  ctx.fillRect(-3, -16, 6, 5);
+  ctx.fillStyle = '#bc6850';
+  ctx.fillRect(-3, -5, 6, 3);
+  ctx.fillStyle = '#d8c7a5';
+  ctx.fillRect(-2, -11, 2, 2);
+  ctx.restore();
+}
+
 function drawDestinationMarker(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
   const pulse = 1 + Math.sin(t * 5) * 0.12;
   ctx.save();
@@ -5920,7 +6036,7 @@ function getTownLayer(): HTMLCanvasElement {
     [800, 1150, 850, 1370, 1040, 1510], // south gate → oddity orchard
     [1040, 1510, 1330, 1660, 1530, 1600],
     [1530, 1600, 1700, 1490, 1870, 1350], // mushroom council
-    [1870, 1350, 1970, 1320, 2055, 1290], // bowling lane entrance
+    [1870, 1350, 2040, 1440, 2250, 1460], // bowling lane approach
     [1530, 1600, 1810, 1700, 2110, 1710],
     [2110, 1710, 2370, 1710, 2700, 1790], // star overlook
     [2490, 850, 2670, 1000, 2790, 1150], // golf green entrance
@@ -5948,24 +6064,18 @@ function getTownLayer(): HTMLCanvasElement {
   pxEllipse(golf.x, golf.y, 184, 108, '#78a45b');
   pxEllipse(golf.x - 90, golf.y + 26, 25, 16, '#d9c38f');
   pxEllipse(golf.x + 56, golf.y - 37, 21, 13, '#d9c38f');
-  px(golf.x + 70, golf.y + 10, 10, 6, '#263a2a');
-  px(golf.x + 105, golf.y - 45, 5, 52, '#f0dfb9');
-  px(golf.x + 88, golf.y - 45, 20, 12, '#d97757');
+  px(GOLF_TEE.x - 7, GOLF_TEE.y - 4, 14, 8, '#785a3c');
+  px(golf.x + 65, golf.y - 20, 10, 6, '#263a2a');
+  px(golf.x + 65, golf.y - 64, 5, 52, '#f0dfb9');
+  px(golf.x + 50, golf.y - 64, 20, 12, '#d97757');
 
   const bowling = MINI_GAME_ZONES.bowling;
-  pxShadow(bowling.x + 5, bowling.y + 12, 205, 68, 0.2);
-  px(bowling.x - 195, bowling.y - 56, 390, 112, '#684a34');
-  px(bowling.x - 183, bowling.y - 45, 366, 90, '#b88b5c');
-  px(bowling.x - 174, bowling.y - 36, 348, 72, '#d0a673');
-  px(bowling.x - 178, bowling.y - 55, 10, 110, '#765338');
-  px(bowling.x + 168, bowling.y - 55, 10, 110, '#765338');
-  for (const [dx, dy] of [
-    [0, -24], [-10, -39], [10, -39], [-20, -54], [0, -54], [20, -54],
-    [-30, -69], [-10, -69], [10, -69], [30, -69],
-  ] as const) {
-    px(bowling.x + dx - 4, bowling.y + dy - 4, 8, 12, '#fff8e9');
-    px(bowling.x + dx - 3, bowling.y + dy - 1, 6, 3, '#bc6850');
-  }
+  pxShadow(bowling.x + 5, bowling.y + 12, 68, 205, 0.2);
+  px(bowling.x - 56, bowling.y - 195, 112, 390, '#684a34');
+  px(bowling.x - 45, bowling.y - 183, 90, 366, '#b88b5c');
+  px(bowling.x - 36, bowling.y - 174, 72, 348, '#d0a673');
+  px(bowling.x - 55, bowling.y - 178, 110, 10, '#765338');
+  px(bowling.x - 55, bowling.y + 168, 110, 10, '#765338');
 
   const soccer = MINI_GAME_ZONES.soccer;
   const fieldWidth = soccer.right - soccer.left;

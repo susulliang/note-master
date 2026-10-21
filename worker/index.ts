@@ -2203,7 +2203,7 @@ async function handleCommuneMiniGameFinish(
 
   const award = game === 'golf' ? (holed ? 10 : 0) : pinsDown;
   const rewardReason = game === 'golf' ? 'minigame_golf' : 'minigame_bowling';
-  const cooldownMs = game === 'golf' ? 30_000 : 8_000;
+  const cooldownMs = game === 'golf' ? 30_000 : 4_000;
   if (award > 0) {
     const lastAward = await env.DB.prepare(
       'SELECT created_at FROM spice_ledger WHERE username = ?1 AND reason = ?2 ORDER BY created_at DESC LIMIT 1',

@@ -73,6 +73,15 @@ type RenderSoccerBall = {
   kickedAt: number;
   by: string | null;
 };
+type RenderPhysicsBall = {
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  startedAt: number;
+  duration: number;
+  arc: number;
+};
 
 export interface CommuneThreeFrame {
   time: number;
@@ -89,6 +98,10 @@ export interface CommuneThreeFrame {
   destination: RenderDiscovery | null;
   clickTarget: RenderDiscovery | null;
   soccerBall: RenderSoccerBall;
+  golfBall: RenderPhysicsBall;
+  bowlingBall: RenderPhysicsBall;
+  bowlingPinsDown: readonly number[];
+  bowlingPinsKnockedAt: number;
   nightOpacity: number;
   reduceMotion: boolean;
 }
@@ -339,6 +352,10 @@ export class CommuneThreeRenderer {
   private readonly dropMeshes: THREE.InstancedMesh;
   private readonly discoveryMeshes: THREE.InstancedMesh;
   private readonly soccerBallMesh: THREE.Mesh;
+  private readonly golfBallMesh: THREE.Mesh;
+  private readonly bowlingBallMesh: THREE.Mesh;
+  private readonly bowlingPins: THREE.Mesh[] = [];
+  private readonly bowlingPinHomes: THREE.Vector3[] = [];
   private readonly cars = new Map<string, THREE.Group>();
   private readonly canvas: HTMLCanvasElement;
   private readonly labels: HTMLCanvasElement;
@@ -452,6 +469,11 @@ export class CommuneThreeRenderer {
     this.soccerBallMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(10, 0), material('#f3ecdd'));
     this.soccerBallMesh.castShadow = true;
     this.scene.add(this.soccerBallMesh);
+    this.golfBallMesh = new THREE.Mesh(new THREE.SphereGeometry(7, 8, 6), material('#fff8e9'));
+    this.bowlingBallMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(11, 0), material('#403428'));
+    this.golfBallMesh.castShadow = true;
+    this.bowlingBallMesh.castShadow = true;
+    this.scene.add(this.golfBallMesh, this.bowlingBallMesh);
 
     this.addMarkerMeshes();
     this.buildCars();
@@ -539,6 +561,9 @@ export class CommuneThreeRenderer {
     this.updatePets(frame.pets, frame.time, frame.reduceMotion);
     this.updateMarkers(frame, frame.time);
     this.updateSoccerBall(frame.soccerBall);
+    this.updatePhysicsBall(this.golfBallMesh, frame.golfBall);
+    this.updatePhysicsBall(this.bowlingBallMesh, frame.bowlingBall);
+    this.updateBowlingPins(frame.bowlingPinsDown, frame.bowlingPinsKnockedAt, frame.time * 1000);
     this.drawLabels(frame);
     this.renderer.render(this.scene, this.camera);
   }
@@ -581,7 +606,7 @@ export class CommuneThreeRenderer {
     addPath(this.scene, [[1900, 1380], [2250, 1500], [2660, 1760]], 38, pathColor);
     addPath(this.scene, [[1440, 1050], [1460, 1420], [1580, 1770], [1840, 2040]], 38, pathColor);
     addPath(this.scene, [[800, 1180], [900, 1540], [1065, 1815]], 34, pathColor);
-    addPath(this.scene, [[1870, 1350], [1970, 1320], [2055, 1290]], 32, pathColor);
+    addPath(this.scene, [[1870, 1350], [2040, 1440], [2250, 1460]], 32, pathColor);
     addPath(this.scene, [[2490, 850], [2670, 1000], [2790, 1150]], 32, pathColor);
 
     addBuilding(this.scene, 800, 155, 300, 146, '#d6c7a0', '#ab7050', 112);
@@ -621,32 +646,40 @@ export class CommuneThreeRenderer {
     const golf = { x: 2860, z: 1280 };
     addGroundDisc(this.scene, golf.x, golf.z, 214, 132, '#659252', 3, 28);
     addGroundDisc(this.scene, golf.x, golf.z, 174, 98, '#82a95f', 2, 28);
+    addBox(this.scene, 2725, 2, 1260, 18, 5, 18, '#785a3c');
+    const cupX = golf.x + 65;
+    const cupZ = golf.z - 20;
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 2, 12), new THREE.MeshBasicMaterial({ color: '#263a2a' }));
-    cup.position.set(golf.x + 76, 4, golf.z + 22);
+    cup.position.set(cupX, 4, cupZ);
     this.scene.add(cup);
-    addBox(this.scene, golf.x + 108, 2, golf.z - 34, 4, 74, 4, '#f0dfb9');
+    addBox(this.scene, cupX, 2, cupZ, 4, 74, 4, '#f0dfb9');
     const flag = new THREE.Mesh(new THREE.BoxGeometry(30, 18, 3), material('#d97757'));
-    flag.position.set(golf.x + 93, 67, golf.z - 34);
+    flag.position.set(cupX + 13, 67, cupZ);
     flag.castShadow = true;
     this.scene.add(flag);
 
     const bowling = { x: 2250, z: 1290 };
-    addBox(this.scene, bowling.x, 0, bowling.z, 390, 5, 112, '#684a34');
-    addBox(this.scene, bowling.x, 5, bowling.z, 366, 2, 90, '#b88b5c');
-    for (const x of [bowling.x - 178, bowling.x + 178]) {
-      addBox(this.scene, x, 5, bowling.z, 10, 10, 114, '#765338');
+    addBox(this.scene, bowling.x, 0, bowling.z, 112, 5, 390, '#684a34');
+    addBox(this.scene, bowling.x, 5, bowling.z, 90, 2, 366, '#b88b5c');
+    for (const x of [bowling.x - 54, bowling.x + 54]) {
+      addBox(this.scene, x, 5, bowling.z, 10, 10, 390, '#765338');
     }
-    for (let row = 0; row < 4; row++) {
-      for (let column = 0; column <= row; column++) {
-        const pinMesh = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 18, 6), material('#f3ecdd'));
-        pinMesh.position.set(
-          bowling.x + (column - row / 2) * 18,
-          16,
-          bowling.z - 34 + row * 18
-        );
-        pinMesh.castShadow = true;
-        this.scene.add(pinMesh);
-      }
+    const pinPositions: [number, number][] = [
+      [114, 25], [126, 25], [138, 25], [150, 25],
+      [120, 39], [132, 39], [144, 39],
+      [126, 53], [138, 53], [132, 67],
+    ];
+    for (const [localX, localY] of pinPositions) {
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 18, 6), material('#f3ecdd'));
+      pin.position.set(
+        bowling.x + (localX - 132) * 1.5,
+        16,
+        bowling.z - 150 + (localY - 25) * 3
+      );
+      pin.castShadow = true;
+      this.bowlingPins.push(pin);
+      this.bowlingPinHomes.push(pin.position.clone());
+      this.scene.add(pin);
     }
 
     const field = { x: 1065, z: 1970, width: 430, depth: 300 };
@@ -685,6 +718,35 @@ export class CommuneThreeRenderer {
     const z = THREE.MathUtils.lerp(ball.fromY, ball.y, progress);
     this.soccerBallMesh.position.set(x, 13 + (1 - progress) * 7, z);
     this.soccerBallMesh.rotation.set(progress * 4, 0, progress * 3);
+  }
+
+  private updatePhysicsBall(mesh: THREE.Mesh, ball: RenderPhysicsBall): void {
+    const progress = ball.duration > 0
+      ? THREE.MathUtils.clamp((Date.now() - ball.startedAt) / ball.duration, 0, 1)
+      : 1;
+    const x = THREE.MathUtils.lerp(ball.fromX, ball.x, progress);
+    const z = THREE.MathUtils.lerp(ball.fromY, ball.y, progress);
+    const hop = Math.sin(progress * Math.PI) * ball.arc;
+    mesh.position.set(x, 9 + hop, z);
+    mesh.rotation.set(progress * 5, 0, progress * 7);
+  }
+
+  private updateBowlingPins(knocked: readonly number[], knockedAt: number, now: number): void {
+    const down = new Set(knocked);
+    const fall = knockedAt ? THREE.MathUtils.clamp((now - knockedAt) / 330, 0, 1) : 1;
+    this.bowlingPins.forEach((pin, index) => {
+      const home = this.bowlingPinHomes[index];
+      if (!home) return;
+      const falling = down.has(index);
+      const tilt = falling ? fall : 0;
+      pin.position.set(
+        home.x + (index % 2 ? 11 : -11) * tilt,
+        home.y - 8 * tilt,
+        home.z + 9 * tilt
+      );
+      pin.rotation.x = 1.2 * tilt;
+      pin.rotation.z = (index % 2 ? 0.48 : -0.48) * tilt;
+    });
   }
 
   private addLantern(x: number, z: number): void {
