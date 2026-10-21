@@ -373,6 +373,54 @@ export interface CommuneDrop {
   y: number;
 }
 
+export type CommuneMiniGame = 'golf' | 'bowling';
+export interface CommuneSoccerBall {
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  kickedAt: number;
+  by: string | null;
+}
+
+export async function startCommuneMiniGame(game: CommuneMiniGame): Promise<{ roundId: string; expiresAt: number }> {
+  const token = getStoredToken();
+  return call<{ roundId: string; expiresAt: number }>('/api/commune/minigame/start', {
+    method: 'POST',
+    body: JSON.stringify({ game }),
+    token,
+  });
+}
+
+export async function finishCommuneMiniGame(
+  game: CommuneMiniGame,
+  roundId: string,
+  result: { shots: Array<{ aim: number; power: number }> } | { aim: number; power: number }
+): Promise<{ awarded: number; spice: number; pinsDown?: number }> {
+  const token = getStoredToken();
+  return call<{ awarded: number; spice: number; pinsDown?: number }>('/api/commune/minigame/finish', {
+    method: 'POST',
+    body: JSON.stringify({ game, roundId, ...result }),
+    token,
+  });
+}
+
+export async function kickCommuneSoccerBall(
+  actionId: string,
+  dx: number,
+  dy: number
+): Promise<{ accepted: boolean; awarded: number; spice: number; ball: CommuneSoccerBall }> {
+  const token = getStoredToken();
+  return call<{ accepted: boolean; awarded: number; spice: number; ball: CommuneSoccerBall }>(
+    '/api/commune/soccer/kick',
+    {
+      method: 'POST',
+      body: JSON.stringify({ actionId, dx, dy }),
+      token,
+    },
+  );
+}
+
 export type CommuneTreeholeCategory = 'app-feedback' | 'suggestion' | 'tip' | 'other';
 export interface CommuneTreeholeEntry {
   id: number;

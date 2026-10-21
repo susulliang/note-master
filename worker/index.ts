@@ -940,6 +940,18 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            created_at INTEGER NOT NULL
          )`
       ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_minigame_rounds (
+           round_id TEXT PRIMARY KEY,
+           username TEXT NOT NULL,
+           game TEXT NOT NULL,
+           started_at INTEGER NOT NULL,
+           expires_at INTEGER NOT NULL,
+           completed_at INTEGER,
+           award INTEGER NOT NULL DEFAULT 0,
+           credited INTEGER NOT NULL DEFAULT 0
+         )`
+      ).run();
       // NPC challenge personas — seeded from worker/npc/*.json on first use.
       await env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS npc_personas (
@@ -1650,7 +1662,7 @@ const COMMUNE_BANNER_SKETCH_COLORS = new Set([
 
 function normalizeCommuneBannerStrokes(value: unknown): CommuneRoomBannerStroke[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 8).flatMap((entry): CommuneRoomBannerStroke[] => {
+  return value.slice(0, 20).flatMap((entry): CommuneRoomBannerStroke[] => {
     if (!entry || typeof entry !== 'object') return [];
     const stroke = entry as Record<string, unknown>;
     if (!Array.isArray(stroke.points)) return [];
@@ -1752,10 +1764,9 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   });
 }
 
-/** Persist shared town announcements; only admins may manage the board. */
+/** Any signed-in agent may post; only admins may edit or remove shared posts. */
 async function handleCommuneBannerMutation(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
-  if (Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
-  if (Number(request.headers.get('content-length') ?? 0) > 24_576)
+  if (Number(request.headers.get('content-length') ?? 0) > 65_536)
     return authJson({ error: 'Request is too large' }, 413);
   let payload: { action?: unknown; id?: unknown; text?: unknown; kind?: unknown; priority?: unknown; strokes?: unknown };
   try {
@@ -1765,13 +1776,14 @@ async function handleCommuneBannerMutation(request: Request, env: Env, user: Aut
   }
   const action = payload.action === undefined ? 'create' : payload.action;
   const id = typeof payload.id === 'string' ? payload.id.trim().slice(0, 64) : '';
-  const text = typeof payload.text === 'string' ? payload.text.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+  const text = typeof payload.text === 'string' ? payload.text.trim().replace(/\s+/g, ' ').slice(0, 2_000) : '';
   const kind = payload.kind === undefined ? 'pin' : payload.kind;
   const priority = payload.priority === undefined ? 'normal' : payload.priority;
   const strokes = normalizeCommuneBannerStrokes(payload.strokes);
   if (action !== 'create' && action !== 'edit' && action !== 'delete') {
     return authJson({ error: 'Unsupported announcement action' }, 400);
   }
+  if (action !== 'create' && Number(user.is_admin) !== 1) return authJson({ error: 'Admin only' }, 403);
   if (action !== 'delete' && !text) return authJson({ error: 'Announcement text is required' }, 400);
   if (action !== 'create' && !id) return authJson({ error: 'Announcement id is required' }, 400);
   if (action !== 'delete' && kind !== 'pin' && kind !== 'priority' && kind !== 'sketch') {
@@ -2072,6 +2084,253 @@ async function handleCommuneSpicePick(request: Request, env: Env, user: AuthUser
     // A later ticket bootstrap includes the current drop set.
   }
   return authJson({ picked: true, spice: Number(user.spice ?? 0) + 1 });
+}
+
+type CommuneMiniGame = 'golf' | 'bowling';
+
+async function verifyCommuneMiniGamePresence(
+  env: Env,
+  username: string,
+  game: CommuneMiniGame,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const response = await env.COMMUNE_ROOM.getByName('main-plaza').fetch(
+      new Request('https://commune-room/internal/minigame/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, game }),
+      }),
+    );
+    return await response.json() as { ok: boolean; error?: string };
+  } catch {
+    return { ok: false, error: 'The town game room is unavailable. Reconnect and try again.' };
+  }
+}
+
+/** Start a short-lived round only while the signed-in player is at its map area. */
+async function handleCommuneMiniGameStart(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  const payload = await request.json().catch(() => null) as { game?: unknown } | null;
+  const game = payload?.game;
+  if (game !== 'golf' && game !== 'bowling') return authJson({ error: 'Unknown town game' }, 400);
+  await ensureSpiceSchema(env);
+  const presence = await verifyCommuneMiniGamePresence(env, user.username, game);
+  if (!presence.ok) return authJson({ error: presence.error ?? 'Walk up to the game area first.' }, 403);
+
+  const now = Date.now();
+  const roundId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO commune_minigame_rounds
+     (round_id, username, game, started_at, expires_at)
+     VALUES (?1, ?2, ?3, ?4, ?5)`,
+  ).bind(roundId, user.username, game, now, now + 180_000).run();
+  return authJson({ roundId, expiresAt: now + 180_000 });
+}
+
+/** Settle a one-use golf or bowling round with bounded server-side spice. */
+async function handleCommuneMiniGameFinish(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  const payload = await request.json().catch(() => null) as {
+    game?: unknown;
+    roundId?: unknown;
+    shots?: unknown;
+    aim?: unknown;
+    power?: unknown;
+  } | null;
+  const game = payload?.game;
+  const roundId = typeof payload?.roundId === 'string' ? payload.roundId : '';
+  if ((game !== 'golf' && game !== 'bowling') || !/^[\da-f-]{36}$/i.test(roundId)) {
+    return authJson({ error: 'Invalid town game round' }, 400);
+  }
+  const bowlingPins: [number, number][] = [
+    [114, 25], [126, 25], [138, 25], [150, 25],
+    [120, 39], [132, 39], [144, 39],
+    [126, 53], [138, 53], [132, 67],
+  ];
+  let pinsDown = 0;
+  let holed = false;
+  if (game === 'golf') {
+    if (!Array.isArray(payload?.shots) || payload.shots.length < 1 || payload.shots.length > 4) {
+      return authJson({ error: 'Golf rounds require 1 to 4 strokes' }, 400);
+    }
+    let ballX = 28;
+    let ballY = 60;
+    for (const rawShot of payload.shots) {
+      if (!rawShot || typeof rawShot !== 'object') return authJson({ error: 'Invalid golf stroke' }, 400);
+      const shot = rawShot as Record<string, unknown>;
+      const aim = Number(shot.aim);
+      const power = Number(shot.power);
+      if (!Number.isFinite(aim) || aim < -12 || aim > 12 || !Number.isFinite(power) || power < 20 || power > 100) {
+        return authJson({ error: 'Golf aim or power is out of range' }, 400);
+      }
+      const angle = aim * Math.PI / 180;
+      const travel = power * 1.8;
+      ballX = Math.max(16, Math.min(258, ballX + Math.cos(angle) * travel));
+      ballY = Math.max(18, Math.min(102, ballY - Math.sin(angle) * travel * 0.55));
+      if (Math.hypot(250 - ballX, 60 - ballY) <= 12) {
+        holed = true;
+        break;
+      }
+    }
+  } else {
+    const aim = Number(payload?.aim);
+    const power = Number(payload?.power);
+    if (!Number.isFinite(aim) || aim < -30 || aim > 30 || !Number.isFinite(power) || power < 20 || power > 100) {
+      return authJson({ error: 'Bowling aim or power is out of range' }, 400);
+    }
+    const aimX = 132 + aim * 0.7;
+    const scatter = 5 + power * 0.1;
+    pinsDown = bowlingPins.filter(([x, y]) => Math.abs(x - aimX) <= scatter + (y < 40 ? 2 : 0)).length;
+  }
+
+  await ensureSpiceSchema(env);
+  const now = Date.now();
+  const presence = await verifyCommuneMiniGamePresence(env, user.username, game);
+  if (!presence.ok) return authJson({ error: presence.error ?? 'Return to the game area to finish your round.' }, 403);
+
+  const round = await env.DB.prepare(
+    `SELECT round_id FROM commune_minigame_rounds
+     WHERE round_id = ?1 AND username = ?2 AND game = ?3
+       AND completed_at IS NULL AND expires_at >= ?4`,
+  ).bind(roundId, user.username, game, now).first<{ round_id: string }>();
+  if (!round) return authJson({ error: 'That round has expired or was already settled.' }, 409);
+
+  const award = game === 'golf' ? (holed ? 10 : 0) : pinsDown;
+  const rewardReason = game === 'golf' ? 'minigame_golf' : 'minigame_bowling';
+  const cooldownMs = game === 'golf' ? 30_000 : 8_000;
+  if (award > 0) {
+    const lastAward = await env.DB.prepare(
+      'SELECT created_at FROM spice_ledger WHERE username = ?1 AND reason = ?2 ORDER BY created_at DESC LIMIT 1',
+    ).bind(user.username, rewardReason).first<{ created_at: number }>();
+    if (lastAward && now - Number(lastAward.created_at) < cooldownMs) {
+      return authJson({ error: 'A little cooldown before your next spice-winning round.' }, 429);
+    }
+  }
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE commune_minigame_rounds
+       SET completed_at = ?1, award = ?2
+       WHERE round_id = ?3 AND username = ?4 AND game = ?5
+         AND completed_at IS NULL AND expires_at >= ?1`,
+    ).bind(now, award, roundId, user.username, game),
+    env.DB.prepare(
+      `UPDATE auth_users SET spice = spice + ?2, updated_at = ?3
+       WHERE username = ?1 AND ?2 > 0 AND EXISTS (
+         SELECT 1 FROM commune_minigame_rounds
+         WHERE round_id = ?4 AND username = ?1 AND completed_at = ?3
+           AND credited = 0 AND award = ?2
+       )`,
+    ).bind(user.username, award, now, roundId),
+    env.DB.prepare(
+      `INSERT INTO spice_ledger (username, delta, reason, detail, created_at)
+       SELECT username, award, ?2, ?3, ?4
+       FROM commune_minigame_rounds
+       WHERE round_id = ?1 AND username = ?5 AND completed_at = ?4
+         AND credited = 0 AND award > 0`,
+    ).bind(roundId, rewardReason, `${game}:${roundId}`, now, user.username),
+    env.DB.prepare(
+      `UPDATE commune_minigame_rounds SET credited = 1
+       WHERE round_id = ?1 AND username = ?2 AND completed_at = ?3 AND credited = 0`,
+    ).bind(roundId, user.username, now),
+  ]);
+  if (!result[0]?.meta.changes) {
+    return authJson({ error: 'That round has expired or was already settled.' }, 409);
+  }
+  return authJson({
+    awarded: award,
+    spice: Number(user.spice ?? 0) + award,
+    pinsDown: game === 'bowling' ? pinsDown : undefined,
+  });
+}
+
+/** A successful shared-room kick is the only way to earn soccer spice. */
+async function handleCommuneSoccerKick(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  const payload = await request.json().catch(() => null) as { actionId?: unknown; dx?: unknown; dy?: unknown } | null;
+  const actionId = typeof payload?.actionId === 'string' ? payload.actionId : '';
+  const dx = Number(payload?.dx);
+  const dy = Number(payload?.dy);
+  if (
+    !/^[\da-f-]{36}$/i.test(actionId)
+    || !Number.isFinite(dx)
+    || !Number.isFinite(dy)
+    || Math.hypot(dx, dy) < 0.1
+  ) {
+    return authJson({ error: 'Choose a direction to kick.' }, 400);
+  }
+  await ensureSpiceSchema(env);
+
+  let response: Response;
+  try {
+    response = await env.COMMUNE_ROOM.getByName('main-plaza').fetch(
+      new Request('https://commune-room/internal/minigame/soccer-kick', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: user.username, actionId, dx, dy }),
+      }),
+    );
+  } catch {
+    return authJson({ error: 'The shared soccer ball is unavailable. Reconnect and try again.' }, 503);
+  }
+  const result = await response.json() as {
+    accepted?: boolean;
+    replay?: boolean;
+    ball?: { x: number; y: number; fromX: number; fromY: number; kickedAt: number; by: string | null };
+    error?: string;
+  };
+  if (!response.ok || !result.accepted || !result.ball) {
+    const message = result.error === 'soccer_ball_too_far'
+      ? 'Get closer to the ball before kicking.'
+      : result.error === 'soccer_kick_cooldown'
+        ? 'Let the ball settle before your next kick.'
+        : result.error === 'soccer_out_of_bounds'
+          ? 'Step onto the soccer pitch to play.'
+          : 'That kick could not be played.';
+    return authJson({ error: message }, response.status);
+  }
+
+  const awardId = `soccer-${actionId}`;
+  const now = Date.now();
+  const credited = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO commune_minigame_rounds
+       (round_id, username, game, started_at, expires_at, completed_at, award, credited)
+       VALUES (?1, ?2, 'soccer', ?3, ?3, ?3, 1, 0)`,
+    ).bind(awardId, user.username, now),
+    env.DB.prepare(
+      `UPDATE auth_users SET spice = spice + 1, updated_at = ?2
+       WHERE username = ?1 AND EXISTS (
+         SELECT 1 FROM commune_minigame_rounds
+         WHERE round_id = ?3 AND username = ?1 AND game = 'soccer' AND credited = 0
+       )`,
+    ).bind(user.username, now, awardId),
+    env.DB.prepare(
+      `INSERT INTO spice_ledger (username, delta, reason, detail, created_at)
+       SELECT username, 1, 'soccer', ?2, ?3
+       FROM commune_minigame_rounds
+       WHERE round_id = ?1 AND username = ?4 AND game = 'soccer' AND credited = 0`,
+    ).bind(awardId, `kick:${actionId}`, now, user.username),
+    env.DB.prepare(
+      `UPDATE commune_minigame_rounds SET credited = 1
+       WHERE round_id = ?1 AND username = ?2 AND game = 'soccer' AND credited = 0`,
+    ).bind(awardId, user.username),
+  ]);
+  return authJson({
+    accepted: true,
+    awarded: credited[0]?.meta.changes ? 1 : 0,
+    spice: Number(user.spice ?? 0) + (credited[0]?.meta.changes ? 1 : 0),
+    ball: result.ball,
+    replay: !!result.replay,
+  });
 }
 
 /* ── NPC challenge (remote LLM roleplay) ───────────────────────────────────── */
@@ -2530,6 +2789,21 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSpicePick(request, env, user);
+  }
+  if (path === '/api/commune/minigame/start' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneMiniGameStart(request, env, user);
+  }
+  if (path === '/api/commune/minigame/finish' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneMiniGameFinish(request, env, user);
+  }
+  if (path === '/api/commune/soccer/kick' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneSoccerKick(request, env, user);
   }
   // NPC challenge success award (roleplay calls the shared LLM serving route).
   if (path === '/api/commune/challenge/award' && request.method === 'POST') {

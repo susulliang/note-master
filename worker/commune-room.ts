@@ -32,6 +32,15 @@ export interface CommuneRoomDrop {
   y: number;
 }
 
+export interface CommuneRoomSoccerBall {
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  kickedAt: number;
+  by: string | null;
+}
+
 export type CommuneRoomBannerKind = 'pin' | 'priority' | 'sketch';
 export type CommuneRoomBannerPriority = 'normal' | 'high' | 'urgent';
 
@@ -77,6 +86,13 @@ interface CommuneCarPosition {
   lastMoveAt: number;
 }
 
+interface CommuneSoccerKickResult {
+  accepted: boolean;
+  replay?: boolean;
+  ball?: CommuneRoomSoccerBall;
+  error?: 'soccer_out_of_bounds' | 'soccer_ball_too_far' | 'soccer_kick_cooldown' | 'invalid_soccer_kick';
+}
+
 type RoomEvent = Record<string, unknown>;
 
 const ROOM_TICKET_TTL_MS = 60_000;
@@ -87,6 +103,10 @@ const MAX_MESSAGE_LENGTH = 90;
 const MAX_SOCKET_MESSAGE_LENGTH = 2_048;
 const COMMUNE_WORLD_W = 3_200;
 const COMMUNE_WORLD_H = 2_400;
+const SOCCER_FIELD = { left: 850, right: 1280, top: 1820, bottom: 2120 };
+const SOCCER_BALL_START = { x: 1065, y: 1970 };
+const SOCCER_KICK_RANGE = 104;
+const SOCCER_KICK_COOLDOWN_MS = 1_400;
 const PARKED_CAR_INTERACT_RANGE = 118;
 const PARKED_CAR_EXIT_DISTANCE = 100;
 const PARKED_CAR_SPEED = 220;
@@ -228,6 +248,40 @@ export class CommuneRoom extends DurableObject<Env> {
           last_move_at INTEGER NOT NULL DEFAULT 0
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_soccer_ball (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          x REAL NOT NULL,
+          y REAL NOT NULL,
+          from_x REAL NOT NULL,
+          from_y REAL NOT NULL,
+          kicked_at INTEGER NOT NULL DEFAULT 0,
+          by_username TEXT
+        )
+      `);
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO commune_soccer_ball
+         (singleton, x, y, from_x, from_y, kicked_at, by_username)
+         VALUES (1, ?, ?, ?, ?, 0, NULL)`,
+        SOCCER_BALL_START.x,
+        SOCCER_BALL_START.y,
+        SOCCER_BALL_START.x,
+        SOCCER_BALL_START.y,
+      );
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_soccer_kick_limits (
+          username TEXT PRIMARY KEY,
+          kicked_at INTEGER NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_soccer_kick_actions (
+          action_id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      `);
       for (const [id, car] of Object.entries(PARKED_CARS)) {
         this.ctx.storage.sql.exec(
           'INSERT OR IGNORE INTO commune_parked_cars (id, x, y, heading) VALUES (?, ?, ?, ?)',
@@ -280,6 +334,12 @@ export class CommuneRoom extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/internal/minigame/verify') {
+      return this.verifyMinigamePresence(request);
+    }
+    if (request.method === 'POST' && url.pathname === '/internal/minigame/soccer-kick') {
+      return this.handleSoccerKick(request);
+    }
     if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('WebSocket upgrade required', { status: 426 });
     }
@@ -311,6 +371,7 @@ export class CommuneRoom extends DurableObject<Env> {
       self: profile.username,
       others: this.listAgents(profile.username),
       cars: this.listCarPositions(),
+      soccerBall: this.getSoccerBall(),
     });
     const recentMessages = this.ctx.storage.sql.exec<PublicChatRow>(
       `SELECT id, username, message, sent_at
@@ -332,6 +393,127 @@ export class CommuneRoom extends DurableObject<Env> {
     this.broadcast({ type: 'agent_join', agent: this.toAgent(profile) }, profile.username);
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async verifyMinigamePresence(request: Request): Promise<Response> {
+    const payload = await request.json().catch(() => null) as { username?: unknown; game?: unknown } | null;
+    const username = typeof payload?.username === 'string' ? payload.username.trim() : '';
+    const game = payload?.game;
+    const current = this.ctx.getWebSockets(username)
+      .map((socket) => attachment(socket))
+      .find((presence): presence is Presence => !!presence && !presence.carId);
+    if (!username || !current) {
+      return Response.json({ ok: false, error: 'Join the town square to play.' }, { status: 403 });
+    }
+    const zones = {
+      golf: { x: 2_860, y: 1_280, range: 230 },
+      bowling: { x: 2_250, y: 1_290, range: 220 },
+    } as const;
+    if (game !== 'golf' && game !== 'bowling') {
+      return Response.json({ ok: false, error: 'Unknown mini-game.' }, { status: 400 });
+    }
+    const zone = zones[game];
+    const nearby = Math.hypot(current.x - zone.x, current.y - zone.y) <= zone.range;
+    return Response.json({ ok: nearby, error: nearby ? undefined : 'Walk up to the game area first.' });
+  }
+
+  private async handleSoccerKick(request: Request): Promise<Response> {
+    const payload = await request.json().catch(() => null) as {
+      username?: unknown;
+      actionId?: unknown;
+      dx?: unknown;
+      dy?: unknown;
+    } | null;
+    const username = typeof payload?.username === 'string' ? payload.username.trim() : '';
+    const actionId = typeof payload?.actionId === 'string' ? payload.actionId : '';
+    const dx = Number(payload?.dx);
+    const dy = Number(payload?.dy);
+    const directionLength = Math.hypot(dx, dy);
+    if (
+      !username
+      || !/^[\da-f-]{36}$/i.test(actionId)
+      || !Number.isFinite(directionLength)
+      || directionLength < 0.1
+    ) {
+      return Response.json({ accepted: false, error: 'invalid_soccer_kick' } satisfies CommuneSoccerKickResult, { status: 400 });
+    }
+
+    const existing = this.ctx.storage.sql.exec<{ result_json: string }>(
+      'SELECT result_json FROM commune_soccer_kick_actions WHERE action_id = ?',
+      actionId,
+    ).toArray()[0];
+    if (existing) {
+      return Response.json({
+        ...(JSON.parse(existing.result_json) as CommuneSoccerKickResult),
+        replay: true,
+      });
+    }
+
+    const current = this.ctx.getWebSockets(username)
+      .map((socket) => attachment(socket))
+      .find((presence): presence is Presence => !!presence && !presence.carId);
+    if (!current) {
+      return Response.json({ accepted: false, error: 'soccer_out_of_bounds' } satisfies CommuneSoccerKickResult, { status: 403 });
+    }
+    const inField = current.x >= SOCCER_FIELD.left && current.x <= SOCCER_FIELD.right
+      && current.y >= SOCCER_FIELD.top && current.y <= SOCCER_FIELD.bottom;
+    if (!inField) {
+      return Response.json({ accepted: false, error: 'soccer_out_of_bounds' } satisfies CommuneSoccerKickResult, { status: 403 });
+    }
+
+    const ball = this.getSoccerBall();
+    if (Math.hypot(current.x - ball.x, current.y - ball.y) > SOCCER_KICK_RANGE) {
+      return Response.json({ accepted: false, error: 'soccer_ball_too_far' } satisfies CommuneSoccerKickResult, { status: 409 });
+    }
+    const lastKick = this.ctx.storage.sql.exec<{ kicked_at: number }>(
+      'SELECT kicked_at FROM commune_soccer_kick_limits WHERE username = ?',
+      username,
+    ).toArray()[0];
+    const now = Date.now();
+    if (lastKick && now - lastKick.kicked_at < SOCCER_KICK_COOLDOWN_MS) {
+      return Response.json({ accepted: false, error: 'soccer_kick_cooldown' } satisfies CommuneSoccerKickResult, { status: 429 });
+    }
+
+    const unitX = dx / directionLength;
+    const unitY = dy / directionLength;
+    const x = Math.max(SOCCER_FIELD.left + 18, Math.min(SOCCER_FIELD.right - 18, ball.x + unitX * 170));
+    const y = Math.max(SOCCER_FIELD.top + 18, Math.min(SOCCER_FIELD.bottom - 18, ball.y + unitY * 170));
+    const nextBall: CommuneRoomSoccerBall = {
+      x,
+      y,
+      fromX: ball.x,
+      fromY: ball.y,
+      kickedAt: now,
+      by: username,
+    };
+    const result: CommuneSoccerKickResult = { accepted: true, ball: nextBall };
+    this.ctx.storage.sql.exec(
+      `UPDATE commune_soccer_ball
+       SET x = ?, y = ?, from_x = ?, from_y = ?, kicked_at = ?, by_username = ?
+       WHERE singleton = 1`,
+      nextBall.x,
+      nextBall.y,
+      nextBall.fromX,
+      nextBall.fromY,
+      nextBall.kickedAt,
+      nextBall.by,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO commune_soccer_kick_limits (username, kicked_at) VALUES (?, ?)
+       ON CONFLICT(username) DO UPDATE SET kicked_at = excluded.kicked_at`,
+      username,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      'INSERT INTO commune_soccer_kick_actions (action_id, username, result_json, created_at) VALUES (?, ?, ?, ?)',
+      actionId,
+      username,
+      JSON.stringify(result),
+      now,
+    );
+    this.ctx.storage.sql.exec('DELETE FROM commune_soccer_kick_actions WHERE created_at < ?', now - 120_000);
+    this.broadcast({ type: 'soccer_ball', ball: nextBall });
+    return Response.json(result);
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
@@ -662,6 +844,37 @@ export class CommuneRoom extends DurableObject<Env> {
       'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars WHERE id = ?',
       carId,
     ).toArray()[0] ?? null;
+  }
+
+  private getSoccerBall(): CommuneRoomSoccerBall {
+    const row = this.ctx.storage.sql.exec<{
+      x: number;
+      y: number;
+      from_x: number;
+      from_y: number;
+      kicked_at: number;
+      by_username: string | null;
+    }>(
+      `SELECT x, y, from_x, from_y, kicked_at, by_username
+       FROM commune_soccer_ball WHERE singleton = 1`,
+    ).toArray()[0];
+    return row
+      ? {
+          x: row.x,
+          y: row.y,
+          fromX: row.from_x,
+          fromY: row.from_y,
+          kickedAt: row.kicked_at,
+          by: row.by_username,
+        }
+      : {
+          x: SOCCER_BALL_START.x,
+          y: SOCCER_BALL_START.y,
+          fromX: SOCCER_BALL_START.x,
+          fromY: SOCCER_BALL_START.y,
+          kickedAt: 0,
+          by: null,
+        };
   }
 
   private listCarPositions(): CommuneCarPosition[] {

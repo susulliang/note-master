@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CommuneBannerStroke } from '@/lib/auth-client';
 
 const SKETCH_COLORS = ['#403428', '#bc6850', '#6a9bcc', '#788c5d', '#d6a646'] as const;
-const MAX_STROKES = 8;
+const MAX_STROKES = 20;
 const MAX_POINTS = 48;
 
 interface CommuneBoardSketchPadProps {

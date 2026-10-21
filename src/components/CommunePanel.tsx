@@ -64,9 +64,14 @@ import {
   type CommuneBannerStroke,
   type CommuneDrop,
   type CommuneLoadout,
+  type CommuneMiniGame,
   type CommunePet,
+  type CommuneSoccerBall,
   type CommuneTreeholeCategory,
   type CommuneTreeholeEntry,
+  finishCommuneMiniGame,
+  kickCommuneSoccerBall,
+  startCommuneMiniGame,
 } from '@/lib/auth-client';
 import { CAT_CHOICES, CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
@@ -93,6 +98,19 @@ const BOARD = { x: 800, y: 330, w: 190, h: 130 }; // bulletin board (banners)
 const STALL = { x: 400, y: 730, w: 170, h: 150 }; // showcase stall
 const POND_C = { x: 170, y: 640, rx: 115, ry: 75 }; // west pond (ellipse)
 const DUCK_LAGOON = { x: 2580, y: 790, rx: 150, ry: 102 };
+const MINI_GAME_ZONES = {
+  golf: { x: 2860, y: 1280, range: 230 },
+  bowling: { x: 2250, y: 1290, range: 220 },
+  soccer: { left: 850, right: 1280, top: 1820, bottom: 2120, x: 1065, y: 1970 },
+} as const;
+const INITIAL_SOCCER_BALL: CommuneSoccerBall = {
+  x: MINI_GAME_ZONES.soccer.x,
+  y: MINI_GAME_ZONES.soccer.y,
+  fromX: MINI_GAME_ZONES.soccer.x,
+  fromY: MINI_GAME_ZONES.soccer.y,
+  kickedAt: 0,
+  by: null,
+};
 const PONDS = [
   { id: 'town-pond', ...POND_C },
   { id: 'duck-lagoon', ...DUCK_LAGOON },
@@ -120,7 +138,7 @@ function isRosterOffDay(code: string): boolean {
 }
 
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
-type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | null;
+type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | 'golf' | 'bowling' | null;
 type BoardTab = 'roster' | 'announcements';
 type CommuneCarId = 'meadow-cruiser' | 'orchard-wagon';
 
@@ -171,6 +189,8 @@ type CommuneAction =
   | { type: 'serendipity'; key: 'E'; label: string; momentId: number }
   | { type: 'world-object'; key: 'E'; label: string; objectId: CommuneWorldObjectId }
   | { type: 'duck-incident'; key: 'E'; label: string; incidentId: number }
+  | { type: 'mini-game'; key: 'E'; label: string; game: CommuneMiniGame }
+  | { type: 'soccer-kick'; key: 'E'; label: string }
   | { type: 'prop'; key: 'E'; label: string; panel: PropPanelKind };
 
 function touchActionIcon(action: CommuneAction) {
@@ -188,6 +208,8 @@ function touchActionIcon(action: CommuneAction) {
     case 'serendipity':
     case 'duck-incident':
     case 'world-object': return <Sparkles className="size-6" />;
+    case 'mini-game':
+    case 'soccer-kick': return <Gamepad2 className="size-6" />;
     case 'prop': return <Building2 className="size-6" />;
   }
 }
@@ -207,6 +229,8 @@ function touchActionLabel(action: CommuneAction): string {
     case 'serendipity': return 'Discover';
     case 'duck-incident': return 'Ask duck';
     case 'world-object': return 'Explore';
+    case 'mini-game': return action.game === 'golf' ? 'Play golf' : 'Bowl';
+    case 'soccer-kick': return 'Kick +1 spice';
     case 'prop': return 'Open';
   }
 }
@@ -395,7 +419,6 @@ interface BoardNoteEditorProps {
   onPriorityChange: (priority: CommuneBannerPriority) => void;
   strokes: CommuneBannerStroke[];
   onStrokesChange: (strokes: CommuneBannerStroke[]) => void;
-  onSubmit: () => void;
   label: string;
 }
 
@@ -408,7 +431,6 @@ function BoardNoteEditor({
   onPriorityChange,
   strokes,
   onStrokesChange,
-  onSubmit,
   label,
 }: BoardNoteEditorProps) {
   return (
@@ -443,17 +465,15 @@ function BoardNoteEditor({
       </div>
       <label className="block">
         <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">{label}</span>
-        <input
+        <textarea
           value={text}
           onChange={(event) => onTextChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') onSubmit();
-            event.stopPropagation();
-          }}
-          maxLength={80}
+          onKeyDown={(event) => event.stopPropagation()}
+          maxLength={2000}
+          rows={3}
           aria-label={label}
           placeholder={kind === 'priority' ? 'What needs attention?' : kind === 'sketch' ? 'Label this drawing…' : 'Write a short town note…'}
-          className="h-10 w-full border-2 border-[#92734c] bg-[#fff4d9] px-2.5 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+          className="min-h-20 w-full resize-y border-2 border-[#92734c] bg-[#fff4d9] px-2.5 py-2 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
         />
       </label>
       {kind === 'sketch' && <CommuneBoardSketchPad strokes={strokes} onChange={onStrokesChange} />}
@@ -575,7 +595,7 @@ function parseBanners(value: unknown): Banner[] {
     const priority: CommuneBannerPriority = banner.priority === 'high' || banner.priority === 'urgent'
       ? banner.priority
       : 'normal';
-    const strokes = Array.isArray(banner.strokes) ? banner.strokes.filter(isCommuneBannerStroke).slice(0, 8) : [];
+    const strokes = Array.isArray(banner.strokes) ? banner.strokes.filter(isCommuneBannerStroke).slice(0, 20) : [];
     return {
       ...banner,
       kind,
@@ -710,6 +730,22 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const mapZoomRef = useRef(1.5);
   mapZoomRef.current = mapZoom;
   const [panel, setPanel] = useState<PanelKind>(null);
+  const [miniGameRoundId, setMiniGameRoundId] = useState<string | null>(null);
+  const [miniGameBusy, setMiniGameBusy] = useState(false);
+  const [miniGameMessage, setMiniGameMessage] = useState('');
+  const [golfAim, setGolfAim] = useState(0);
+  const [golfPower, setGolfPower] = useState(74);
+  const [golfBall, setGolfBall] = useState({ x: 28, y: 60 });
+  const [golfStrokes, setGolfStrokes] = useState(0);
+  const [golfShots, setGolfShots] = useState<{ aim: number; power: number }[]>([]);
+  const [golfFinished, setGolfFinished] = useState(false);
+  const [bowlingAim, setBowlingAim] = useState(0);
+  const [bowlingPower, setBowlingPower] = useState(68);
+  const [bowlingPinsDown, setBowlingPinsDown] = useState<number[]>([]);
+  const [bowlingFinished, setBowlingFinished] = useState(false);
+  const [soccerBall, setSoccerBall] = useState<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
+  const soccerBallRef = useRef<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
+  soccerBallRef.current = soccerBall;
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
   const [banners, setBanners] = useState<Banner[]>([]);
@@ -1361,6 +1397,21 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }
           if (event.type === 'welcome') {
             applySnapshot(Array.isArray(event.others) ? event.others as CommuneAgent[] : []);
+            if (event.soccerBall && typeof event.soccerBall === 'object') {
+              const value = event.soccerBall as Record<string, unknown>;
+              if ([value.x, value.y, value.fromX, value.fromY].every((part) => Number.isFinite(Number(part)))) {
+                const ball: CommuneSoccerBall = {
+                  x: Number(value.x),
+                  y: Number(value.y),
+                  fromX: Number(value.fromX),
+                  fromY: Number(value.fromY),
+                  kickedAt: Number(value.kickedAt) || 0,
+                  by: typeof value.by === 'string' ? value.by : null,
+                };
+                soccerBallRef.current = ball;
+                setSoccerBall(ball);
+              }
+            }
             if (Array.isArray(event.cars)) {
               for (const value of event.cars) {
                 if (!value || typeof value !== 'object') continue;
@@ -1375,6 +1426,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 car.targetY = car.y;
                 car.targetHeading = car.heading;
               }
+            }
+          } else if (event.type === 'soccer_ball' && event.ball && typeof event.ball === 'object') {
+            const value = event.ball as Record<string, unknown>;
+            if ([value.x, value.y, value.fromX, value.fromY].every((part) => Number.isFinite(Number(part)))) {
+              const ball: CommuneSoccerBall = {
+                x: Number(value.x),
+                y: Number(value.y),
+                fromX: Number(value.fromX),
+                fromY: Number(value.fromY),
+                kickedAt: Number(value.kickedAt) || 0,
+                by: typeof value.by === 'string' ? value.by : null,
+              };
+              soccerBallRef.current = ball;
+              setSoccerBall(ball);
             }
           } else if (event.type === 'drops' && Array.isArray(event.drops)) {
             dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
@@ -1598,6 +1663,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             return incident?.id === action.incidentId
               && Math.hypot(player.x - incident.x, player.y - incident.y) < 76;
           }
+          case 'mini-game': {
+            const zone = MINI_GAME_ZONES[action.game];
+            return Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range;
+          }
+          case 'soccer-kick': {
+            const field = MINI_GAME_ZONES.soccer;
+            return player.x >= field.left && player.x <= field.right
+              && player.y >= field.top && player.y <= field.bottom
+              && Math.hypot(player.x - soccerBallRef.current.x, player.y - soccerBallRef.current.y) <= 104;
+          }
           case 'prop': {
             const prop = COMMUNE_PROPS.find((item) => item.kind === action.panel);
             return !!prop && Math.hypot(player.x - prop.x, player.y - prop.y) <= prop.range;
@@ -1712,11 +1787,63 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onCatThought?.('WHAT THE DUCK! That bird has a tiny briefcase.', 5000);
         return;
       }
+      case 'mini-game':
+        setMiniGameRoundId(null);
+        setMiniGameMessage('');
+        setGolfAim(0);
+        setGolfPower(74);
+        setGolfBall({ x: 28, y: 60 });
+        setGolfStrokes(0);
+        setGolfShots([]);
+        setGolfFinished(false);
+        setBowlingAim(0);
+        setBowlingPower(68);
+        setBowlingPinsDown([]);
+        setBowlingFinished(false);
+        setPanel(action.game);
+        return;
+      case 'soccer-kick': {
+        const ball = soccerBallRef.current;
+        const field = MINI_GAME_ZONES.soccer;
+        const receiver = [...remoteRef.current.values()]
+          .filter((remote) => (
+            !remote.agent.carId
+            && remote.rx >= field.left && remote.rx <= field.right
+            && remote.ry >= field.top && remote.ry <= field.bottom
+          ))
+          .sort((a, b) => (
+            Math.hypot(a.rx - ball.x, a.ry - ball.y) - Math.hypot(b.rx - ball.x, b.ry - ball.y)
+          ))[0];
+        const joystick = movementInputRef.current;
+        let dx = receiver ? receiver.rx - ball.x : joystick.x;
+        let dy = receiver ? receiver.ry - ball.y : joystick.y;
+        if (Math.hypot(dx, dy) < 0.1) {
+          dx = ball.x - playerRef.current.x;
+          dy = ball.y - playerRef.current.y;
+        }
+        void kickCommuneSoccerBall(crypto.randomUUID(), dx, dy)
+          .then((result) => {
+            soccerBallRef.current = result.ball;
+            setSoccerBall(result.ball);
+            setSpice(result.spice);
+            playerRef.current.says = {
+              text: result.awarded ? `Nice pass! +${result.awarded} spice ⚽` : 'The ball is back in play!',
+              until: Date.now() + 2600,
+            };
+          })
+          .catch((error: unknown) => {
+            playerRef.current.says = {
+              text: error instanceof Error ? error.message : 'The kick did not connect.',
+              until: Date.now() + 2600,
+            };
+          });
+        return;
+      }
       case 'prop':
         setPanel(action.panel);
         return;
     }
-  }, [onCatThought, sendRoomEvent]);
+  }, [onCatThought, sendRoomEvent, setSpice]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -2117,6 +2244,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         .map((object) => ({ object, distance: Math.hypot(player.x - object.x, player.y - object.y) }))
         .filter(({ object, distance }) => distance < object.range)
         .sort((a, b) => a.distance - b.distance)[0]?.object ?? null;
+      const nearbyGame = (['golf', 'bowling'] as const)
+        .map((game) => ({ game, distance: Math.hypot(player.x - MINI_GAME_ZONES[game].x, player.y - MINI_GAME_ZONES[game].y) }))
+        .filter(({ game, distance }) => distance <= MINI_GAME_ZONES[game].range)
+        .sort((a, b) => a.distance - b.distance)[0]?.game ?? null;
+      const soccerField = MINI_GAME_ZONES.soccer;
+      const nearSoccerBall = player.x >= soccerField.left && player.x <= soccerField.right
+        && player.y >= soccerField.top && player.y <= soccerField.bottom
+        && Math.hypot(player.x - soccerBallRef.current.x, player.y - soccerBallRef.current.y) <= 104;
       const nearPond = !nearFountain
         ? PONDS
           .map((pond) => ({ pond, distance: Math.hypot(player.x - pond.x, player.y - pond.y) }))
@@ -2161,6 +2296,29 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           key: 'E',
           label: nearWorldObject.label,
           objectId: nearWorldObject.id,
+        });
+      } else if (nearSoccerBall) {
+        const receiver = [...remoteRef.current.values()]
+          .filter((remote) => (
+            !remote.agent.carId
+            && remote.rx >= soccerField.left && remote.rx <= soccerField.right
+            && remote.ry >= soccerField.top && remote.ry <= soccerField.bottom
+          ))
+          .sort((a, b) => (
+            Math.hypot(a.rx - soccerBallRef.current.x, a.ry - soccerBallRef.current.y)
+            - Math.hypot(b.rx - soccerBallRef.current.x, b.ry - soccerBallRef.current.y)
+          ))[0];
+        actions.push({
+          type: 'soccer-kick',
+          key: 'E',
+          label: receiver ? `Pass to ${receiver.agent.username} · +1 spice` : 'Kick the soccer ball · +1 spice',
+        });
+      } else if (nearbyGame) {
+        actions.push({
+          type: 'mini-game',
+          key: 'E',
+          label: nearbyGame === 'golf' ? 'Play golf' : 'Play bowling',
+          game: nearbyGame,
         });
       } else if (nearAgent) {
         actions.push({
@@ -2306,6 +2464,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           serendipity: serendipityRef.current,
           destination: clickTargetRef.current,
           clickTarget: clickTargetRef.current,
+          soccerBall: soccerBallRef.current,
           nightOpacity,
           reduceMotion,
         };
@@ -2313,7 +2472,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         draw(
           ctx, vw, vh, dpr, shakeCam, tSec, player, npcsRef.current, banners,
           remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
-          clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current
+          clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current,
+          soccerBallRef.current
         );
       }
       raf = requestAnimationFrame(step);
@@ -2407,6 +2567,38 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         });
       } else {
         clickTargetRef.current = approachPoint(tappedCar.x, tappedCar.y, player.x, player.y, 100);
+      }
+      return;
+    }
+    const soccerBallAtTap = soccerBallRef.current;
+    if (Math.hypot(wx - soccerBallAtTap.x, wy - soccerBallAtTap.y) < 34) {
+      const player = playerRef.current;
+      const field = MINI_GAME_ZONES.soccer;
+      const inField = player.x >= field.left && player.x <= field.right
+        && player.y >= field.top && player.y <= field.bottom;
+      if (inField && Math.hypot(player.x - soccerBallAtTap.x, player.y - soccerBallAtTap.y) <= 104) {
+        executeInteraction({ type: 'soccer-kick', key: 'E', label: 'Kick the soccer ball · +1 spice' });
+      } else {
+        clickTargetRef.current = approachPoint(soccerBallAtTap.x, soccerBallAtTap.y, player.x, player.y, 52);
+      }
+      return;
+    }
+    const tappedGame = (['golf', 'bowling'] as const).find((game) => {
+      const zone = MINI_GAME_ZONES[game];
+      return Math.abs(wx - zone.x) < 210 && Math.abs(wy - zone.y) < 130;
+    });
+    if (tappedGame) {
+      const player = playerRef.current;
+      const zone = MINI_GAME_ZONES[tappedGame];
+      if (Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range) {
+        executeInteraction({
+          type: 'mini-game',
+          key: 'E',
+          label: tappedGame === 'golf' ? 'Play golf' : 'Play bowling',
+          game: tappedGame,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(zone.x, zone.y, player.x, player.y, 92);
       }
       return;
     }
@@ -2606,6 +2798,91 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     window.requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
+  const beginMiniGameRound = async (game: CommuneMiniGame) => {
+    setMiniGameBusy(true);
+    setMiniGameMessage('');
+    try {
+      const round = await startCommuneMiniGame(game);
+      setMiniGameRoundId(round.roundId);
+      setMiniGameMessage(game === 'golf' ? 'Round started. Sink the putt for +10 spice.' : 'Frame started. Each pin is worth +1 spice.');
+      if (game === 'golf') {
+        setGolfBall({ x: 28, y: 60 });
+        setGolfStrokes(0);
+      setGolfShots([]);
+        setGolfFinished(false);
+      } else {
+        setBowlingPinsDown([]);
+        setBowlingFinished(false);
+      }
+    } catch (error) {
+      setMiniGameMessage(error instanceof Error ? error.message : 'Could not start this round.');
+    } finally {
+      setMiniGameBusy(false);
+    }
+  };
+
+  const settleMiniGameRound = async (
+    game: CommuneMiniGame,
+    roundId: string,
+    result: { shots: { aim: number; power: number }[] } | { aim: number; power: number }
+  ) => {
+    try {
+      const outcome = await finishCommuneMiniGame(game, roundId, result);
+      setSpice(outcome.spice);
+      setMiniGameMessage(
+        game === 'golf'
+          ? outcome.awarded ? 'Putt sunk! +10 spice!' : 'Round complete. Next time, sink it!'
+          : `Pins down: ${outcome.pinsDown ?? 0}. +${outcome.awarded} spice!`
+      );
+    } catch (error) {
+      setMiniGameMessage(error instanceof Error ? error.message : 'Could not settle this round.');
+    } finally {
+      setMiniGameRoundId(null);
+      setMiniGameBusy(false);
+    }
+  };
+
+  const takeGolfStroke = () => {
+    if (!miniGameRoundId || miniGameBusy || golfFinished) return;
+    const angle = golfAim * Math.PI / 180;
+    const travel = golfPower * 1.8;
+    const nextBall = {
+      x: Math.max(16, Math.min(258, golfBall.x + Math.cos(angle) * travel)),
+      y: Math.max(18, Math.min(102, golfBall.y - Math.sin(angle) * travel * 0.55)),
+    };
+    const strokes = golfStrokes + 1;
+    const shots = [...golfShots, { aim: golfAim, power: golfPower }];
+    const holed = Math.hypot(250 - nextBall.x, 60 - nextBall.y) <= 12;
+    setGolfBall(nextBall);
+    setGolfStrokes(strokes);
+    setGolfShots(shots);
+    if (holed || strokes >= 4) {
+      setGolfFinished(true);
+      setMiniGameBusy(true);
+      void settleMiniGameRound('golf', miniGameRoundId, { shots });
+    }
+  };
+
+  const rollBowlingBall = async () => {
+    if (!miniGameRoundId || miniGameBusy || bowlingFinished) return;
+    setMiniGameBusy(true);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 520));
+    const pins: [number, number][] = [
+      [114, 25], [126, 25], [138, 25], [150, 25],
+      [120, 39], [132, 39], [144, 39],
+      [126, 53], [138, 53],
+      [132, 67],
+    ];
+    const aimX = 132 + bowlingAim * 0.7;
+    const scatter = 5 + bowlingPower * 0.1;
+    const knocked = pins.flatMap(([x, y], index) => (
+      Math.abs(x - aimX) <= scatter + (y < 40 ? 2 : 0) ? [index] : []
+    ));
+    setBowlingPinsDown(knocked);
+    setBowlingFinished(true);
+    await settleMiniGameRound('bowling', miniGameRoundId, { aim: bowlingAim, power: bowlingPower });
+  };
+
   const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
   const currentCar = carSeat ? PARKED_CARS.find((car) => car.id === carSeat.carId) ?? null : null;
@@ -2613,7 +2890,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     ? others.filter((agent) => agent.carId === carSeat.carId).sort((a, b) => (a.carSeat ?? 0) - (b.carSeat ?? 0))
     : [];
   const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
-  const paperPanel = panel === 'banners' || panel === 'agent';
+  const paperPanel = panel === 'banners' || panel === 'agent' || panel === 'golf' || panel === 'bowling';
   const panelPosition = touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
@@ -3085,7 +3362,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         <div
           role="dialog"
           aria-modal="false"
-          aria-label={activeProp?.label ?? (panel === 'treehole' ? 'Anonymous feedback treehole' : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details')}
+          aria-label={activeProp?.label ?? (
+            panel === 'treehole' ? 'Anonymous feedback treehole'
+              : panel === 'golf' ? 'Cloverleaf golf mini-game'
+                : panel === 'bowling' ? 'Meadow bowling mini-game'
+                  : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details'
+          )}
           className={cn(
             paperPanel
               ? 'absolute overflow-y-auto border-[3px] border-[#785a3c] bg-[#dcc399] p-3 text-[#493927] shadow-[5px_5px_0_rgba(36,28,19,0.48)]'
@@ -3145,6 +3427,105 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 {touchControls ? 'Close to return · Use the joystick to explore' : 'Press Esc to close · Keep exploring with WASD'}
               </p>
             </div>
+          )}
+
+          {panel === 'golf' && (
+            <section className="mt-1 space-y-3 pr-7" aria-label="Cloverleaf Links golf">
+              <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.45)]">
+                <p className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#ead6ad]">CLOVERLEAF LINKS</p>
+                <h3 className="font-['Schoolbell'] text-lg font-bold">A tiny putting challenge</h3>
+              </div>
+              <p className="font-['Schoolbell'] text-sm text-[#715b3e]">
+                Aim, set your power, and sink the putt in four strokes or fewer to earn <strong>+10 spice</strong>.
+              </p>
+              <svg viewBox="0 0 280 120" role="img" aria-label={`Golf ball at stroke ${golfStrokes + 1} of 4`} className="block h-32 w-full border-2 border-[#8b6a44] bg-[#82a95f] shadow-[3px_3px_0_rgba(51,39,25,0.3)]">
+                <rect x="8" y="16" width="264" height="88" fill="#80a75f" />
+                <path d="M12 30H268M12 90H268" stroke="#9abb72" strokeWidth="2" strokeDasharray="5 7" />
+                <circle cx="250" cy="60" r="10" fill="#263a2a" />
+                <circle cx="250" cy="60" r="15" fill="none" stroke="#f0dfb9" strokeWidth="2" />
+                <path d={`M${golfBall.x} ${golfBall.y} L250 60`} stroke="#f0dfb9" strokeWidth="1.5" strokeDasharray="4 5" opacity=".75" />
+                <circle cx={golfBall.x} cy={golfBall.y} r="6" fill="#fff8e9" stroke="#493927" strokeWidth="2" />
+                <rect x="22" y="50" width="3" height="22" fill="#785a3c" />
+                <path d="M25 50h15l-5 7H25" fill="#d97757" />
+                <text x="22" y="96" fill="#fff4d9" fontSize="9" fontFamily="Schoolbell">TEE</text>
+                <text x="250" y="39" fill="#fff4d9" textAnchor="middle" fontSize="9" fontFamily="Schoolbell">CUP</text>
+              </svg>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
+                  Aim · {golfAim}°
+                  <input type="range" min="-12" max="12" step="1" value={golfAim} onChange={(event) => setGolfAim(Number(event.target.value))} aria-label="Golf aim" className="mt-1 block h-5 w-full accent-[#788c5d]" />
+                </label>
+                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
+                  Power · {golfPower}
+                  <input type="range" min="20" max="100" step="1" value={golfPower} onChange={(event) => setGolfPower(Number(event.target.value))} aria-label="Golf shot power" className="mt-1 block h-5 w-full accent-[#788c5d]" />
+                </label>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-['Schoolbell'] text-xs text-[#715b3e]">{golfFinished ? 'Cup reached' : `Stroke ${Math.min(golfStrokes + 1, 4)} / 4`}</span>
+                <button
+                  type="button"
+                  disabled={miniGameBusy}
+                  onClick={() => golfFinished || !miniGameRoundId ? void beginMiniGameRound('golf') : takeGolfStroke()}
+                  className="border-2 border-[#5b6139] bg-[#788c5d] px-3 py-2 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+                >
+                  {miniGameBusy ? 'Playing…' : !miniGameRoundId ? golfFinished ? 'Play again' : 'Start round' : 'Putt!'}
+                </button>
+              </div>
+              {miniGameMessage && <p role="status" className="border border-[#a88a5f] bg-[#ead6ad] px-2 py-1.5 font-['Schoolbell'] text-sm text-[#493927]">{miniGameMessage}</p>}
+            </section>
+          )}
+
+          {panel === 'bowling' && (
+            <section className="mt-1 space-y-3 pr-7" aria-label="Meadow bowling lane">
+              <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#fff4d9] shadow-[3px_3px_0_rgba(51,39,25,0.45)]">
+                <p className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#ead6ad]">MEADOW BOWLING</p>
+                <h3 className="font-['Schoolbell'] text-lg font-bold">Ten-pin in the meadow</h3>
+              </div>
+              <p className="font-['Schoolbell'] text-sm text-[#715b3e]">
+                Line up your roll. Every pin you knock down earns <strong>+1 spice</strong>.
+              </p>
+              <svg viewBox="0 0 264 142" role="img" aria-label={`${10 - bowlingPinsDown.length} bowling pins standing`} className="block h-36 w-full border-2 border-[#6b4c34] bg-[#b88b5c] shadow-[3px_3px_0_rgba(51,39,25,0.3)]">
+                <rect x="25" y="8" width="214" height="126" fill="#d0a673" />
+                <path d="M28 12V130M236 12V130" stroke="#765338" strokeWidth="5" />
+                <path d="M28 116H236" stroke="#ead6ad" strokeWidth="2" />
+                {[
+                  [114, 25], [126, 25], [138, 25], [150, 25],
+                  [120, 39], [132, 39], [144, 39],
+                  [126, 53], [138, 53], [132, 67],
+                ].map(([x, y], index) => (
+                  <g key={index} transform={bowlingPinsDown.includes(index) ? `rotate(68 ${x} ${y}) translate(8 5)` : undefined}>
+                    <rect x={x - 4} y={y - 9} width="8" height="18" fill="#fff8e9" stroke="#785a3c" strokeWidth="1" />
+                    <path d={`M${x - 3} ${y - 3}h6`} stroke="#bc6850" strokeWidth="2" />
+                  </g>
+                ))}
+                <circle cx={132 + bowlingAim * 0.7} cy="112" r="9" fill="#403428" stroke="#f0dfb9" strokeWidth="2" />
+                <circle cx={132 + bowlingAim * 0.7 - 3} cy="109" r="1.5" fill="#f0dfb9" />
+              </svg>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
+                  Aim · {bowlingAim}
+                  <input type="range" min="-30" max="30" step="1" value={bowlingAim} onChange={(event) => setBowlingAim(Number(event.target.value))} aria-label="Bowling aim" className="mt-1 block h-5 w-full accent-[#788c5d]" />
+                </label>
+                <label className="border-2 border-[#a88a5f] bg-[#fff4d9] px-2 py-1.5 font-['Schoolbell'] text-xs text-[#493927]">
+                  Power · {bowlingPower}
+                  <input type="range" min="20" max="100" step="1" value={bowlingPower} onChange={(event) => setBowlingPower(Number(event.target.value))} aria-label="Bowling power" className="mt-1 block h-5 w-full accent-[#788c5d]" />
+                </label>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-['Schoolbell'] text-xs text-[#715b3e]">
+                  {bowlingFinished ? `${bowlingPinsDown.length} / 10 down` : 'One roll · ten pins'}
+                </span>
+                <button
+                  type="button"
+                  disabled={miniGameBusy}
+                  onClick={() => bowlingFinished || !miniGameRoundId ? void beginMiniGameRound('bowling') : void rollBowlingBall()}
+                  className="border-2 border-[#5b6139] bg-[#788c5d] px-3 py-2 font-['Schoolbell'] text-sm font-bold text-[#fff4d9] shadow-[3px_3px_0_#433d28] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
+                >
+                  {miniGameBusy ? 'Rolling…' : !miniGameRoundId ? bowlingFinished ? 'Play again' : 'Start frame' : 'Roll!'}
+                </button>
+              </div>
+              {miniGameMessage && <p role="status" className="border border-[#a88a5f] bg-[#ead6ad] px-2 py-1.5 font-['Schoolbell'] text-sm text-[#493927]">{miniGameMessage}</p>}
+            </section>
           )}
 
           {panel === 'treehole' && (
@@ -3640,7 +4021,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                   onPriorityChange={setBannerEditPriority}
                                   strokes={bannerEditStrokes}
                                   onStrokesChange={setBannerEditStrokes}
-                                  onSubmit={() => void saveBannerEdit(banner.id)}
                                   label="EDIT BOARD ITEM"
                                 />
                               ) : (
@@ -3763,7 +4143,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       );
                     })}
                   </div>
-                  {isAdmin && !editingBannerId && (
+                  {!editingBannerId && (
                     <div className="border-2 border-[#876641] bg-[#dcc399] p-3 shadow-[3px_3px_0_rgba(51,39,25,0.4)]">
                       <BoardNoteEditor
                         text={bannerDraft}
@@ -3774,12 +4154,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                         onPriorityChange={setBannerPriority}
                         strokes={bannerStrokes}
                         onStrokesChange={setBannerStrokes}
-                        onSubmit={() => void hangBanner()}
                         label="NEW BOARD ITEM"
                       />
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <span className="font-['Schoolbell'] text-xs text-[#785e3e]">
-                          {bannerDraft.length}/80 · {bannerKind === 'sketch' ? `${bannerStrokes.length}/8 strokes` : bannerKind === 'priority' ? `${bannerPriority} priority` : 'pinned note'}
+                          {bannerDraft.length}/2000 · {bannerKind === 'sketch' ? `${bannerStrokes.length}/20 strokes` : bannerKind === 'priority' ? `${bannerPriority} priority` : 'pinned note'}
                         </span>
                         <button
                           type="button"
@@ -4473,7 +4852,8 @@ function draw(
   destination: { x: number; y: number } | null,
   drops: CommuneDrop[] = [],
   ducks: PondDuck[] = [],
-  incident: DuckIncident | null = null
+  incident: DuckIncident | null = null,
+  soccerBall: CommuneSoccerBall = INITIAL_SOCCER_BALL
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -4556,6 +4936,15 @@ function draw(
   /* spice drops — pixel piles bobbing gently */
   for (const d of drops) {
     if (isVisible(d.x, d.y, 32, 32)) items.push({ y: d.y, fn: () => drawSpiceDrop(ctx, d.x, d.y, t) });
+  }
+
+  const ballProgress = soccerBall.kickedAt
+    ? Math.min(1, Math.max(0, (Date.now() - soccerBall.kickedAt) / 360))
+    : 1;
+  const soccerBallX = soccerBall.fromX + (soccerBall.x - soccerBall.fromX) * ballProgress;
+  const soccerBallY = soccerBall.fromY + (soccerBall.y - soccerBall.fromY) * ballProgress;
+  if (isVisible(soccerBallX, soccerBallY, 24, 28)) {
+    items.push({ y: soccerBallY, bright: true, fn: () => drawSoccerBall(ctx, soccerBallX, soccerBallY, t) });
   }
 
   /* bulletin board (banners) */
@@ -5042,6 +5431,27 @@ function drawSpiceDrop(ctx: CanvasRenderingContext2D, x: number, y: number, t: n
   ctx.restore();
 }
 
+function drawSoccerBall(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  const bounce = Math.sin(t * 12 + x * 0.02) * 1.5;
+  ctx.save();
+  drawGroundShadow(ctx, x + 2, y + 6, 12, 5, 0.26);
+  ctx.translate(Math.round(x), Math.round(y - 9 - bounce));
+  ctx.rotate(t * 1.8);
+  ctx.fillStyle = '#fff8e9';
+  ctx.strokeStyle = '#403428';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 11, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#403428';
+  ctx.fillRect(-3, -4, 6, 7);
+  for (const [px, py] of [[-8, -7], [6, -8], [-9, 4], [7, 5]] as const) {
+    ctx.fillRect(px, py, 4, 4);
+  }
+  ctx.restore();
+}
+
 function drawDestinationMarker(ctx: CanvasRenderingContext2D, x: number, y: number, t: number) {
   const pulse = 1 + Math.sin(t * 5) * 0.12;
   ctx.save();
@@ -5502,6 +5912,7 @@ function getTownLayer(): HTMLCanvasElement {
     [800, 640, 620, 700, 450, 730], // west → showcase stall
     [800, 640, 980, 700, 1150, 730], // east → challenge tent
     [800, 700, 800, 900, 800, 1150], // south → hedge gate
+    [800, 1150, 920, 1540, 1065, 1815], // soccer pitch entrance
     [1150, 730, 1370, 770, 1580, 730], // arcade trail → eastern meadow
     [1580, 730, 1760, 640, 1900, 590],
     [1900, 590, 2140, 530, 2350, 650], // duck borough
@@ -5509,8 +5920,10 @@ function getTownLayer(): HTMLCanvasElement {
     [800, 1150, 850, 1370, 1040, 1510], // south gate → oddity orchard
     [1040, 1510, 1330, 1660, 1530, 1600],
     [1530, 1600, 1700, 1490, 1870, 1350], // mushroom council
+    [1870, 1350, 1970, 1320, 2055, 1290], // bowling lane entrance
     [1530, 1600, 1810, 1700, 2110, 1710],
     [2110, 1710, 2370, 1710, 2700, 1790], // star overlook
+    [2490, 850, 2670, 1000, 2790, 1150], // golf green entrance
   ];
   const pathPts: [number, number][] = [];
   for (const [x0, y0, cx, cy, x1, y1] of PATHS) {
@@ -5526,6 +5939,57 @@ function getTownLayer(): HTMLCanvasElement {
   for (let i = 0; i < 540; i++) {
     const [wx, wy] = pathPts[Math.floor(rand() * pathPts.length)];
     px(wx - 20 + rand() * 40, wy - 20 + rand() * 40, 8, 8, rand() < 0.5 ? '#b68e69' : '#e2c69c');
+  }
+
+  /* Three small play clearings are baked into the cached pixel landscape. */
+  const golf = MINI_GAME_ZONES.golf;
+  pxShadow(golf.x + 7, golf.y + 12, 220, 142, 0.22);
+  pxEllipse(golf.x, golf.y, 216, 136, '#567d4e');
+  pxEllipse(golf.x, golf.y, 184, 108, '#78a45b');
+  pxEllipse(golf.x - 90, golf.y + 26, 25, 16, '#d9c38f');
+  pxEllipse(golf.x + 56, golf.y - 37, 21, 13, '#d9c38f');
+  px(golf.x + 70, golf.y + 10, 10, 6, '#263a2a');
+  px(golf.x + 105, golf.y - 45, 5, 52, '#f0dfb9');
+  px(golf.x + 88, golf.y - 45, 20, 12, '#d97757');
+
+  const bowling = MINI_GAME_ZONES.bowling;
+  pxShadow(bowling.x + 5, bowling.y + 12, 205, 68, 0.2);
+  px(bowling.x - 195, bowling.y - 56, 390, 112, '#684a34');
+  px(bowling.x - 183, bowling.y - 45, 366, 90, '#b88b5c');
+  px(bowling.x - 174, bowling.y - 36, 348, 72, '#d0a673');
+  px(bowling.x - 178, bowling.y - 55, 10, 110, '#765338');
+  px(bowling.x + 168, bowling.y - 55, 10, 110, '#765338');
+  for (const [dx, dy] of [
+    [0, -24], [-10, -39], [10, -39], [-20, -54], [0, -54], [20, -54],
+    [-30, -69], [-10, -69], [10, -69], [30, -69],
+  ] as const) {
+    px(bowling.x + dx - 4, bowling.y + dy - 4, 8, 12, '#fff8e9');
+    px(bowling.x + dx - 3, bowling.y + dy - 1, 6, 3, '#bc6850');
+  }
+
+  const soccer = MINI_GAME_ZONES.soccer;
+  const fieldWidth = soccer.right - soccer.left;
+  const fieldHeight = soccer.bottom - soccer.top;
+  pxShadow(soccer.x + 5, soccer.y + 12, fieldWidth / 2 + 10, fieldHeight / 2 + 10, 0.2);
+  px(soccer.left, soccer.top, fieldWidth, fieldHeight, '#426b48');
+  px(soccer.left + 8, soccer.top + 8, fieldWidth - 16, fieldHeight - 16, '#648e55');
+  for (let stripe = 0; stripe < 5; stripe++) {
+    if (stripe % 2 === 0) px(soccer.left + 8 + stripe * ((fieldWidth - 16) / 5), soccer.top + 8, (fieldWidth - 16) / 5, fieldHeight - 16, '#6d985c');
+  }
+  g.strokeStyle = '#e7e5cf';
+  g.lineWidth = 4;
+  g.strokeRect(soccer.left + 10, soccer.top + 10, fieldWidth - 20, fieldHeight - 20);
+  g.beginPath();
+  g.moveTo(soccer.x, soccer.top + 10);
+  g.lineTo(soccer.x, soccer.bottom - 10);
+  g.stroke();
+  g.beginPath();
+  g.ellipse(soccer.x, soccer.y, 38, 38, 0, 0, Math.PI * 2);
+  g.stroke();
+  for (const x of [soccer.left + 10, soccer.right - 22]) {
+    px(x, soccer.y - 32, 12, 64, '#f0dfb9');
+    px(x + (x < soccer.x ? 8 : -8), soccer.y - 32, 8, 5, '#fff8e9');
+    px(x + (x < soccer.x ? 8 : -8), soccer.y + 27, 8, 5, '#fff8e9');
   }
 
   /* plaza cobbles + fountain */

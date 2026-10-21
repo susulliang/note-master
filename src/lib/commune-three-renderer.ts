@@ -15,6 +15,9 @@ const LANDMARKS = [
   { text: 'DUCK BOROUGH', x: 2580, z: 780, height: 80 },
   { text: 'ODDITY ORCHARD', x: 1870, z: 1190, height: 80 },
   { text: 'STAR OVERLOOK', x: 2700, z: 1640, height: 80 },
+  { text: 'GOLF GREEN', x: 2860, z: 1132, height: 18 },
+  { text: 'BOWLING LANE', x: 2250, z: 1200, height: 22 },
+  { text: 'SOCCER FIELD', x: 1065, z: 1808, height: 18 },
 ];
 
 type AvatarColors = {
@@ -62,6 +65,14 @@ type RenderPet = {
 type RenderDrop = { x: number; y: number };
 type RenderDuck = { x: number; y: number; phase?: number };
 type RenderDiscovery = { x: number; y: number };
+type RenderSoccerBall = {
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  kickedAt: number;
+  by: string | null;
+};
 
 export interface CommuneThreeFrame {
   time: number;
@@ -77,6 +88,7 @@ export interface CommuneThreeFrame {
   serendipity: RenderDiscovery | null;
   destination: RenderDiscovery | null;
   clickTarget: RenderDiscovery | null;
+  soccerBall: RenderSoccerBall;
   nightOpacity: number;
   reduceMotion: boolean;
 }
@@ -326,6 +338,7 @@ export class CommuneThreeRenderer {
   private readonly duckMeshes: THREE.InstancedMesh;
   private readonly dropMeshes: THREE.InstancedMesh;
   private readonly discoveryMeshes: THREE.InstancedMesh;
+  private readonly soccerBallMesh: THREE.Mesh;
   private readonly cars = new Map<string, THREE.Group>();
   private readonly canvas: HTMLCanvasElement;
   private readonly labels: HTMLCanvasElement;
@@ -436,6 +449,9 @@ export class CommuneThreeRenderer {
     this.dropMeshes = makeInstanceMesh(new THREE.OctahedronGeometry(7, 0), '#e6ad48', 96);
     this.discoveryMeshes = makeInstanceMesh(new THREE.OctahedronGeometry(9, 0), '#8fe0b0', 2);
     this.scene.add(this.dropMeshes, this.discoveryMeshes);
+    this.soccerBallMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(10, 0), material('#f3ecdd'));
+    this.soccerBallMesh.castShadow = true;
+    this.scene.add(this.soccerBallMesh);
 
     this.addMarkerMeshes();
     this.buildCars();
@@ -522,6 +538,7 @@ export class CommuneThreeRenderer {
     this.updateActors(frame, 1 - Math.exp(-delta * 26));
     this.updatePets(frame.pets, frame.time, frame.reduceMotion);
     this.updateMarkers(frame, frame.time);
+    this.updateSoccerBall(frame.soccerBall);
     this.drawLabels(frame);
     this.renderer.render(this.scene, this.camera);
   }
@@ -563,6 +580,9 @@ export class CommuneThreeRenderer {
     addPath(this.scene, [[1510, 680], [1630, 1000], [1830, 1280]], 38, pathColor);
     addPath(this.scene, [[1900, 1380], [2250, 1500], [2660, 1760]], 38, pathColor);
     addPath(this.scene, [[1440, 1050], [1460, 1420], [1580, 1770], [1840, 2040]], 38, pathColor);
+    addPath(this.scene, [[800, 1180], [900, 1540], [1065, 1815]], 34, pathColor);
+    addPath(this.scene, [[1870, 1350], [1970, 1320], [2055, 1290]], 32, pathColor);
+    addPath(this.scene, [[2490, 850], [2670, 1000], [2790, 1150]], 32, pathColor);
 
     addBuilding(this.scene, 800, 155, 300, 146, '#d6c7a0', '#ab7050', 112);
     addBuilding(this.scene, 270, 298, 174, 174, '#cfb68d', '#6e7770', 92);
@@ -581,6 +601,7 @@ export class CommuneThreeRenderer {
     this.addLantern(1015, 455);
     this.addLantern(585, 805);
     this.addLantern(1015, 805);
+    this.addMiniGameAreas();
 
     const treePositions: [number, number][] = [
       [480, 208], [1120, 208], [560, 260], [1040, 260],
@@ -594,6 +615,76 @@ export class CommuneThreeRenderer {
       [1480, 1440],
     ];
     addTreeInstances(this.scene, treePositions);
+  }
+
+  private addMiniGameAreas(): void {
+    const golf = { x: 2860, z: 1280 };
+    addGroundDisc(this.scene, golf.x, golf.z, 214, 132, '#659252', 3, 28);
+    addGroundDisc(this.scene, golf.x, golf.z, 174, 98, '#82a95f', 2, 28);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 2, 12), new THREE.MeshBasicMaterial({ color: '#263a2a' }));
+    cup.position.set(golf.x + 76, 4, golf.z + 22);
+    this.scene.add(cup);
+    addBox(this.scene, golf.x + 108, 2, golf.z - 34, 4, 74, 4, '#f0dfb9');
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(30, 18, 3), material('#d97757'));
+    flag.position.set(golf.x + 93, 67, golf.z - 34);
+    flag.castShadow = true;
+    this.scene.add(flag);
+
+    const bowling = { x: 2250, z: 1290 };
+    addBox(this.scene, bowling.x, 0, bowling.z, 390, 5, 112, '#684a34');
+    addBox(this.scene, bowling.x, 5, bowling.z, 366, 2, 90, '#b88b5c');
+    for (const x of [bowling.x - 178, bowling.x + 178]) {
+      addBox(this.scene, x, 5, bowling.z, 10, 10, 114, '#765338');
+    }
+    for (let row = 0; row < 4; row++) {
+      for (let column = 0; column <= row; column++) {
+        const pinMesh = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 18, 6), material('#f3ecdd'));
+        pinMesh.position.set(
+          bowling.x + (column - row / 2) * 18,
+          16,
+          bowling.z - 34 + row * 18
+        );
+        pinMesh.castShadow = true;
+        this.scene.add(pinMesh);
+      }
+    }
+
+    const field = { x: 1065, z: 1970, width: 430, depth: 300 };
+    addBox(this.scene, field.x, 0, field.z, field.width, 2, field.depth, '#5d8c58');
+    const stripe = material('#e7e5cf');
+    for (const [x, z, width, depth] of [
+      [field.x, field.z - field.depth / 2, field.width, 3],
+      [field.x, field.z + field.depth / 2, field.width, 3],
+      [field.x - field.width / 2, field.z, 3, field.depth],
+      [field.x + field.width / 2, field.z, 3, field.depth],
+      [field.x, field.z, 3, field.depth],
+    ] as const) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(width, 1, depth), stripe);
+      line.position.set(x, 2.8, z);
+      this.scene.add(line);
+    }
+    const centerCircle = new THREE.Mesh(
+      new THREE.TorusGeometry(38, 2, 4, 24),
+      new THREE.MeshBasicMaterial({ color: '#e7e5cf' })
+    );
+    centerCircle.rotation.x = Math.PI / 2;
+    centerCircle.position.set(field.x, 3, field.z);
+    this.scene.add(centerCircle);
+    for (const x of [field.x - field.width / 2 + 14, field.x + field.width / 2 - 14]) {
+      addBox(this.scene, x, 4, field.z, 5, 48, 5, '#f0dfb9');
+      addBox(this.scene, x, 50, field.z - 23, 5, 5, 48, '#f0dfb9');
+      addBox(this.scene, x, 50, field.z + 23, 5, 5, 48, '#f0dfb9');
+    }
+  }
+
+  private updateSoccerBall(ball: RenderSoccerBall): void {
+    const progress = ball.kickedAt
+      ? THREE.MathUtils.clamp((Date.now() - ball.kickedAt) / 360, 0, 1)
+      : 1;
+    const x = THREE.MathUtils.lerp(ball.fromX, ball.x, progress);
+    const z = THREE.MathUtils.lerp(ball.fromY, ball.y, progress);
+    this.soccerBallMesh.position.set(x, 13 + (1 - progress) * 7, z);
+    this.soccerBallMesh.rotation.set(progress * 4, 0, progress * 3);
   }
 
   private addLantern(x: number, z: number): void {
