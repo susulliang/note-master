@@ -2,9 +2,9 @@
  * Worker entry for the Cloudflare Workers deploy (see wrangler.jsonc).
  *
  * Static assets are served for the SPA; this handler only receives requests
- * routed via `run_worker_first` (tool APIs), and
- * reads and writes tool data through the D1 `eco-data` database via the
- * bound `DB` binding — no API token is needed client-side.
+ * routed via `run_worker_first` (tool APIs and asset misses), and reads and
+ * writes tool data through the D1 `eco-data` database via the bound `DB`
+ * binding — no API token is needed client-side.
  */
 
 /// <reference path="./worker-configuration.d.ts" />
@@ -3195,6 +3195,16 @@ async function handleKeywordAlerts(request: Request, env: Env): Promise<Response
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/assets/')) {
+      const asset = await env.ASSETS.fetch(request);
+      if (asset.headers.get('content-type')?.toLowerCase().includes('text/html')) {
+        return new Response('Asset not found', {
+          status: 404,
+          headers: { 'cache-control': 'no-store' },
+        });
+      }
+      return asset;
+    }
     if (url.pathname === '/api/commune/socket') {
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
         return new Response('WebSocket upgrade required', { status: 426 });

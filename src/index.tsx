@@ -5,6 +5,26 @@ import { ErrorBoundary } from "react-error-boundary";
 import App from "./app";
 import "./index.css";
 
+const CHUNK_RELOAD_KEY = "ecovacs_chunk_reload_at";
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  try {
+    const lastReload = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
+    if (Date.now() - lastReload < 30_000) return;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return;
+  }
+  window.location.reload();
+});
+window.setTimeout(() => {
+  try {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}, 10_000);
+
 /**
  * Lightweight replacement for @lark-apaas/client-toolkit-lite's AppContainer + ErrorRender.
  * The toolkit pulled in ~735 kB of Feishu-only runtime (auth SDK, Slardar, penpal, Miaoda
@@ -26,6 +46,12 @@ function StandaloneErrorRender({
   error: Error;
   resetErrorBoundary: () => void;
 }) {
+  const errorText = `${error?.message ?? ""}\n${error?.stack ?? ""}`;
+  const isChunkLoadError =
+    /failed to fetch dynamically imported module|loading chunk|chunkloaderror/i.test(
+      errorText,
+    );
+
   return (
     <div
       role="alert"
@@ -74,8 +100,17 @@ function StandaloneErrorRender({
         >
 {error?.stack ?? String(error)}
         </pre>
+        {isChunkLoadError && (
+          <p style={{ margin: "0 0 16px", fontSize: 13, color: "#c9d1d9" }}>
+            This page may be out of date. Reload to get the latest app version.
+          </p>
+        )}
         <button
-          onClick={resetErrorBoundary}
+          onClick={
+            isChunkLoadError
+              ? () => window.location.reload()
+              : resetErrorBoundary
+          }
           style={{
             padding: "8px 16px",
             background: "#238636",
@@ -87,7 +122,7 @@ function StandaloneErrorRender({
             fontSize: 14,
           }}
         >
-          ↻ Try again
+          {isChunkLoadError ? "↻ Reload app" : "↻ Try again"}
         </button>
       </div>
     </div>
