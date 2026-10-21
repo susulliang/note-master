@@ -3195,6 +3195,16 @@ async function handleKeywordAlerts(request: Request, env: Env): Promise<Response
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      const shell = await env.ASSETS.fetch(request);
+      const headers = new Headers(shell.headers);
+      headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+      return new Response(shell.body, {
+        status: shell.status,
+        statusText: shell.statusText,
+        headers,
+      });
+    }
     if (url.pathname.startsWith('/assets/')) {
       const asset = await env.ASSETS.fetch(request);
       if (asset.headers.get('content-type')?.toLowerCase().includes('text/html')) {
