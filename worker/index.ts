@@ -1776,7 +1776,7 @@ async function handleCommuneBannerMutation(request: Request, env: Env, user: Aut
   }
   const action = payload.action === undefined ? 'create' : payload.action;
   const id = typeof payload.id === 'string' ? payload.id.trim().slice(0, 64) : '';
-  const text = typeof payload.text === 'string' ? payload.text.trim().replace(/\s+/g, ' ').slice(0, 2_000) : '';
+  const text = typeof payload.text === 'string' ? payload.text.replace(/\r\n?/g, '\n').trim().slice(0, 2_000) : '';
   const kind = payload.kind === undefined ? 'pin' : payload.kind;
   const priority = payload.priority === undefined ? 'normal' : payload.priority;
   const strokes = normalizeCommuneBannerStrokes(payload.strokes);

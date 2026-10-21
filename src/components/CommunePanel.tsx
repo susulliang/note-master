@@ -40,6 +40,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import CommuneBoardSketchPad, { CommuneBoardSketchPreview } from '@/components/CommuneBoardSketchPad';
@@ -444,6 +446,7 @@ interface BoardNoteEditorProps {
   strokes: CommuneBannerStroke[];
   onStrokesChange: (strokes: CommuneBannerStroke[]) => void;
   label: string;
+  large?: boolean;
 }
 
 function BoardNoteEditor({
@@ -456,9 +459,12 @@ function BoardNoteEditor({
   strokes,
   onStrokesChange,
   label,
+  large = false,
 }: BoardNoteEditorProps) {
+  const [preview, setPreview] = useState(false);
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block min-w-0">
           <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">Card format</span>
@@ -487,19 +493,65 @@ function BoardNoteEditor({
           </label>
         )}
       </div>
-      <label className="block">
-        <span className="mb-1 block font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">{label}</span>
-        <textarea
-          value={text}
-          onChange={(event) => onTextChange(event.target.value)}
-          onKeyDown={(event) => event.stopPropagation()}
-          maxLength={2000}
-          rows={3}
-          aria-label={label}
-          placeholder={kind === 'priority' ? 'What needs attention?' : kind === 'sketch' ? 'Label this drawing…' : 'Write a short town note…'}
-          className="min-h-20 w-full resize-y border-2 border-[#92734c] bg-[#fff4d9] px-2.5 py-2 font-['Schoolbell'] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]"
-        />
-      </label>
+      <div>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <span className="font-['Schoolbell'] text-[11px] font-bold uppercase tracking-wider text-[#705335]">{label}</span>
+          <div className="flex border border-[#92734c] bg-[#ead6ad] p-0.5" role="tablist" aria-label={`${label} editor mode`}>
+            {(['Write', 'Preview'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={(mode === 'Preview') === preview}
+                onClick={() => setPreview(mode === 'Preview')}
+                className={cn(
+                  'px-2.5 py-1 font-["Schoolbell"] text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]',
+                  (mode === 'Preview') === preview
+                    ? 'bg-[#735638] text-[#fff4d9]'
+                    : 'text-[#715536] hover:bg-[#f8eccf]'
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+        {preview ? (
+          <div
+            role="tabpanel"
+            aria-label={`${label} Markdown preview`}
+            className={cn(
+              'overflow-y-auto border-2 border-[#92734c] bg-[#fff4d9] px-3 py-2.5 text-[#3c3021]',
+              large ? 'min-h-64 max-h-[42dvh]' : 'min-h-20 max-h-56'
+            )}
+          >
+            {text.trim() ? (
+              <div className="prose prose-sm max-w-none break-words font-['Schoolbell'] text-sm leading-relaxed text-[#3c3021] prose-headings:my-2 prose-headings:font-['Schoolbell'] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-a:text-[#5c6f43] prose-strong:text-[#3c3021]">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="font-['Schoolbell'] text-sm italic text-[#9a805b]">Your formatted note preview will appear here.</p>
+            )}
+          </div>
+        ) : (
+          <textarea
+            value={text}
+            onChange={(event) => onTextChange(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            maxLength={2000}
+            rows={large ? 10 : 3}
+            aria-label={label}
+            placeholder={kind === 'priority' ? 'What needs attention?' : kind === 'sketch' ? 'Label this drawing…' : 'Write a town note… Markdown is welcome.'}
+            className={cn(
+              'w-full resize-y border-2 border-[#92734c] bg-[#fff4d9] px-2.5 py-2 font-["Schoolbell"] text-sm text-[#3c3021] placeholder:text-[#9a805b] outline-none focus-visible:ring-2 focus-visible:ring-[#7d6848]',
+              large ? 'min-h-64' : 'min-h-20'
+            )}
+          />
+        )}
+        <p className="mt-1 font-['Schoolbell'] text-[11px] text-[#785e3e]">
+          Markdown supported · raw HTML is disabled for safety · {text.length}/2000
+        </p>
+      </div>
       {kind === 'sketch' && <CommuneBoardSketchPad strokes={strokes} onChange={onStrokesChange} />}
     </div>
   );
@@ -596,6 +648,18 @@ function isCommuneBanner(value: unknown): value is CommuneBanner {
     && typeof banner.text === 'string'
     && typeof banner.author === 'string'
     && Number.isFinite(Number(banner.at));
+}
+
+function bannerPlainText(markdown: string): string {
+  return markdown
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function isCommuneBannerStroke(value: unknown): value is CommuneBannerStroke {
@@ -789,6 +853,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
   const [banners, setBanners] = useState<Banner[]>([]);
+  const [bannerTickerDismissed, setBannerTickerDismissed] = useState(false);
   const [bannerDraft, setBannerDraft] = useState('');
   const [bannerKind, setBannerKind] = useState<CommuneBannerKind>('pin');
   const [bannerPriority, setBannerPriority] = useState<CommuneBannerPriority>('normal');
@@ -3005,7 +3070,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     window.requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
-  const bannerWords = useMemo(() => banners.map((b) => b.text), [banners]);
+  const latestBanner = banners[banners.length - 1] ?? null;
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
   const currentCar = carSeat ? PARKED_CARS.find((car) => car.id === carSeat.carId) ?? null : null;
   const carOccupants = carSeat
@@ -3013,7 +3078,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     : [];
   const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
   const paperPanel = panel === 'banners' || panel === 'agent';
-  const panelPosition = touchControls
+  const bannerWorkspace = panel === 'banners';
+  const panelPosition = bannerWorkspace
+    ? 'fixed inset-0 z-[60]'
+    : touchControls
     ? 'left-3 right-3 bottom-3 top-auto z-30 translate-x-0'
     : panel === 'loadout'
       ? 'right-4 top-4 z-20'
@@ -3483,16 +3551,18 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       {panel && panel !== 'store' && panel !== 'challenges' && (
         <div
           role="dialog"
-          aria-modal="false"
-          aria-label={activeProp?.label ?? (
+          aria-modal={bannerWorkspace}
+          aria-label={bannerWorkspace ? 'COMMUNE bulletin board' : activeProp?.label ?? (
             panel === 'treehole' ? 'Anonymous feedback treehole'
               : panel === 'loadout' ? 'My Loadout' : selected?.username ?? 'Agent details'
           )}
           className={cn(
-            paperPanel
+            bannerWorkspace
+              ? 'fixed inset-0 z-[60] h-[100dvh] w-screen overflow-hidden border-0 bg-[#dcc399] p-0 text-[#493927] shadow-none'
+              : paperPanel
               ? 'absolute overflow-y-auto border-[3px] border-[#785a3c] bg-[#dcc399] p-3 text-[#493927] shadow-[5px_5px_0_rgba(36,28,19,0.48)]'
               : 'glass-panel absolute overflow-y-auto rounded-2xl border border-border/70 bg-card/95 p-4 shadow-2xl backdrop-blur-2xl',
-            touchControls
+            !bannerWorkspace && (touchControls
               ? cn(
                   panel === 'quiz' ? 'max-h-[min(90dvh,980px)]' : 'max-h-[min(82dvh,780px)]',
                   'w-auto'
@@ -3502,10 +3572,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                     panel === 'quiz' ? 'max-h-[calc(100dvh-24px)]' : 'max-h-[min(78vh,780px)]',
                     'w-[min(720px,calc(100vw-24px))]'
                   )
-                : 'max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))]',
+                : 'max-h-[min(66vh,560px)] w-[min(390px,calc(100vw-24px))]'),
             panelPosition
           )}
-          style={touchControls
+          style={bannerWorkspace
+            ? {
+                paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+                paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
+                paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))',
+                paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
+              }
+            : touchControls
             ? {
                 bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
                 left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
@@ -3517,10 +3594,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             type="button"
             onClick={() => setPanel(null)}
             className={cn(
-              'absolute right-2.5 top-2.5 p-1.5 transition focus-visible:outline-none focus-visible:ring-2',
-              paperPanel
-                ? 'border-2 border-[#8b6a44] bg-[#ead6ad] text-[#5c472e] shadow-[2px_2px_0_#6c5034] hover:bg-[#f8eccf] focus-visible:ring-[#7d6848]'
-                : 'rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:ring-accent'
+              'absolute p-1.5 transition focus-visible:outline-none focus-visible:ring-2',
+              bannerWorkspace
+                ? 'right-5 top-5 z-10 border-2 border-[#8b6a44] bg-[#ead6ad] text-[#5c472e] shadow-[2px_2px_0_#6c5034] hover:bg-[#f8eccf] focus-visible:ring-[#7d6848]'
+                : cn(
+                    'right-2.5 top-2.5',
+                    paperPanel
+                      ? 'border-2 border-[#8b6a44] bg-[#ead6ad] text-[#5c472e] shadow-[2px_2px_0_#6c5034] hover:bg-[#f8eccf] focus-visible:ring-[#7d6848]'
+                      : 'rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:ring-accent'
+                  )
             )}
             aria-label="Close"
           >
@@ -3836,8 +3918,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           )}
 
           {panel === 'banners' && (
-            <div className="mt-3">
-              <div className="mb-3 flex items-center justify-between gap-3 border-2 border-[#785a3c] bg-[#735638] p-2.5 pr-8 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.55)]">
+            <div className={bannerWorkspace ? 'flex h-full min-h-0 flex-col p-4 sm:p-6' : 'mt-3'}>
+              <div className="mb-3 flex shrink-0 items-center justify-between gap-3 border-2 border-[#785a3c] bg-[#735638] p-2.5 pr-12 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.55)]">
                 <div className="flex items-center gap-2.5">
                   <span className="grid size-9 place-items-center border-2 border-[#8b6a44] bg-[#f0dfb9] text-[#694d32] shadow-[2px_2px_0_#443322]">
                     {boardTab === 'roster' ? <CalendarDays className="size-4" /> : <Megaphone className="size-4" />}
@@ -3981,8 +4063,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                   </div>
                 </section>
               ) : (
-                <section aria-label="Town Hall News" className="space-y-3">
-                  <div className="border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.7)]">
+                <section
+                  aria-label="Town Hall News"
+                  className={cn('space-y-3', bannerWorkspace && 'flex min-h-0 flex-1 flex-col')}
+                >
+                  <div className="shrink-0 border-2 border-[#785a3c] bg-[#735638] px-3 py-2 text-[#f4e4c2] shadow-[3px_3px_0_rgba(51,39,25,0.7)]">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-['Schoolbell'] text-xs font-bold uppercase tracking-[0.12em]">
                         TOWN HALL / MIXED-MEDIA BOARD
@@ -3992,10 +4077,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       </span>
                     </div>
                   </div>
-                  <p className="font-['Schoolbell'] text-sm leading-relaxed text-[#715b3e]">
+                  <p className="shrink-0 font-['Schoolbell'] text-sm leading-relaxed text-[#715b3e]">
                     Mix pinned notes, priority alerts, and quick whiteboard sketches for the whole square.
                   </p>
-                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  <div className={cn(
+                    'max-h-64 space-y-2 overflow-y-auto pr-1',
+                    bannerWorkspace && 'grid max-h-none min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]'
+                  )}>
+                    <div className={cn('space-y-2', bannerWorkspace && 'min-h-0 overflow-y-auto pr-1')}>
                     {banners.length === 0 && (
                       <p className="border-2 border-dashed border-[#96774f] bg-[#e8d3a9] p-5 text-center font-['Schoolbell'] text-sm text-[#6f5537] shadow-[3px_3px_0_rgba(51,39,25,0.25)]">
                         The board is clear. Pin a note, flag a priority, or sketch an idea.
@@ -4012,7 +4101,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       return (
                         <article
                           key={banner.id}
-                          className="relative border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2.5 text-[#3c3021] shadow-[3px_3px_0_rgba(51,39,25,0.45)]"
+                          className={cn(
+                            'relative border-2 border-[#8b6a44] bg-[#f0dfb9] px-3 py-2.5 text-[#3c3021] shadow-[3px_3px_0_rgba(51,39,25,0.45)]',
+                            editing && bannerWorkspace && 'max-h-full overflow-y-auto'
+                          )}
                           style={{
                             borderLeftWidth: 5,
                             borderLeftColor: kind === 'priority'
@@ -4043,6 +4135,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                   strokes={bannerEditStrokes}
                                   onStrokesChange={setBannerEditStrokes}
                                   label="EDIT BOARD ITEM"
+                                  large={bannerWorkspace}
                                 />
                               ) : (
                                 <>
@@ -4069,9 +4162,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                                       className="mb-2 block h-20 w-full border-2 border-[#8b6a44]"
                                     />
                                   )}
-                                  <p className="whitespace-pre-wrap break-words font-['Schoolbell'] text-sm font-bold leading-relaxed">
-                                    {banner.text}
-                                  </p>
+                                  <div className="prose prose-sm max-w-none break-words font-['Schoolbell'] text-sm leading-relaxed text-[#3c3021] prose-headings:my-1 prose-headings:font-['Schoolbell'] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-a:text-[#5c6f43] prose-strong:text-[#3c3021]">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{banner.text}</ReactMarkdown>
+                                  </div>
                                 </>
                               )}
                               <p className="mt-1.5 font-['Schoolbell'] text-[11px] text-[#715b3e]">
@@ -4163,9 +4256,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                         </article>
                       );
                     })}
-                  </div>
+                    </div>
                   {!editingBannerId && (
-                    <div className="border-2 border-[#876641] bg-[#dcc399] p-3 shadow-[3px_3px_0_rgba(51,39,25,0.4)]">
+                    <div className={cn(
+                      'border-2 border-[#876641] bg-[#dcc399] p-3 shadow-[3px_3px_0_rgba(51,39,25,0.4)]',
+                      bannerWorkspace && 'min-h-0 overflow-y-auto'
+                    )}>
                       <BoardNoteEditor
                         text={bannerDraft}
                         onTextChange={setBannerDraft}
@@ -4176,6 +4272,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                         strokes={bannerStrokes}
                         onStrokesChange={setBannerStrokes}
                         label="NEW BOARD ITEM"
+                        large={bannerWorkspace}
                       />
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <span className="font-['Schoolbell'] text-xs text-[#785e3e]">
@@ -4196,6 +4293,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                       </div>
                     </div>
                   )}
+                  </div>
                 </section>
               )}
             </div>
@@ -4506,17 +4604,39 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         </div>
       )}
 
-      {/* Banner ticker — hung banners also scroll along the top edge */}
-      {bannerWords.length > 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-4 flex w-[min(680px,calc(100%-200px))] -translate-x-1/2 items-center gap-2 overflow-hidden border-2 border-[#725338] bg-[#f0dfb8] px-2.5 py-2 shadow-[4px_4px_0_rgba(36,28,19,0.38)]">
-          <span className="shrink-0 border-2 border-[#5d432d] bg-[#735638] px-1.5 py-0.5 font-['Schoolbell'] text-[10px] font-bold uppercase tracking-wider text-[#f6e7c8]">
-            {banners[banners.length - 1]?.kind === 'priority'
-              ? `${banners[banners.length - 1].priority} priority`
-              : banners[banners.length - 1]?.kind === 'sketch' ? 'Sketch' : 'Notice'}
-          </span>
-          <p className="truncate font-['Schoolbell'] text-sm font-bold text-[#493923]">
-            {bannerWords[bannerWords.length - 1]}
-          </p>
+      {/* The ticker is session-dismissible; shared posts remain pinned to the board. */}
+      {latestBanner && !bannerTickerDismissed && (
+        <div className="absolute left-1/2 top-4 z-20 flex w-[min(680px,calc(100%-24px))] -translate-x-1/2 items-stretch overflow-hidden border-2 border-[#725338] bg-[#f0dfb8] shadow-[4px_4px_0_rgba(36,28,19,0.38)] md:w-[min(680px,calc(100%-200px))]">
+          <button
+            type="button"
+            onClick={() => {
+              setBoardTab('announcements');
+              setPanel('banners');
+            }}
+            aria-label="Expand latest town notice and open the bulletin board"
+            className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-[#f8eccf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7d6848]"
+          >
+            <span className="shrink-0 border-2 border-[#5d432d] bg-[#735638] px-1.5 py-0.5 font-['Schoolbell'] text-[10px] font-bold uppercase tracking-wider text-[#f6e7c8]">
+              {latestBanner.kind === 'priority'
+                ? `${latestBanner.priority} priority`
+                : latestBanner.kind === 'sketch' ? 'Sketch' : 'Notice'}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-['Schoolbell'] text-sm font-bold text-[#493923]">
+              {bannerPlainText(latestBanner.text)}
+            </span>
+            <span className="hidden shrink-0 font-['Schoolbell'] text-xs font-bold text-[#715536] sm:block">
+              Expand
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setBannerTickerDismissed(true)}
+            aria-label="Dismiss notice until next session"
+            title="Dismiss until next session"
+            className="grid w-10 shrink-0 place-items-center border-l-2 border-[#725338] bg-[#ead6ad] text-[#5c472e] transition-colors hover:bg-[#efd0b7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7d6848]"
+          >
+            <X className="size-4" />
+          </button>
         </div>
       )}
     </div>
@@ -5073,7 +5193,7 @@ function draw(
           ctx.fillStyle = '#f7e8c8';
           ctx.font = "bold 6px 'Schoolbell', ui-monospace, monospace";
           ctx.textAlign = 'center';
-          ctx.fillText(b.text.slice(0, 12), 22, 50, 37);
+          ctx.fillText(bannerPlainText(b.text).slice(0, 12), 22, 50, 37);
         } else {
           const isPriority = b.kind === 'priority';
           if (isPriority) {
@@ -5087,7 +5207,8 @@ function draw(
           ctx.fillStyle = '#493927';
           ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
           ctx.textAlign = 'center';
-          const clippedText = b.text.length > 42 ? `${b.text.slice(0, 39)}…` : b.text;
+          const plainText = bannerPlainText(b.text);
+          const clippedText = plainText.length > 42 ? `${plainText.slice(0, 39)}…` : plainText;
           const words = clippedText.split(/\s+/);
           let line = '';
           let ly = isPriority ? 20 : 12;
