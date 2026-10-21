@@ -30,6 +30,8 @@ type AvatarColors = {
 type RenderActor = {
   x: number;
   y: number;
+  headingX?: number;
+  headingY?: number;
   name: string;
   hue: number;
   moving?: boolean;
@@ -62,6 +64,8 @@ type RenderPet = {
   emote?: string | null;
   walkPhase?: number;
   facingLeft?: boolean;
+  headingX?: number;
+  headingY?: number;
 };
 type RenderDrop = { x: number; y: number };
 type RenderDuck = { x: number; y: number; phase?: number };
@@ -1068,6 +1072,9 @@ export class CommuneThreeRenderer {
         : 0;
       const x = visual.x;
       const z = visual.z;
+      const headingX = actor.headingX ?? 0;
+      const headingY = actor.headingY ?? 1;
+      const heading = Math.atan2(headingX, headingY);
       const shirtColor = actor.avatar?.shirt ?? actor.hue;
       const hairColor = actor.avatar?.hair ?? '#493a33';
       const bottomColor = actor.avatar?.bottomColor ?? '#424a4e';
@@ -1099,17 +1106,17 @@ export class CommuneThreeRenderer {
       }
 
       this.transform.position.set(x, 25 + bob, z);
-      this.transform.rotation.set(0, 0, 0);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(car ? 0.74 : 1, car ? 0.74 : 1, car ? 0.74 : 1);
       setInstance(this.actorBody, index, this.transform);
 
       this.transform.position.set(x, 43 + bob, z);
-      this.transform.rotation.set(0, 0, 0);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(1, 1, 1);
       setInstance(this.actorHead, index, this.transform);
 
-      this.transform.position.set(x, 51 + bob, z - 1);
-      this.transform.rotation.set(0, 0, 0);
+      this.transform.position.set(x - headingX, 51 + bob, z - headingY);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(1.02, 0.34, 0.92);
       setInstance(this.actorHair, index, this.transform);
 
@@ -1120,8 +1127,14 @@ export class CommuneThreeRenderer {
 
       for (let leg = 0; leg < 2; leg++) {
         const legIndex = index * 2 + leg;
-        this.transform.position.set(x + (leg ? 4 : -4), 9 + bob, z + (leg ? stride : -stride));
-        this.transform.rotation.set(0, 0, 0);
+        const side = leg ? 4 : -4;
+        const step = leg ? stride : -stride;
+        this.transform.position.set(
+          x - headingY * side + headingX * step,
+          9 + bob,
+          z + headingX * side + headingY * step
+        );
+        this.transform.rotation.set(0, heading, 0);
         this.transform.scale.set(1, 1, 1);
         setInstance(this.actorLegs, legIndex, this.transform);
       }
@@ -1177,7 +1190,13 @@ export class CommuneThreeRenderer {
 
       const walking = !reduceMotion && !!pet.moving;
       const phase = pet.walkPhase ?? time * 8;
-      const direction = pet.facingLeft ? -1 : 1;
+      const headingX = pet.headingX ?? (pet.facingLeft ? -1 : 1);
+      const headingY = pet.headingY ?? 0;
+      const heading = Math.atan2(-headingY, headingX);
+      const offset = (forward: number, side = 0) => ({
+        x: pet.x + forward * headingX - side * headingY,
+        z: pet.y + forward * headingY + side * headingX,
+      });
       const hop = !reduceMotion && pet.pose === 'play' ? Math.abs(Math.sin(time * 7 + index)) * 6 : 0;
       const walkBob = walking ? Math.abs(Math.sin(phase)) * 2 : 0;
       const idleBreath = reduceMotion ? 0 : Math.sin(time * 1.7 + index * 1.9) * 0.45;
@@ -1194,51 +1213,59 @@ export class CommuneThreeRenderer {
       const stageScale = pet.stage === 'Kitten' ? 0.78 : pet.stage === 'Elder' ? 1.04 : 0.92;
 
       this.transform.position.set(pet.x, bodyY, pet.y);
-      this.transform.rotation.set(0, 0, 0);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(bodyScaleX * stageScale, bodyScaleY * stageScale, stageScale);
       setInstance(this.petBodies, index, this.transform);
 
-      this.transform.position.set(pet.x - direction * 4, bodyY + 1, pet.y + 5);
-      this.transform.rotation.set(0, 0, 0);
+      const firstPatch = offset(-4, 5);
+      this.transform.position.set(firstPatch.x, bodyY + 1, firstPatch.z);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(0.54, 0.66, 0.58);
       setInstance(this.petPatches, patchCount++, this.transform);
-      this.transform.position.set(pet.x + direction * 4, bodyY + 2, pet.y + 2);
+      const secondPatch = offset(4, 2);
+      this.transform.position.set(secondPatch.x, bodyY + 2, secondPatch.z);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(0.44, 0.52, 0.5);
       setInstance(this.petPatches, patchCount++, this.transform);
 
-      this.transform.position.set(pet.x + direction * 4, headY - sniffDip, pet.y + 2);
-      this.transform.rotation.set(0, 0, direction * (sniffDip * 0.05));
+      const head = offset(4, 2);
+      this.transform.position.set(head.x, headY - sniffDip, head.z);
+      this.transform.rotation.set(0, heading, sniffDip * 0.05);
       this.transform.scale.set(0.78 * stageScale, 0.78 * stageScale, 0.78 * stageScale);
       setInstance(this.petHeads, index, this.transform);
 
       for (let ear = 0; ear < 2; ear++) {
         const earIndex = index * 2 + ear;
-        const earX = pet.x + direction * (4 + (ear ? 3 : -3));
+        const earPosition = offset(4 + (ear ? 3 : -3), 2);
         const earTilt = ear === 0 ? -0.12 : 0.12;
-        this.transform.position.set(earX, headY + 4 - sniffDip, pet.y + 2);
-        this.transform.rotation.set(earTilt + earFlick, 0, direction * earTilt);
+        this.transform.position.set(earPosition.x, headY + 4 - sniffDip, earPosition.z);
+        this.transform.rotation.set(earTilt + earFlick, heading, earTilt);
         this.transform.scale.set(stageScale, stageScale, stageScale);
         setInstance(this.petEars, earIndex, this.transform);
-        this.transform.position.set(earX, headY + 5.2 - sniffDip, pet.y + 4.2);
-        this.transform.rotation.set(earTilt + earFlick, 0, direction * earTilt);
+        const innerEar = offset(4 + (ear ? 3 : -3), 4.2);
+        this.transform.position.set(innerEar.x, headY + 5.2 - sniffDip, innerEar.z);
+        this.transform.rotation.set(earTilt + earFlick, heading, earTilt);
         this.transform.scale.set(stageScale, stageScale, stageScale);
         setInstance(this.petInnerEars, earIndex, this.transform);
       }
 
-      this.transform.position.set(pet.x + direction * 6, headY - 1 - sniffDip, pet.y + 6);
-      this.transform.rotation.set(0, 0, 0);
+      const muzzle = offset(6, 6);
+      this.transform.position.set(muzzle.x, headY - 1 - sniffDip, muzzle.z);
+      this.transform.rotation.set(0, heading, 0);
       this.transform.scale.set(stageScale, stageScale, stageScale);
       setInstance(this.petMuzzles, index, this.transform);
       for (let eye = 0; eye < 2; eye++) {
         const eyeIndex = eyeCount++;
-        this.transform.position.set(pet.x + direction * (5 + (eye ? 2 : -2)), headY + 1 - sniffDip, pet.y + 7);
-        this.transform.rotation.set(0, 0, 0);
+        const eyePosition = offset(5 + (eye ? 2 : -2), 7);
+        this.transform.position.set(eyePosition.x, headY + 1 - sniffDip, eyePosition.z);
+        this.transform.rotation.set(0, heading, 0);
         this.transform.scale.set(stageScale, stageScale, stageScale);
         setInstance(this.petEyes, eyeIndex, this.transform, '#252a32');
       }
 
-      this.transform.position.set(pet.x - direction * 8, bodyY + 7, pet.y - 1);
-      this.transform.rotation.set(0, 0, direction * (0.42 + tailSwish));
+      const tail = offset(-8, -1);
+      this.transform.position.set(tail.x, bodyY + 7, tail.z);
+      this.transform.rotation.set(0, heading, 0.42 + tailSwish);
       this.transform.scale.set(stageScale, stageScale * 1.18, stageScale);
       setInstance(this.petTails, index, this.transform);
 
@@ -1248,12 +1275,13 @@ export class CommuneThreeRenderer {
         const front = leg < 2;
         const stride = walking ? Math.sin(phase + (front === (side < 0) ? 0 : Math.PI)) * 2.1 : 0;
         const lift = walking ? Math.max(0, Math.sin(phase + (front === (side < 0) ? 0 : Math.PI))) * 1.3 : 0;
+        const legPosition = offset((front ? 4 : -4) + stride, side * 3);
         this.transform.position.set(
-          pet.x + (front ? 4 : -4) + stride * direction,
+          legPosition.x,
           4 + lift + (loafing ? -1.4 : 0),
-          pet.y + side * 3
+          legPosition.z
         );
-        this.transform.rotation.set(0, 0, stride * 0.08);
+        this.transform.rotation.set(0, heading, stride * 0.08);
         this.transform.scale.set(stageScale, stageScale, stageScale);
         setInstance(this.petLegs, legIndex, this.transform);
       }
@@ -1270,10 +1298,11 @@ export class CommuneThreeRenderer {
           const sparkleIndex = sparkleCount++;
           const orbit = time * (showSniff ? 1.8 : 2.5) + sparkle * (Math.PI * 2 / 3) + index;
           const radius = showSniff ? 7 : 12;
+          const sparklePosition = offset(9 + Math.cos(orbit) * radius, 5 + Math.sin(orbit) * radius * 0.45);
           this.transform.position.set(
-            pet.x + direction * 9 + Math.cos(orbit) * radius,
+            sparklePosition.x,
             headY + 8 + Math.sin(orbit) * 2,
-            pet.y + 5 + Math.sin(orbit) * radius * 0.45
+            sparklePosition.z
           );
           this.transform.rotation.set(orbit, orbit, 0);
           this.transform.scale.setScalar(showSniff ? 0.5 : 0.7 + Math.sin(orbit) * 0.18);

@@ -120,6 +120,9 @@ const BOWLING_PINS: [number, number][] = [
   [132, 67],
 ];
 const BOWLING_APPROACH = { x: MINI_GAME_ZONES.bowling.x, y: 1460 };
+const isInBowlingArena = (x: number, y: number) => (
+  Math.hypot(x - MINI_GAME_ZONES.bowling.x, y - MINI_GAME_ZONES.bowling.y) <= MINI_GAME_ZONES.bowling.range
+);
 type TRexMode = 'mowing' | 'zoomies' | 'confused' | 'napping' | 'reverse';
 interface MowerTrack {
   fromX: number;
@@ -838,6 +841,8 @@ interface CarChatMessage {
 interface Agent {
   x: number;
   y: number;
+  headingX?: number;
+  headingY?: number;
   name: string;
   hue: number;
   says: Speech | null;
@@ -865,6 +870,8 @@ interface Agent {
 interface RemoteView {
   x: number;
   y: number;
+  headingX: number;
+  headingY: number;
   name: string;
   hue: number;
   phrase: string | null;
@@ -919,6 +926,8 @@ interface PetFollower {
   moving: boolean;
   walkPhase: number;
   facingLeft: boolean;
+  facingX: number;
+  facingY: number;
 }
 
 interface PixelPetView {
@@ -931,6 +940,8 @@ interface PixelPetView {
   emote: 'sniff' | 'spark' | null;
   walkPhase: number;
   facingLeft: boolean;
+  headingX: number;
+  headingY: number;
 }
 
 export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanelProps) {
@@ -1177,7 +1188,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     }
   };
 
-  const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
+  const playerRef = useRef<Agent>({
+    x: PLAZA.x,
+    y: PLAZA.y + 240,
+    headingX: 0,
+    headingY: 1,
+    name: username,
+    hue: hueOf(username),
+    says: null,
+  });
   playerRef.current.name = username;
   playerRef.current.hue = hueOf(username);
   playerRef.current.carId = carSeat?.carId ?? null;
@@ -1210,6 +1229,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       ry: number;
       tx: number;
       ty: number;
+      headingX: number;
+      headingY: number;
       agent: CommuneAgent;
       moving: boolean;
       bobPhase: number;
@@ -1526,6 +1547,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           ry: agent.y,
           tx: agent.x,
           ty: agent.y,
+          headingX: 0,
+          headingY: 1,
           agent,
           moving: false,
           bobPhase: Math.random() * 10,
@@ -1554,6 +1577,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           ry: agent.y,
           tx: agent.x,
           ty: agent.y,
+          headingX: 0,
+          headingY: 1,
           agent,
           moving: false,
           bobPhase: Math.random() * 10,
@@ -2106,7 +2131,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               return Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range;
             }
             return !bowlingBusyRef.current
-              && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
+              && isInBowlingArena(player.x, player.y);
           }
           case 'soccer-kick': {
             const field = MINI_GAME_ZONES.soccer;
@@ -2454,6 +2479,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) + joystick.y;
         const directionLength = Math.hypot(dx, dy);
         player.moving = directionLength > 0.12;
+        if (directionLength > 0.12) {
+          player.headingX = dx / directionLength;
+          player.headingY = dy / directionLength;
+        }
         if (directionLength > 0.12 && !panelRef.current && !chatFocusedRef.current && wallNow - lastCarMoveSentAt >= CAR_MOVE_INTERVAL_MS) {
           sendRoomEvent({ type: 'car_move', dx, dy });
           lastCarMoveSentAt = wallNow;
@@ -2475,7 +2504,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           player.x += (tx - player.x) * k;
           player.y += (ty - player.y) * k;
           player.moving = leader.moving;
-          if (leader.moving) player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
+          if (leader.moving) {
+            player.headingX = leader.headingX;
+            player.headingY = leader.headingY;
+            player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
+          }
         } else {
           player.moving = false;
         }
@@ -2502,6 +2535,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         }
         player.moving = len > 0.12;
         if (len > 0.12) {
+          player.headingX = dx / len;
+          player.headingY = dy / len;
           const nx = player.x + (dx / len) * SPEED * dt * Math.min(1, len);
           const ny = player.y + (dy / len) * SPEED * dt * Math.min(1, len);
           moveWithCollision(player, nx, ny);
@@ -2596,6 +2631,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           } else {
             const nx = npc.x + (tx / d) * NPC_SPEED * dt;
             const ny = npc.y + (ty / d) * NPC_SPEED * dt;
+            npc.headingX = tx / d;
+            npc.headingY = ty / d;
             moveWithCollision(npc, nx, ny);
             npc.moving = true;
             npc.bobPhase = (npc.bobPhase ?? 0) + dt * 9;
@@ -2709,7 +2746,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           game === 'golf' && golfSession.roundId
             ? !golfSession.busy && Math.hypot(player.x - currentGolfBall.x, player.y - currentGolfBall.y) <= 104
             : game === 'bowling'
-              ? !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82
+              ? !bowlingBusyRef.current && isInBowlingArena(player.x, player.y)
               : distance <= MINI_GAME_ZONES.golf.range
         ))
         .sort((a, b) => a.distance - b.distance)[0]?.game ?? null;
@@ -2866,6 +2903,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const d = Math.hypot(dx, dy);
         r.moving = d > 3;
         if (d > 0.5) {
+          r.headingX = dx / d;
+          r.headingY = dy / d;
           const k = Math.min(1, dt * 3.5);
           r.rx += dx * k;
           r.ry += dy * k;
@@ -2874,14 +2913,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         let vx = r.rx;
         let vy = r.ry;
         let vmoving = r.moving;
+        let headingX = r.headingX;
+        let headingY = r.headingY;
         if (heldHands && heldHands.lead && r.agent.username === heldHands.partner) {
           vx = player.x - 22;
           vy = player.y + 6;
           vmoving = !!player.moving;
+          headingX = player.headingX ?? 0;
+          headingY = player.headingY ?? 1;
         }
         remoteViews.push({
           x: vx,
           y: vy,
+          headingX,
+          headingY,
           name: r.agent.username,
           hue: hueOf(r.agent.username),
           phrase: r.agent.loadout?.phrase || null,
@@ -3081,7 +3126,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         ? !session.busy && Math.hypot(player.x - golfBall.x, player.y - golfBall.y) <= 104
         : tappedGame === 'golf'
           ? Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range
-          : !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
+          : !bowlingBusyRef.current && isInBowlingArena(player.x, player.y);
       if (inRange) {
         executeInteraction({
           type: 'mini-game',
@@ -4984,6 +5029,8 @@ function updatePetFollowers(
         moving: false,
         walkPhase: Math.random() * Math.PI * 2,
         facingLeft: false,
+        facingX: 1,
+        facingY: 0,
       };
       if (startsMoving) follower.followAt = now + petRandom(700, 2400);
       followers.set(key, follower);
@@ -5165,7 +5212,10 @@ function updatePetFollowers(
     follower.moving = Math.hypot(movedX, movedY) > 0.15;
     if (follower.moving) {
       follower.walkPhase += dt * (follower.behavior === 'catchup' ? 12 : 8.5) * follower.pace;
-      follower.facingLeft = movedX < -0.1;
+      const movedDistance = Math.hypot(movedX, movedY);
+      follower.facingX = movedX / movedDistance;
+      follower.facingY = movedY / movedDistance;
+      follower.facingLeft = follower.facingX < 0;
     }
     follower.ownerX = owner.x;
     follower.ownerY = owner.y;
@@ -5180,6 +5230,8 @@ function updatePetFollowers(
       emote: follower.emote,
       walkPhase: follower.walkPhase,
       facingLeft: follower.facingLeft,
+      headingX: follower.facingX,
+      headingY: follower.facingY,
     });
   }
 
@@ -5864,7 +5916,7 @@ function draw(
             : null;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, superAdmin: r.superAdmin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, headingX: r.headingX, headingY: r.headingY, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, superAdmin: r.superAdmin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
@@ -6475,8 +6527,10 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       }
     }
   }
-  const ox = Math.round(a.x) - (tpl[0].length * SP_P) / 2;
   const oy = Math.round(feet) - tpl.length * SP_P;
+  ctx.save();
+  ctx.translate(a.x, feet);
+  ctx.rotate(Math.atan2(-(a.headingX ?? 0), a.headingY ?? 1));
   for (let r = 0; r < tpl.length; r++) {
     const row = tpl[r];
     for (let c = 0; c < row.length; c++) {
@@ -6484,9 +6538,9 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       if (ch === '.') continue;
       ctx.fillStyle = palette[ch] ?? skin;
       if (r === hemRow && ch === 'P') {
-        ctx.fillRect(ox + c * SP_P - SP_P, oy + r * SP_P, SP_P * 3, SP_P);
+        ctx.fillRect(-tpl[0].length * SP_P / 2 + c * SP_P - SP_P, -tpl.length * SP_P + r * SP_P, SP_P * 3, SP_P);
       } else {
-        ctx.fillRect(ox + c * SP_P, oy + r * SP_P, SP_P, SP_P);
+        ctx.fillRect(-tpl[0].length * SP_P / 2 + c * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
       }
     }
   }
@@ -6494,10 +6548,11 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   if (look?.hairStyle === 'long') {
     for (let r = 3; r <= 10; r++) {
       ctx.fillStyle = r === 3 || r === 8 ? hairHi : hair;
-      ctx.fillRect(ox + 2 * SP_P, oy + r * SP_P, SP_P, SP_P);
-      ctx.fillRect(ox + 9 * SP_P, oy + r * SP_P, SP_P, SP_P);
+      ctx.fillRect(-tpl[0].length * SP_P / 2 + 2 * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
+      ctx.fillRect(-tpl[0].length * SP_P / 2 + 9 * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
     }
   }
+  ctx.restore();
 
   // player ring + name tag (+ admin star, + status line for remote agents)
   if (isPlayer) {
@@ -6551,7 +6606,6 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
         : CAT_STAND;
   const width = rows[0].length * cellX;
   const height = rows.length * cellY;
-  const left = pet.x - width / 2;
   const bob = reduceMotion
     ? 0
     : animated
@@ -6559,7 +6613,7 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
       : pet.pose === 'play'
         ? Math.abs(Math.sin(t * 6 + pet.walkPhase)) * 2.5
         : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
-  const top = pet.y - height + 4 + bob;
+  const top = -height + 4;
   const palette = CAT_PIXEL_PALETTES[pet.catId];
 
   ctx.fillStyle = 'rgba(20,20,19,0.22)';
@@ -6567,15 +6621,17 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
   ctx.ellipse(pet.x, pet.y + 3, width * 0.46, 5 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  ctx.save();
+  ctx.translate(pet.x, pet.y + bob);
+  ctx.rotate(Math.atan2(pet.headingY, pet.headingX));
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
     for (let colIndex = 0; colIndex < row.length; colIndex++) {
       const pixel = row[colIndex];
       if (pixel === '.') continue;
-      const col = pet.facingLeft ? row.length - 1 - colIndex : colIndex;
       ctx.fillStyle = palette[pixel] ?? palette.C;
       ctx.fillRect(
-        Math.round(left + col * cellX),
+        Math.round(-width / 2 + colIndex * cellX),
         Math.round(top + rowIndex * cellY),
         Math.ceil(cellX),
         Math.ceil(cellY)
@@ -6586,11 +6642,11 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
     const emoteY = top - 5 - Math.sin(t * 3 + pet.walkPhase) * 2;
     if (pet.emote === 'sniff') {
       ctx.fillStyle = '#b8d9c8';
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -17 : 13)), Math.round(emoteY), 3, 3);
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -22 : 18)), Math.round(emoteY - 5), 2, 2);
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -25 : 21)), Math.round(emoteY + 2), 2, 2);
+      ctx.fillRect(13, Math.round(emoteY), 3, 3);
+      ctx.fillRect(18, Math.round(emoteY - 5), 2, 2);
+      ctx.fillRect(21, Math.round(emoteY + 2), 2, 2);
     } else {
-      const sx = Math.round(pet.x + 15);
+      const sx = 15;
       const sy = Math.round(emoteY - 5);
       ctx.fillStyle = '#f0d394';
       ctx.fillRect(sx, sy - 4, 3, 11);
@@ -6599,6 +6655,7 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
       ctx.fillRect(sx + 1, sy, 2, 3);
     }
   }
+  ctx.restore();
 }
 
 /** Chunky pixel oak (dynamic so it y-sorts with the agents), cached as a sprite. */
