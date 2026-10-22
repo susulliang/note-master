@@ -110,6 +110,26 @@ interface CommuneSoccerKickResult {
   error?: 'soccer_out_of_bounds' | 'soccer_ball_too_far' | 'soccer_kick_cooldown' | 'invalid_soccer_kick';
 }
 
+interface CommuneLaserShot {
+  id: string;
+  shooter: string;
+  fromX: number;
+  fromY: number;
+  fromHeight: number;
+  toX: number;
+  toY: number;
+  toHeight: number;
+  durationMs: number;
+  targetUsername: string | null;
+}
+
+interface CommuneLaserShotResult {
+  accepted: boolean;
+  replay?: boolean;
+  shot?: CommuneLaserShot;
+  error?: 'invalid_laser_shot' | 'laser_shooter_unavailable' | 'laser_cooldown';
+}
+
 type RoomEvent = Record<string, unknown>;
 
 const ROOM_TICKET_TTL_MS = 60_000;
@@ -125,6 +145,8 @@ const SOCCER_FIELD = { left: 850, right: 1280, top: 1820, bottom: 2120 };
 const SOCCER_BALL_START = { x: 1065, y: 1970 };
 const SOCCER_KICK_RANGE = 104;
 const SOCCER_KICK_COOLDOWN_MS = 1_400;
+const LASER_SHOT_COOLDOWN_MS = 500;
+const LASER_MAX_RANGE = 3_400;
 const PARKED_CAR_INTERACT_RANGE = 118;
 const PARKED_CAR_EXIT_DISTANCE = 100;
 const PARKED_CAR_SPEED = 220;
@@ -156,6 +178,51 @@ const CAR_BLOCKING_TREES: [number, number][] = [
   [1630, 2050], [1760, 2110], [1900, 2040], [2050, 2120],
   [2290, 2220], [2460, 2130], [2660, 2200], [2840, 2110], [3000, 2210],
 ];
+
+function rayBoxDistance(
+  origin: readonly [number, number, number],
+  direction: readonly [number, number, number],
+  minimum: readonly [number, number, number],
+  maximum: readonly [number, number, number],
+  maxDistance: number
+): number | null {
+  let entry = 0;
+  let exit = maxDistance;
+  for (let axis = 0; axis < 3; axis++) {
+    const originAxis = origin[axis];
+    const directionAxis = direction[axis];
+    if (Math.abs(directionAxis) < 1e-6) {
+      if (originAxis < minimum[axis] || originAxis > maximum[axis]) return null;
+      continue;
+    }
+    const first = (minimum[axis] - originAxis) / directionAxis;
+    const second = (maximum[axis] - originAxis) / directionAxis;
+    entry = Math.max(entry, Math.min(first, second));
+    exit = Math.min(exit, Math.max(first, second));
+    if (entry > exit) return null;
+  }
+  return exit < 0 ? null : Math.max(0, entry);
+}
+
+function raySphereDistance(
+  origin: readonly [number, number, number],
+  direction: readonly [number, number, number],
+  center: readonly [number, number, number],
+  radius: number
+): number | null {
+  const offset = [
+    origin[0] - center[0],
+    origin[1] - center[1],
+    origin[2] - center[2],
+  ];
+  const projection = offset[0] * direction[0] + offset[1] * direction[1] + offset[2] * direction[2];
+  const discriminant = projection * projection
+    - (offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2] - radius * radius);
+  if (discriminant < 0) return null;
+  const near = -projection - Math.sqrt(discriminant);
+  const far = -projection + Math.sqrt(discriminant);
+  return near >= 0 ? near : far >= 0 ? far : null;
+}
 
 function canCarOccupy(x: number, y: number, carId: string, cars: CommuneCarPosition[]): boolean {
   const car = cars.find((item) => item.id === carId);
@@ -392,6 +459,20 @@ export class CommuneRoom extends DurableObject<Env> {
           created_at INTEGER NOT NULL
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_laser_shot_limits (
+          username TEXT PRIMARY KEY,
+          shot_at INTEGER NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_laser_shot_actions (
+          action_id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      `);
       for (const [id, car] of Object.entries(PARKED_CARS)) {
         this.ctx.storage.sql.exec(
           'INSERT OR IGNORE INTO commune_parked_cars (id, x, y, heading) VALUES (?, ?, ?, ?)',
@@ -462,6 +543,12 @@ export class CommuneRoom extends DurableObject<Env> {
     }
     if (request.method === 'POST' && url.pathname === '/internal/minigame/soccer-kick') {
       return this.handleSoccerKick(request);
+    }
+    if (request.method === 'POST' && url.pathname === '/internal/minigame/laser-shot') {
+      return this.handleLaserShot(request);
+    }
+    if (request.method === 'POST' && url.pathname === '/internal/minigame/laser-reward') {
+      return this.handleLaserReward(request);
     }
     if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('WebSocket upgrade required', { status: 426 });
@@ -650,6 +737,192 @@ export class CommuneRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec('DELETE FROM commune_soccer_kick_actions WHERE created_at < ?', now - 120_000);
     this.broadcast({ type: 'soccer_ball', ball: nextBall });
     return Response.json(result);
+  }
+
+  private async handleLaserShot(request: Request): Promise<Response> {
+    const payload = await request.json().catch(() => null) as {
+      username?: unknown;
+      actionId?: unknown;
+      yaw?: unknown;
+      pitch?: unknown;
+    } | null;
+    const username = typeof payload?.username === 'string' ? payload.username.trim() : '';
+    const actionId = typeof payload?.actionId === 'string' ? payload.actionId : '';
+    const yawInput = Number(payload?.yaw);
+    const pitch = Number(payload?.pitch);
+    if (
+      !username
+      || !/^[\da-f-]{36}$/i.test(actionId)
+      || !Number.isFinite(yawInput)
+      || Math.abs(yawInput) > 10_000
+      || !Number.isFinite(pitch)
+      || pitch < -1.25
+      || pitch > 1.25
+    ) {
+      return Response.json({ accepted: false, error: 'invalid_laser_shot' } satisfies CommuneLaserShotResult, { status: 400 });
+    }
+
+    const replay = this.ctx.storage.sql.exec<{ username: string; result_json: string }>(
+      'SELECT username, result_json FROM commune_laser_shot_actions WHERE action_id = ?',
+      actionId,
+    ).toArray()[0];
+    if (replay) {
+      if (replay.username !== username) {
+        return Response.json({ accepted: false, error: 'invalid_laser_shot' } satisfies CommuneLaserShotResult, { status: 403 });
+      }
+      return Response.json({
+        ...(JSON.parse(replay.result_json) as CommuneLaserShotResult),
+        replay: true,
+      });
+    }
+
+    const now = Date.now();
+    const current = this.ctx.getWebSockets(username)
+      .map((socket) => attachment(socket))
+      .find((presence): presence is Presence => (
+        !!presence && !presence.carId && now - presence.seenAt <= PRESENCE_TTL_MS
+      ));
+    if (!current) {
+      return Response.json({ accepted: false, error: 'laser_shooter_unavailable' } satisfies CommuneLaserShotResult, { status: 403 });
+    }
+    const lastShot = this.ctx.storage.sql.exec<{ shot_at: number }>(
+      'SELECT shot_at FROM commune_laser_shot_limits WHERE username = ?',
+      username,
+    ).toArray()[0];
+    if (lastShot && now - lastShot.shot_at < LASER_SHOT_COOLDOWN_MS) {
+      return Response.json({ accepted: false, error: 'laser_cooldown' } satisfies CommuneLaserShotResult, { status: 429 });
+    }
+
+    const yaw = Math.atan2(Math.sin(yawInput), Math.cos(yawInput));
+    const direction: [number, number, number] = [
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch),
+    ];
+    const origin: [number, number, number] = [current.x, 55, current.y];
+    let maxDistance = LASER_MAX_RANGE;
+    if (direction[0] > 1e-6) maxDistance = Math.min(maxDistance, (COMMUNE_WORLD_W - current.x) / direction[0]);
+    if (direction[0] < -1e-6) maxDistance = Math.min(maxDistance, (0 - current.x) / direction[0]);
+    if (direction[2] > 1e-6) maxDistance = Math.min(maxDistance, (COMMUNE_WORLD_H - current.y) / direction[2]);
+    if (direction[2] < -1e-6) maxDistance = Math.min(maxDistance, (0 - current.y) / direction[2]);
+    maxDistance = Math.max(0, maxDistance);
+
+    let blockerDistance = maxDistance;
+    const groundDistance = direction[1] < -1e-6 ? (-5 - origin[1]) / direction[1] : Infinity;
+    if (groundDistance >= 0 && groundDistance < blockerDistance) blockerDistance = groundDistance;
+    for (const blocker of CAR_STATIC_BLOCKERS) {
+      const distance = rayBoxDistance(
+        origin,
+        direction,
+        [blocker.x, 0, blocker.y],
+        [blocker.x + blocker.w, 145, blocker.y + blocker.h],
+        blockerDistance,
+      );
+      if (distance !== null) blockerDistance = Math.min(blockerDistance, distance);
+    }
+    for (const [treeX, treeY] of CAR_BLOCKING_TREES) {
+      const distance = rayBoxDistance(
+        origin,
+        direction,
+        [treeX - 30, 0, treeY - 42],
+        [treeX + 30, 132, treeY + 4],
+        blockerDistance,
+      );
+      if (distance !== null) blockerDistance = Math.min(blockerDistance, distance);
+    }
+    const cars = this.ctx.storage.sql.exec<{ x: number; y: number; heading: number }>(
+      'SELECT x, y, heading FROM commune_parked_cars',
+    ).toArray();
+    for (const car of cars) {
+      const halfX = Math.abs(Math.cos(car.heading)) * CAR_HALF_WIDTH
+        + Math.abs(Math.sin(car.heading)) * CAR_HALF_LENGTH;
+      const halfY = Math.abs(Math.sin(car.heading)) * CAR_HALF_WIDTH
+        + Math.abs(Math.cos(car.heading)) * CAR_HALF_LENGTH;
+      const distance = rayBoxDistance(
+        origin,
+        direction,
+        [car.x - halfX, 0, car.y - halfY],
+        [car.x + halfX, 58, car.y + halfY],
+        blockerDistance,
+      );
+      if (distance !== null) blockerDistance = Math.min(blockerDistance, distance);
+    }
+
+    const candidates = new Map<string, Presence>();
+    for (const socket of this.ctx.getWebSockets()) {
+      const presence = attachment(socket);
+      if (
+        !presence
+        || presence.username === username
+        || presence.carId
+        || now - presence.seenAt > PRESENCE_TTL_MS
+      ) continue;
+      const existing = candidates.get(presence.username);
+      if (!existing || presence.seenAt > existing.seenAt) candidates.set(presence.username, presence);
+    }
+    let targetUsername: string | null = null;
+    let impactDistance = blockerDistance;
+    for (const [target, presence] of candidates) {
+      const bodyHit = raySphereDistance(origin, direction, [presence.x, 25, presence.y], 16);
+      const headHit = raySphereDistance(origin, direction, [presence.x, 44, presence.y], 13);
+      for (const distance of [bodyHit, headHit]) {
+        if (distance !== null && distance < impactDistance) {
+          impactDistance = distance;
+          targetUsername = target;
+        }
+      }
+    }
+
+    const fromOffset = 8;
+    const muzzleSideOffset = 6;
+    const shot: CommuneLaserShot = {
+      id: actionId,
+      shooter: username,
+      fromX: origin[0] + direction[0] * fromOffset + Math.cos(yaw) * muzzleSideOffset,
+      fromY: origin[2] + direction[2] * fromOffset - Math.sin(yaw) * muzzleSideOffset,
+      fromHeight: origin[1] + direction[1] * fromOffset - 5,
+      toX: origin[0] + direction[0] * impactDistance,
+      toY: origin[2] + direction[2] * impactDistance,
+      toHeight: origin[1] + direction[1] * impactDistance,
+      durationMs: Math.max(90, Math.min(650, Math.round(Math.max(0, impactDistance - fromOffset) / 6.5))),
+      targetUsername,
+    };
+    const result: CommuneLaserShotResult = { accepted: true, shot };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO commune_laser_shot_limits (username, shot_at) VALUES (?, ?)
+       ON CONFLICT(username) DO UPDATE SET shot_at = excluded.shot_at`,
+      username,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO commune_laser_shot_actions (action_id, username, result_json, created_at)
+       VALUES (?, ?, ?, ?)`,
+      actionId,
+      username,
+      JSON.stringify(result),
+      now,
+    );
+    this.ctx.storage.sql.exec('DELETE FROM commune_laser_shot_actions WHERE created_at < ?', now - 120_000);
+    this.broadcast({ type: 'laser_shot', shot });
+    return Response.json(result);
+  }
+
+  private async handleLaserReward(request: Request): Promise<Response> {
+    const payload = await request.json().catch(() => null) as {
+      username?: unknown;
+      actionId?: unknown;
+      spice?: unknown;
+    } | null;
+    const username = typeof payload?.username === 'string' ? payload.username.trim() : '';
+    const actionId = typeof payload?.actionId === 'string' ? payload.actionId : '';
+    const spice = Number(payload?.spice);
+    if (!username || !/^[\da-f-]{36}$/i.test(actionId) || !Number.isFinite(spice) || spice < 0) {
+      return Response.json({ ok: false }, { status: 400 });
+    }
+    for (const socket of this.ctx.getWebSockets(username)) {
+      send(socket, { type: 'laser_reward', username, actionId, spice });
+    }
+    return Response.json({ ok: true });
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {

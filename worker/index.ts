@@ -1048,6 +1048,14 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            credited INTEGER NOT NULL DEFAULT 0
          )`
       ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_laser_awards (
+           action_id TEXT PRIMARY KEY,
+           username TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           credited INTEGER NOT NULL DEFAULT 0
+         )`
+      ).run();
       // NPC challenge personas — seeded from worker/npc/*.json on first use.
       await env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS npc_personas (
@@ -2431,6 +2439,126 @@ async function handleCommuneSoccerKick(
   });
 }
 
+async function handleCommuneLaserShot(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  const payload = await request.json().catch(() => null) as {
+    actionId?: unknown;
+    yaw?: unknown;
+    pitch?: unknown;
+  } | null;
+  const actionId = typeof payload?.actionId === 'string' ? payload.actionId : '';
+  const yaw = Number(payload?.yaw);
+  const pitch = Number(payload?.pitch);
+  if (
+    !/^[\da-f-]{36}$/i.test(actionId)
+    || !Number.isFinite(yaw)
+    || !Number.isFinite(pitch)
+    || Math.abs(yaw) > 10_000
+    || pitch < -1.25
+    || pitch > 1.25
+  ) {
+    return authJson({ error: 'Invalid laser shot.' }, 400);
+  }
+  await ensureSpiceSchema(env);
+
+  let response: Response;
+  try {
+    response = await env.COMMUNE_ROOM.getByName('main-plaza').fetch(
+      new Request('https://commune-room/internal/minigame/laser-shot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: user.username, actionId, yaw, pitch }),
+      }),
+    );
+  } catch {
+    return authJson({ error: 'The town room is unavailable; reconnect and try again.' }, 503);
+  }
+  const result = await response.json() as {
+    accepted?: boolean;
+    replay?: boolean;
+    shot?: {
+      id: string;
+      shooter: string;
+      fromX: number;
+      fromY: number;
+      fromHeight: number;
+      toX: number;
+      toY: number;
+      toHeight: number;
+      durationMs: number;
+      targetUsername: string | null;
+    };
+    error?: string;
+  };
+  if (!response.ok || !result.accepted || !result.shot) {
+    const message = result.error === 'laser_cooldown'
+      ? 'Laser cooling down — fire no faster than twice per second.'
+      : result.error === 'laser_shooter_unavailable'
+        ? 'Reconnect to the town before firing.'
+        : 'That laser shot could not be fired.';
+    return authJson({ error: message }, response.status);
+  }
+
+  const targetUsername = result.shot.targetUsername;
+  let awarded = 0;
+  let targetSpice: number | null = null;
+  if (targetUsername) {
+    const now = Date.now();
+    const credited = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO commune_laser_awards (action_id, username, created_at, credited)
+         SELECT ?1, username, ?2, 0 FROM auth_users WHERE username = ?3`,
+      ).bind(actionId, now, targetUsername),
+      env.DB.prepare(
+        `UPDATE auth_users SET spice = spice + 1, updated_at = ?2
+         WHERE username = ?1 AND EXISTS (
+           SELECT 1 FROM commune_laser_awards
+           WHERE action_id = ?3 AND username = ?1 AND credited = 0
+         )`,
+      ).bind(targetUsername, now, actionId),
+      env.DB.prepare(
+        `INSERT INTO spice_ledger (username, delta, reason, detail, created_at)
+         SELECT username, 1, 'laser', ?2, ?3 FROM commune_laser_awards
+         WHERE action_id = ?1 AND username = ?4 AND credited = 0`,
+      ).bind(actionId, `hit:${user.username}`, now, targetUsername),
+      env.DB.prepare(
+        `UPDATE commune_laser_awards SET credited = 1
+         WHERE action_id = ?1 AND username = ?2 AND credited = 0`,
+      ).bind(actionId, targetUsername),
+    ]);
+    awarded = credited[1]?.meta.changes ? 1 : 0;
+    const target = await env.DB.prepare(
+      'SELECT spice FROM auth_users WHERE username = ?1',
+    ).bind(targetUsername).first<{ spice: number }>();
+    targetSpice = target ? Number(target.spice ?? 0) : null;
+    if (targetSpice !== null) {
+      try {
+        await env.COMMUNE_ROOM.getByName('main-plaza').fetch(
+          new Request('https://commune-room/internal/minigame/laser-reward', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ username: targetUsername, actionId, spice: targetSpice }),
+          }),
+        );
+      } catch {
+        /* The persisted balance will be visible on the next auth refresh. */
+      }
+    }
+  }
+
+  return authJson({
+    accepted: true,
+    awarded,
+    targetUsername,
+    targetSpice,
+    shot: result.shot,
+    replay: !!result.replay,
+  });
+}
+
 /* ── NPC challenge (remote LLM roleplay) ───────────────────────────────────── */
 
 /** One-time schema + persona seeding — the persona JSON is uploaded into the
@@ -2902,6 +3030,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSoccerKick(request, env, user);
+  }
+  if (path === '/api/commune/laser/fire' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneLaserShot(request, env, user);
   }
   // NPC challenge success award (roleplay calls the shared LLM serving route).
   if (path === '/api/commune/challenge/award' && request.method === 'POST') {

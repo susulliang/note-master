@@ -390,6 +390,32 @@ export interface CommuneSoccerBall {
   by: string | null;
 }
 
+export interface CommuneLaserShot {
+  id: string;
+  shooter: string;
+  fromX: number;
+  fromY: number;
+  fromHeight: number;
+  toX: number;
+  toY: number;
+  toHeight: number;
+  durationMs: number;
+  targetUsername: string | null;
+}
+
+export async function fireCommuneLaser(
+  actionId: string,
+  yaw: number,
+  pitch: number,
+): Promise<{ accepted: boolean; awarded: number; targetUsername: string | null; shot: CommuneLaserShot }> {
+  const token = getStoredToken();
+  return call('/api/commune/laser/fire', {
+    method: 'POST',
+    body: JSON.stringify({ actionId, yaw, pitch }),
+    token,
+  });
+}
+
 export async function startCommuneMiniGame(game: CommuneMiniGame): Promise<{ roundId: string; expiresAt: number }> {
   const token = getStoredToken();
   return call<{ roundId: string; expiresAt: number }>('/api/commune/minigame/start', {

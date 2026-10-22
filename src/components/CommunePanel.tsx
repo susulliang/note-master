@@ -65,6 +65,7 @@ import {
   type CommuneBannerPriority,
   type CommuneBannerStroke,
   type CommuneDrop,
+  type CommuneLaserShot,
   type CommuneLoadout,
   type CommuneMiniGame,
   type CommunePet,
@@ -72,6 +73,7 @@ import {
   type CommuneTreeholeCategory,
   type CommuneTreeholeEntry,
   finishCommuneMiniGame,
+  fireCommuneLaser,
   kickCommuneSoccerBall,
   startCommuneMiniGame,
 } from '@/lib/auth-client';
@@ -85,7 +87,11 @@ import type { RosterAgent } from '@/data/roster';
 import { fetchRosterMonth, subscribeRosterMonth, type RosterCell } from '@/lib/roster-sync';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import type { FaqSearchHit } from '@/utils/productData';
-import { CommuneThreeRenderer, type CommuneThreeFrame } from '@/lib/commune-three-renderer';
+import {
+  CommuneThreeRenderer,
+  type CommuneThreeFrame,
+  type CommuneThreeLaserShot,
+} from '@/lib/commune-three-renderer';
 
 const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 
@@ -273,6 +279,32 @@ const PONDS = [
 function smoothStep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
+}
+
+function parseLaserShot(value: unknown): CommuneLaserShot | null {
+  if (!value || typeof value !== 'object') return null;
+  const shot = value as Record<string, unknown>;
+  const numeric = [
+    shot.fromX, shot.fromY, shot.fromHeight, shot.toX, shot.toY, shot.toHeight, shot.durationMs,
+  ].map(Number);
+  if (
+    typeof shot.id !== 'string'
+    || typeof shot.shooter !== 'string'
+    || numeric.some((item) => !Number.isFinite(item))
+    || (shot.targetUsername !== null && typeof shot.targetUsername !== 'string')
+  ) return null;
+  return {
+    id: shot.id,
+    shooter: shot.shooter,
+    fromX: numeric[0],
+    fromY: numeric[1],
+    fromHeight: numeric[2],
+    toX: numeric[3],
+    toY: numeric[4],
+    toHeight: numeric[5],
+    durationMs: numeric[6],
+    targetUsername: typeof shot.targetUsername === 'string' ? shot.targetUsername : null,
+  };
 }
 
 /** Nightfall follows a fixed GMT+8 clock, independent of the viewer's locale. */
@@ -957,6 +989,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [mapZoom, setMapZoom] = useState(1.5);
   const mapZoomRef = useRef(1.5);
   mapZoomRef.current = mapZoom;
+  const cameraLookRef = useRef({ pitch: 0, yaw: 0 });
+  const [pointerLocked, setPointerLocked] = useState(false);
+  const [laserHitConfirmed, setLaserHitConfirmed] = useState(false);
+  const laserHitTimerRef = useRef<number | null>(null);
+  const laserShotsRef = useRef<CommuneThreeLaserShot[]>([]);
+  const lastLaserFiredAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const appendLaserShot = useCallback((shot: CommuneLaserShot) => {
+    if (laserShotsRef.current.some((current) => current.id === shot.id)) return;
+    laserShotsRef.current = [
+      ...laserShotsRef.current,
+      { ...shot, startedAt: performance.now() / 1000 },
+    ].slice(-32);
+  }, []);
   const [panel, setPanel] = useState<PanelKind>(null);
   const golfRoundRef = useRef({
     roundId: null as string | null,
@@ -1080,10 +1125,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const joystickKnobRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const movementInputRef = useRef({ x: 0, y: 0 });
-  const canvasPointerRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const canvasPointerRef = useRef<{ id: number; x: number; y: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
   const [chatFocused, setChatFocused] = useState(false);
+
+  useEffect(() => {
+    const syncPointerLock = () => setPointerLocked(document.pointerLockElement === canvasRef.current);
+    document.addEventListener('pointerlockchange', syncPointerLock);
+    return () => {
+      document.removeEventListener('pointerlockchange', syncPointerLock);
+      if (document.pointerLockElement === canvasRef.current) document.exitPointerLock();
+      if (laserHitTimerRef.current !== null) window.clearTimeout(laserHitTimerRef.current);
+    };
+  }, []);
 
   const rosterAgents = useMemo(() => getRoster(rosterMonth) ?? [], [rosterMonth]);
   const rosterShiftOf = useCallback((agent: RosterAgent, iso: string) =>
@@ -1755,6 +1810,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               soccerBallRef.current = ball;
               setSoccerBall(ball);
             }
+          } else if (event.type === 'laser_shot') {
+            const shot = parseLaserShot(event.shot);
+            if (shot) appendLaserShot(shot);
+          } else if (
+            event.type === 'laser_reward'
+            && event.username === username
+            && Number.isFinite(Number(event.spice))
+          ) {
+            setSpice(Number(event.spice));
+            playerRef.current.says = {
+              text: 'Tagged by a laser! +1 spice.',
+              until: Date.now() + 3000,
+            };
           } else if (event.type === 'drops' && Array.isArray(event.drops)) {
             dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
           } else if (event.type === 'car_update' && typeof event.carId === 'string') {
@@ -2455,6 +2523,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       last = now;
       lastFrame = now;
       const tSec = now / 1000;
+      laserShotsRef.current = laserShotsRef.current.filter(
+        (shot) => tSec - shot.startedAt <= shot.durationMs / 1000 + 0.12
+      );
       const carFollow = 1 - Math.exp(-dt * 14);
       for (const car of PARKED_CARS) {
         car.x += (car.targetX - car.x) * carFollow;
@@ -2515,28 +2586,49 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       } else if (!panelRef.current && !chatFocusedRef.current) {
         const k = keysRef.current;
         const joystick = movementInputRef.current;
-        let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
-          - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
-        let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
-          - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) + joystick.y;
-        let len = Math.hypot(dx, dy);
-        if (len > 0.12) clickTargetRef.current = null;
-        if (len <= 0.12 && clickTargetRef.current) {
-          const tx = clickTargetRef.current.x - player.x;
-          const ty = clickTargetRef.current.y - player.y;
-          const d = Math.hypot(tx, ty);
-          if (d > 6) {
-            dx = tx / d;
-            dy = ty / d;
-            len = 1;
-          } else {
-            clickTargetRef.current = null;
+        const firstPerson = mapZoomRef.current >= 5;
+        let dx: number;
+        let dy: number;
+        let len: number;
+        if (firstPerson) {
+          const forward = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0)
+            - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - joystick.y;
+          const strafe = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
+            - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
+          const yaw = cameraLookRef.current.yaw;
+          dx = strafe * Math.cos(yaw) + forward * Math.sin(yaw);
+          dy = -strafe * Math.sin(yaw) + forward * Math.cos(yaw);
+          len = Math.hypot(dx, dy);
+          clickTargetRef.current = null;
+        } else {
+          dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
+            - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
+          dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
+            - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) + joystick.y;
+          len = Math.hypot(dx, dy);
+          if (len > 0.12) clickTargetRef.current = null;
+          if (len <= 0.12 && clickTargetRef.current) {
+            const tx = clickTargetRef.current.x - player.x;
+            const ty = clickTargetRef.current.y - player.y;
+            const d = Math.hypot(tx, ty);
+            if (d > 6) {
+              dx = tx / d;
+              dy = ty / d;
+              len = 1;
+            } else {
+              clickTargetRef.current = null;
+            }
           }
         }
         player.moving = len > 0.12;
         if (len > 0.12) {
-          player.headingX = dx / len;
-          player.headingY = dy / len;
+          if (firstPerson) {
+            player.headingX = Math.sin(cameraLookRef.current.yaw);
+            player.headingY = Math.cos(cameraLookRef.current.yaw);
+          } else {
+            player.headingX = dx / len;
+            player.headingY = dy / len;
+          }
           const nx = player.x + (dx / len) * SPEED * dt * Math.min(1, len);
           const ny = player.y + (dy / len) * SPEED * dt * Math.min(1, len);
           moveWithCollision(player, nx, ny);
@@ -2971,6 +3063,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         latestFrame = {
           time: tSec,
           zoom: mapZoomRef.current,
+          cameraPitch: cameraLookRef.current.pitch,
+          cameraYaw: cameraLookRef.current.yaw,
           player: renderedPlayer,
           npcs: npcsRef.current,
           remotes: remoteViews,
@@ -2987,6 +3081,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           bowlingBall: bowlingBallMotionRef.current,
           bowlingPinsDown: bowlingPinsDownRef.current,
           bowlingPinsKnockedAt: bowlingPinsKnockedAtRef.current,
+          laserShots: laserShotsRef.current,
           mower: tRexRef.current,
           mowerTracks: mowerTracksRef.current,
           nightOpacity,
@@ -3031,12 +3126,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
       threeRenderer?.dispose();
     };
-  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, user?.isAdmin]);
+  }, [appendLaserShot, banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, user?.isAdmin, username]);
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
   const handleCanvasTap = (clientX: number, clientY: number) => {
-    if (panelRef.current || playerRef.current.carId) return;
+    if (panelRef.current || playerRef.current.carId || mapZoomRef.current >= 5) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -3261,27 +3356,100 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     stopJoystick(event.pointerId);
   };
 
+  const fireLaser = async () => {
+    if (mapZoomRef.current < 5 || panelRef.current || playerRef.current.carId) return;
+    const now = performance.now();
+    if (now - lastLaserFiredAtRef.current < 500) return;
+    lastLaserFiredAtRef.current = now;
+    try {
+      const result = await fireCommuneLaser(
+        crypto.randomUUID(),
+        cameraLookRef.current.yaw,
+        cameraLookRef.current.pitch
+      );
+      appendLaserShot(result.shot);
+      if (result.awarded > 0) {
+        setLaserHitConfirmed(true);
+        if (laserHitTimerRef.current !== null) window.clearTimeout(laserHitTimerRef.current);
+        laserHitTimerRef.current = window.setTimeout(() => {
+          setLaserHitConfirmed(false);
+          laserHitTimerRef.current = null;
+        }, 280);
+      }
+      playerRef.current.says = {
+        text: result.targetUsername
+          ? `Tagged ${result.targetUsername}! +1 spice for them.`
+          : 'Pew! The laser fizzled into the scenery.',
+        until: Date.now() + 2600,
+      };
+    } catch (error) {
+      playerRef.current.says = {
+        text: error instanceof Error ? error.message : 'Laser unavailable. Try again.',
+        until: Date.now() + 2400,
+      };
+    }
+  };
+
   const onCanvasPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (mapZoomRef.current >= 5 && event.pointerType === 'mouse') {
+      event.currentTarget.focus();
+      if (document.pointerLockElement !== event.currentTarget) {
+        void event.currentTarget.requestPointerLock().catch(() => undefined);
+      } else {
+        void fireLaser();
+      }
+      return;
+    }
     canvasPointerRef.current = {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onCanvasPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointerLocked) return;
     const pointer = canvasPointerRef.current;
-    if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
-    pointer.moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    if (mapZoomRef.current >= 5) {
+      const dx = event.clientX - pointer.lastX;
+      const dy = event.clientY - pointer.lastY;
+      pointer.lastX = event.clientX;
+      pointer.lastY = event.clientY;
+      updateFirstPersonLook(dx, dy, 0.004);
+      pointer.moved ||= Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 6;
+      return;
+    }
+    if (!pointer.moved) pointer.moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12;
+  };
+
+  const updateFirstPersonLook = (dx: number, dy: number, sensitivity: number) => {
+    cameraLookRef.current.yaw -= dx * sensitivity;
+    cameraLookRef.current.pitch = Math.max(
+      -1.2,
+      Math.min(1.2, cameraLookRef.current.pitch - dy * sensitivity)
+    );
+  };
+
+  const onCanvasMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (mapZoomRef.current >= 5 && document.pointerLockElement === event.currentTarget) {
+      updateFirstPersonLook(event.movementX, event.movementY, 0.0025);
+    }
   };
 
   const onCanvasPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const pointer = canvasPointerRef.current;
     canvasPointerRef.current = null;
     if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
+    if (mapZoomRef.current >= 5) {
+      if (event.pointerType !== 'mouse') void fireLaser();
+      return;
+    }
     handleCanvasTap(event.clientX, event.clientY);
   };
 
@@ -3291,16 +3459,30 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const onCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     // Pointer events handle mouse and touch; keep click-only keyboard activation.
-    if (event.detail !== 0) return;
+    if (event.detail !== 0 || mapZoomRef.current >= 5) return;
     handleCanvasTap(event.clientX, event.clientY);
   };
 
+  const changeMapZoom = (value: number) => {
+    const zoom = Number(Math.min(5, Math.max(1, value)).toFixed(2));
+    const wasFirstPerson = mapZoomRef.current >= 5;
+    if (zoom >= 5 && !wasFirstPerson) {
+      const player = playerRef.current;
+      cameraLookRef.current.yaw = Math.atan2(player.headingX ?? 0, player.headingY ?? 1);
+    } else if (zoom < 5 && wasFirstPerson && document.pointerLockElement === canvasRef.current) {
+      document.exitPointerLock();
+    }
+    mapZoomRef.current = zoom;
+    if (zoom >= 5) clickTargetRef.current = null;
+    setMapZoom(zoom);
+  };
+
   const adjustMapZoom = (delta: number) => {
-    setMapZoom((current) => Number(Math.min(4, Math.max(1.5, current + delta)).toFixed(2)));
+    changeMapZoom(mapZoomRef.current + delta);
   };
 
   const onMapZoomChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setMapZoom(Number(event.currentTarget.value));
+    changeMapZoom(Number(event.currentTarget.value));
   };
 
   const onCanvasWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -3367,12 +3549,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onPointerMove={onCanvasPointerMove}
         onPointerUp={onCanvasPointerUp}
         onPointerCancel={onCanvasPointerCancel}
+        onMouseMove={onCanvasMouseMove}
         onClick={onCanvasClick}
         onWheel={onCanvasWheel}
-        className="absolute inset-0 cursor-crosshair outline-none"
+        className={cn(
+          'absolute inset-0 outline-none',
+          mapZoom >= 5 && pointerLocked ? 'cursor-none' : 'cursor-crosshair'
+        )}
         role="application"
-        aria-label="COMMUNE town square. Tap the ground to walk. On touchscreens, use the left joystick and nearby action buttons. Keyboard: WASD or arrow keys to move, E and H to interact."
-        style={{ touchAction: 'manipulation' }}
+        aria-label="COMMUNE town square. Zoom to 5x for first-person view. Click to capture the mouse; use WASD to move and the mouse to look."
+        style={{ touchAction: mapZoom >= 5 ? 'none' : 'manipulation' }}
         tabIndex={0}
       />
       <canvas
@@ -3380,6 +3566,44 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         className="pointer-events-none absolute inset-0 size-full"
         aria-hidden="true"
       />
+      {mapZoom >= 5 && (
+        <div
+          role="img"
+          aria-label={laserHitConfirmed ? 'Laser hit confirmed' : 'Laser aiming crosshair'}
+          className={cn(
+            'pointer-events-none absolute left-1/2 top-1/2 z-20 size-5 -translate-x-1/2 -translate-y-1/2 transition-transform duration-100',
+            laserHitConfirmed
+              ? 'scale-125 text-white drop-shadow-[0_0_6px_rgba(255,255,255,1)]'
+              : 'text-cyan-200 drop-shadow-[0_0_4px_rgba(98,242,255,0.9)]'
+          )}
+        >
+          {laserHitConfirmed && (
+            <svg className="absolute -inset-2 size-9" viewBox="0 0 36 36" aria-hidden="true">
+              <path
+                d="M6 6l7 7M30 6l-7 7M6 30l7-7M30 30l-7-7"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="square"
+                strokeWidth="2"
+              />
+            </svg>
+          )}
+          <span className="absolute left-1/2 top-0 h-1.5 w-px -translate-x-1/2 bg-current" />
+          <span className="absolute bottom-0 left-1/2 h-1.5 w-px -translate-x-1/2 bg-current" />
+          <span className="absolute left-0 top-1/2 h-px w-1.5 -translate-y-1/2 bg-current" />
+          <span className="absolute right-0 top-1/2 h-px w-1.5 -translate-y-1/2 bg-current" />
+          <span className="absolute left-1/2 top-1/2 size-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        </div>
+      )}
+      {mapZoom >= 5 && (
+        <div className="pointer-events-none absolute bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/25 bg-slate-950/55 px-3 py-1.5 font-mono text-[10px] text-white/85 shadow-lg backdrop-blur-sm">
+          {touchControls
+            ? 'JOYSTICK MOVE · DRAG TO LOOK · TAP TO FIRE'
+            : pointerLocked
+              ? 'WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · ESC RELEASE'
+              : 'CLICK TO CAPTURE MOUSE · LEFT CLICK FIRE'}
+        </div>
+      )}
 
       {touchControls && !panel && !chatFocused && (
         <div
@@ -3387,20 +3611,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-label="Map zoom controls"
           className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full border border-white/30 bg-slate-950/30 px-2 py-3 shadow-lg backdrop-blur-sm"
         >
-          <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">ZOOM</span>
+          <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">{mapZoom >= 5 ? 'FPV' : 'ZOOM'}</span>
           <input
             type="range"
-            min="1.5"
-            max="4"
+            min="1"
+            max="5"
             step="0.05"
             value={mapZoom}
             onChange={onMapZoomChange}
-            aria-label="Map zoom"
+            aria-label="Map zoom, 5x switches to first-person view"
             className="h-32 w-6 accent-primary"
             style={{ writingMode: 'vertical-lr', direction: 'rtl', touchAction: 'none' }}
           />
           <output className="font-mono text-[9px] font-bold tabular-nums text-white/80">
-            {mapZoom.toFixed(1)}x
+            {mapZoom >= 5 ? 'FPV' : `${mapZoom.toFixed(1)}x`}
           </output>
         </div>
       )}
@@ -3611,11 +3835,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           >
             −
           </button>
-          <output className="min-w-9 text-center tabular-nums">{mapZoom.toFixed(1)}x</output>
+          <output className="min-w-9 text-center tabular-nums">{mapZoom >= 5 ? 'FPV' : `${mapZoom.toFixed(1)}x`}</output>
           <button
             type="button"
             onClick={() => adjustMapZoom(0.25)}
-            aria-label="Zoom in map"
+            aria-label={mapZoom >= 5 ? 'First-person view active' : 'Zoom in map'}
+            disabled={mapZoom >= 5}
             className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             +

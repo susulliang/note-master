@@ -96,9 +96,25 @@ type RenderMower = {
 };
 type RenderMowerTrack = { fromX: number; fromY: number; x: number; y: number; at: number };
 
+export interface CommuneThreeLaserShot {
+  id: string;
+  shooter: string;
+  fromX: number;
+  fromY: number;
+  fromHeight: number;
+  toX: number;
+  toY: number;
+  toHeight: number;
+  durationMs: number;
+  targetUsername: string | null;
+  startedAt: number;
+}
+
 export interface CommuneThreeFrame {
   time: number;
   zoom: number;
+  cameraPitch: number;
+  cameraYaw: number;
   player: RenderActor;
   npcs: readonly RenderActor[];
   remotes: readonly RenderActor[];
@@ -115,6 +131,7 @@ export interface CommuneThreeFrame {
   bowlingBall: RenderPhysicsBall;
   bowlingPinsDown: readonly number[];
   bowlingPinsKnockedAt: number;
+  laserShots: readonly CommuneThreeLaserShot[];
   mower: RenderMower;
   mowerTracks: readonly RenderMowerTrack[];
   nightOpacity: number;
@@ -328,6 +345,8 @@ export class CommuneThreeRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 9000);
+  private readonly perspectiveCamera = new THREE.PerspectiveCamera(68, 1, 0.5, 9000);
+  private activeCamera: THREE.Camera = this.camera;
   private readonly raycaster = new THREE.Raycaster();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly rayPoint = new THREE.Vector3();
@@ -351,7 +370,13 @@ export class CommuneThreeRenderer {
   private readonly actorHead: THREE.InstancedMesh;
   private readonly actorHair: THREE.InstancedMesh;
   private readonly actorLegs: THREE.InstancedMesh;
+  private readonly actorArms: THREE.InstancedMesh;
+  private readonly actorHands: THREE.InstancedMesh;
   private readonly actorShadows: THREE.InstancedMesh;
+  private readonly firstPersonArms = new THREE.Group();
+  private readonly skyMaterial: THREE.ShaderMaterial;
+  private readonly skyMesh: THREE.Mesh;
+  private readonly boundaryGroup = new THREE.Group();
   private readonly petBodies: THREE.InstancedMesh;
   private readonly petHeads: THREE.InstancedMesh;
   private readonly petEars: THREE.InstancedMesh;
@@ -377,6 +402,8 @@ export class CommuneThreeRenderer {
   private readonly mowerBeam: THREE.Mesh;
   private readonly mowerTrackGeometry = new THREE.BufferGeometry();
   private readonly mowerTrackMesh: THREE.LineSegments;
+  private readonly laserLines = new Map<string, THREE.Line>();
+  private readonly laserImpactMeshes = new Map<string, THREE.Mesh>();
   private readonly cars = new Map<string, THREE.Group>();
   private readonly canvas: HTMLCanvasElement;
   private readonly labels: HTMLCanvasElement;
@@ -433,6 +460,37 @@ export class CommuneThreeRenderer {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor('#78956f');
     this.camera.up.set(0, 1, 0);
+    this.perspectiveCamera.up.set(0, 1, 0);
+    this.perspectiveCamera.add(this.firstPersonArms);
+    this.skyMaterial = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: { night: { value: 0 } },
+      vertexShader: `
+        varying float vHeight;
+        void main() {
+          vHeight = normalize(position).y;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float night;
+        varying float vHeight;
+        void main() {
+          vec3 dayHorizon = vec3(0.78, 0.84, 0.77);
+          vec3 dayZenith = vec3(0.20, 0.43, 0.66);
+          vec3 nightHorizon = vec3(0.10, 0.16, 0.25);
+          vec3 nightZenith = vec3(0.025, 0.055, 0.12);
+          float gradient = smoothstep(-0.06, 0.66, vHeight);
+          vec3 dayColor = mix(dayHorizon, dayZenith, gradient);
+          vec3 nightColor = mix(nightHorizon, nightZenith, gradient);
+          gl_FragColor = vec4(mix(dayColor, nightColor, night), 1.0);
+        }
+      `,
+    });
+    this.skyMesh = new THREE.Mesh(new THREE.SphereGeometry(7000, 32, 20), this.skyMaterial);
+    this.skyMesh.frustumCulled = false;
+    this.scene.add(this.skyMesh, this.boundaryGroup, this.perspectiveCamera);
 
     this.ambient = new THREE.AmbientLight('#e4f1d8', 1.35);
     this.sun = new THREE.DirectionalLight('#fff2d4', 1.5);
@@ -455,8 +513,42 @@ export class CommuneThreeRenderer {
     this.actorHead = makeInstanceMesh(new THREE.DodecahedronGeometry(9, 0), '#e9c49e', MAX_ACTORS);
     this.actorHair = makeInstanceMesh(new THREE.DodecahedronGeometry(10, 0), '#493a33', MAX_ACTORS);
     this.actorLegs = makeInstanceMesh(new THREE.BoxGeometry(6, 12, 6), '#353b42', MAX_ACTORS * 2);
+    this.actorArms = makeInstanceMesh(new THREE.CapsuleGeometry(3.2, 9, 2, 5), '#ffffff', MAX_ACTORS * 2);
+    this.actorHands = makeInstanceMesh(new THREE.SphereGeometry(3.2, 6, 5), '#eec39a', MAX_ACTORS * 2);
     this.actorShadows = makeInstanceMesh(new THREE.CircleGeometry(12, 7), '#15251c', MAX_ACTORS, true);
-    this.scene.add(this.actorShadows, this.actorLegs, this.actorBody, this.actorHead, this.actorHair);
+    this.scene.add(this.actorShadows, this.actorLegs, this.actorArms, this.actorHands, this.actorBody, this.actorHead, this.actorHair);
+
+    const sleeveMaterial = material('#d97757');
+    const handMaterial = material('#eec39a');
+    for (const side of [-1, 1]) {
+      const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.42, 0.2), sleeveMaterial);
+      sleeve.position.set(side * 0.34, -0.28, -0.82);
+      sleeve.rotation.z = side * -0.32;
+      sleeve.castShadow = false;
+      this.firstPersonArms.add(sleeve);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.105, 7, 6), handMaterial);
+      hand.position.set(side * 0.24, -0.42, -0.88);
+      hand.castShadow = false;
+      this.firstPersonArms.add(hand);
+    }
+    const gunMetal = material('#28323a');
+    const gunDark = material('#151c22');
+    const gunGlow = new THREE.MeshBasicMaterial({ color: '#62f2ff' });
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.15, 0.4), gunMetal);
+    gunBody.position.set(0.31, -0.3, -0.72);
+    this.firstPersonArms.add(gunBody);
+    const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.23, 0.17), gunDark);
+    gunGrip.position.set(0.34, -0.44, -0.57);
+    gunGrip.rotation.z = -0.18;
+    this.firstPersonArms.add(gunGrip);
+    const gunBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.27), gunDark);
+    gunBarrel.position.set(0.31, -0.26, -1.02);
+    this.firstPersonArms.add(gunBarrel);
+    const emitter = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.075, 8), gunGlow);
+    emitter.rotation.x = -Math.PI / 2;
+    emitter.position.set(0.31, -0.26, -1.18);
+    this.firstPersonArms.add(emitter);
+    for (const mesh of [gunBody, gunGrip, gunBarrel, emitter]) mesh.castShadow = false;
 
     this.petBodies = makeInstanceMesh(new THREE.DodecahedronGeometry(8, 0), '#d5c2a1', MAX_ACTORS);
     this.petHeads = makeInstanceMesh(new THREE.DodecahedronGeometry(5, 0), '#d5c2a1', MAX_ACTORS);
@@ -594,6 +686,8 @@ export class CommuneThreeRenderer {
     this.camera.top = height * 1.05;
     this.camera.bottom = -height * 1.05;
     this.camera.updateProjectionMatrix();
+    this.perspectiveCamera.aspect = width / height;
+    this.perspectiveCamera.updateProjectionMatrix();
   }
 
   screenToWorld(clientX: number, clientY: number, rect: DOMRect): { x: number; y: number } | null {
@@ -602,7 +696,7 @@ export class CommuneThreeRenderer {
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
-    this.raycaster.setFromCamera(this.ndc, this.camera);
+    this.raycaster.setFromCamera(this.ndc, this.activeCamera);
     const point = this.raycaster.ray.intersectPlane(this.groundPlane, this.rayPoint);
     if (!point) return null;
     return {
@@ -613,11 +707,16 @@ export class CommuneThreeRenderer {
 
   render(frame: CommuneThreeFrame): void {
     if (!this.width || !this.height) return;
-    const zoom = THREE.MathUtils.clamp(frame.zoom, 1.5, 4);
+    const firstPerson = frame.zoom >= 5;
+    const zoom = THREE.MathUtils.clamp(frame.zoom, 1, 4.95);
     if (Math.abs(this.camera.zoom - zoom) > 0.001) {
       this.camera.zoom = zoom;
       this.camera.updateProjectionMatrix();
     }
+    this.activeCamera = firstPerson ? this.perspectiveCamera : this.camera;
+    this.skyMesh.visible = firstPerson;
+    this.boundaryGroup.visible = firstPerson;
+    this.firstPersonArms.visible = firstPerson;
     const delta = this.lastRenderTime
       ? THREE.MathUtils.clamp(frame.time - this.lastRenderTime, 0, 0.05)
       : 1 / 60;
@@ -630,16 +729,32 @@ export class CommuneThreeRenderer {
       this.focus.x += (frame.player.x - this.focus.x) * follow;
       this.focus.z += (frame.player.y - this.focus.z) * follow;
     }
-    this.lookAt.set(this.focus.x, 0, this.focus.z);
-    this.camera.position.set(this.focus.x + 1150, 1450, this.focus.z + 1150);
-    this.camera.lookAt(this.lookAt);
-    this.camera.updateMatrixWorld();
+    if (firstPerson) {
+      const yaw = frame.cameraYaw;
+      const pitch = THREE.MathUtils.clamp(frame.cameraPitch, -1.25, 1.25);
+      const horizontal = Math.cos(pitch);
+      this.perspectiveCamera.position.set(this.focus.x, 55, this.focus.z);
+      this.lookAt.set(
+        this.focus.x + Math.sin(yaw) * horizontal * 180,
+        55 + Math.sin(pitch) * 180,
+        this.focus.z + Math.cos(yaw) * horizontal * 180
+      );
+      this.perspectiveCamera.lookAt(this.lookAt);
+      this.perspectiveCamera.updateMatrixWorld();
+    } else {
+      this.lookAt.set(this.focus.x, 0, this.focus.z);
+      this.camera.position.set(this.focus.x + 1150, 1450, this.focus.z + 1150);
+      this.camera.lookAt(this.lookAt);
+      this.camera.updateMatrixWorld();
+    }
 
     const night = THREE.MathUtils.clamp(frame.nightOpacity / 0.54, 0, 1);
     this.ambient.intensity = 1.35 - night * 0.78;
     this.sun.intensity = 1.5 - night * 1.1;
     this.ambient.color.copy(this.dayLightColor).lerp(this.nightLightColor, night);
     this.sun.color.copy(this.daySunColor).lerp(this.nightSunColor, night);
+    this.skyMaterial.uniforms.night.value = night;
+    this.skyMesh.position.set(this.focus.x, 0, this.focus.z);
     this.sunTarget.position.set(this.focus.x, 0, this.focus.z);
     this.sun.position.set(this.focus.x - 850, 1650, this.focus.z + 1050);
     this.sun.target.updateMatrixWorld();
@@ -654,9 +769,10 @@ export class CommuneThreeRenderer {
     this.updatePhysicsBall(this.golfBallMesh, frame.golfBall);
     this.updatePhysicsBall(this.bowlingBallMesh, frame.bowlingBall);
     this.updateBowlingPins(frame.bowlingPinsDown, frame.bowlingPinsKnockedAt, frame.time * 1000);
+    this.updateLaserShots(frame.laserShots, frame.time);
     this.updateMower(frame.mower, frame.mowerTracks, frame.time, frame.reduceMotion);
     this.drawLabels(frame);
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.activeCamera);
   }
 
   dispose(): void {
@@ -670,6 +786,87 @@ export class CommuneThreeRenderer {
     });
   }
 
+  private updateLaserShots(shots: readonly CommuneThreeLaserShot[], time: number): void {
+    const liveIds = new Set<string>();
+    for (const shot of shots) {
+      const flightSeconds = Math.max(0.08, shot.durationMs / 1000);
+      const age = time - shot.startedAt;
+      if (age < 0 || age > flightSeconds + 0.12) continue;
+      liveIds.add(shot.id);
+
+      let beam = this.laserLines.get(shot.id);
+      if (!beam) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+        beam = new THREE.Line(
+          geometry,
+          new THREE.LineBasicMaterial({
+            color: '#62f2ff',
+            transparent: true,
+            opacity: 0.96,
+            depthWrite: false,
+          })
+        );
+        beam.frustumCulled = false;
+        this.laserLines.set(shot.id, beam);
+        this.scene.add(beam);
+      }
+
+      const progress = THREE.MathUtils.clamp(age / flightSeconds, 0, 1);
+      const x = shot.fromX + (shot.toX - shot.fromX) * progress;
+      const z = shot.fromY + (shot.toY - shot.fromY) * progress;
+      const y = shot.fromHeight + (shot.toHeight - shot.fromHeight) * progress;
+      const positions = beam.geometry.getAttribute('position') as THREE.BufferAttribute;
+      positions.setXYZ(0, shot.fromX, shot.fromHeight, shot.fromY);
+      positions.setXYZ(1, x, y, z);
+      positions.needsUpdate = true;
+      beam.geometry.computeBoundingSphere();
+      const material = beam.material as THREE.LineBasicMaterial;
+      material.opacity = age > flightSeconds
+        ? 0.96 * (1 - (age - flightSeconds) / 0.12)
+        : 0.96;
+      if (age >= flightSeconds) {
+        let impact = this.laserImpactMeshes.get(shot.id);
+        if (!impact) {
+          impact = new THREE.Mesh(
+            new THREE.SphereGeometry(3.5, 8, 6),
+            new THREE.MeshBasicMaterial({
+              color: shot.targetUsername ? '#f4fdff' : '#62f2ff',
+              transparent: true,
+              opacity: 0.9,
+              depthWrite: false,
+            })
+          );
+          this.laserImpactMeshes.set(shot.id, impact);
+          this.scene.add(impact);
+        }
+        impact.visible = true;
+        impact.position.set(shot.toX, shot.toHeight, shot.toY);
+        const pulse = 1 + Math.sin((age - flightSeconds) * 36) * 0.22;
+        impact.scale.setScalar(pulse);
+        (impact.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - (age - flightSeconds) / 0.12);
+      } else {
+        const impact = this.laserImpactMeshes.get(shot.id);
+        if (impact) impact.visible = false;
+      }
+    }
+
+    for (const [id, beam] of this.laserLines) {
+      if (liveIds.has(id)) continue;
+      this.scene.remove(beam);
+      beam.geometry.dispose();
+      (beam.material as THREE.Material).dispose();
+      this.laserLines.delete(id);
+      const impact = this.laserImpactMeshes.get(id);
+      if (impact) {
+        this.scene.remove(impact);
+        impact.geometry.dispose();
+        (impact.material as THREE.Material).dispose();
+        this.laserImpactMeshes.delete(id);
+      }
+    }
+  }
+
   private buildWorld(): void {
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_W, WORLD_H),
@@ -679,6 +876,25 @@ export class CommuneThreeRenderer {
     ground.position.set(WORLD_W / 2, -5, WORLD_H / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
+
+    this.boundaryGroup.visible = false;
+    const boundary = '#66745d';
+    const boundaryTop = '#a0a879';
+    addBox(this.boundaryGroup, -12, 0, WORLD_H / 2, 24, 180, WORLD_H + 24, boundary);
+    addBox(this.boundaryGroup, WORLD_W + 12, 0, WORLD_H / 2, 24, 180, WORLD_H + 24, boundary);
+    addBox(this.boundaryGroup, WORLD_W / 2, 0, -12, WORLD_W + 24, 180, 24, boundary);
+    addBox(this.boundaryGroup, WORLD_W / 2, 0, WORLD_H + 12, WORLD_W + 24, 180, 24, boundary);
+    addBox(this.boundaryGroup, -12, 180, WORLD_H / 2, 24, 16, WORLD_H + 24, boundaryTop);
+    addBox(this.boundaryGroup, WORLD_W + 12, 180, WORLD_H / 2, 24, 16, WORLD_H + 24, boundaryTop);
+    addBox(this.boundaryGroup, WORLD_W / 2, 180, -12, WORLD_W + 24, 16, 24, boundaryTop);
+    addBox(this.boundaryGroup, WORLD_W / 2, 180, WORLD_H + 12, WORLD_W + 24, 16, 24, boundaryTop);
+    this.boundaryGroup.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
+        object.material.side = THREE.DoubleSide;
+        object.castShadow = false;
+        object.receiveShadow = false;
+      }
+    });
 
     addGroundDisc(this.scene, 800, 620, 320, 270, '#b9b18b', 5, 32);
     addGroundDisc(this.scene, 800, 620, 278, 232, '#c6bc91', 2, 32);
@@ -1078,6 +1294,9 @@ export class CommuneThreeRenderer {
       const shirtColor = actor.avatar?.shirt ?? actor.hue;
       const hairColor = actor.avatar?.hair ?? '#493a33';
       const bottomColor = actor.avatar?.bottomColor ?? '#424a4e';
+      const sleeveColor = typeof shirtColor === 'number'
+        ? new THREE.Color().setHSL(((shirtColor % 360) + 360) % 360 / 360, 0.52, 0.48)
+        : new THREE.Color(shirtColor);
       const previousColors = this.actorColorSlots[index];
       if (
         !previousColors
@@ -1095,6 +1314,8 @@ export class CommuneThreeRenderer {
         this.actorHair.setColorAt(index, TEMP_COLOR.set(hairColor));
         for (let leg = 0; leg < 2; leg++) {
           this.actorLegs.setColorAt(index * 2 + leg, TEMP_COLOR.set(bottomColor));
+          this.actorArms.setColorAt(index * 2 + leg, sleeveColor);
+          this.actorHands.setColorAt(index * 2 + leg, TEMP_COLOR.set('#eec39a'));
         }
         const slot = previousColors ?? { id: '', shirt: '', hair: '', bottom: '' };
         slot.id = actorId;
@@ -1107,17 +1328,18 @@ export class CommuneThreeRenderer {
 
       this.transform.position.set(x, 25 + bob, z);
       this.transform.rotation.set(0, heading, 0);
-      this.transform.scale.set(car ? 0.74 : 1, car ? 0.74 : 1, car ? 0.74 : 1);
+      const hideFirstPersonHead = index === 0 && frame.zoom >= 5;
+      this.transform.scale.set(hideFirstPersonHead ? 0 : car ? 0.74 : 1, hideFirstPersonHead ? 0 : car ? 0.74 : 1, hideFirstPersonHead ? 0 : car ? 0.74 : 1);
       setInstance(this.actorBody, index, this.transform);
 
       this.transform.position.set(x, 43 + bob, z);
       this.transform.rotation.set(0, heading, 0);
-      this.transform.scale.set(1, 1, 1);
+      this.transform.scale.setScalar(hideFirstPersonHead ? 0 : 1);
       setInstance(this.actorHead, index, this.transform);
 
       this.transform.position.set(x - headingX, 51 + bob, z - headingY);
       this.transform.rotation.set(0, heading, 0);
-      this.transform.scale.set(1.02, 0.34, 0.92);
+      this.transform.scale.set(hideFirstPersonHead ? 0 : 1.02, hideFirstPersonHead ? 0 : 0.34, hideFirstPersonHead ? 0 : 0.92);
       setInstance(this.actorHair, index, this.transform);
 
       this.transform.position.set(x, 2, z);
@@ -1126,17 +1348,27 @@ export class CommuneThreeRenderer {
       setInstance(this.actorShadows, index, this.transform);
 
       for (let leg = 0; leg < 2; leg++) {
-        const legIndex = index * 2 + leg;
-        const side = leg ? 4 : -4;
+        const limbIndex = index * 2 + leg;
+        const side = leg ? 10 : -10;
         const step = leg ? stride : -stride;
         this.transform.position.set(
           x - headingY * side + headingX * step,
-          9 + bob,
+          25 + bob,
           z + headingX * side + headingY * step
         );
         this.transform.rotation.set(0, heading, 0);
         this.transform.scale.set(1, 1, 1);
-        setInstance(this.actorLegs, legIndex, this.transform);
+        setInstance(this.actorArms, limbIndex, this.transform);
+        this.transform.position.y = 16 + bob + Math.abs(step) * 0.35;
+        setInstance(this.actorHands, limbIndex, this.transform);
+
+        this.transform.position.set(
+          x - headingY * (leg ? 4 : -4) + headingX * step,
+          9 + bob,
+          z + headingX * (leg ? 4 : -4) + headingY * step
+        );
+        this.transform.scale.set(1, 1, 1);
+        setInstance(this.actorLegs, limbIndex, this.transform);
       }
     }
     this.actorBody.count = count;
@@ -1144,11 +1376,13 @@ export class CommuneThreeRenderer {
     this.actorHair.count = count;
     this.actorShadows.count = count;
     this.actorLegs.count = count * 2;
-    for (const mesh of [this.actorBody, this.actorHead, this.actorHair, this.actorLegs, this.actorShadows]) {
+    this.actorArms.count = count * 2;
+    this.actorHands.count = count * 2;
+    for (const mesh of [this.actorBody, this.actorHead, this.actorHair, this.actorLegs, this.actorArms, this.actorHands, this.actorShadows]) {
       mesh.instanceMatrix.needsUpdate = true;
     }
     if (colorsChanged) {
-      for (const mesh of [this.actorBody, this.actorHair, this.actorLegs]) {
+      for (const mesh of [this.actorBody, this.actorHair, this.actorLegs, this.actorArms, this.actorHands]) {
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
     }
@@ -1418,7 +1652,7 @@ export class CommuneThreeRenderer {
     ctx.setTransform(this.labelPixelRatio, 0, 0, this.labelPixelRatio, 0, 0);
     ctx.clearRect(0, 0, this.width, this.height);
     for (const landmark of LANDMARKS) {
-      this.projectedPoint.set(landmark.x, landmark.height, landmark.z).project(this.camera);
+      this.projectedPoint.set(landmark.x, landmark.height, landmark.z).project(this.activeCamera);
       const point = this.projectedPoint;
       if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
       drawLabel(
@@ -1430,7 +1664,7 @@ export class CommuneThreeRenderer {
       );
     }
     const mower = frame.mower;
-    this.projectedPoint.set(mower.x, 55, mower.y).project(this.camera);
+    this.projectedPoint.set(mower.x, 55, mower.y).project(this.activeCamera);
     if (
       this.projectedPoint.z >= -1 && this.projectedPoint.z <= 1
       && Math.abs(this.projectedPoint.x) <= 1.08 && Math.abs(this.projectedPoint.y) <= 1.1
@@ -1452,7 +1686,8 @@ export class CommuneThreeRenderer {
       const bob = actor.moving && !frame.reduceMotion
         ? Math.abs(Math.sin(frame.time * 10 + (actor.bobPhase ?? 0))) * 2
         : 0;
-      this.projectedPoint.set(actorX, 66 + bob, actorZ).project(this.camera);
+      if (actor === frame.player && frame.zoom >= 5) return;
+      this.projectedPoint.set(actorX, 66 + bob, actorZ).project(this.activeCamera);
       const point = this.projectedPoint;
       if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) return;
       const pixelStep = 1 / this.labelPixelRatio;
