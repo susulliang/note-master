@@ -995,10 +995,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const laserHitTimerRef = useRef<number | null>(null);
   const laserShotsRef = useRef<CommuneThreeLaserShot[]>([]);
   const lastLaserFiredAtRef = useRef(Number.NEGATIVE_INFINITY);
-  const appendLaserShot = useCallback((shot: CommuneLaserShot) => {
-    if (laserShotsRef.current.some((current) => current.id === shot.id)) return;
+  const upsertLaserShot = useCallback((shot: CommuneLaserShot) => {
     laserShotsRef.current = [
-      ...laserShotsRef.current,
+      ...laserShotsRef.current.filter((current) => current.id !== shot.id),
       { ...shot, startedAt: performance.now() / 1000 },
     ].slice(-32);
   }, []);
@@ -1812,7 +1811,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             }
           } else if (event.type === 'laser_shot') {
             const shot = parseLaserShot(event.shot);
-            if (shot) appendLaserShot(shot);
+            if (shot) upsertLaserShot(shot);
           } else if (
             event.type === 'laser_reward'
             && event.username === username
@@ -3126,7 +3125,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
       threeRenderer?.dispose();
     };
-  }, [appendLaserShot, banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, user?.isAdmin, username]);
+  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, upsertLaserShot, user?.isAdmin, username]);
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
@@ -3361,13 +3360,35 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const now = performance.now();
     if (now - lastLaserFiredAtRef.current < 500) return;
     lastLaserFiredAtRef.current = now;
+    const actionId = crypto.randomUUID();
+    const yaw = cameraLookRef.current.yaw;
+    const pitch = cameraLookRef.current.pitch;
+    const directionX = Math.sin(yaw) * Math.cos(pitch);
+    const directionY = Math.cos(yaw) * Math.cos(pitch);
+    const player = playerRef.current;
+
+    // Render locally first so the weapon has immediate feedback even when the
+    // authoritative room request is delayed or unavailable.
+    upsertLaserShot({
+      id: actionId,
+      shooter: player.name,
+      fromX: player.x + directionX * 8 + Math.cos(yaw) * 6,
+      fromY: player.y + directionY * 8 - Math.sin(yaw) * 6,
+      fromHeight: 50 + Math.sin(pitch) * 8,
+      toX: player.x + directionX * 1_800,
+      toY: player.y + directionY * 1_800,
+      toHeight: 55 + Math.sin(pitch) * 1_800,
+      durationMs: 720,
+      targetUsername: null,
+    });
     try {
       const result = await fireCommuneLaser(
-        crypto.randomUUID(),
-        cameraLookRef.current.yaw,
-        cameraLookRef.current.pitch
+        actionId,
+        yaw,
+        pitch
       );
-      appendLaserShot(result.shot);
+      // Replace the prediction with the shared, server-resolved impact.
+      upsertLaserShot(result.shot);
       if (result.awarded > 0) {
         setLaserHitConfirmed(true);
         if (laserHitTimerRef.current !== null) window.clearTimeout(laserHitTimerRef.current);

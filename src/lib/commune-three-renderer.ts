@@ -402,7 +402,7 @@ export class CommuneThreeRenderer {
   private readonly mowerBeam: THREE.Mesh;
   private readonly mowerTrackGeometry = new THREE.BufferGeometry();
   private readonly mowerTrackMesh: THREE.LineSegments;
-  private readonly laserLines = new Map<string, THREE.Line>();
+  private readonly laserBeams = new Map<string, THREE.Mesh>();
   private readonly laserImpactMeshes = new Map<string, THREE.Mesh>();
   private readonly cars = new Map<string, THREE.Group>();
   private readonly canvas: HTMLCanvasElement;
@@ -794,21 +794,21 @@ export class CommuneThreeRenderer {
       if (age < 0 || age > flightSeconds + 0.12) continue;
       liveIds.add(shot.id);
 
-      let beam = this.laserLines.get(shot.id);
+      let beam = this.laserBeams.get(shot.id);
       if (!beam) {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-        beam = new THREE.Line(
-          geometry,
-          new THREE.LineBasicMaterial({
+        beam = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.4, 2.4, 1, 10),
+          new THREE.MeshBasicMaterial({
             color: '#62f2ff',
             transparent: true,
             opacity: 0.96,
             depthWrite: false,
+            depthTest: false,
+            blending: THREE.AdditiveBlending,
           })
         );
         beam.frustumCulled = false;
-        this.laserLines.set(shot.id, beam);
+        this.laserBeams.set(shot.id, beam);
         this.scene.add(beam);
       }
 
@@ -816,12 +816,13 @@ export class CommuneThreeRenderer {
       const x = shot.fromX + (shot.toX - shot.fromX) * progress;
       const z = shot.fromY + (shot.toY - shot.fromY) * progress;
       const y = shot.fromHeight + (shot.toHeight - shot.fromHeight) * progress;
-      const positions = beam.geometry.getAttribute('position') as THREE.BufferAttribute;
-      positions.setXYZ(0, shot.fromX, shot.fromHeight, shot.fromY);
-      positions.setXYZ(1, x, y, z);
-      positions.needsUpdate = true;
-      beam.geometry.computeBoundingSphere();
-      const material = beam.material as THREE.LineBasicMaterial;
+      const from = new THREE.Vector3(shot.fromX, shot.fromHeight, shot.fromY);
+      const to = new THREE.Vector3(x, y, z);
+      const distance = from.distanceTo(to);
+      beam.position.copy(from).lerp(to, 0.5);
+      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.sub(from).normalize());
+      beam.scale.set(1, Math.max(1, distance), 1);
+      const material = beam.material as THREE.MeshBasicMaterial;
       material.opacity = age > flightSeconds
         ? 0.96 * (1 - (age - flightSeconds) / 0.12)
         : 0.96;
@@ -851,12 +852,12 @@ export class CommuneThreeRenderer {
       }
     }
 
-    for (const [id, beam] of this.laserLines) {
+    for (const [id, beam] of this.laserBeams) {
       if (liveIds.has(id)) continue;
       this.scene.remove(beam);
       beam.geometry.dispose();
       (beam.material as THREE.Material).dispose();
-      this.laserLines.delete(id);
+      this.laserBeams.delete(id);
       const impact = this.laserImpactMeshes.get(id);
       if (impact) {
         this.scene.remove(impact);
