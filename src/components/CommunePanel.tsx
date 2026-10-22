@@ -185,6 +185,66 @@ function createTRexState(): TRexState {
   };
 }
 
+function parseTRexState(value: unknown): TRexState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const modes: TRexMode[] = ['mowing', 'zoomies', 'confused', 'napping', 'reverse'];
+  const numericKeys = [
+    'x', 'y', 'heading', 'modeStartedAt', 'modeUntil', 'nextMoodAt',
+    'panicCooldownUntil', 'lawnIndex', 'rowIndex', 'rowPass', 'rowDirection',
+    'pathIndex', 'goalX', 'goalY', 'lastTrackX', 'lastTrackY', 'trackDistance',
+  ] as const;
+  if (
+    !modes.includes(input.mode as TRexMode)
+    || numericKeys.some((key) => !Number.isFinite(Number(input[key])))
+    || !Array.isArray(input.path)
+    || input.path.length > 256
+  ) return null;
+
+  const path = input.path.flatMap((point) => {
+    if (!point || typeof point !== 'object') return [];
+    const item = point as Record<string, unknown>;
+    if (!Number.isFinite(Number(item.x)) || !Number.isFinite(Number(item.y))) return [];
+    return [{
+      x: Math.max(0, Math.min(WORLD_W, Number(item.x))),
+      y: Math.max(0, Math.min(WORLD_H, Number(item.y))),
+    }];
+  });
+  if (path.length !== input.path.length) return null;
+
+  let says: TRexState['says'] = null;
+  if (input.says && typeof input.says === 'object') {
+    const speech = input.says as Record<string, unknown>;
+    if (typeof speech.text !== 'string' || !Number.isFinite(Number(speech.until))) return null;
+    says = { text: speech.text.slice(0, 120), until: Number(speech.until) };
+  }
+
+  const clampWorld = (item: unknown, maximum: number) => Math.max(0, Math.min(maximum, Number(item)));
+  const rawHeading = Number(input.heading);
+  return {
+    x: clampWorld(input.x, WORLD_W),
+    y: clampWorld(input.y, WORLD_H),
+    heading: ((rawHeading % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2),
+    mode: input.mode as TRexMode,
+    modeStartedAt: Number(input.modeStartedAt),
+    modeUntil: Number(input.modeUntil),
+    nextMoodAt: Number(input.nextMoodAt),
+    panicCooldownUntil: Number(input.panicCooldownUntil),
+    lawnIndex: Math.max(0, Math.min(T_REX_LAWNS.length - 1, Math.trunc(Number(input.lawnIndex)))),
+    rowIndex: Math.max(0, Math.min(1000, Math.trunc(Number(input.rowIndex)))),
+    rowPass: Number(input.rowPass) === 1 ? 1 : 0,
+    rowDirection: Number(input.rowDirection) < 0 ? -1 : 1,
+    path,
+    pathIndex: Math.max(0, Math.min(path.length, Math.trunc(Number(input.pathIndex)))),
+    goalX: clampWorld(input.goalX, WORLD_W),
+    goalY: clampWorld(input.goalY, WORLD_H),
+    lastTrackX: clampWorld(input.lastTrackX, WORLD_W),
+    lastTrackY: clampWorld(input.lastTrackY, WORLD_H),
+    trackDistance: Math.max(0, Math.min(1000, Number(input.trackDistance))),
+    says,
+  };
+}
+
 interface PhysicsBallMotion {
   x: number;
   y: number;
@@ -917,6 +977,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     arc: 0,
   });
   const tRexRef = useRef<TRexState>(createTRexState());
+  const mowerClientIdRef = useRef<string | null>(null);
+  const mowerAuthorityClientIdRef = useRef<string | null>(null);
+  const mowerTargetRef = useRef<TRexState | null>(null);
+  const lastMowerSnapshotSentAtRef = useRef(0);
   const mowerTracksRef = useRef<MowerTrack[]>([]);
   const [soccerBall, setSoccerBall] = useState<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
   const soccerBallRef = useRef<CommuneSoccerBall>(INITIAL_SOCCER_BALL);
@@ -1514,6 +1578,39 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (messagingRef.current === agentName) setMessaging(null);
     };
 
+    const applyMowerSnapshot = (value: unknown, immediate = false) => {
+      const next = parseTRexState(value);
+      if (!next) return;
+      mowerTargetRef.current = next;
+      const isAuthority = mowerClientIdRef.current !== null
+        && mowerClientIdRef.current === mowerAuthorityClientIdRef.current;
+      const current = tRexRef.current;
+      tRexRef.current = immediate || isAuthority
+        ? next
+        : { ...next, x: current.x, y: current.y, heading: current.heading };
+    };
+
+    const applyMowerTracks = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const track = item as Record<string, unknown>;
+        if (![track.fromX, track.fromY, track.x, track.y, track.at].every((part) => Number.isFinite(Number(part)))) continue;
+        const at = Number(track.at);
+        if (mowerTracksRef.current.some((existing) => existing.at === at && existing.x === Number(track.x))) continue;
+        mowerTracksRef.current.push({
+          fromX: Number(track.fromX),
+          fromY: Number(track.fromY),
+          x: Number(track.x),
+          y: Number(track.y),
+          at,
+        });
+      }
+      if (mowerTracksRef.current.length > 420) {
+        mowerTracksRef.current.splice(0, mowerTracksRef.current.length - 420);
+      }
+    };
+
     const scheduleReconnect = () => {
       if (stopped || reconnectTimer) return;
       setConnectionState('reconnecting');
@@ -1572,6 +1669,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             return;
           }
           if (event.type === 'welcome') {
+            mowerClientIdRef.current = typeof event.mowerClientId === 'string' ? event.mowerClientId : null;
+            mowerAuthorityClientIdRef.current = typeof event.mowerAuthorityClientId === 'string'
+              ? event.mowerAuthorityClientId
+              : null;
+            lastMowerSnapshotSentAtRef.current = 0;
+            if (event.mowerState) applyMowerSnapshot(event.mowerState, true);
+            if (Array.isArray(event.mowerTracks)) applyMowerTracks(event.mowerTracks);
             applySnapshot(Array.isArray(event.others) ? event.others as CommuneAgent[] : []);
             if (event.soccerBall && typeof event.soccerBall === 'object') {
               const value = event.soccerBall as Record<string, unknown>;
@@ -1603,6 +1707,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 car.targetHeading = car.heading;
               }
             }
+          } else if (event.type === 'mower_authority') {
+            mowerAuthorityClientIdRef.current = typeof event.clientId === 'string' ? event.clientId : null;
+            if (event.mowerState) applyMowerSnapshot(event.mowerState, true);
+          } else if (
+            event.type === 'mower_state'
+            && event.clientId === mowerAuthorityClientIdRef.current
+          ) {
+            applyMowerSnapshot(event.mowerState);
+            applyMowerTracks(event.tracks);
           } else if (event.type === 'soccer_ball' && event.ball && typeof event.ball === 'object') {
             const value = event.ball as Record<string, unknown>;
             if ([value.x, value.y, value.fromX, value.fromY].every((part) => Number.isFinite(Number(part)))) {
@@ -1737,6 +1850,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           if (activeSocket !== socket) return;
           activeSocket = null;
           if (socketRef.current === socket) socketRef.current = null;
+          mowerClientIdRef.current = null;
           if (carSeatRef.current) {
             const car = PARKED_CARS.find((item) => item.id === carSeatRef.current?.carId);
             if (car) {
@@ -2489,7 +2603,32 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         }
       }
 
-      updateTRex(tRexRef.current, player, remoteRef.current.values(), dt, wallNow, mowerTracksRef.current);
+      const isMowerAuthority = mowerClientIdRef.current !== null
+        && mowerClientIdRef.current === mowerAuthorityClientIdRef.current;
+      if (isMowerAuthority) {
+        updateTRex(tRexRef.current, player, remoteRef.current.values(), dt, wallNow, mowerTracksRef.current);
+        if (
+          wallNow - lastMowerSnapshotSentAtRef.current >= 100
+          && sendRoomEvent({
+            type: 'mower_state',
+            mower: tRexRef.current,
+            tracks: mowerTracksRef.current.slice(-16),
+          })
+        ) {
+          lastMowerSnapshotSentAtRef.current = wallNow;
+        }
+      } else if (mowerTargetRef.current) {
+        const target = mowerTargetRef.current;
+        const mower = tRexRef.current;
+        const follow = 1 - Math.exp(-dt * 14);
+        mower.x += (target.x - mower.x) * follow;
+        mower.y += (target.y - mower.y) * follow;
+        const headingDelta = Math.atan2(
+          Math.sin(target.heading - mower.heading),
+          Math.cos(target.heading - mower.heading)
+        );
+        mower.heading += headingDelta * follow;
+      }
 
       /* camera follows the player, clamped to the world */
       const cam = camRef.current;

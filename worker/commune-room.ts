@@ -65,6 +65,21 @@ interface Presence extends CommuneRoomAgent {
   seenAt: number;
   lastMoveAt: number;
   lastChatAt: number;
+  mowerClientId?: string;
+}
+
+interface CommuneMowerTrack {
+  fromX: number;
+  fromY: number;
+  x: number;
+  y: number;
+  at: number;
+}
+
+interface CommuneMowerRow {
+  state_json: string | null;
+  authority_client_id: string | null;
+  updated_at: number;
 }
 
 interface TicketRow {
@@ -100,9 +115,10 @@ type RoomEvent = Record<string, unknown>;
 const ROOM_TICKET_TTL_MS = 60_000;
 const PRESENCE_TTL_MS = 60_000;
 const MOVE_THROTTLE_MS = 80;
+const MOWER_UPDATE_THROTTLE_MS = 100;
 const CHAT_THROTTLE_MS = 500;
 const MAX_MESSAGE_LENGTH = 90;
-const MAX_SOCKET_MESSAGE_LENGTH = 2_048;
+const MAX_SOCKET_MESSAGE_LENGTH = 16_384;
 const COMMUNE_WORLD_W = 3_200;
 const COMMUNE_WORLD_H = 2_400;
 const SOCCER_FIELD = { left: 850, right: 1280, top: 1820, bottom: 2120 };
@@ -201,6 +217,87 @@ function normalizeLoadout(input: unknown): CommuneRoomLoadout {
   return { cards, pet, phrase: String(value.phrase ?? '').slice(0, 80), avatar };
 }
 
+function normalizeMowerState(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const value = input as Record<string, unknown>;
+  const modes = ['mowing', 'zoomies', 'confused', 'napping', 'reverse'];
+  const numericKeys = [
+    'x', 'y', 'heading', 'modeStartedAt', 'modeUntil', 'nextMoodAt',
+    'panicCooldownUntil', 'lawnIndex', 'rowIndex', 'rowPass', 'rowDirection',
+    'pathIndex', 'goalX', 'goalY', 'lastTrackX', 'lastTrackY', 'trackDistance',
+  ];
+  if (
+    !modes.includes(String(value.mode))
+    || numericKeys.some((key) => typeof value[key] !== 'number' || !Number.isFinite(value[key]))
+    || !Array.isArray(value.path)
+    || value.path.length > 256
+  ) return null;
+
+  const path: { x: number; y: number }[] = [];
+  for (const point of value.path) {
+    if (!point || typeof point !== 'object' || Array.isArray(point)) return null;
+    const item = point as Record<string, unknown>;
+    if (typeof item.x !== 'number' || typeof item.y !== 'number' || !Number.isFinite(item.x) || !Number.isFinite(item.y)) {
+      return null;
+    }
+    path.push({
+      x: Math.max(0, Math.min(COMMUNE_WORLD_W, item.x)),
+      y: Math.max(0, Math.min(COMMUNE_WORLD_H, item.y)),
+    });
+  }
+
+  let says: { text: string; until: number } | null = null;
+  if (value.says !== null && value.says !== undefined) {
+    if (typeof value.says !== 'object' || Array.isArray(value.says)) return null;
+    const speech = value.says as Record<string, unknown>;
+    if (typeof speech.text !== 'string' || typeof speech.until !== 'number' || !Number.isFinite(speech.until)) return null;
+    says = { text: speech.text.slice(0, 120), until: speech.until };
+  }
+
+  const clampWorld = (item: unknown, maximum: number) => Math.max(0, Math.min(maximum, Number(item)));
+  const heading = ((Number(value.heading) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  return {
+    x: clampWorld(value.x, COMMUNE_WORLD_W),
+    y: clampWorld(value.y, COMMUNE_WORLD_H),
+    heading,
+    mode: value.mode,
+    modeStartedAt: value.modeStartedAt,
+    modeUntil: value.modeUntil,
+    nextMoodAt: value.nextMoodAt,
+    panicCooldownUntil: value.panicCooldownUntil,
+    lawnIndex: Math.max(0, Math.min(2, Math.trunc(Number(value.lawnIndex)))),
+    rowIndex: Math.max(0, Math.min(1000, Math.trunc(Number(value.rowIndex)))),
+    rowPass: Number(value.rowPass) === 1 ? 1 : 0,
+    rowDirection: Number(value.rowDirection) < 0 ? -1 : 1,
+    path,
+    pathIndex: Math.max(0, Math.min(path.length, Math.trunc(Number(value.pathIndex)))),
+    goalX: clampWorld(value.goalX, COMMUNE_WORLD_W),
+    goalY: clampWorld(value.goalY, COMMUNE_WORLD_H),
+    lastTrackX: clampWorld(value.lastTrackX, COMMUNE_WORLD_W),
+    lastTrackY: clampWorld(value.lastTrackY, COMMUNE_WORLD_H),
+    trackDistance: Math.max(0, Math.min(1000, Number(value.trackDistance))),
+    says,
+  };
+}
+
+function normalizeMowerTracks(input: unknown): CommuneMowerTrack[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(-16).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const track = item as Record<string, unknown>;
+    if (![track.fromX, track.fromY, track.x, track.y, track.at].every((part) => typeof part === 'number' && Number.isFinite(part))) {
+      return [];
+    }
+    return [{
+      fromX: Math.max(0, Math.min(COMMUNE_WORLD_W, Number(track.fromX))),
+      fromY: Math.max(0, Math.min(COMMUNE_WORLD_H, Number(track.fromY))),
+      x: Math.max(0, Math.min(COMMUNE_WORLD_W, Number(track.x))),
+      y: Math.max(0, Math.min(COMMUNE_WORLD_H, Number(track.y))),
+      at: Number(track.at),
+    }];
+  });
+}
+
 function send(ws: WebSocket, event: RoomEvent): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   try {
@@ -261,6 +358,17 @@ export class CommuneRoom extends DurableObject<Env> {
           by_username TEXT
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_mower_state (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          state_json TEXT,
+          authority_client_id TEXT,
+          updated_at INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      this.ctx.storage.sql.exec(
+        'INSERT OR IGNORE INTO commune_mower_state (singleton, state_json, authority_client_id, updated_at) VALUES (1, NULL, NULL, 0)',
+      );
       this.ctx.storage.sql.exec(
         `INSERT OR IGNORE INTO commune_soccer_ball
          (singleton, x, y, from_x, from_y, kicked_at, by_username)
@@ -378,8 +486,15 @@ export class CommuneRoom extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
+    const mowerClientId = crypto.randomUUID();
+    const connectedProfile: Presence = {
+      ...profile,
+      seenAt: Date.now(),
+      mowerClientId,
+    };
     this.ctx.acceptWebSocket(server, [profile.username]);
-    server.serializeAttachment({ ...profile, seenAt: Date.now() });
+    server.serializeAttachment(connectedProfile);
+    const authority = this.electMowerAuthority(mowerClientId);
 
     send(server, {
       type: 'welcome',
@@ -387,7 +502,13 @@ export class CommuneRoom extends DurableObject<Env> {
       others: this.listAgents(profile.username),
       cars: this.listCarPositions(),
       soccerBall: this.getSoccerBall(),
+      mowerClientId,
+      mowerAuthorityClientId: authority.clientId,
+      mowerState: authority.state,
     });
+    if (authority.changed) {
+      this.broadcastMowerAuthority(authority.clientId, authority.state);
+    }
     const recentMessages = this.ctx.storage.sql.exec<PublicChatRow>(
       `SELECT id, username, message, sent_at
        FROM commune_public_chat_messages
@@ -405,7 +526,7 @@ export class CommuneRoom extends DurableObject<Env> {
         sentAt: row.sent_at,
       })),
     });
-    this.broadcast({ type: 'agent_join', agent: this.toAgent(profile) }, profile.username);
+    this.broadcast({ type: 'agent_join', agent: this.toAgent(connectedProfile) }, profile.username);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -555,6 +676,31 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     const now = Date.now();
+    if (event.type === 'mower_state') {
+      const roomMower = this.getMowerRow();
+      if (!current.mowerClientId || current.mowerClientId !== roomMower.authority_client_id) return;
+      const mower = normalizeMowerState(event.mower);
+      if (!mower) {
+        send(ws, { type: 'error', code: 'invalid_mower_state', message: 'Invalid mower state.' });
+        return;
+      }
+      if (now - roomMower.updated_at < MOWER_UPDATE_THROTTLE_MS) return;
+      const tracks = normalizeMowerTracks(event.tracks);
+      this.ctx.storage.sql.exec(
+        'UPDATE commune_mower_state SET state_json = ?, updated_at = ? WHERE singleton = 1',
+        JSON.stringify(mower),
+        now,
+      );
+      ws.serializeAttachment({ ...current, seenAt: now });
+      this.broadcastExceptSocket({
+        type: 'mower_state',
+        clientId: current.mowerClientId,
+        mowerState: mower,
+        tracks,
+      }, ws);
+      return;
+    }
+
     if (event.type === 'car_enter') {
       const carId = typeof event.carId === 'string' ? event.carId : '';
       const car = Object.prototype.hasOwnProperty.call(PARKED_CARS, carId)
@@ -841,6 +987,8 @@ export class CommuneRoom extends DurableObject<Env> {
   webSocketClose(ws: WebSocket): void {
     const current = attachment(ws);
     if (!current) return;
+    const authority = this.electMowerAuthority();
+    if (authority.changed) this.broadcastMowerAuthority(authority.clientId, authority.state);
     if (this.ctx.getWebSockets(current.username).some((socket) => socket.readyState === WebSocket.OPEN)) return;
     this.broadcast({ type: 'agent_leave', username: current.username });
   }
@@ -859,6 +1007,50 @@ export class CommuneRoom extends DurableObject<Env> {
       'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars WHERE id = ?',
       carId,
     ).toArray()[0] ?? null;
+  }
+
+  private getMowerRow(): CommuneMowerRow {
+    return this.ctx.storage.sql.exec<CommuneMowerRow>(
+      'SELECT state_json, authority_client_id, updated_at FROM commune_mower_state WHERE singleton = 1',
+    ).toArray()[0] ?? { state_json: null, authority_client_id: null, updated_at: 0 };
+  }
+
+  private getMowerState(row = this.getMowerRow()): Record<string, unknown> | null {
+    if (!row.state_json) return null;
+    try {
+      return normalizeMowerState(JSON.parse(row.state_json));
+    } catch {
+      return null;
+    }
+  }
+
+  private electMowerAuthority(preferredClientId?: string): {
+    clientId: string | null;
+    state: Record<string, unknown> | null;
+    changed: boolean;
+  } {
+    const row = this.getMowerRow();
+    const sockets = this.ctx.getWebSockets().filter((socket) => socket.readyState === WebSocket.OPEN);
+    const activeClientIds = sockets
+      .map((socket) => attachment(socket)?.mowerClientId)
+      .filter((clientId): clientId is string => typeof clientId === 'string');
+    const nextClientId = row.authority_client_id && activeClientIds.includes(row.authority_client_id)
+      ? row.authority_client_id
+      : preferredClientId && activeClientIds.includes(preferredClientId)
+        ? preferredClientId
+        : activeClientIds[0] ?? null;
+    const changed = nextClientId !== row.authority_client_id;
+    if (changed) {
+      this.ctx.storage.sql.exec(
+        'UPDATE commune_mower_state SET authority_client_id = ? WHERE singleton = 1',
+        nextClientId,
+      );
+    }
+    return { clientId: nextClientId, state: this.getMowerState(row), changed };
+  }
+
+  private broadcastMowerAuthority(clientId: string | null, state: Record<string, unknown> | null): void {
+    this.broadcast({ type: 'mower_authority', clientId, mowerState: state });
   }
 
   private getSoccerBall(): CommuneRoomSoccerBall {
@@ -913,6 +1105,12 @@ export class CommuneRoom extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       if (exceptUsername && attachment(ws)?.username === exceptUsername) continue;
       send(ws, event);
+    }
+  }
+
+  private broadcastExceptSocket(event: RoomEvent, excludedSocket: WebSocket): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws !== excludedSocket) send(ws, event);
     }
   }
 
