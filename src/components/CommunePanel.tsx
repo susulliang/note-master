@@ -2596,8 +2596,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           const strafe = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
             - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
           const yaw = cameraLookRef.current.yaw;
-          dx = strafe * Math.cos(yaw) + forward * Math.sin(yaw);
-          dy = -strafe * Math.sin(yaw) + forward * Math.cos(yaw);
+          dx = forward * Math.sin(yaw) - strafe * Math.cos(yaw);
+          dy = forward * Math.cos(yaw) + strafe * Math.sin(yaw);
           len = Math.hypot(dx, dy);
           clickTargetRef.current = null;
         } else {
@@ -3396,9 +3396,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       event.currentTarget.focus();
       if (document.pointerLockElement !== event.currentTarget) {
         void event.currentTarget.requestPointerLock().catch(() => undefined);
-      } else {
-        void fireLaser();
       }
+      void fireLaser();
       return;
     }
     canvasPointerRef.current = {
@@ -3458,8 +3457,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const onCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (mapZoomRef.current >= 5) {
+      if (event.detail > 0) void fireLaser();
+      return;
+    }
     // Pointer events handle mouse and touch; keep click-only keyboard activation.
-    if (event.detail !== 0 || mapZoomRef.current >= 5) return;
+    if (event.detail !== 0) return;
     handleCanvasTap(event.clientX, event.clientY);
   };
 
@@ -3601,7 +3604,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             ? 'JOYSTICK MOVE · DRAG TO LOOK · TAP TO FIRE'
             : pointerLocked
               ? 'WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · ESC RELEASE'
-              : 'CLICK TO CAPTURE MOUSE · LEFT CLICK FIRE'}
+              : 'CLICK TO LOCK MOUSE + FIRE · WASD MOVE'}
         </div>
       )}
 
