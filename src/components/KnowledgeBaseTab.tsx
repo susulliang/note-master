@@ -256,6 +256,17 @@ export default function KnowledgeBaseTab() {
     }
   };
 
+  const syncNewsR2 = async () => {
+    if (r2) return;
+    try {
+      const total = await exportKbToR2(['news', 'news_assets'], (p) => setR2(p));
+      if (total === null) toast.error('News R2 export failed (not admin?)');
+      else toast.success(`Copied ${total.toLocaleString()} News & Updates articles and images to R2`);
+    } finally {
+      setR2(null);
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {/* Kind selector */}
@@ -282,15 +293,27 @@ export default function KnowledgeBaseTab() {
           </span>
         )}
         {isAdmin && (
-          <button
-            type="button"
-            disabled={!!r2}
-            onClick={() => void syncR2()}
-            title={`Copy this tab's D1 data into the eco-kb R2 bucket (AI Search source)`}
-            className="ml-auto flex items-center gap-1.5 rounded-lg border border-sky-400/50 bg-sky-400/15 px-2.5 py-1 text-[11px] font-bold text-sky-300 transition-colors hover:bg-sky-400/25 disabled:opacity-50"
-          >
-            <CloudUpload className={cn('size-3.5', r2 && 'animate-pulse')} /> Sync {meta.label} to R2
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={!!r2}
+              onClick={() => void syncR2()}
+              title={`Copy this tab's D1 data into the eco-kb R2 bucket (AI Search source)`}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-sky-400/50 bg-sky-400/15 px-2.5 py-1 text-[11px] font-bold text-sky-300 transition-colors hover:bg-sky-400/25 disabled:opacity-50"
+            >
+              <CloudUpload className={cn('size-3.5', r2 && 'animate-pulse')} /> Sync {meta.label} to R2
+            </button>
+            <button
+              type="button"
+              disabled={!!r2}
+              onClick={() => void syncNewsR2()}
+              title="Copy every News & Updates article and referenced image into the AI Search R2 bucket"
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-400/50 bg-emerald-400/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300 transition-colors hover:bg-emerald-400/25 disabled:opacity-50"
+            >
+              <CloudUpload className={cn('size-3.5', r2?.label.startsWith('News') && 'animate-pulse')} />
+              Sync News to R2
+            </button>
+          </>
         )}
       </div>
       <p className="text-[10px] leading-relaxed text-muted-foreground">

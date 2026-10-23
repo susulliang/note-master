@@ -354,11 +354,58 @@ export async function handleKbDelete(request: Request, env: Env, kind: KbKind, i
 
 /* ------------------------------ R2 mirror --------------------------------- */
 /* The eco-kb R2 bucket holds one markdown object per kb_documents row
- * ({kind}/{id}.md) — it feeds the Cloudflare AI Search (AutoRAG) "Ask"
- * instance. Single-doc writes mirror best-effort; the paginated export below
- * backfills / heals drift in bulk. */
+ * ({kind}/{id}.md) — it feeds the Cloudflare AI Search "Ask" instance.
+ * Single-document writes mirror best-effort; the paginated export below
+ * backfills and heals drift in bulk. */
 
 const MD_HTTP_METADATA = { httpMetadata: { contentType: 'text/markdown; charset=utf-8' } };
+
+interface NewsR2Entry {
+  id: string;
+  date: string;
+  title: string;
+  author: string;
+  body: string;
+  updatedAt?: number;
+}
+
+type NewsExportRow = NewsR2Entry;
+
+function newsMarkdown(entry: NewsR2Entry): string {
+  return [
+    `# ${entry.title || entry.id}`,
+    '',
+    `- Date: ${entry.date}`,
+    `- Author: ${entry.author || 'Unknown'}`,
+    `- Entry ID: ${entry.id}`,
+    `- Updated: ${entry.updatedAt ? new Date(entry.updatedAt).toISOString() : 'unknown'}`,
+    '',
+    entry.body.replace(/\r\n/g, '\n').trimStart(),
+    '',
+  ].join('\n');
+}
+
+/** Mirror an edited News & Updates entry into the AI Search source bucket. */
+export async function mirrorNewsEntryToR2(env: Env, entry: NewsR2Entry): Promise<boolean> {
+  try {
+    if (!env.KB_BUCKET) return false;
+    await env.KB_BUCKET.put(`news/${entry.id}.md`, newsMarkdown(entry), MD_HTTP_METADATA);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove the indexed article when an admin deletes it from D1. */
+export async function removeNewsEntryFromR2(env: Env, id: string): Promise<boolean> {
+  try {
+    if (!env.KB_BUCKET) return false;
+    await env.KB_BUCKET.delete(`news/${id}.md`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function mirrorDocToR2(env: Env, kind: string, id: string, body: string): Promise<void> {
   try {
@@ -383,13 +430,13 @@ interface ExportRow {
   body: string;
 }
 
-/** POST /api/kb/export-r2 — admin copies D1 kb_documents into the R2 bucket
+/** POST /api/kb/export-r2 — admin copies knowledge sources into the R2 bucket
  *  as {kind}/{id}.md files (one page per call, cursor-paginated so the
  *  request stays far below the subrequest limit). Body: {source?, cursor?,
  *  limit?} — sources run in order: 'documents' (kb_documents), 'photos'
  *  (app-photo binaries from the ASSETS binding), 'sop' (sop_entries) and
- *  'amr' (amr_templates). The 'amr' final page lands manifest.json with
- *  counts for every source, ready for an AI Search (AutoRAG) connection. */
+ *  'amr' (amr_templates), 'news' (news_entries) and 'news_assets' (images
+ *  referenced by News articles). */
 export async function handleKbExportR2(request: Request, env: Env): Promise<Response> {
   await ensureKbTables(env);
   if (!env.KB_BUCKET) return json({ error: 'R2 binding KB_BUCKET is not configured' }, 500);
@@ -409,6 +456,8 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     'photos',
     'sop',
     'amr',
+    'news',
+    'news_assets',
   ] as const;
   const source = (SOURCES as readonly string[]).includes(payload.source ?? '')
     ? (payload.source as (typeof SOURCES)[number])
@@ -418,6 +467,10 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
   let result: { exported: number; total: number | null; done: boolean; nextCursor: string | null };
   if (source === 'photos') {
     result = await exportPhotosPage(env, limit, cursor);
+  } else if (source === 'news_assets') {
+    result = await exportNewsAssetsPage(env, limit, cursor);
+  } else if (source === 'news') {
+    result = await exportNewsPage(env, limit, cursor);
   } else if (source === 'sop') {
     result = await exportSopPage(env, limit, cursor);
   } else if (source === 'amr') {
@@ -428,7 +481,7 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     result = await exportKindPage(env, source, limit, cursor);
   }
 
-  if (source === 'amr' && result.done) await writeManifest(env);
+  if (result.done) await writeManifest(env);
   return json(result);
 }
 
@@ -495,6 +548,94 @@ async function exportDocumentsPage(env: Env, limit: number, cursor: string) {
     total: (await countPromise)?.n ?? null,
     done,
     nextCursor: done ? null : `${page[page.length - 1].kind}${SEP}${page[page.length - 1].id}`,
+  };
+}
+
+async function ensureNewsR2Table(env: Env): Promise<void> {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS news_entries (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )`
+  ).run();
+}
+
+/** 'news' phase — every full News & Updates article from D1. */
+async function exportNewsPage(env: Env, limit: number, cursor: string) {
+  await ensureNewsR2Table(env);
+  const countPromise = env.DB.prepare(`SELECT COUNT(*) AS n FROM news_entries`).first<{ n: number }>();
+  const rows = cursor
+    ? (
+        await env.DB.prepare(
+          `SELECT id, date, title, author, body, updated_at AS updatedAt FROM news_entries
+           WHERE id > ?1 ORDER BY id LIMIT ?2`
+        )
+          .bind(cursor, limit + 1)
+          .all<NewsExportRow>()
+      ).results ?? []
+    : (
+        await env.DB.prepare(
+          `SELECT id, date, title, author, body, updated_at AS updatedAt FROM news_entries
+           ORDER BY id LIMIT ?1`
+        )
+          .bind(limit + 1)
+          .all<NewsExportRow>()
+      ).results ?? [];
+
+  const done = rows.length <= limit;
+  const page = rows.slice(0, limit);
+  for (const row of page) {
+    await env.KB_BUCKET!.put(`news/${row.id}.md`, newsMarkdown(row), MD_HTTP_METADATA);
+  }
+  return {
+    exported: page.length,
+    total: (await countPromise)?.n ?? null,
+    done,
+    nextCursor: done ? null : page[page.length - 1].id,
+  };
+}
+
+/** All image files linked from News markdown, sorted for cursor pagination. */
+async function loadNewsAssetPaths(env: Env): Promise<string[]> {
+  await ensureNewsR2Table(env);
+  const rows = await env.DB.prepare(`SELECT body FROM news_entries ORDER BY id`).all<{ body: string }>();
+  const paths = new Set<string>();
+  const imagePattern = /!\[[^\]]*\]\((?:\.\/)?assets\/([^)\s]+)\)/g;
+  for (const row of rows.results ?? []) {
+    for (const match of row.body.matchAll(imagePattern)) {
+      const filename = match[1]?.split(/[?#]/, 1)[0] ?? '';
+      if (/^[\p{L}\p{N}._-]+$/u.test(filename)) paths.add(filename);
+    }
+  }
+  return [...paths].sort();
+}
+
+/** 'news_assets' phase — copy every referenced News image from static assets. */
+async function exportNewsAssetsPage(env: Env, limit: number, cursor: string) {
+  const paths = await loadNewsAssetPaths(env);
+  const start = Math.max(0, Number(cursor) || 0);
+  const end = Math.min(start + limit, paths.length);
+  let exported = 0;
+  for (const filename of paths.slice(start, end)) {
+    const assetPath = `/news/assets/${encodeURIComponent(filename)}`;
+    const response = await env.ASSETS!.fetch(new Request(`https://assets.local${assetPath}`));
+    if (!response.ok) continue;
+    const bytes = await response.arrayBuffer();
+    const type = response.headers.get('content-type') ?? 'application/octet-stream';
+    await env.KB_BUCKET!.put(`news/assets/${filename}`, bytes, {
+      httpMetadata: { contentType: type },
+    });
+    exported += 1;
+  }
+  return {
+    exported,
+    total: paths.length,
+    done: end >= paths.length,
+    nextCursor: end >= paths.length ? null : String(end),
   };
 }
 
@@ -618,13 +759,16 @@ function exportAmrPage(env: Env, limit: number, cursor: string) {
   );
 }
 
-/** Final 'amr' page → manifest.json with counts for every source. */
+/** Completed export phase → manifest.json with counts for every source. */
 async function writeManifest(env: Env) {
-  const [byKind, sop, amr, photoIndex] = await Promise.all([
+  await ensureNewsR2Table(env);
+  const [byKind, sop, amr, news, photoIndex, newsAssets] = await Promise.all([
     env.DB.prepare(`SELECT kind, COUNT(*) AS n FROM kb_documents GROUP BY kind`).all<{ kind: string; n: number }>(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM sop_entries`).first<{ n: number }>(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM amr_templates`).first<{ n: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM news_entries`).first<{ n: number }>(),
     loadPhotoPaths(env),
+    loadNewsAssetPaths(env),
   ]);
   const counts: Record<string, number> = {};
   let total = 0;
@@ -634,7 +778,9 @@ async function writeManifest(env: Env) {
   }
   counts.sop_sections = sop?.n ?? 0;
   counts.amr_templates = amr?.n ?? 0;
+  counts.news_updates = news?.n ?? 0;
   counts.app_photos = photoIndex.length;
+  counts.news_assets = newsAssets.length;
   await env.KB_BUCKET!.put(
     'manifest.json',
     JSON.stringify({ exportedAt: new Date().toISOString(), documents: total, counts }, null, 2),

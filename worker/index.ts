@@ -31,6 +31,8 @@ import {
   handleKbList,
   handleKbPut,
   isKbKind,
+  mirrorNewsEntryToR2,
+  removeNewsEntryFromR2,
 } from './kb';
 
 export { CommuneRoom } from './commune-room';
@@ -1525,6 +1527,7 @@ async function handleNewsEntryPost(request: Request, env: Env, admin: AuthUserRo
   }
   if (!/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/.test(id)) return authJson({ error: 'Invalid entry id' }, 400);
   await ensureNewsSchema(env);
+  const updatedAt = Date.now();
   await env.DB.prepare(
     `INSERT INTO news_entries (id, date, title, author, body, updated_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -1532,7 +1535,7 @@ async function handleNewsEntryPost(request: Request, env: Env, admin: AuthUserRo
        date = excluded.date, title = excluded.title, author = excluded.author,
        body = excluded.body, updated_at = excluded.updated_at`
   )
-    .bind(id, date, title, author, body, Date.now())
+    .bind(id, date, title, author, body, updatedAt)
     .run();
   // Every successful add/edit earns the editing admin +5 spice.
   await ensureSpiceSchema(env);
@@ -1543,7 +1546,8 @@ async function handleNewsEntryPost(request: Request, env: Env, admin: AuthUserRo
     env.DB.prepare("INSERT INTO spice_ledger (username, delta, reason, detail, created_at) VALUES (?1, 5, 'news', ?2, ?3)")
       .bind(admin.username, `news:${id}`, now),
   ]);
-  return authJson({ ok: true, id, spice: Number(admin.spice ?? 0) + 5 });
+  const r2Synced = await mirrorNewsEntryToR2(env, { id, date, title, author, body, updatedAt });
+  return authJson({ ok: true, id, spice: Number(admin.spice ?? 0) + 5, r2Synced });
 }
 
 /** POST /api/admin/news-delete { id } — admin removal of one knowledge
@@ -1562,7 +1566,8 @@ async function handleNewsDelete(request: Request, env: Env): Promise<Response> {
   await ensureNewsSchema(env);
   const result = await env.DB.prepare('DELETE FROM news_entries WHERE id = ?1').bind(id).run();
   if (!result.meta.changes) return authJson({ error: 'Entry not found' }, 404);
-  return authJson({ ok: true });
+  const r2Synced = await removeNewsEntryFromR2(env, id);
+  return authJson({ ok: true, r2Synced });
 }
 
 /** GET /api/store/purchases — the 100 most recent store transactions,

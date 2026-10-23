@@ -187,14 +187,15 @@ const R2_SOURCE_LABELS: Record<string, string> = {
   photos: 'App photo binaries',
   sop: 'SOP handbook',
   amr: 'AMR email templates',
+  news: 'News & Updates articles',
+  news_assets: 'News & Updates images',
 };
 
 /** Bulk-copy knowledge-base segments into the eco-kb R2 bucket (admin).
  *  Each source is cursor-paginated to stay under the subrequest limit; call
- *  it once per segment (e.g. one KB kind, or 'photos'/'sop'/'amr') so the
- *  copy happens in short toast-confirmed chunks — the 'amr' segment lands
- *  manifest.json last. Reports progress via the optional callback after
- *  every page. Returns the total exported or null on failure. */
+ *  it once per segment (e.g. one KB kind, or 'photos'/'sop'/'amr'/'news')
+ *  so the copy happens in short toast-confirmed chunks. Reports progress via
+ *  the optional callback after every page. Returns the total or null on failure. */
 export async function exportKbToR2(
   sources: string[],
   onProgress?: (p: KbR2Progress) => void

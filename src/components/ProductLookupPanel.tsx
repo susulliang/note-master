@@ -963,6 +963,9 @@ function NewsTab({
         setSpice(result.spice);
         toast.success('🌶️ +5 Spice', { description: 'Knowledge update saved.' });
       }
+      if (result.r2Synced === false) {
+        toast.warning('Saved, but the R2 copy failed. An admin can retry with “Sync News to R2”.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save the entry.');
     } finally {
@@ -975,10 +978,11 @@ function NewsTab({
     setDeleting(true);
     setError(null);
     try {
-      await deleteNewsEntry(id);
+      const r2Synced = await deleteNewsEntry(id);
       removeNewsEntry(id);
       refresh();
       if (openId === id) setOpenId(null);
+      if (!r2Synced) toast.warning('Deleted from News, but its R2 copy could not be removed.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete the entry.');
     } finally {

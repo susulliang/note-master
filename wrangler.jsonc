@@ -18,7 +18,7 @@
     }
   ],
   // R2 copy of the knowledge base (kind/id.md per D1 kb_documents row) —
-  // feeds the Cloudflare AI Search (AutoRAG) "Ask" instance.
+  // feeds the Cloudflare AI Search "Ask" instance.
   "r2_buckets": [
     {
       "binding": "KB_BUCKET",
@@ -34,6 +34,13 @@
   "ai": {
     "binding": "AI"
   },
+  "ai_search_namespaces": [
+    {
+      "binding": "AI_SEARCH",
+      "namespace": "default",
+      "remote": true
+    }
+  ],
   "migrations": [
     { "tag": "commune-room-v1", "new_sqlite_classes": ["CommuneRoom"] },
     { "tag": "roster-room-v1", "new_sqlite_classes": ["RosterRoom"] }

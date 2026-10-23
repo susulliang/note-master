@@ -64,7 +64,7 @@ export async function saveNewsEntry(entry: {
   title: string;
   author: string;
   body: string;
-}): Promise<{ id: string; spice?: number }> {
+}): Promise<{ id: string; spice?: number; r2Synced?: boolean }> {
   const token = getStoredToken();
   if (!token) throw new Error('Only logged-in admins can edit the knowledge base.');
   const res = await fetch(`${getApiBase()}/api/admin/news-entry`, {
@@ -72,13 +72,13 @@ export async function saveNewsEntry(entry: {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(entry),
   });
-  const data = await res.json() as { error?: string; id?: string; spice?: number };
+  const data = await res.json() as { error?: string; id?: string; spice?: number; r2Synced?: boolean };
   if (!res.ok) throw new Error(data.error || 'Could not save the entry.');
-  return { id: data.id ?? entry.id ?? '', spice: data.spice };
+  return { id: data.id ?? entry.id ?? '', spice: data.spice, r2Synced: data.r2Synced };
 }
 
 /** Admin delete of one knowledge update (no spice for deletions). */
-export async function deleteNewsEntry(id: string): Promise<void> {
+export async function deleteNewsEntry(id: string): Promise<boolean> {
   const token = getStoredToken();
   if (!token) throw new Error('Only logged-in admins can edit the knowledge base.');
   const res = await fetch(`${getApiBase()}/api/admin/news-delete`, {
@@ -86,6 +86,7 @@ export async function deleteNewsEntry(id: string): Promise<void> {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ id }),
   });
-  const data = await res.json() as { error?: string };
+  const data = await res.json() as { error?: string; r2Synced?: boolean };
   if (!res.ok) throw new Error(data.error || 'Could not delete the entry.');
+  return data.r2Synced === true;
 }
