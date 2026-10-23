@@ -65,6 +65,7 @@ import {
   type CommuneBannerPriority,
   type CommuneBannerStroke,
   type CommuneDrop,
+  type CommuneLaserShot,
   type CommuneLoadout,
   type CommuneMiniGame,
   type CommunePet,
@@ -72,6 +73,7 @@ import {
   type CommuneTreeholeCategory,
   type CommuneTreeholeEntry,
   finishCommuneMiniGame,
+  fireCommuneLaser,
   kickCommuneSoccerBall,
   startCommuneMiniGame,
 } from '@/lib/auth-client';
@@ -85,7 +87,11 @@ import type { RosterAgent } from '@/data/roster';
 import { fetchRosterMonth, subscribeRosterMonth, type RosterCell } from '@/lib/roster-sync';
 import { loadFaqAnswer, searchLoadedFaqs } from '@/utils/faqData';
 import type { FaqSearchHit } from '@/utils/productData';
-import { CommuneThreeRenderer, type CommuneThreeFrame } from '@/lib/commune-three-renderer';
+import {
+  CommuneThreeRenderer,
+  type CommuneThreeFrame,
+  type CommuneThreeLaserShot,
+} from '@/lib/commune-three-renderer';
 
 const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 
@@ -120,6 +126,9 @@ const BOWLING_PINS: [number, number][] = [
   [132, 67],
 ];
 const BOWLING_APPROACH = { x: MINI_GAME_ZONES.bowling.x, y: 1460 };
+const isInBowlingArena = (x: number, y: number) => (
+  Math.hypot(x - MINI_GAME_ZONES.bowling.x, y - MINI_GAME_ZONES.bowling.y) <= MINI_GAME_ZONES.bowling.range
+);
 type TRexMode = 'mowing' | 'zoomies' | 'confused' | 'napping' | 'reverse';
 interface MowerTrack {
   fromX: number;
@@ -270,6 +279,32 @@ const PONDS = [
 function smoothStep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
+}
+
+function parseLaserShot(value: unknown): CommuneLaserShot | null {
+  if (!value || typeof value !== 'object') return null;
+  const shot = value as Record<string, unknown>;
+  const numeric = [
+    shot.fromX, shot.fromY, shot.fromHeight, shot.toX, shot.toY, shot.toHeight, shot.durationMs,
+  ].map(Number);
+  if (
+    typeof shot.id !== 'string'
+    || typeof shot.shooter !== 'string'
+    || numeric.some((item) => !Number.isFinite(item))
+    || (shot.targetUsername !== null && typeof shot.targetUsername !== 'string')
+  ) return null;
+  return {
+    id: shot.id,
+    shooter: shot.shooter,
+    fromX: numeric[0],
+    fromY: numeric[1],
+    fromHeight: numeric[2],
+    toX: numeric[3],
+    toY: numeric[4],
+    toHeight: numeric[5],
+    durationMs: numeric[6],
+    targetUsername: typeof shot.targetUsername === 'string' ? shot.targetUsername : null,
+  };
 }
 
 /** Nightfall follows a fixed GMT+8 clock, independent of the viewer's locale. */
@@ -838,6 +873,8 @@ interface CarChatMessage {
 interface Agent {
   x: number;
   y: number;
+  headingX?: number;
+  headingY?: number;
   name: string;
   hue: number;
   says: Speech | null;
@@ -865,6 +902,8 @@ interface Agent {
 interface RemoteView {
   x: number;
   y: number;
+  headingX: number;
+  headingY: number;
   name: string;
   hue: number;
   phrase: string | null;
@@ -919,6 +958,8 @@ interface PetFollower {
   moving: boolean;
   walkPhase: number;
   facingLeft: boolean;
+  facingX: number;
+  facingY: number;
 }
 
 interface PixelPetView {
@@ -931,6 +972,8 @@ interface PixelPetView {
   emote: 'sniff' | 'spark' | null;
   walkPhase: number;
   facingLeft: boolean;
+  headingX: number;
+  headingY: number;
 }
 
 export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanelProps) {
@@ -946,6 +989,18 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [mapZoom, setMapZoom] = useState(1.5);
   const mapZoomRef = useRef(1.5);
   mapZoomRef.current = mapZoom;
+  const cameraLookRef = useRef({ pitch: 0, yaw: 0 });
+  const [pointerLocked, setPointerLocked] = useState(false);
+  const [laserHitConfirmed, setLaserHitConfirmed] = useState(false);
+  const laserHitTimerRef = useRef<number | null>(null);
+  const laserShotsRef = useRef<CommuneThreeLaserShot[]>([]);
+  const lastLaserFiredAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const upsertLaserShot = useCallback((shot: CommuneLaserShot) => {
+    laserShotsRef.current = [
+      ...laserShotsRef.current.filter((current) => current.id !== shot.id),
+      { ...shot, startedAt: performance.now() / 1000 },
+    ].slice(-32);
+  }, []);
   const [panel, setPanel] = useState<PanelKind>(null);
   const golfRoundRef = useRef({
     roundId: null as string | null,
@@ -1069,10 +1124,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const joystickKnobRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const movementInputRef = useRef({ x: 0, y: 0 });
-  const canvasPointerRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const canvasPointerRef = useRef<{ id: number; x: number; y: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
   const [chatFocused, setChatFocused] = useState(false);
+
+  useEffect(() => {
+    const syncPointerLock = () => setPointerLocked(document.pointerLockElement === canvasRef.current);
+    document.addEventListener('pointerlockchange', syncPointerLock);
+    return () => {
+      document.removeEventListener('pointerlockchange', syncPointerLock);
+      if (document.pointerLockElement === canvasRef.current) document.exitPointerLock();
+      if (laserHitTimerRef.current !== null) window.clearTimeout(laserHitTimerRef.current);
+    };
+  }, []);
 
   const rosterAgents = useMemo(() => getRoster(rosterMonth) ?? [], [rosterMonth]);
   const rosterShiftOf = useCallback((agent: RosterAgent, iso: string) =>
@@ -1177,7 +1242,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     }
   };
 
-  const playerRef = useRef<Agent>({ x: PLAZA.x, y: PLAZA.y + 240, name: username, hue: hueOf(username), says: null });
+  const playerRef = useRef<Agent>({
+    x: PLAZA.x,
+    y: PLAZA.y + 240,
+    headingX: 0,
+    headingY: 1,
+    name: username,
+    hue: hueOf(username),
+    says: null,
+  });
   playerRef.current.name = username;
   playerRef.current.hue = hueOf(username);
   playerRef.current.carId = carSeat?.carId ?? null;
@@ -1210,6 +1283,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       ry: number;
       tx: number;
       ty: number;
+      headingX: number;
+      headingY: number;
       agent: CommuneAgent;
       moving: boolean;
       bobPhase: number;
@@ -1526,6 +1601,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           ry: agent.y,
           tx: agent.x,
           ty: agent.y,
+          headingX: 0,
+          headingY: 1,
           agent,
           moving: false,
           bobPhase: Math.random() * 10,
@@ -1554,6 +1631,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           ry: agent.y,
           tx: agent.x,
           ty: agent.y,
+          headingX: 0,
+          headingY: 1,
           agent,
           moving: false,
           bobPhase: Math.random() * 10,
@@ -1730,6 +1809,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               soccerBallRef.current = ball;
               setSoccerBall(ball);
             }
+          } else if (event.type === 'laser_shot') {
+            const shot = parseLaserShot(event.shot);
+            if (shot) upsertLaserShot(shot);
+          } else if (
+            event.type === 'laser_reward'
+            && event.username === username
+            && Number.isFinite(Number(event.spice))
+          ) {
+            setSpice(Number(event.spice));
+            playerRef.current.says = {
+              text: 'Tagged by a laser! +1 spice.',
+              until: Date.now() + 3000,
+            };
           } else if (event.type === 'drops' && Array.isArray(event.drops)) {
             dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
           } else if (event.type === 'car_update' && typeof event.carId === 'string') {
@@ -2106,7 +2198,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               return Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range;
             }
             return !bowlingBusyRef.current
-              && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
+              && isInBowlingArena(player.x, player.y);
           }
           case 'soccer-kick': {
             const field = MINI_GAME_ZONES.soccer;
@@ -2430,6 +2522,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       last = now;
       lastFrame = now;
       const tSec = now / 1000;
+      laserShotsRef.current = laserShotsRef.current.filter(
+        (shot) => tSec - shot.startedAt <= shot.durationMs / 1000 + 0.12
+      );
       const carFollow = 1 - Math.exp(-dt * 14);
       for (const car of PARKED_CARS) {
         car.x += (car.targetX - car.x) * carFollow;
@@ -2454,6 +2549,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) + joystick.y;
         const directionLength = Math.hypot(dx, dy);
         player.moving = directionLength > 0.12;
+        if (directionLength > 0.12) {
+          player.headingX = dx / directionLength;
+          player.headingY = dy / directionLength;
+        }
         if (directionLength > 0.12 && !panelRef.current && !chatFocusedRef.current && wallNow - lastCarMoveSentAt >= CAR_MOVE_INTERVAL_MS) {
           sendRoomEvent({ type: 'car_move', dx, dy });
           lastCarMoveSentAt = wallNow;
@@ -2475,33 +2574,60 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           player.x += (tx - player.x) * k;
           player.y += (ty - player.y) * k;
           player.moving = leader.moving;
-          if (leader.moving) player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
+          if (leader.moving) {
+            player.headingX = leader.headingX;
+            player.headingY = leader.headingY;
+            player.bobPhase = (player.bobPhase ?? 0) + dt * 10;
+          }
         } else {
           player.moving = false;
         }
       } else if (!panelRef.current && !chatFocusedRef.current) {
         const k = keysRef.current;
         const joystick = movementInputRef.current;
-        let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
-          - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
-        let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
-          - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) + joystick.y;
-        let len = Math.hypot(dx, dy);
-        if (len > 0.12) clickTargetRef.current = null;
-        if (len <= 0.12 && clickTargetRef.current) {
-          const tx = clickTargetRef.current.x - player.x;
-          const ty = clickTargetRef.current.y - player.y;
-          const d = Math.hypot(tx, ty);
-          if (d > 6) {
-            dx = tx / d;
-            dy = ty / d;
-            len = 1;
-          } else {
-            clickTargetRef.current = null;
+        const firstPerson = mapZoomRef.current >= 5;
+        let dx: number;
+        let dy: number;
+        let len: number;
+        if (firstPerson) {
+          const forward = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0)
+            - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - joystick.y;
+          const strafe = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
+            - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
+          const yaw = cameraLookRef.current.yaw;
+          dx = forward * Math.sin(yaw) - strafe * Math.cos(yaw);
+          dy = forward * Math.cos(yaw) + strafe * Math.sin(yaw);
+          len = Math.hypot(dx, dy);
+          clickTargetRef.current = null;
+        } else {
+          dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0)
+            - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + joystick.x;
+          dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
+            - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) + joystick.y;
+          len = Math.hypot(dx, dy);
+          if (len > 0.12) clickTargetRef.current = null;
+          if (len <= 0.12 && clickTargetRef.current) {
+            const tx = clickTargetRef.current.x - player.x;
+            const ty = clickTargetRef.current.y - player.y;
+            const d = Math.hypot(tx, ty);
+            if (d > 6) {
+              dx = tx / d;
+              dy = ty / d;
+              len = 1;
+            } else {
+              clickTargetRef.current = null;
+            }
           }
         }
         player.moving = len > 0.12;
         if (len > 0.12) {
+          if (firstPerson) {
+            player.headingX = Math.sin(cameraLookRef.current.yaw);
+            player.headingY = Math.cos(cameraLookRef.current.yaw);
+          } else {
+            player.headingX = dx / len;
+            player.headingY = dy / len;
+          }
           const nx = player.x + (dx / len) * SPEED * dt * Math.min(1, len);
           const ny = player.y + (dy / len) * SPEED * dt * Math.min(1, len);
           moveWithCollision(player, nx, ny);
@@ -2596,6 +2722,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           } else {
             const nx = npc.x + (tx / d) * NPC_SPEED * dt;
             const ny = npc.y + (ty / d) * NPC_SPEED * dt;
+            npc.headingX = tx / d;
+            npc.headingY = ty / d;
             moveWithCollision(npc, nx, ny);
             npc.moving = true;
             npc.bobPhase = (npc.bobPhase ?? 0) + dt * 9;
@@ -2709,7 +2837,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           game === 'golf' && golfSession.roundId
             ? !golfSession.busy && Math.hypot(player.x - currentGolfBall.x, player.y - currentGolfBall.y) <= 104
             : game === 'bowling'
-              ? !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82
+              ? !bowlingBusyRef.current && isInBowlingArena(player.x, player.y)
               : distance <= MINI_GAME_ZONES.golf.range
         ))
         .sort((a, b) => a.distance - b.distance)[0]?.game ?? null;
@@ -2866,6 +2994,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const d = Math.hypot(dx, dy);
         r.moving = d > 3;
         if (d > 0.5) {
+          r.headingX = dx / d;
+          r.headingY = dy / d;
           const k = Math.min(1, dt * 3.5);
           r.rx += dx * k;
           r.ry += dy * k;
@@ -2874,14 +3004,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         let vx = r.rx;
         let vy = r.ry;
         let vmoving = r.moving;
+        let headingX = r.headingX;
+        let headingY = r.headingY;
         if (heldHands && heldHands.lead && r.agent.username === heldHands.partner) {
           vx = player.x - 22;
           vy = player.y + 6;
           vmoving = !!player.moving;
+          headingX = player.headingX ?? 0;
+          headingY = player.headingY ?? 1;
         }
         remoteViews.push({
           x: vx,
           y: vy,
+          headingX,
+          headingY,
           name: r.agent.username,
           hue: hueOf(r.agent.username),
           phrase: r.agent.loadout?.phrase || null,
@@ -2926,6 +3062,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         latestFrame = {
           time: tSec,
           zoom: mapZoomRef.current,
+          cameraPitch: cameraLookRef.current.pitch,
+          cameraYaw: cameraLookRef.current.yaw,
           player: renderedPlayer,
           npcs: npcsRef.current,
           remotes: remoteViews,
@@ -2942,6 +3080,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           bowlingBall: bowlingBallMotionRef.current,
           bowlingPinsDown: bowlingPinsDownRef.current,
           bowlingPinsKnockedAt: bowlingPinsKnockedAtRef.current,
+          laserShots: laserShotsRef.current,
           mower: tRexRef.current,
           mowerTracks: mowerTracksRef.current,
           nightOpacity,
@@ -2986,12 +3125,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
       threeRenderer?.dispose();
     };
-  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, user?.isAdmin]);
+  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, upsertLaserShot, user?.isAdmin, username]);
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
   const handleCanvasTap = (clientX: number, clientY: number) => {
-    if (panelRef.current || playerRef.current.carId) return;
+    if (panelRef.current || playerRef.current.carId || mapZoomRef.current >= 5) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -3081,7 +3220,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         ? !session.busy && Math.hypot(player.x - golfBall.x, player.y - golfBall.y) <= 104
         : tappedGame === 'golf'
           ? Math.hypot(player.x - zone.x, player.y - zone.y) <= zone.range
-          : !bowlingBusyRef.current && Math.hypot(player.x - BOWLING_APPROACH.x, player.y - BOWLING_APPROACH.y) <= 82;
+          : !bowlingBusyRef.current && isInBowlingArena(player.x, player.y);
       if (inRange) {
         executeInteraction({
           type: 'mini-game',
@@ -3216,27 +3355,121 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     stopJoystick(event.pointerId);
   };
 
+  const fireLaser = async () => {
+    if (mapZoomRef.current < 5 || panelRef.current || playerRef.current.carId) return;
+    const now = performance.now();
+    if (now - lastLaserFiredAtRef.current < 500) return;
+    lastLaserFiredAtRef.current = now;
+    const actionId = crypto.randomUUID();
+    const yaw = cameraLookRef.current.yaw;
+    const pitch = cameraLookRef.current.pitch;
+    const directionX = Math.sin(yaw) * Math.cos(pitch);
+    const directionY = Math.cos(yaw) * Math.cos(pitch);
+    const player = playerRef.current;
+
+    // Render locally first so the weapon has immediate feedback even when the
+    // authoritative room request is delayed or unavailable.
+    upsertLaserShot({
+      id: actionId,
+      shooter: player.name,
+      fromX: player.x + directionX * 8 + Math.cos(yaw) * 6,
+      fromY: player.y + directionY * 8 - Math.sin(yaw) * 6,
+      fromHeight: 50 + Math.sin(pitch) * 8,
+      toX: player.x + directionX * 1_800,
+      toY: player.y + directionY * 1_800,
+      toHeight: 55 + Math.sin(pitch) * 1_800,
+      durationMs: 720,
+      targetUsername: null,
+    });
+    try {
+      const result = await fireCommuneLaser(
+        actionId,
+        yaw,
+        pitch
+      );
+      // Replace the prediction with the shared, server-resolved impact.
+      upsertLaserShot(result.shot);
+      if (result.awarded > 0) {
+        setLaserHitConfirmed(true);
+        if (laserHitTimerRef.current !== null) window.clearTimeout(laserHitTimerRef.current);
+        laserHitTimerRef.current = window.setTimeout(() => {
+          setLaserHitConfirmed(false);
+          laserHitTimerRef.current = null;
+        }, 280);
+      }
+      playerRef.current.says = {
+        text: result.targetUsername
+          ? `Tagged ${result.targetUsername}! +1 spice for them.`
+          : 'Pew! The laser fizzled into the scenery.',
+        until: Date.now() + 2600,
+      };
+    } catch (error) {
+      playerRef.current.says = {
+        text: error instanceof Error ? error.message : 'Laser unavailable. Try again.',
+        until: Date.now() + 2400,
+      };
+    }
+  };
+
   const onCanvasPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (mapZoomRef.current >= 5 && event.pointerType === 'mouse') {
+      event.currentTarget.focus();
+      if (document.pointerLockElement !== event.currentTarget) {
+        void event.currentTarget.requestPointerLock().catch(() => undefined);
+      }
+      void fireLaser();
+      return;
+    }
     canvasPointerRef.current = {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onCanvasPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointerLocked) return;
     const pointer = canvasPointerRef.current;
-    if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
-    pointer.moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    if (mapZoomRef.current >= 5) {
+      const dx = event.clientX - pointer.lastX;
+      const dy = event.clientY - pointer.lastY;
+      pointer.lastX = event.clientX;
+      pointer.lastY = event.clientY;
+      updateFirstPersonLook(dx, dy, 0.004);
+      pointer.moved ||= Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 6;
+      return;
+    }
+    if (!pointer.moved) pointer.moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12;
+  };
+
+  const updateFirstPersonLook = (dx: number, dy: number, sensitivity: number) => {
+    cameraLookRef.current.yaw -= dx * sensitivity;
+    cameraLookRef.current.pitch = Math.max(
+      -1.2,
+      Math.min(1.2, cameraLookRef.current.pitch - dy * sensitivity)
+    );
+  };
+
+  const onCanvasMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (mapZoomRef.current >= 5 && document.pointerLockElement === event.currentTarget) {
+      updateFirstPersonLook(event.movementX, event.movementY, 0.0025);
+    }
   };
 
   const onCanvasPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const pointer = canvasPointerRef.current;
     canvasPointerRef.current = null;
     if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
+    if (mapZoomRef.current >= 5) {
+      if (event.pointerType !== 'mouse') void fireLaser();
+      return;
+    }
     handleCanvasTap(event.clientX, event.clientY);
   };
 
@@ -3245,17 +3478,35 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const onCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (mapZoomRef.current >= 5) {
+      if (event.detail > 0) void fireLaser();
+      return;
+    }
     // Pointer events handle mouse and touch; keep click-only keyboard activation.
     if (event.detail !== 0) return;
     handleCanvasTap(event.clientX, event.clientY);
   };
 
+  const changeMapZoom = (value: number) => {
+    const zoom = Number(Math.min(5, Math.max(1, value)).toFixed(2));
+    const wasFirstPerson = mapZoomRef.current >= 5;
+    if (zoom >= 5 && !wasFirstPerson) {
+      const player = playerRef.current;
+      cameraLookRef.current.yaw = Math.atan2(player.headingX ?? 0, player.headingY ?? 1);
+    } else if (zoom < 5 && wasFirstPerson && document.pointerLockElement === canvasRef.current) {
+      document.exitPointerLock();
+    }
+    mapZoomRef.current = zoom;
+    if (zoom >= 5) clickTargetRef.current = null;
+    setMapZoom(zoom);
+  };
+
   const adjustMapZoom = (delta: number) => {
-    setMapZoom((current) => Number(Math.min(4, Math.max(1.5, current + delta)).toFixed(2)));
+    changeMapZoom(mapZoomRef.current + delta);
   };
 
   const onMapZoomChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setMapZoom(Number(event.currentTarget.value));
+    changeMapZoom(Number(event.currentTarget.value));
   };
 
   const onCanvasWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -3322,12 +3573,16 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onPointerMove={onCanvasPointerMove}
         onPointerUp={onCanvasPointerUp}
         onPointerCancel={onCanvasPointerCancel}
+        onMouseMove={onCanvasMouseMove}
         onClick={onCanvasClick}
         onWheel={onCanvasWheel}
-        className="absolute inset-0 cursor-crosshair outline-none"
+        className={cn(
+          'absolute inset-0 outline-none',
+          mapZoom >= 5 && pointerLocked ? 'cursor-none' : 'cursor-crosshair'
+        )}
         role="application"
-        aria-label="COMMUNE town square. Tap the ground to walk. On touchscreens, use the left joystick and nearby action buttons. Keyboard: WASD or arrow keys to move, E and H to interact."
-        style={{ touchAction: 'manipulation' }}
+        aria-label="COMMUNE town square. Zoom to 5x for first-person view. Click to capture the mouse; use WASD to move and the mouse to look."
+        style={{ touchAction: mapZoom >= 5 ? 'none' : 'manipulation' }}
         tabIndex={0}
       />
       <canvas
@@ -3335,6 +3590,44 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         className="pointer-events-none absolute inset-0 size-full"
         aria-hidden="true"
       />
+      {mapZoom >= 5 && (
+        <div
+          role="img"
+          aria-label={laserHitConfirmed ? 'Laser hit confirmed' : 'Laser aiming crosshair'}
+          className={cn(
+            'pointer-events-none absolute left-1/2 top-1/2 z-20 size-5 -translate-x-1/2 -translate-y-1/2 transition-transform duration-100',
+            laserHitConfirmed
+              ? 'scale-125 text-white drop-shadow-[0_0_6px_rgba(255,255,255,1)]'
+              : 'text-cyan-200 drop-shadow-[0_0_4px_rgba(98,242,255,0.9)]'
+          )}
+        >
+          {laserHitConfirmed && (
+            <svg className="absolute -inset-2 size-9" viewBox="0 0 36 36" aria-hidden="true">
+              <path
+                d="M6 6l7 7M30 6l-7 7M6 30l7-7M30 30l-7-7"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="square"
+                strokeWidth="2"
+              />
+            </svg>
+          )}
+          <span className="absolute left-1/2 top-0 h-1.5 w-px -translate-x-1/2 bg-current" />
+          <span className="absolute bottom-0 left-1/2 h-1.5 w-px -translate-x-1/2 bg-current" />
+          <span className="absolute left-0 top-1/2 h-px w-1.5 -translate-y-1/2 bg-current" />
+          <span className="absolute right-0 top-1/2 h-px w-1.5 -translate-y-1/2 bg-current" />
+          <span className="absolute left-1/2 top-1/2 size-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        </div>
+      )}
+      {mapZoom >= 5 && (
+        <div className="pointer-events-none absolute bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/25 bg-slate-950/55 px-3 py-1.5 font-mono text-[10px] text-white/85 shadow-lg backdrop-blur-sm">
+          {touchControls
+            ? 'JOYSTICK MOVE · DRAG TO LOOK · TAP TO FIRE'
+            : pointerLocked
+              ? 'WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · ESC RELEASE'
+              : 'CLICK TO LOCK MOUSE + FIRE · WASD MOVE'}
+        </div>
+      )}
 
       {touchControls && !panel && !chatFocused && (
         <div
@@ -3342,20 +3635,20 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-label="Map zoom controls"
           className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full border border-white/30 bg-slate-950/30 px-2 py-3 shadow-lg backdrop-blur-sm"
         >
-          <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">ZOOM</span>
+          <span className="font-mono text-[8px] font-bold tracking-wider text-white/70">{mapZoom >= 5 ? 'FPV' : 'ZOOM'}</span>
           <input
             type="range"
-            min="1.5"
-            max="4"
+            min="1"
+            max="5"
             step="0.05"
             value={mapZoom}
             onChange={onMapZoomChange}
-            aria-label="Map zoom"
+            aria-label="Map zoom, 5x switches to first-person view"
             className="h-32 w-6 accent-primary"
             style={{ writingMode: 'vertical-lr', direction: 'rtl', touchAction: 'none' }}
           />
           <output className="font-mono text-[9px] font-bold tabular-nums text-white/80">
-            {mapZoom.toFixed(1)}x
+            {mapZoom >= 5 ? 'FPV' : `${mapZoom.toFixed(1)}x`}
           </output>
         </div>
       )}
@@ -3566,11 +3859,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           >
             −
           </button>
-          <output className="min-w-9 text-center tabular-nums">{mapZoom.toFixed(1)}x</output>
+          <output className="min-w-9 text-center tabular-nums">{mapZoom >= 5 ? 'FPV' : `${mapZoom.toFixed(1)}x`}</output>
           <button
             type="button"
             onClick={() => adjustMapZoom(0.25)}
-            aria-label="Zoom in map"
+            aria-label={mapZoom >= 5 ? 'First-person view active' : 'Zoom in map'}
+            disabled={mapZoom >= 5}
             className="grid size-7 place-items-center rounded-full text-base hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             +
@@ -4984,6 +5278,8 @@ function updatePetFollowers(
         moving: false,
         walkPhase: Math.random() * Math.PI * 2,
         facingLeft: false,
+        facingX: 1,
+        facingY: 0,
       };
       if (startsMoving) follower.followAt = now + petRandom(700, 2400);
       followers.set(key, follower);
@@ -5165,7 +5461,10 @@ function updatePetFollowers(
     follower.moving = Math.hypot(movedX, movedY) > 0.15;
     if (follower.moving) {
       follower.walkPhase += dt * (follower.behavior === 'catchup' ? 12 : 8.5) * follower.pace;
-      follower.facingLeft = movedX < -0.1;
+      const movedDistance = Math.hypot(movedX, movedY);
+      follower.facingX = movedX / movedDistance;
+      follower.facingY = movedY / movedDistance;
+      follower.facingLeft = follower.facingX < 0;
     }
     follower.ownerX = owner.x;
     follower.ownerY = owner.y;
@@ -5180,6 +5479,8 @@ function updatePetFollowers(
       emote: follower.emote,
       walkPhase: follower.walkPhase,
       facingLeft: follower.facingLeft,
+      headingX: follower.facingX,
+      headingY: follower.facingY,
     });
   }
 
@@ -5864,7 +6165,7 @@ function draw(
             : null;
         drawAgent(
           ctx,
-          { x: r.x, y: r.y, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, superAdmin: r.superAdmin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
+          { x: r.x, y: r.y, headingX: r.headingX, headingY: r.headingY, name: r.name, hue: r.hue, says: speech, status: r.status, admin: r.admin, superAdmin: r.superAdmin, pet: r.pet, avatar: r.avatar, moving: r.moving, bobPhase: r.bobPhase },
           t
         );
       },
@@ -6475,8 +6776,10 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       }
     }
   }
-  const ox = Math.round(a.x) - (tpl[0].length * SP_P) / 2;
   const oy = Math.round(feet) - tpl.length * SP_P;
+  ctx.save();
+  ctx.translate(a.x, feet);
+  ctx.rotate(Math.atan2(-(a.headingX ?? 0), a.headingY ?? 1));
   for (let r = 0; r < tpl.length; r++) {
     const row = tpl[r];
     for (let c = 0; c < row.length; c++) {
@@ -6484,9 +6787,9 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
       if (ch === '.') continue;
       ctx.fillStyle = palette[ch] ?? skin;
       if (r === hemRow && ch === 'P') {
-        ctx.fillRect(ox + c * SP_P - SP_P, oy + r * SP_P, SP_P * 3, SP_P);
+        ctx.fillRect(-tpl[0].length * SP_P / 2 + c * SP_P - SP_P, -tpl.length * SP_P + r * SP_P, SP_P * 3, SP_P);
       } else {
-        ctx.fillRect(ox + c * SP_P, oy + r * SP_P, SP_P, SP_P);
+        ctx.fillRect(-tpl[0].length * SP_P / 2 + c * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
       }
     }
   }
@@ -6494,10 +6797,11 @@ function drawAgent(ctx: CanvasRenderingContext2D, a: Agent, t: number, isPlayer 
   if (look?.hairStyle === 'long') {
     for (let r = 3; r <= 10; r++) {
       ctx.fillStyle = r === 3 || r === 8 ? hairHi : hair;
-      ctx.fillRect(ox + 2 * SP_P, oy + r * SP_P, SP_P, SP_P);
-      ctx.fillRect(ox + 9 * SP_P, oy + r * SP_P, SP_P, SP_P);
+      ctx.fillRect(-tpl[0].length * SP_P / 2 + 2 * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
+      ctx.fillRect(-tpl[0].length * SP_P / 2 + 9 * SP_P, -tpl.length * SP_P + r * SP_P, SP_P, SP_P);
     }
   }
+  ctx.restore();
 
   // player ring + name tag (+ admin star, + status line for remote agents)
   if (isPlayer) {
@@ -6551,7 +6855,6 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
         : CAT_STAND;
   const width = rows[0].length * cellX;
   const height = rows.length * cellY;
-  const left = pet.x - width / 2;
   const bob = reduceMotion
     ? 0
     : animated
@@ -6559,7 +6862,7 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
       : pet.pose === 'play'
         ? Math.abs(Math.sin(t * 6 + pet.walkPhase)) * 2.5
         : Math.sin(t * 1.7 + pet.walkPhase) * 0.5;
-  const top = pet.y - height + 4 + bob;
+  const top = -height + 4;
   const palette = CAT_PIXEL_PALETTES[pet.catId];
 
   ctx.fillStyle = 'rgba(20,20,19,0.22)';
@@ -6567,15 +6870,17 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
   ctx.ellipse(pet.x, pet.y + 3, width * 0.46, 5 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  ctx.save();
+  ctx.translate(pet.x, pet.y + bob);
+  ctx.rotate(Math.atan2(pet.headingY, pet.headingX));
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
     for (let colIndex = 0; colIndex < row.length; colIndex++) {
       const pixel = row[colIndex];
       if (pixel === '.') continue;
-      const col = pet.facingLeft ? row.length - 1 - colIndex : colIndex;
       ctx.fillStyle = palette[pixel] ?? palette.C;
       ctx.fillRect(
-        Math.round(left + col * cellX),
+        Math.round(-width / 2 + colIndex * cellX),
         Math.round(top + rowIndex * cellY),
         Math.ceil(cellX),
         Math.ceil(cellY)
@@ -6586,11 +6891,11 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
     const emoteY = top - 5 - Math.sin(t * 3 + pet.walkPhase) * 2;
     if (pet.emote === 'sniff') {
       ctx.fillStyle = '#b8d9c8';
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -17 : 13)), Math.round(emoteY), 3, 3);
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -22 : 18)), Math.round(emoteY - 5), 2, 2);
-      ctx.fillRect(Math.round(pet.x + (pet.facingLeft ? -25 : 21)), Math.round(emoteY + 2), 2, 2);
+      ctx.fillRect(13, Math.round(emoteY), 3, 3);
+      ctx.fillRect(18, Math.round(emoteY - 5), 2, 2);
+      ctx.fillRect(21, Math.round(emoteY + 2), 2, 2);
     } else {
-      const sx = Math.round(pet.x + 15);
+      const sx = 15;
       const sy = Math.round(emoteY - 5);
       ctx.fillStyle = '#f0d394';
       ctx.fillRect(sx, sy - 4, 3, 11);
@@ -6599,6 +6904,7 @@ function drawPixelCat(ctx: CanvasRenderingContext2D, pet: PixelPetView, t: numbe
       ctx.fillRect(sx + 1, sy, 2, 3);
     }
   }
+  ctx.restore();
 }
 
 /** Chunky pixel oak (dynamic so it y-sorts with the agents), cached as a sprite. */
