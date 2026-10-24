@@ -298,10 +298,10 @@ export function CatAskPanel({
   const canGenerateEmail = emailConversation.length > 0 && !loading;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-5" role="dialog" aria-modal="true" aria-label="Ask the knowledge base">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-5" role="dialog" aria-modal="true" aria-label="Ask the knowledge base">
       <button type="button" aria-label="Close Ask panel" onClick={onClose} className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm" />
-      <section className="glass-panel relative flex max-h-[92dvh] min-h-[420px] w-full max-w-3xl flex-col overflow-visible rounded-2xl border border-white/15 bg-card/90 shadow-[0_24px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/5 backdrop-blur-2xl">
-        <header className="flex shrink-0 items-center gap-3 rounded-t-2xl border-b border-border/60 bg-gradient-to-b from-white/[0.06] to-transparent px-4 py-3 sm:px-5">
+      <section className="glass-panel relative flex max-h-[calc(100dvh-1rem)] min-h-0 w-full max-w-3xl flex-col overflow-visible rounded-xl border border-white/15 bg-card/90 shadow-[0_24px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/5 backdrop-blur-2xl sm:max-h-[92dvh] sm:rounded-2xl">
+        <header className="flex shrink-0 items-center gap-2 rounded-t-xl border-b border-border/60 bg-gradient-to-b from-white/[0.06] to-transparent px-3 py-2.5 sm:gap-3 sm:rounded-t-2xl sm:px-5 sm:py-3">
           <div
             className="relative z-30 shrink-0"
             onMouseEnter={() => !loading && setModelMenuOpen(true)}
@@ -367,7 +367,7 @@ export function CatAskPanel({
           </button>
         </header>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-5 sm:px-5 sm:py-4">
           {conversation.length === 0 && (
             <p className="rounded-xl border border-border/50 bg-black/10 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
               Ask about a support issue, or leave the box below empty to search these ticket notes. Follow-up questions will stay grounded in the support sources.
@@ -407,7 +407,7 @@ export function CatAskPanel({
           {error && !conversation.some((turn) => turn.error === error) && <p role="alert" className="text-sm text-red-400">{error}</p>}
         </div>
 
-        <footer className="shrink-0 border-t border-border/60 bg-black/10 px-4 py-3 sm:px-5">
+        <footer className="shrink-0 border-t border-border/60 bg-black/10 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-3">
           <textarea
             ref={inputRef}
             value={question}
@@ -428,16 +428,16 @@ export function CatAskPanel({
             maxLength={1000}
             rows={2}
             placeholder={loading ? 'Searching and streaming your answer…' : 'Ask a follow-up, or press Enter to search current ticket notes…'}
-            className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:opacity-60"
+            className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-base text-foreground outline-none placeholder:text-sm placeholder:text-muted-foreground/70 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:opacity-60 sm:text-sm"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
             <span className="hidden text-[10px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line</span>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
               <button
                 type="button"
                 onClick={() => setEmailOpen(true)}
                 disabled={!canGenerateEmail || loading}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-3 py-2 text-xs font-medium text-foreground transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-sky-300"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-2 py-2 text-xs font-medium text-foreground transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-sky-300 sm:flex-none sm:px-3"
               >
                 <Mail className="size-3.5" />
                 Generate Email
@@ -446,7 +446,7 @@ export function CatAskPanel({
                 type="button"
                 onClick={() => void submit()}
                 disabled={loading || (!question.trim() && !notes.trim())}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 sm:flex-none sm:px-3.5"
               >
                 <Send className="size-3.5" />
                 {loading ? 'Working…' : 'Send'}
