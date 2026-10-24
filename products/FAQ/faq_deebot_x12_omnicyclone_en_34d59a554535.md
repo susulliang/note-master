@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set clean along the floor?
+# DEEBOT / X12 OmniCyclone / EN - How to set clean along the floor?
 
 ## Question
 

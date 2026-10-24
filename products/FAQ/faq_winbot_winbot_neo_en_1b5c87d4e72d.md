@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the reminder about "the water reservoir need to be filled with Ecovacs cleaning solution or clean water before using the robot" be turned off?
+# WINBOT / WINBOT NEO / EN - Can the reminder about "the water reservoir need to be filled with Ecovacs cleaning solution or clean water before using the robot" be turned off?
 
 ## Question
 

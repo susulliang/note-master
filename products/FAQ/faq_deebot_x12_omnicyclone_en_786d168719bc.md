@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the robot not cleaning along the edge/wall?
+# DEEBOT / X12 OmniCyclone / EN - How to handle the issue of the robot not cleaning along the edge/wall?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot be charged, what can I do?
+# DEEBOT / DEEBOT T30 PRO OMNI Rosé / EN - The robot cannot be charged, what can I do?
 
 ## Question
 

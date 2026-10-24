@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot be charged.
+# DEEBOT / DEEBOT X2 OMNI / EN - The robot cannot be charged.
 
 ## Question
 

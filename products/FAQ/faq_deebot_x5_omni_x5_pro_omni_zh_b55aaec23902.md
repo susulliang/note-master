@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地时抹布支架无法正常收缩，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 拖地时抹布支架无法正常收缩，如何处理？
 
 ## Question
 

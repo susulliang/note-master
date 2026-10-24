@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Bumper is stuck
+# DEEBOT / X9S PRO OMNI / ZH - Alarm: Bumper is stuck
 
 ## Question
 

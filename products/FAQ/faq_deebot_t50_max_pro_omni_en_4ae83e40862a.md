@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Base station related functions
+# DEEBOT / T50 MAX PRO OMNI / EN - Base station related functions
 
 ## Question
 

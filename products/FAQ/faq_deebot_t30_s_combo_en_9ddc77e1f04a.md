@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When mopping the floor, the rag bracket cannot be stretched and retracted normally; how to deal with it?
+# DEEBOT / T30 S Combo / EN - When mopping the floor, the rag bracket cannot be stretched and retracted normally; how to deal with it?
 
 ## Question
 

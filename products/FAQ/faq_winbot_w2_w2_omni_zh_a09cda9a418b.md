@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT与ECOVACSHOME APP蓝牙配对失败，如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT与ECOVACSHOME APP蓝牙配对失败，如何处理？
 
 ## Question
 

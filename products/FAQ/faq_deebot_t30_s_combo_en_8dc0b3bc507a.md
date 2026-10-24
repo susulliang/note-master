@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The sewage in the station cleaning sink cannot be recycled; how to deal with the voice alarm "cleaning sink full"?
+# DEEBOT / T30 S Combo / EN - The sewage in the station cleaning sink cannot be recycled; how to deal with the voice alarm "cleaning sink full"?
 
 ## Question
 

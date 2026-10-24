@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# OKYIKO语音助手无法唤醒，唤醒后机器不执行或延迟执行？
+# DEEBOT / X5 PRO OMNI / ZH - OKYIKO语音助手无法唤醒，唤醒后机器不执行或延迟执行？
 
 ## Question
 

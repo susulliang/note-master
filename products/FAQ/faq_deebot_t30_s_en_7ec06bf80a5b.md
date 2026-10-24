@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the robot Wi-Fi management function correctly?
+# DEEBOT / T30 S / EN - How to use the robot Wi-Fi management function correctly?
 
 ## Question
 

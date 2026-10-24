@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人無法更新韌體。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 機器人無法更新韌體。
 
 ## Question
 

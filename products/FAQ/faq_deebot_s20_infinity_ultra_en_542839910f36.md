@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What to do if the robot cannot cross thresholds or steps?
+# DEEBOT / S20 Infinity Ultra / EN - What to do if the robot cannot cross thresholds or steps?
 
 ## Question
 

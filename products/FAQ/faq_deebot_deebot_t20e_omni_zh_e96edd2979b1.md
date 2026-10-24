@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安裝機器人？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何安裝機器人？
 
 ## Question
 

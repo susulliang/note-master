@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Network Connection Guide
+# DEEBOT / T50 MAX PRO OMNI / EN - Network Connection Guide
 
 ## Question
 

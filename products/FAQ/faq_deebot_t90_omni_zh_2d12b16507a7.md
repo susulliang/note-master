@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Base Installation & Removal Guide
+# DEEBOT / T90 OMNI / ZH - Base Installation & Removal Guide
 
 ## Question
 

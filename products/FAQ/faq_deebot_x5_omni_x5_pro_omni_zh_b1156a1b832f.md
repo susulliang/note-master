@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝驱动轮被缠绕或表面有脏污，如何清理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝驱动轮被缠绕或表面有脏污，如何清理？
 
 ## Question
 

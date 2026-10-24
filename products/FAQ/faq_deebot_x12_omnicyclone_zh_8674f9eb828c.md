@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用Agent YIKO来设置清洁偏好？
+# DEEBOT / X12 OmniCyclone / ZH - 如何使用Agent YIKO来设置清洁偏好？
 
 ## Question
 

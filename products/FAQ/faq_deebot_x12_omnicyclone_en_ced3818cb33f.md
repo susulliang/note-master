@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I install and remove the station base?
+# DEEBOT / X12 OmniCyclone / EN - How do I install and remove the station base?
 
 ## Question
 

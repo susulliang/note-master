@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝清洁时无法喷水，如何处理？
+# WINBOT / WINBOT MINI / ZH - 窗宝清洁时无法喷水，如何处理？
 
 ## Question
 

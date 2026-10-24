@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Should I map along the outline of the lawn or the garden?
+# GOAT / GOAT G1 / ZH - Should I map along the outline of the lawn or the garden?
 
 ## Question
 

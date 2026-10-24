@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the YIKO voice assistant?
+# DEEBOT / X5 PRO OMNI / ZH - How to use the YIKO voice assistant?
 
 ## Question
 

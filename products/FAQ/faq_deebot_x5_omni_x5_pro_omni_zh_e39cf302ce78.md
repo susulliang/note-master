@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布支架提示未完整安装/被缠绕？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 抹布支架提示未完整安装/被缠绕？
 
 ## Question
 

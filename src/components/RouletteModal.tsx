@@ -152,7 +152,6 @@ export default function RouletteModal({ token, onSpiceChange, onClose }: Roulett
         localStorage.removeItem(WHEEL_PENDING_KEY);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── idle loop (betting phase): lazy ceremonial wheel rotation ─────────────

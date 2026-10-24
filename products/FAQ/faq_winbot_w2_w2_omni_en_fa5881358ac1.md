@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How often should the wiping pad be replaced or cleaned?
+# WINBOT / W2/W2 OMNI / EN - How often should the wiping pad be replaced or cleaned?
 
 ## Question
 

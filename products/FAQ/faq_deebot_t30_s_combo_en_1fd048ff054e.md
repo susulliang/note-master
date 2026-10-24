@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot automatically adapts to the carpet mode without lifting or hitting the floor mat, how to deal with it?
+# DEEBOT / T30 S Combo / EN - The robot automatically adapts to the carpet mode without lifting or hitting the floor mat, how to deal with it?
 
 ## Question
 

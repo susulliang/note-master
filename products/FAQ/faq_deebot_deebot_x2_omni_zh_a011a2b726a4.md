@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地布板未完全安裝/遭纏繞。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 拖地布板未完全安裝/遭纏繞。
 
 ## Question
 

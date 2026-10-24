@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the Video Manager function correctly?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to use the Video Manager function correctly?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝为何无法将地毯识别完整或将地毯判断为地板？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝为何无法将地毯识别完整或将地毯判断为地板？
 
 ## Question
 

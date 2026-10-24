@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I clean the mower with cleaning solution?
+# GOAT / GOAT G1 / ZH - Can I clean the mower with cleaning solution?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I use WINBOT outdoors in northern winter with a low temperature?
+# WINBOT / WINBOT W1/W1 Pro / EN - Can I use WINBOT outdoors in northern winter with a low temperature?
 
 ## Question
 

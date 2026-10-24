@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT清洁液用完了该怎么办？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT清洁液用完了该怎么办？
 
 ## Question
 

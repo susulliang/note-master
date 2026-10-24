@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置单拖模式？
+# DEEBOT / X11S Omnicyclone / ZH - 如何设置单拖模式？
 
 ## Question
 

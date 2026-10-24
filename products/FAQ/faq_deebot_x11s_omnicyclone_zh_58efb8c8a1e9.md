@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何给机器连网？
+# DEEBOT / X11S Omnicyclone / ZH - 如何给机器连网？
 
 ## Question
 

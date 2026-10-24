@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Roller mop is tangled
+# DEEBOT / X9S PRO OMNI / ZH - Warning: Roller mop is tangled
 
 ## Question
 

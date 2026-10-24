@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用区域/自定义清洁/AI智能托管模式/多区域混合清洁？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何使用区域/自定义清洁/AI智能托管模式/多区域混合清洁？
 
 ## Question
 

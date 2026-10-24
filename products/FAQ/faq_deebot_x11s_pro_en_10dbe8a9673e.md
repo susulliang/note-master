@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set mop-only mode？
+# DEEBOT / X11S Pro / EN - How to set mop-only mode？
 
 ## Question
 

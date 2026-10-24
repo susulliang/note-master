@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the docking station be relocated after it has been installed?
+# GOAT / GX / ZH - Can the docking station be relocated after it has been installed?
 
 ## Question
 

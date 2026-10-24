@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the roller brush stop rotating after DEEBOT has been in use for a while?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does the roller brush stop rotating after DEEBOT has been in use for a while?
 
 ## Question
 

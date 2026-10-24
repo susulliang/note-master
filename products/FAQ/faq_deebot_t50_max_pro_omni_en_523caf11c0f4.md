@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the cleaning sink?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to clean the cleaning sink?
 
 ## Question
 

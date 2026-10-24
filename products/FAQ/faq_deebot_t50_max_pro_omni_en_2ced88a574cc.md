@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot can't be charged, what can I do?
+# DEEBOT / T50 MAX PRO OMNI / EN - Robot can't be charged, what can I do?
 
 ## Question
 

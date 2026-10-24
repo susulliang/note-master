@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dirty water box abnormality
+# DEEBOT / X11S Omnicyclone / EN - Alarm: Dirty water box abnormality
 
 ## Question
 

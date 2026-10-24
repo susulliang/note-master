@@ -1,0 +1,23 @@
+---
+category: "DEEBOT"
+model: "T50降配版"
+model_slug: "t50"
+lang: "en"
+source: "FAQ/DEEBOT/T50降配版 FAQ 2.0（CN&EN）.xlsx"
+source_sheet: "EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT / T50降配版 / EN - How to deal with the robot's voice prompting “Abnormal station cleaning sink”?
+
+## Question
+
+How to deal with the robot's voice prompting “Abnormal station cleaning sink”?
+
+## Answer
+
+1.Check that the water level sensing float is installed properly.
+2.Check that the mop washing tray is in place;
+3.Reconnect power to the station and start a cleaning task to observe.

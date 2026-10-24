@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Mopping
+# DEEBOT / DEEBOT T20 OMNI / EN - Mopping
 
 ## Question
 

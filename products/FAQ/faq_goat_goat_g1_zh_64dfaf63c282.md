@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have adjusted the rain sensor delay time to start mowing immediately after the rain stops. Why is GOAT not working when there is no rain outside?
+# GOAT / GOAT G1 / ZH - I have adjusted the rain sensor delay time to start mowing immediately after the rain stops. Why is GOAT not working when there is no rain outside?
 
 ## Question
 

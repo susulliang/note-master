@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安装机器人指导
+# DEEBOT / X9S PRO OMNI / ZH - 安装机器人指导
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Which button do I need to press to start the robot?
+# WINBOT / WINBOT W1/W1 Pro / EN - Which button do I need to press to start the robot?
 
 ## Question
 

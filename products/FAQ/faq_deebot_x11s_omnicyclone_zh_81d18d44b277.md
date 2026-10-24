@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器出现充不进电/无法充电时应该怎样处理？
+# DEEBOT / X11S Omnicyclone / ZH - 机器出现充不进电/无法充电时应该怎样处理？
 
 ## Question
 

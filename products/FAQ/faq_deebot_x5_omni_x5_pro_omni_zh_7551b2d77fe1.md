@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if my robot is experiencing map confusion/map overlapping/distorted maps?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - What should I do if my robot is experiencing map confusion/map overlapping/distorted maps?
 
 ## Question
 

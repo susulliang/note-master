@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器不出清水/ 机器报警上水异常怎么办？（上下水版本）
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 机器不出清水/ 机器报警上水异常怎么办？（上下水版本）
 
 ## Question
 

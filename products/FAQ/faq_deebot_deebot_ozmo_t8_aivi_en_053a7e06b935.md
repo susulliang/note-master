@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What kinds of surfaces can DEEBOT clean?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What kinds of surfaces can DEEBOT clean?
 
 ## Question
 

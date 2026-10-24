@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot frequently returns to the station. How to handle it?
+# DEEBOT / X9S PRO OMNI / ZH - Robot frequently returns to the station. How to handle it?
 
 ## Question
 

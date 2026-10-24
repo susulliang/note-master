@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is the navigation beacon waterproof?
+# GOAT / GOAT G1 / ZH - Is the navigation beacon waterproof?
 
 ## Question
 

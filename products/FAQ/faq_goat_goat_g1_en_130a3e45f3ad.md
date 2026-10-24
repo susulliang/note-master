@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does edge optimization have to be set up first when using the automatic edge optimization function?
+# GOAT / GOAT G1 / EN - Does edge optimization have to be set up first when using the automatic edge optimization function?
 
 ## Question
 

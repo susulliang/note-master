@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 尘盒的拆卸，清理和安装指导
+# DEEBOT / X9S PRO OMNI / ZH - 尘盒的拆卸，清理和安装指导
 
 ## Question
 

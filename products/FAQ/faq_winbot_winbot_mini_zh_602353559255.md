@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝报警“气压不足”，怎么办？
+# WINBOT / WINBOT MINI / ZH - 窗宝报警“气压不足”，怎么办？
 
 ## Question
 

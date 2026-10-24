@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 遥控模式有什么用？
+# WINBOT / W2/W2 OMNI / ZH - 遥控模式有什么用？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to add standard Cleaning Solution/heavy-duty Cleaning Solution?
+# DEEBOT / T90 PRO OMNI / ZH - How to add standard Cleaning Solution/heavy-duty Cleaning Solution?
 
 ## Question
 

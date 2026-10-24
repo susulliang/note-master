@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Dust Bin Removal, Cleaning, and Installation Guide
+# DEEBOT / X9S PRO OMNI / ZH - Dust Bin Removal, Cleaning, and Installation Guide
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot missed areas while cleaning?
+# DEEBOT / DEEBOT T20e OMNI / EN - What should I do if the robot missed areas while cleaning?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果機器人在清掃時遺漏了某些區域，我該怎麼辦？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如果機器人在清掃時遺漏了某些區域，我該怎麼辦？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the reason for failure to add the Navigation Beacon in the App?
+# GOAT / GOAT G1 / EN - What is the reason for failure to add the Navigation Beacon in the App?
 
 ## Question
 

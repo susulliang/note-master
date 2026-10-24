@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Laser Sensor Abnormal
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Alarm: Laser Sensor Abnormal
 
 ## Question
 

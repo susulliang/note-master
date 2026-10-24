@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I share the WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - Can I share the WINBOT W2?
 
 ## Question
 

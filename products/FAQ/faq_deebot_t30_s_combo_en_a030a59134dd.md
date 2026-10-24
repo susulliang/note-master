@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to correctly disassemble the mopping pad plate and clean the mopping Pad?
+# DEEBOT / T30 S Combo / EN - How to correctly disassemble the mopping pad plate and clean the mopping Pad?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't the robot connect to the App, even after completing network setup?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why can't the robot connect to the App, even after completing network setup?
 
 ## Question
 

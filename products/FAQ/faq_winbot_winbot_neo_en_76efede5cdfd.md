@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# If there is too much dust on the glass, do I have to remove the dust before using WINBOT?
+# WINBOT / WINBOT NEO / EN - If there is too much dust on the glass, do I have to remove the dust before using WINBOT?
 
 ## Question
 

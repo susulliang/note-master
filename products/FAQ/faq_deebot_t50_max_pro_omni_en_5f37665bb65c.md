@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to schedule a cleaning task?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to schedule a cleaning task?
 
 ## Question
 

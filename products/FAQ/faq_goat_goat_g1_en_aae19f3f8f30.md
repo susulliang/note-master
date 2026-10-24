@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I place the navigation beacon against a wall?
+# GOAT / GOAT G1 / EN - Can I place the navigation beacon against a wall?
 
 ## Question
 

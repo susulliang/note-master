@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to create a new map?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to create a new map?
 
 ## Question
 

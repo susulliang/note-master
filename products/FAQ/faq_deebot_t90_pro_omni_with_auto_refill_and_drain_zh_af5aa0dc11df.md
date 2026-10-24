@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置定制清洁场景？
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 如何设置定制清洁场景？
 
 ## Question
 

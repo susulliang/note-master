@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with map confusion/overlapping caused by robots?
+# DEEBOT / T30 S / EN - How to deal with map confusion/overlapping caused by robots?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 为什么新机第一次开机提示“窗宝电量不足，请充满电后使用”？
+# WINBOT / WINBOT MINI / ZH - 为什么新机第一次开机提示“窗宝电量不足，请充满电后使用”？
 
 ## Question
 

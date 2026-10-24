@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to upgrade the firmware version?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to upgrade the firmware version?
 
 ## Question
 

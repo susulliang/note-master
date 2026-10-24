@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT automatically end the mowing task when it is not complete?
+# GOAT / GX / ZH - Why does the GOAT automatically end the mowing task when it is not complete?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清扫线路乱如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 清扫线路乱如何处理？
 
 ## Question
 

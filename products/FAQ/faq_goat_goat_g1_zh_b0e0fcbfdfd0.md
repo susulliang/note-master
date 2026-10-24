@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT often prompt that its bumper is abnormal?
+# GOAT / GOAT G1 / ZH - Why does the GOAT often prompt that its bumper is abnormal?
 
 ## Question
 

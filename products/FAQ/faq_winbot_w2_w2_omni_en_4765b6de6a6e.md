@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if WINBOT W2 slips?
+# WINBOT / W2/W2 OMNI / EN - What should I do if WINBOT W2 slips?
 
 ## Question
 

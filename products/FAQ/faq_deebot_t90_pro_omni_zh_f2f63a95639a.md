@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 启动智能体模式清洁及参数设置指导
+# DEEBOT / T90 PRO OMNI / ZH - 启动智能体模式清洁及参数设置指导
 
 ## Question
 

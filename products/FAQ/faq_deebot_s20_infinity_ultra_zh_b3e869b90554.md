@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何处理下视传感器异常？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何处理下视传感器异常？
 
 ## Question
 

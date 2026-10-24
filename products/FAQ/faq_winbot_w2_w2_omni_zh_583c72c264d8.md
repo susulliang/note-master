@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 室外温度较低，是否可以使用WINBOT？
+# WINBOT / W2/W2 OMNI / ZH - 室外温度较低，是否可以使用WINBOT？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the robot's Wi-Fi management function?
+# DEEBOT / DEEBOT T20 OMNI / EN - How do I use the robot's Wi-Fi management function?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 梳齿滚刷为什么还是有头发缠绕？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 梳齿滚刷为什么还是有头发缠绕？
 
 ## Question
 

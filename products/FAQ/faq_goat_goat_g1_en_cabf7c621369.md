@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I remotely control the GOAT for mapping?
+# GOAT / GOAT G1 / EN - Can I remotely control the GOAT for mapping?
 
 ## Question
 

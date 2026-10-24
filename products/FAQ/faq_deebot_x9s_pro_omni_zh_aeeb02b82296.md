@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dust accumulation on Anti-drop Sensors
+# DEEBOT / X9S PRO OMNI / ZH - Alarm: Dust accumulation on Anti-drop Sensors
 
 ## Question
 

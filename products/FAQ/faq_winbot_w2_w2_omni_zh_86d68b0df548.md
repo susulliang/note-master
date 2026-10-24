@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT开机后不工作，如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT开机后不工作，如何处理？
 
 ## Question
 

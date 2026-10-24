@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Upgrade the firmware of the WINBOT W2
+# WINBOT / W2/W2 OMNI / EN - Upgrade the firmware of the WINBOT W2
 
 ## Question
 

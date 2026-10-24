@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Poor dust collection performance? How to address it?
+# DEEBOT / X12 PRO OMNI / EN - Poor dust collection performance? How to address it?
 
 ## Question
 

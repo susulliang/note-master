@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Handle the “Disinfectant Cleaning Solution Low” or “Heavy-Duty Cleaning Solution Low” Alert？
+# DEEBOT / X12 PRO OMNI / EN - How to Handle the “Disinfectant Cleaning Solution Low” or “Heavy-Duty Cleaning Solution Low” Alert？
 
 ## Question
 

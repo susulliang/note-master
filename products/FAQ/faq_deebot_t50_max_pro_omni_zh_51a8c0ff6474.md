@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站清洁槽内污水无法回收；语音报警“清洁槽水满”如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 基站清洁槽内污水无法回收；语音报警“清洁槽水满”如何处理？
 
 ## Question
 

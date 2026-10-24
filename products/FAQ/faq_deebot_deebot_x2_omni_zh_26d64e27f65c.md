@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安裝機器人？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何安裝機器人？
 
 ## Question
 

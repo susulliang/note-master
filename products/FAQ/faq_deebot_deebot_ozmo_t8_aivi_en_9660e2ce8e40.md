@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Could DEEBOT damage furniture by running into it?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Could DEEBOT damage furniture by running into it?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Water Tray not installed
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Warning: Water Tray not installed
 
 ## Question
 

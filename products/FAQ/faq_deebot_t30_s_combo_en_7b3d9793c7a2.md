@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with a robot wetting the carpet while mopping the floor?
+# DEEBOT / T30 S Combo / EN - How to deal with a robot wetting the carpet while mopping the floor?
 
 ## Question
 

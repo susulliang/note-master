@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安全绳比较长，如何使用？
+# WINBOT / WINBOT MINI / ZH - 安全绳比较长，如何使用？
 
 ## Question
 

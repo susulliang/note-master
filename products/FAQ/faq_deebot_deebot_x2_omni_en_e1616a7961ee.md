@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT's real-time cleaning route is chaotic.
+# DEEBOT / DEEBOT X2 OMNI / EN - DEEBOT's real-time cleaning route is chaotic.
 
 ## Question
 

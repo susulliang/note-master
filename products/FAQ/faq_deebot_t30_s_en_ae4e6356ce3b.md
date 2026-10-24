@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot prompts "cloth holder winding"/incomplete installation, how to deal with it?
+# DEEBOT / T30 S / EN - The robot prompts "cloth holder winding"/incomplete installation, how to deal with it?
 
 ## Question
 

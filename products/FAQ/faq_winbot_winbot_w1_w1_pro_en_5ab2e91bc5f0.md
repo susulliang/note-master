@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the W1 PRO water spray angle? What is the water spray interval?
+# WINBOT / WINBOT W1/W1 Pro / EN - What is the W1 PRO water spray angle? What is the water spray interval?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果驅動滾輪卡住，我該如何檢查？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如果驅動滾輪卡住，我該如何檢查？
 
 ## Question
 

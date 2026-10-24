@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何添加清洁消毒液/重污清洁液？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何添加清洁消毒液/重污清洁液？
 
 ## Question
 

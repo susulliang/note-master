@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 automatically end the mowing task when it is not complete?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 automatically end the mowing task when it is not complete?
 
 ## Question
 

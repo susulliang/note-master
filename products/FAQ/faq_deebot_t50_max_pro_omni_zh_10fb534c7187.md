@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地图出现异常(歪斜、重叠)的情况时如何处理?
+# DEEBOT / T50 MAX PRO OMNI / ZH - 地图出现异常(歪斜、重叠)的情况时如何处理?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 启动拖地任务指导
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 启动拖地任务指导
 
 ## Question
 

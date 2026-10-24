@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何更换集尘袋/机器提示尘袋已满如何处理？
+# DEEBOT / X12 PRO OMNI / ZH - 如何更换集尘袋/机器提示尘袋已满如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot return to the station, how to deal with it?
+# DEEBOT / T30 S Combo / EN - The robot cannot return to the station, how to deal with it?
 
 ## Question
 

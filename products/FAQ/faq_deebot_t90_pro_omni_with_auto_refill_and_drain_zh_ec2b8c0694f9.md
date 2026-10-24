@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the base station bottom damp?
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Why is the base station bottom damp?
 
 ## Question
 

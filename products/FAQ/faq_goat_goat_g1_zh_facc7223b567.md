@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I use the automatic mapping function remotely?
+# GOAT / GOAT G1 / ZH - Can I use the automatic mapping function remotely?
 
 ## Question
 

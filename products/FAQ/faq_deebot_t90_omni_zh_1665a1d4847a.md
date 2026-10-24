@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Dust Bag Replacement Guide
+# DEEBOT / T90 OMNI / ZH - Dust Bag Replacement Guide
 
 ## Question
 

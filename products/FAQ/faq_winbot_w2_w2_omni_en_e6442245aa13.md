@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# A reminder says that the air pressure of WINBOT W2 is insufficient.
+# WINBOT / W2/W2 OMNI / EN - A reminder says that the air pressure of WINBOT W2 is insufficient.
 
 ## Question
 

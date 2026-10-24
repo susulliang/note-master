@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why have DEEBOT's lights and voice response both turned off?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why have DEEBOT's lights and voice response both turned off?
 
 ## Question
 

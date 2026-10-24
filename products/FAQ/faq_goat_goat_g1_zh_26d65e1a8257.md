@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can sounds be heard when GOAT is docking with station?
+# GOAT / GOAT G1 / ZH - Why can sounds be heard when GOAT is docking with station?
 
 ## Question
 

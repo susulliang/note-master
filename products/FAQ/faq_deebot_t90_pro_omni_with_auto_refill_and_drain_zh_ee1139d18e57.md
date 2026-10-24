@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Installation Guide
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Robot Installation Guide
 
 ## Question
 

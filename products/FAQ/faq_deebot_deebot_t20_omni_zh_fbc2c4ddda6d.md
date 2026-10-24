@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOMEアプリのダウンロード方法を教えてください。
+# DEEBOT / DEEBOT T20 OMNI / ZH - ECOVACS HOMEアプリのダウンロード方法を教えてください。
 
 ## Question
 

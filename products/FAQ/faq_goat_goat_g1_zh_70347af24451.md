@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT missing some areas when mowing?
+# GOAT / GOAT G1 / ZH - Why is the GOAT missing some areas when mowing?
 
 ## Question
 

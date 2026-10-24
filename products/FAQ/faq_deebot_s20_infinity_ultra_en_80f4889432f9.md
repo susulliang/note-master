@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install the robot?
+# DEEBOT / S20 Infinity Ultra / EN - How to install the robot?
 
 ## Question
 

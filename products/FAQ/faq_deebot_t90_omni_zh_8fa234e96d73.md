@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Network Connection Guide
+# DEEBOT / T90 OMNI / ZH - Robot Network Connection Guide
 
 ## Question
 

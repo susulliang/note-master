@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot be charged.
+# DEEBOT / DEEBOT T20e OMNI / EN - The robot cannot be charged.
 
 ## Question
 

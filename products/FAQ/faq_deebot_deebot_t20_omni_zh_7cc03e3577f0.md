@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何開啟集塵盒並更換集塵袋？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何開啟集塵盒並更換集塵袋？
 
 ## Question
 

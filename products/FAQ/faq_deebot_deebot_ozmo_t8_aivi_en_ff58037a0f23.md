@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why do the side brushes rotate slowly or not rotate at all while DEEBOT is cleaning?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why do the side brushes rotate slowly or not rotate at all while DEEBOT is cleaning?
 
 ## Question
 

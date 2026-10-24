@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What can I do if the cleaning sink is full of dirty water, the voice prompts that the cleaning sink is full.
+# DEEBOT / T50 MAX PRO OMNI / EN - What can I do if the cleaning sink is full of dirty water, the voice prompts that the cleaning sink is full.
 
 ## Question
 

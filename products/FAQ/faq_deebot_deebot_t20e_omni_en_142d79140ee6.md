@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I clean the robot driving wheels when they are entangled or dirty on the surface?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I clean the robot driving wheels when they are entangled or dirty on the surface?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the robot prompt "LDS component exception"?
+# DEEBOT / T30 S / EN - How to handle the robot prompt "LDS component exception"?
 
 ## Question
 

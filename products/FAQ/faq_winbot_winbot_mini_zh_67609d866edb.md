@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝固件版本如何升级？
+# WINBOT / WINBOT MINI / ZH - 窗宝固件版本如何升级？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I charge my robot?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - How do I charge my robot?
 
 ## Question
 

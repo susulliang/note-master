@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I use the self-cleaning function to clean the cleaning sink of the station that are dirty?
+# DEEBOT / DEEBOT X2 OMNI / EN - How can I use the self-cleaning function to clean the cleaning sink of the station that are dirty?
 
 ## Question
 

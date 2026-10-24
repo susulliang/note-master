@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The foot touch function cannot be used, what should I do?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - The foot touch function cannot be used, what should I do?
 
 ## Question
 

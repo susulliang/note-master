@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 语音提醒“WINBOT遇到阻碍，请抓紧复合线，拉回并取下WINBOT”如何处理？
+# WINBOT / W2/W2 OMNI / ZH - 语音提醒“WINBOT遇到阻碍，请抓紧复合线，拉回并取下WINBOT”如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洗拖地布時，抽水的動作會發出奇怪的聲音。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 清洗拖地布時，抽水的動作會發出奇怪的聲音。
 
 ## Question
 

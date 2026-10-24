@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the water spray coverage of the WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - What is the water spray coverage of the WINBOT W2?
 
 ## Question
 

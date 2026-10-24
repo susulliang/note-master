@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why didn't the dust collection start when Dibao returned to the station?
+# DEEBOT / T30 S Combo / EN - Why didn't the dust collection start when Dibao returned to the station?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will use of the robot be affected if the navigation beacon is not upgraded or there is an upgrade failure?
+# GOAT / GOAT G1 / EN - Will use of the robot be affected if the navigation beacon is not upgraded or there is an upgrade failure?
 
 ## Question
 

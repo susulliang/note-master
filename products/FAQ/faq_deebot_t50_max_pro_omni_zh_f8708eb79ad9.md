@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 正确安装机器人？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 正确安装机器人？
 
 ## Question
 

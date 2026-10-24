@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 在基站清洁抹布时不出热水，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 在基站清洁抹布时不出热水，如何处理？
 
 ## Question
 

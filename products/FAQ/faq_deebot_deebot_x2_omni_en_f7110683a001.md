@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't DEEBOT recognize carpet completely or recognize a carpet as floor sometimes?
+# DEEBOT / DEEBOT X2 OMNI / EN - Why can't DEEBOT recognize carpet completely or recognize a carpet as floor sometimes?
 
 ## Question
 

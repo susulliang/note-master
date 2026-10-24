@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What type of SIM card do I need to purchase?
+# GOAT / GOAT G1 / EN - What type of SIM card do I need to purchase?
 
 ## Question
 

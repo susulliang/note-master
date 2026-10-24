@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do the AI camera violate the user's privacy?
+# GOAT / GX / ZH - Do the AI camera violate the user's privacy?
 
 ## Question
 

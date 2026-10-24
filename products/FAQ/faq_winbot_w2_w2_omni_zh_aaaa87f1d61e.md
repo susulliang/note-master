@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT适用的擦窗面积是多少？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT适用的擦窗面积是多少？
 
 ## Question
 

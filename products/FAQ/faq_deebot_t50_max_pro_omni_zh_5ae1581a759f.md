@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# V型梳齿拆卸清理及安装
+# DEEBOT / T50 MAX PRO OMNI / ZH - V型梳齿拆卸清理及安装
 
 ## Question
 

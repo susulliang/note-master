@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 边刷拆卸，清理及安装
+# DEEBOT / T50 MAX PRO OMNI / ZH - 边刷拆卸，清理及安装
 
 ## Question
 

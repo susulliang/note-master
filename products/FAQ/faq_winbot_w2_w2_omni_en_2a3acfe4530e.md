@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Tips for using the wiping pad
+# WINBOT / W2/W2 OMNI / EN - Tips for using the wiping pad
 
 ## Question
 

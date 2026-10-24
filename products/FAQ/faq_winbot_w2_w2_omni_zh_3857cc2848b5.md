@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT喷水范围是多少？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT喷水范围是多少？
 
 ## Question
 

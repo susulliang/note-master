@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用「家居擺設」功能？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何使用「家居擺設」功能？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO语音助手使用指导
+# DEEBOT / T90 PRO OMNI / ZH - YIKO语音助手使用指导
 
 ## Question
 

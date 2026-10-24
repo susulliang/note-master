@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Auto-emptying failed, or dust bag not detcted or is full.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - Auto-emptying failed, or dust bag not detcted or is full.
 
 ## Question
 

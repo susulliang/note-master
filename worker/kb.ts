@@ -91,20 +91,21 @@ function mdSection(body: string, heading: string): string {
 }
 
 function compactSearchTerms(question: string, answer: string): string {
-  const words = `${question}\n${answer}`.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words: string[] = `${question}\n${answer}`.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const tokens = words.flatMap((word) => {
     if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(word)) {
       return word.length >= 2 ? [word] : [];
     }
-    const chars = Array.from(word);
+    const chars: string[] = Array.from(word);
     if (chars.length < 2) return chars;
-    return chars.slice(0, -1).map((char, index) => char + (chars[index + 1] ?? ''));
+    return chars.slice(0, -1).map((char, index) => `${char}${chars[index + 1] ?? ''}`);
   });
   return [...new Set(tokens)].slice(0, 40).join(' ');
 }
 
 interface FaqIndexEntry {
   id: string;
+  title: string;
   category: string;
   model: string;
   modelSlug: string;
@@ -117,18 +118,30 @@ interface FaqIndexEntry {
   shard: string;
 }
 
-function parseFaqIndexEntry(id: string, markdown: string): FaqIndexEntry | null {
+function parseFaqIndexEntry(id: string, storedTitle: string, markdown: string): FaqIndexEntry | null {
   const { values, body } = readFrontmatter(markdown);
+  if (values.kind !== 'faq') return null;
+  const rawLanguage = String(values.lang ?? 'en').toLowerCase();
+  const lang = rawLanguage === 'zh' || rawLanguage.startsWith('zh-')
+    ? 'zh'
+    : rawLanguage === 'en' || rawLanguage.startsWith('en-')
+      ? 'en'
+      : '';
+  if (!lang) return null;
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? '';
   const question = mdSection(body, 'Question') || mdSection(body, '问题') || title;
   const answer = mdSection(body, 'Answer') || mdSection(body, '答案');
-  if (!question) return null;
+  if (!question || !answer) return null;
+  const category = String(values.category ?? 'OTHER');
+  const model = String(values.model ?? '');
   return {
     id,
-    category: String(values.category ?? 'OTHER'),
-    model: String(values.model ?? ''),
+    title: storedTitle.trim()
+      || `${category} / ${model || 'General'} / ${lang.toUpperCase()} - ${question.replace(/\s+/g, ' ')}`,
+    category,
+    model,
     modelSlug: String(values.model_slug ?? 'general'),
-    lang: String(values.lang ?? 'en').toLowerCase(),
+    lang,
     source: String(values.source ?? ''),
     sourceSheet: String(values.source_sheet ?? ''),
     question,
@@ -151,11 +164,11 @@ async function faqIndexStamp(env: Env): Promise<string> {
 
 async function buildFaqIndexPayload(env: Env): Promise<string> {
   const { results } = await env.DB.prepare(
-    `SELECT id, body FROM kb_documents WHERE kind = 'faq' ORDER BY id`
-  ).all<{ id: string; body: string }>();
+    `SELECT id, title, body FROM kb_documents WHERE kind = 'faq' ORDER BY id`
+  ).all<{ id: string; title: string; body: string }>();
   const entries: FaqIndexEntry[] = [];
   for (const row of results ?? []) {
-    const entry = parseFaqIndexEntry(row.id, row.body ?? '');
+    const entry = parseFaqIndexEntry(row.id, row.title ?? '', row.body ?? '');
     if (entry) entries.push(entry);
   }
   entries.sort(
@@ -441,7 +454,7 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
   await ensureKbTables(env);
   if (!env.KB_BUCKET) return json({ error: 'R2 binding KB_BUCKET is not configured' }, 500);
 
-  let payload: { source?: string; cursor?: string; limit?: number } = {};
+  let payload: { source?: string; cursor?: string; limit?: number; pruneFaq?: boolean } = {};
   try {
     payload = (await request.json()) as { source?: string; cursor?: string; limit?: number };
   } catch {
@@ -481,8 +494,34 @@ export async function handleKbExportR2(request: Request, env: Env): Promise<Resp
     result = await exportKindPage(env, source, limit, cursor);
   }
 
+  let pruned = 0;
+  if (result.done && source === 'faq' && payload.pruneFaq === true) {
+    pruned = await pruneFaqR2Objects(env);
+  }
   if (result.done) await writeManifest(env);
-  return json(result);
+  return json({ ...result, ...(source === 'faq' && payload.pruneFaq === true ? { pruned } : {}) });
+}
+
+async function pruneFaqR2Objects(env: Env): Promise<number> {
+  const [faqRows, firstPage] = await Promise.all([
+    env.DB.prepare(`SELECT id FROM kb_documents WHERE kind = 'faq'`).all<{ id: string }>(),
+    env.KB_BUCKET!.list({ prefix: 'faq/', limit: 1000 }),
+  ]);
+  const currentKeys = new Set((faqRows.results ?? []).map((row) => `faq/${row.id}.md`));
+  let page = firstPage;
+  let deleted = 0;
+  while (true) {
+    const staleKeys = page.objects
+      .map((object) => object.key)
+      .filter((key) => !currentKeys.has(key));
+    if (staleKeys.length) {
+      await env.KB_BUCKET!.delete(staleKeys);
+      deleted += staleKeys.length;
+    }
+    if (!page.truncated || !page.cursor) break;
+    page = await env.KB_BUCKET!.list({ prefix: 'faq/', limit: 1000, cursor: page.cursor });
+  }
+  return deleted;
 }
 
 /** Per-kind 'documents' phase — kb_documents rows of ONE kind

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 60ml水箱可以喷多少次？可以适用多大的家庭面积？100㎡-120㎡可以吗？
+# WINBOT / WINBOT MINI / ZH - 60ml水箱可以喷多少次？可以适用多大的家庭面积？100㎡-120㎡可以吗？
 
 ## Question
 

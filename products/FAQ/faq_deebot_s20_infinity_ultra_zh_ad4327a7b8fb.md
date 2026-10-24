@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# APP提示“清洁消毒液位低/重污清洁液位低"如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - APP提示“清洁消毒液位低/重污清洁液位低"如何处理？
 
 ## Question
 

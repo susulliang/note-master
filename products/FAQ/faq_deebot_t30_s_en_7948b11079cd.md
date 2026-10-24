@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# App prompt: the robot is disconnected from the station, please check/the station cannot control the robot
+# DEEBOT / T30 S / EN - App prompt: the robot is disconnected from the station, please check/the station cannot control the robot
 
 ## Question
 

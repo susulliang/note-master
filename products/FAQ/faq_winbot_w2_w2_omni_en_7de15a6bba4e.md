@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to store the cleaning solution effectively?
+# WINBOT / W2/W2 OMNI / EN - How to store the cleaning solution effectively?
 
 ## Question
 

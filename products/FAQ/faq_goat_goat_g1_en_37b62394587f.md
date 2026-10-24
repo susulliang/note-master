@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I'm not quite sure how many navigation beacon to use for my garden, nor exactly where to put them.
+# GOAT / GOAT G1 / EN - I'm not quite sure how many navigation beacon to use for my garden, nor exactly where to put them.
 
 ## Question
 

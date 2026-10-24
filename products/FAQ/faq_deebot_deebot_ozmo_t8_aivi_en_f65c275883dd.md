@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is it dangerous to accidentally touch the electrodes on DEEBOT or the charging dock with my hand?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Is it dangerous to accidentally touch the electrodes on DEEBOT or the charging dock with my hand?
 
 ## Question
 

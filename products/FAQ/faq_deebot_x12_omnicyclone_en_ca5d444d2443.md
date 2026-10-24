@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Use the Corner Guards (Optional)？
+# DEEBOT / X12 OmniCyclone / EN - How to Use the Corner Guards (Optional)？
 
 ## Question
 

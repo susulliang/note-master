@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How long will the robot take to learn the map?
+# GOAT / GOAT G1 / ZH - How long will the robot take to learn the map?
 
 ## Question
 

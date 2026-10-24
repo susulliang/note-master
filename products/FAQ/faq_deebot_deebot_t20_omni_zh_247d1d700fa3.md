@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOTのリアルタイム清掃ルートが混乱している。
+# DEEBOT / DEEBOT T20 OMNI / ZH - DEEBOTのリアルタイム清掃ルートが混乱している。
 
 ## Question
 

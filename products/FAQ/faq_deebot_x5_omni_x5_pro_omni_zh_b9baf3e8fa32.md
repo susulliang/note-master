@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Some water remains when the clean water tank and waste water tank are removed.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - Some water remains when the clean water tank and waste water tank are removed.
 
 ## Question
 

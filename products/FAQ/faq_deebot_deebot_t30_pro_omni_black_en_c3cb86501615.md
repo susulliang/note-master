@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to start spot cleaning?
+# DEEBOT / DEEBOT T30 PRO OMNI Black / EN - How to start spot cleaning?
 
 ## Question
 

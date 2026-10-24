@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The suction power of the suction cup at the bottom of the station is not released.
+# WINBOT / W2 OMNI / EN - The suction power of the suction cup at the bottom of the station is not released.
 
 ## Question
 

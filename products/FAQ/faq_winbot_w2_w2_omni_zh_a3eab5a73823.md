@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 玻璃上有水，是否可以直接使用WINBOT？
+# WINBOT / W2/W2 OMNI / ZH - 玻璃上有水，是否可以直接使用WINBOT？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if I don't have enough Navigation Beacons?
+# GOAT / GOAT G1 / EN - What should I do if I don't have enough Navigation Beacons?
 
 ## Question
 

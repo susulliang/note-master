@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to turn on the child lock function?
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - How to turn on the child lock function?
 
 ## Question
 

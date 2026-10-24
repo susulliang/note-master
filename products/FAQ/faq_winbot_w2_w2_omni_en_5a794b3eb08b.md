@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What are the working modes of the WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - What are the working modes of the WINBOT W2?
 
 ## Question
 

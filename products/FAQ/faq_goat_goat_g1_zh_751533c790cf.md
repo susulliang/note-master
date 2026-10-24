@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT remain in place without mowing?
+# GOAT / GOAT G1 / ZH - Why does the GOAT remain in place without mowing?
 
 ## Question
 

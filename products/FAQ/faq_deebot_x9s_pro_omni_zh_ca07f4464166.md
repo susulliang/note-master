@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dirty water box abnormality
+# DEEBOT / X9S PRO OMNI / ZH - Alarm: Dirty water box abnormality
 
 ## Question
 

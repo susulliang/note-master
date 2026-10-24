@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT工作中，电量耗尽自动关机后，基站底部吸盘未解除吸力，怎么办？
+# WINBOT / W2 OMNI / ZH - WINBOT工作中，电量耗尽自动关机后，基站底部吸盘未解除吸力，怎么办？
 
 ## Question
 

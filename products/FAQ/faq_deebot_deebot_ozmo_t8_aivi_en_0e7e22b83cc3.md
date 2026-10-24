@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does DEEBOT fail to completely detect carpets? Why does it recognize carpets as floors?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does DEEBOT fail to completely detect carpets? Why does it recognize carpets as floors?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the Video Manager function correctly?(For high-end models only)
+# DEEBOT / T50降配版 / EN - How to use the Video Manager function correctly?(For high-end models only)
 
 ## Question
 

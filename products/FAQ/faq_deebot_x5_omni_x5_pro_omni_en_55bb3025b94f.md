@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I set DEEBOT's mop drying duration?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How do I set DEEBOT's mop drying duration?
 
 ## Question
 

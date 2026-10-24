@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用智能体模式？
+# DEEBOT / X11S Pro / ZH - 如何使用智能体模式？
 
 ## Question
 

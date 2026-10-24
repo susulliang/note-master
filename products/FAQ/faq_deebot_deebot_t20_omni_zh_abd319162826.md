@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットがステーションに戻れない。どうすればよいですか。
+# DEEBOT / DEEBOT T20 OMNI / ZH - ロボットがステーションに戻れない。どうすればよいですか。
 
 ## Question
 

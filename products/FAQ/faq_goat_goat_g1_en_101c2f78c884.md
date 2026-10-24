@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT G1 moving in a chaotic route when mowing?
+# GOAT / GOAT G1 / EN - Why is the GOAT G1 moving in a chaotic route when mowing?
 
 ## Question
 

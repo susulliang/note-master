@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot cannot cross thresholds/steps. How to handle?
+# DEEBOT / X11S Pro / EN - Robot cannot cross thresholds/steps. How to handle?
 
 ## Question
 

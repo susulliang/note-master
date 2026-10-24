@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I clean the waste water and clean water tanks?
+# DEEBOT / DEEBOT T20 OMNI / EN - How do I clean the waste water and clean water tanks?
 
 ## Question
 

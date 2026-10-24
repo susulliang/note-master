@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What type of battery does the GOAT G1 use? How long does the battery last?
+# GOAT / GOAT G1 / EN - What type of battery does the GOAT G1 use? How long does the battery last?
 
 ## Question
 

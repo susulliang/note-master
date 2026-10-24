@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Mopping Task Guide
+# DEEBOT / X9S PRO OMNI / ZH - Mopping Task Guide
 
 ## Question
 

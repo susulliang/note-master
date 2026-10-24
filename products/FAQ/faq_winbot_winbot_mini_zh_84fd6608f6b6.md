@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器在2mm台阶＋包胶玻璃上运行，冲出边框报警。
+# WINBOT / WINBOT MINI / ZH - 机器在2mm台阶＋包胶玻璃上运行，冲出边框报警。
 
 ## Question
 

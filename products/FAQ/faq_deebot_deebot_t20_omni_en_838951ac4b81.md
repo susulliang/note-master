@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I remove and clean the main brush?
+# DEEBOT / DEEBOT T20 OMNI / EN - How do I remove and clean the main brush?
 
 ## Question
 

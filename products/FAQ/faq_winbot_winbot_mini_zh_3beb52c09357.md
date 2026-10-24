@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器插电后报“请连接电源”
+# WINBOT / WINBOT MINI / ZH - 机器插电后报“请连接电源”
 
 ## Question
 

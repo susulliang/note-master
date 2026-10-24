@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What to do if the clean water tank does not dispense water?
+# DEEBOT / X9S PRO OMNI / ZH - What to do if the clean water tank does not dispense water?
 
 ## Question
 

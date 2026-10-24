@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置沿地板方向清洁
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何设置沿地板方向清洁
 
 ## Question
 

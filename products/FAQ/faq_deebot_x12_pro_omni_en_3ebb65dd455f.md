@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to remove/install the dust cabin filter sponge?
+# DEEBOT / X12 PRO OMNI / EN - How to remove/install the dust cabin filter sponge?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理清洁槽？
+# DEEBOT / X12 PRO OMNI / ZH - 如何清理清洁槽？
 
 ## Question
 

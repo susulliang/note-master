@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何調整機器人返回充電站清潔拖地布的時間間隔？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何調整機器人返回充電站清潔拖地布的時間間隔？
 
 ## Question
 

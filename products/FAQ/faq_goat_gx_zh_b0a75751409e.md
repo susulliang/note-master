@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Which SIM card do I need to buy?
+# GOAT / GX / ZH - Which SIM card do I need to buy?
 
 ## Question
 

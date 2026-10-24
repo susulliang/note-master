@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After the map learning process is complete, I receive a prompt about insufficient beacon signal coverage. What should I do?
+# GOAT / GOAT G1 / ZH - After the map learning process is complete, I receive a prompt about insufficient beacon signal coverage. What should I do?
 
 ## Question
 

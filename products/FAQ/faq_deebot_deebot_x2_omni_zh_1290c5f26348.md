@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT 的即時清掃路徑混亂。
+# DEEBOT / DEEBOT X2 OMNI / ZH - DEEBOT 的即時清掃路徑混亂。
 
 ## Question
 

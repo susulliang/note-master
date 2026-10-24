@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I disassemble the mopping pad plates and clean the mopping pads?
+# DEEBOT / DEEBOT T20 OMNI / EN - How do I disassemble the mopping pad plates and clean the mopping pads?
 
 ## Question
 

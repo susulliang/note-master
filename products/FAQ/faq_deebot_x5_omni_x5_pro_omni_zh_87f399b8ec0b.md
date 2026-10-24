@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确使用地宝Wi-Fi管理功能？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何正确使用地宝Wi-Fi管理功能？
 
 ## Question
 

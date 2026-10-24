@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the firmware upgrade have a low speed or even fail?
+# GOAT / GX / ZH - Why does the firmware upgrade have a low speed or even fail?
 
 ## Question
 

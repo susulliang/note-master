@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 护角（选装）该如何使用？
+# DEEBOT / X12 PRO OMNI / ZH - 护角（选装）该如何使用？
 
 ## Question
 

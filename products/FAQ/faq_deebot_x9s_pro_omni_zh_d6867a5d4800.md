@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站底部为什么会潮湿？
+# DEEBOT / X9S PRO OMNI / ZH - 基站底部为什么会潮湿？
 
 ## Question
 

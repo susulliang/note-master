@@ -28,6 +28,7 @@ export interface KbListResult {
 
 export interface KbFaqIndexEntry {
   id: string;
+  title: string;
   category: string;
   model: string;
   modelSlug: string;
@@ -176,6 +177,11 @@ export interface KbR2Progress {
   totalSoFar: number;
 }
 
+export interface KbR2ExportResult {
+  exported: number;
+  pruned: number;
+}
+
 const R2_SOURCE_LABELS: Record<string, string> = {
   documents: 'Knowledge documents',
   faq: 'FAQ documents',
@@ -198,11 +204,13 @@ const R2_SOURCE_LABELS: Record<string, string> = {
  *  the optional callback after every page. Returns the total or null on failure. */
 export async function exportKbToR2(
   sources: string[],
-  onProgress?: (p: KbR2Progress) => void
-): Promise<number | null> {
+  onProgress?: (p: KbR2Progress) => void,
+  options: { pruneFaq?: boolean } = {}
+): Promise<KbR2ExportResult | null> {
   const token = getStoredToken();
   if (!token) return null;
   let totalSoFar = 0;
+  let totalPruned = 0;
   for (const source of sources) {
     const label = R2_SOURCE_LABELS[source] ?? source;
     let sourceExported = 0;
@@ -217,7 +225,12 @@ export async function exportKbToR2(
         const res = await fetch(`${getApiBase()}/api/kb/export-r2`, {
           method: 'POST',
           headers: kbHeaders(token),
-          body: JSON.stringify({ source, ...(cursor ? { cursor } : {}), limit }),
+          body: JSON.stringify({
+            source,
+            ...(cursor ? { cursor } : {}),
+            limit,
+            ...(source === 'faq' && options.pruneFaq ? { pruneFaq: true } : {}),
+          }),
         });
         if (!res.ok) {
           if (res.status >= 500 && limit > 1) {
@@ -228,12 +241,14 @@ export async function exportKbToR2(
         }
         const payload = (await res.json()) as {
           exported?: number;
+          pruned?: number;
           total?: number;
           done?: boolean;
           nextCursor?: string | null;
         };
         totalSoFar += payload.exported ?? 0;
         sourceExported += payload.exported ?? 0;
+        totalPruned += payload.pruned ?? 0;
         if (typeof payload.total === 'number') sourceTotal = payload.total;
         onProgress?.({ label, exported: sourceExported, total: sourceTotal, totalSoFar });
         if (payload.done) break;
@@ -244,5 +259,5 @@ export async function exportKbToR2(
       }
     }
   }
-  return totalSoFar;
+  return { exported: totalSoFar, pruned: totalPruned };
 }

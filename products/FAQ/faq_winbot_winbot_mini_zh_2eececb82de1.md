@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安装及使用窗宝？
+# WINBOT / WINBOT MINI / ZH - 如何安装及使用窗宝？
 
 ## Question
 

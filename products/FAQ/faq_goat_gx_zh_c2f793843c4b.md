@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The station indicator light stays off.
+# GOAT / GX / ZH - The station indicator light stays off.
 
 ## Question
 

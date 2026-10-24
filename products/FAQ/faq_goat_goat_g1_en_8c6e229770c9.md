@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After beacon installation is complete, and the App detects that the Navigation Beacon communication is abnormal, can the GOAT be used normally?
+# GOAT / GOAT G1 / EN - After beacon installation is complete, and the App detects that the Navigation Beacon communication is abnormal, can the GOAT be used normally?
 
 ## Question
 

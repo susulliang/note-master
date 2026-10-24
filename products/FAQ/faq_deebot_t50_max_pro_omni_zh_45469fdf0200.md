@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站相关功能使用？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 基站相关功能使用？
 
 ## Question
 

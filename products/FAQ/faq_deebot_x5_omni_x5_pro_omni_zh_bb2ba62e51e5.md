@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝不执行智能断点续扫如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝不执行智能断点续扫如何处理？
 
 ## Question
 

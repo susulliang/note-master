@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I turn on the AI recognition feature?
+# GOAT / GOAT G1 / EN - How do I turn on the AI recognition feature?
 
 ## Question
 

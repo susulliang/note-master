@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# “无水提醒”是否可以关闭？
+# WINBOT / WINBOT mini2 / ZH - “无水提醒”是否可以关闭？
 
 ## Question
 

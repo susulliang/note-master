@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do I need to move the docking station indoors in winter?
+# GOAT / GX / ZH - Do I need to move the docking station indoors in winter?
 
 ## Question
 

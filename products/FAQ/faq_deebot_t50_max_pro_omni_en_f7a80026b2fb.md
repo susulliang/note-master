@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to replace dust bag?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to replace dust bag?
 
 ## Question
 

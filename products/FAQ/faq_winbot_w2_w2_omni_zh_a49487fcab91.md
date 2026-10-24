@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT噪音大，是否可以调节吸力？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT噪音大，是否可以调节吸力？
 
 ## Question
 

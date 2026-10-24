@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确拆卸/清理/安装边刷？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何正确拆卸/清理/安装边刷？
 
 ## Question
 

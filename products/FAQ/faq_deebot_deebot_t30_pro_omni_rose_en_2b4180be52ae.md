@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The cleaning route of the robot is messy, why and how to deal with it?
+# DEEBOT / DEEBOT T30 PRO OMNI Rosé / EN - The cleaning route of the robot is messy, why and how to deal with it?
 
 ## Question
 

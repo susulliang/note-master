@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：滚筒被缠绕
+# DEEBOT / X11S Omnicyclone / ZH - 报警：滚筒被缠绕
 
 ## Question
 

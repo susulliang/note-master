@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用 YIKO 語音助理？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何使用 YIKO 語音助理？
 
 ## Question
 

@@ -1,11 +1,12 @@
 {
   "name": "miaoda-vite-react-app",
-  "version": "0.6.24",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "bash scripts/build.sh",
+    "faq:verify": "node scripts/verify-faq-content.mjs",
     "typecheck": "tsc -p tsconfig.app.json",
     "lint": "concurrently npm:typecheck npm:lint:eslint",
     "lint:eslint": "eslint src",

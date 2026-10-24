@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地功能使用
+# DEEBOT / T50 MAX PRO OMNI / ZH - 拖地功能使用
 
 ## Question
 

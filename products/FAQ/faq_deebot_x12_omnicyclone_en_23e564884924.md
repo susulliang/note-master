@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Clean the Water Tray?
+# DEEBOT / X12 OmniCyclone / EN - How to Clean the Water Tray?
 
 ## Question
 

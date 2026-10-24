@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does dust collection not start when the robot returns to the station?
+# DEEBOT / DEEBOT T30 OMNI Rosé / EN - Why does dust collection not start when the robot returns to the station?
 
 ## Question
 

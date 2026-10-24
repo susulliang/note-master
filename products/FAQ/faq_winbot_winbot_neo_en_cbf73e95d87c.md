@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the service life of the mopping pad?
+# WINBOT / WINBOT NEO / EN - What is the service life of the mopping pad?
 
 ## Question
 

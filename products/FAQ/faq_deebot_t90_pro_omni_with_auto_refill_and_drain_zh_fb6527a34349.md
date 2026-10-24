@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set mop-only mode?
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - How to set mop-only mode?
 
 ## Question
 

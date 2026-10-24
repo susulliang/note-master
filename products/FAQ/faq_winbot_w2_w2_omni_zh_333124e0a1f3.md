@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 擦窗布多久更换/清洗一次？
+# WINBOT / W2/W2 OMNI / ZH - 擦窗布多久更换/清洗一次？
 
 ## Question
 

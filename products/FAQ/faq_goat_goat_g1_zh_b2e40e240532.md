@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After the Cellullar Module being installed to another GOAT, will the Auto-Connection service still be available?
+# GOAT / GOAT G1 / ZH - After the Cellullar Module being installed to another GOAT, will the Auto-Connection service still be available?
 
 ## Question
 

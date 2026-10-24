@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is there a limit on how long the GOAT can work?
+# GOAT / GOAT G1 / ZH - Is there a limit on how long the GOAT can work?
 
 ## Question
 

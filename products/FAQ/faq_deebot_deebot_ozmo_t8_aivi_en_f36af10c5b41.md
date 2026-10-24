@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can DEEBOT get over the door sills in my home?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Can DEEBOT get over the door sills in my home?
 
 ## Question
 

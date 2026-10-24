@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the base station bottom damp?
+# DEEBOT / X9S PRO OMNI / ZH - Why is the base station bottom damp?
 
 ## Question
 

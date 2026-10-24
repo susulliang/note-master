@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I hide the navigation beacon in a concealed location?
+# GOAT / GOAT G1 / EN - Can I hide the navigation beacon in a concealed location?
 
 ## Question
 

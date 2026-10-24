@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the safety rope?
+# WINBOT / W2/W2 OMNI / EN - How to use the safety rope?
 
 ## Question
 

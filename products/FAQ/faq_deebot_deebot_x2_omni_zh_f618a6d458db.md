@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何升級機器人的韌體？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何升級機器人的韌體？
 
 ## Question
 

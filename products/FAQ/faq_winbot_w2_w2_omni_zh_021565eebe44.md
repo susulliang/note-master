@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 无水提醒是否可以关闭？
+# WINBOT / W2/W2 OMNI / ZH - 无水提醒是否可以关闭？
 
 ## Question
 

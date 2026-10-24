@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set up custom cleaning scenarios?
+# DEEBOT / T90 OMNI / ZH - How to set up custom cleaning scenarios?
 
 ## Question
 

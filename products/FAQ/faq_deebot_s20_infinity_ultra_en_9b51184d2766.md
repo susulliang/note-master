@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the robot not cleaning along the edge/wall?
+# DEEBOT / S20 Infinity Ultra / EN - How to handle the issue of the robot not cleaning along the edge/wall?
 
 ## Question
 

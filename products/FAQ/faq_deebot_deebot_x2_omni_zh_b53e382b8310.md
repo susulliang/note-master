@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆卸拖地布板和清潔拖地布？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何拆卸拖地布板和清潔拖地布？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is an abnormal Navigation Beacon displayed in the Navigation Beacon list in the App?
+# GOAT / GOAT G1 / EN - Why is an abnormal Navigation Beacon displayed in the Navigation Beacon list in the App?
 
 ## Question
 

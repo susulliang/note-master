@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The DEEBOT has trouble returning to or finding the charging dock.
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - The DEEBOT has trouble returning to or finding the charging dock.
 
 ## Question
 

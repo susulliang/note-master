@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the dirty water tank and clean water tank?
+# DEEBOT / X12 PRO OMNI / EN - How to clean the dirty water tank and clean water tank?
 
 ## Question
 

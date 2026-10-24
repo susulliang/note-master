@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the main brush?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How to clean the main brush?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットを充電する方法を教えてください。
+# DEEBOT / DEEBOT T20 OMNI / ZH - ロボットを充電する方法を教えてください。
 
 ## Question
 

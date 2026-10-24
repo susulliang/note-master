@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The live video footage is not clear enough.
+# GOAT / GOAT G1 / ZH - The live video footage is not clear enough.
 
 ## Question
 

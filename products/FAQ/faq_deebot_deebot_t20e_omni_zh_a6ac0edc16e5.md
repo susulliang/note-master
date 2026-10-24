@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用「地圖管理」功能？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何使用「地圖管理」功能？
 
 ## Question
 

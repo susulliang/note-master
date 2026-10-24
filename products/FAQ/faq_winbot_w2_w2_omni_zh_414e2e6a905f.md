@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT固件版本如何升级？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT固件版本如何升级？
 
 ## Question
 

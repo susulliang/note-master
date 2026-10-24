@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人频繁回基站，如何处理？
+# DEEBOT / X9S PRO OMNI / ZH - 机器人频繁回基站，如何处理？
 
 ## Question
 

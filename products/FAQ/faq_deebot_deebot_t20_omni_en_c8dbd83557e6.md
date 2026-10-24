@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot prompts that please gently tap the D-ToF Sensor. What should I do?
+# DEEBOT / DEEBOT T20 OMNI / EN - Robot prompts that please gently tap the D-ToF Sensor. What should I do?
 
 ## Question
 

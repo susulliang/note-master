@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 谷电充电是什么？怎样使用？
+# DEEBOT / X11S Omnicyclone / ZH - 谷电充电是什么？怎样使用？
 
 ## Question
 

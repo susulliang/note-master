@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the Agent Hosting mode?
+# DEEBOT / S20 Infinity Ultra / EN - How to use the Agent Hosting mode?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清水箱不出水，该如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 清水箱不出水，该如何处理？
 
 ## Question
 

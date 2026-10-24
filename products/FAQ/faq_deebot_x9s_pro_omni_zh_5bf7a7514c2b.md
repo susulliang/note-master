@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO Voice Assistant Usage Guide
+# DEEBOT / X9S PRO OMNI / ZH - YIKO Voice Assistant Usage Guide
 
 ## Question
 

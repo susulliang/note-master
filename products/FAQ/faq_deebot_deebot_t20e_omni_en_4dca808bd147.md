@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the Area Cleaning/Funiture Area Cleaning/Custom Cleaning/Housekeeper modes?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I use the Area Cleaning/Funiture Area Cleaning/Custom Cleaning/Housekeeper modes?
 
 ## Question
 

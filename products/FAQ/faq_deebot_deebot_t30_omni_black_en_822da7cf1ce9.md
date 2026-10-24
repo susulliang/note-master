@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The dirty water in the cleaning sink cannot be recycled or the dirty water tank doesn't have any water, but the robot reminds that the dirty water tank is full.
+# DEEBOT / DEEBOT T30 OMNI Black / EN - The dirty water in the cleaning sink cannot be recycled or the dirty water tank doesn't have any water, but the robot reminds that the dirty water tank is full.
 
 ## Question
 

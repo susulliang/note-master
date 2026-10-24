@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Packing Instruction Video
+# DEEBOT / S20 Infinity Ultra / EN - Robot Packing Instruction Video
 
 ## Question
 

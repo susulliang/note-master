@@ -1,20 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedField, TranscriptEntry } from '@/lib/field-extraction';
+import type {
+  ChatMsg,
+  KittyCandidate,
+} from '@/lib/kitty-help';
 import {
   buildParsePrompt,
   extractJsonLoose,
   extractTldr,
   validateLlmFields,
 } from '@/lib/llm-parser';
-import {
-  collectKittyCandidates,
-  fetchKittySourceContent,
-  kittyChat,
-  KITTY_FIELD_IDS,
-  parseResolutionReply,
-  type ChatMsg,
-  type KittyCandidate,
-} from '@/lib/kitty-help';
+import type { SupportEvidence } from '@/lib/support-evidence';
 import type { CatFormData } from '@/hooks/use-cat-assistant';
 
 /**
@@ -45,6 +41,10 @@ export interface KittyHelpResult {
   emotionalSupport: string;
   /** Cited source titles. */
   sources: string[];
+  /** Canonical source excerpts returned by the shared Worker retrieval. */
+  evidence?: SupportEvidence[];
+  /** Identifies one completed custom Kitty run for chat de-duplication. */
+  runId?: string;
   /** Wall time of the whole routine (ms). */
   ms: number;
   /** The picks the model made (id + title + reason) for transparency. */
@@ -81,8 +81,9 @@ function buildKittySystem(): string {
     '"resolution_en":"detailed step-by-step resolution in English",',
     '"resolution_zh_tldr":"简短中文TLDR版解决方法",',
     '"emotional_support":"1–2 empathetic sentences to use if the customer is frustrated",',
-    '"sources":["cited source title", …]}',
-    'Ground the resolution in the provided sources; do not invent policies. Cite only sources you were given.',
+    '"sources":["K01", …]}',
+    'Ground the resolution in the provided full source contents; do not invent policies or steps.',
+    'Cite factual claims inline with the exact selected source id (for example [K01]). Return only ids from sources you were given.',
     'Never wrap the JSON in a quoted string — emit the raw object.',
   ].join('\n');
 }
@@ -159,7 +160,7 @@ export function useKittyHelp(args: {
 
   const start = useCallback(async (): Promise<void> => {
     if (runRef.current) return;
-    const { entries, transcriptText, formTail, query } = buildQueryContext();
+    const { entries, transcriptText, formTail } = buildQueryContext();
     // Kitty Help activates on EITHER a live transcript OR enough drafted
     // ticket-note content — the notes are fed to the LLM as the Task-1
     // source when the transcript is empty.
@@ -175,9 +176,20 @@ export function useKittyHelp(args: {
     runRef.current = true;
     setBusy(true);
     setError(null);
+    setResult(null);
+    setPanelOpen(true);
     const started = performance.now();
+    const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
+      const {
+        collectKittyCandidates,
+        fetchKittySourceContent,
+        kittyChat,
+        KITTY_FIELD_IDS,
+        parseResolutionReply,
+      } = await import('@/lib/kitty-help');
+
       // ---------------------------------------------------------------
       // Stage 1 — Fill Notes (seeds the persistent conversation).
       // Transcript path: the standard Fill Notes extraction prompt. Note-
@@ -253,6 +265,8 @@ export function useKittyHelp(args: {
           resolutionZhTldr: '没有匹配到可用的知识库资料。',
           emotionalSupport: '',
           sources: [],
+          evidence: [],
+          runId,
           picks: [],
           ms: Math.round(performance.now() - started),
         });
@@ -294,12 +308,18 @@ export function useKittyHelp(args: {
         label: picked.length > 0 ? `Reading ${picked.length} source${picked.length > 1 ? 's' : ''}…` : 'Writing the resolution…',
         detail: picked.length > 0 ? 'Composing the best resolution' : 'No sources picked — answering directly',
       });
-      let sourceBlock = '(no sources were picked — answer from the conversation alone and leave sources empty)';
+      let sourceBlock = '(no matched sources were available — do not provide model-specific instructions; ask for one detail to improve the search)';
+      let evidence: SupportEvidence[] = [];
       if (picked.length > 0) {
         const contents = await Promise.all(
           picked.map(async (c) => ({ candidate: c, content: await fetchKittySourceContent(c) }))
         );
         sourceBlock = buildSourceBlock(contents);
+        evidence = contents.map(({ candidate, content }) => ({
+          id: `[${candidate.id}]`,
+          title: candidate.title,
+          excerpt: content.slice(0, 1_200),
+        }));
       }
       messages.push({
         role: 'user',
@@ -308,7 +328,7 @@ export function useKittyHelp(args: {
           'Full content of the selected sources:',
           sourceBlock,
           '',
-          'Write the best resolution for the current conversation using these sources.',
+          'Write the best resolution for the current conversation using these sources and cite factual claims inline with their [Kxx] ids.',
           'Reply ONLY the JSON object specified in your system contract',
           '({"say_to_customer","resolution_en","resolution_zh_tldr","emotional_support","sources"}).',
         ].join('\n'),
@@ -329,15 +349,30 @@ export function useKittyHelp(args: {
         }
         return '';
       };
+      const citedIds = new Set<string>([
+        ...(Array.isArray(parsed3?.sources)
+          ? (parsed3.sources as unknown[]).filter((s): s is string => typeof s === 'string')
+          : []),
+        ...(reply3.match(/\bK\d{2}\b/g) ?? []),
+      ].flatMap((value) => value.match(/\bK\d{2}\b/g) ?? []));
+      const citedPicks = picked.filter((candidate) => citedIds.has(candidate.id));
+      const finalPicks = citedPicks.length ? citedPicks : picked;
+      const finalEvidence = evidence.filter((source) =>
+        finalPicks.some((candidate) => `[${candidate.id}]` === source.id)
+      );
+      const resolutionEn = readStr('resolution_en', 'resolutionEn') || reply3.trim();
+      const citationLine = finalPicks.map((candidate) => `[${candidate.id}]`).join(', ');
       const finalResult: KittyHelpResult = {
+        runId,
         sayToCustomer: readStr('say_to_customer', 'sayToCustomer'),
-        resolutionEn: readStr('resolution_en', 'resolutionEn') || reply3.trim(),
+        resolutionEn: citationLine && !/\[K\d{2}\]/.test(resolutionEn)
+          ? `${resolutionEn}\n\nSources: ${citationLine}`
+          : resolutionEn,
         resolutionZhTldr: readStr('resolution_zh_tldr', 'resolutionZhTldr', 'resolution_zh', 'zh_tldr'),
         emotionalSupport: readStr('emotional_support', 'emotionalSupport'),
-        sources: Array.isArray(parsed3?.sources)
-          ? (parsed3.sources as unknown[]).filter((s): s is string => typeof s === 'string')
-          : picked.map((c) => c.title),
-        picks: picked.map((c) => ({ id: c.id, title: c.title, reason: pickReasons.get(c.id) ?? '' })),
+        sources: finalPicks.map((candidate) => `[${candidate.id}] ${candidate.title}`),
+        evidence: finalEvidence,
+        picks: finalPicks.map((c) => ({ id: c.id, title: c.title, reason: pickReasons.get(c.id) ?? '' })),
         ms: Math.round(performance.now() - started),
       };
       setResult(finalResult);

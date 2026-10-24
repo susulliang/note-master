@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to quickly map?
+# DEEBOT / T30 S / EN - How to quickly map?
 
 ## Question
 

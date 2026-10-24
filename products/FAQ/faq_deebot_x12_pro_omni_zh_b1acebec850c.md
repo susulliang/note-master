@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置单拖模式？
+# DEEBOT / X12 PRO OMNI / ZH - 如何设置单拖模式？
 
 ## Question
 

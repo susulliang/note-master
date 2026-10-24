@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to disassemble and clean the Handheld Vaccum Cleaner's Dustbin and Mesh Filter?
+# DEEBOT / T30 S Combo / EN - How to disassemble and clean the Handheld Vaccum Cleaner's Dustbin and Mesh Filter?
 
 ## Question
 

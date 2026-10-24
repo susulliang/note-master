@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to disassemble and reassemble the station's guide wheels?
+# DEEBOT / T90 OMNI / ZH - How to disassemble and reassemble the station's guide wheels?
 
 ## Question
 

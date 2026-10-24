@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOMEアプリを使用してT20 OMNIを接続する
+# DEEBOT / DEEBOT T20 OMNI / ZH - ECOVACS HOMEアプリを使用してT20 OMNIを接続する
 
 ## Question
 

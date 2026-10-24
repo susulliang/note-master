@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to replace the dust bag / How to handle it when the robot prompts that the dust bag is full?
+# DEEBOT / X11S Pro / EN - How to replace the dust bag / How to handle it when the robot prompts that the dust bag is full?
 
 ## Question
 

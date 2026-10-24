@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 為什麼 DEEBOT 無法完全辨識地毯，或有時將地毯辨識為地板？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 為什麼 DEEBOT 無法完全辨識地毯，或有時將地毯辨識為地板？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确使用机器人Wi-Fi管理功能？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何正确使用机器人Wi-Fi管理功能？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Mapping Guide
+# DEEBOT / T50 MAX PRO OMNI / EN - Mapping Guide
 
 ## Question
 

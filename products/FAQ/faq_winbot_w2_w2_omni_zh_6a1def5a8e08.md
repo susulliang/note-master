@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT对玻璃的倾斜角度有要求吗？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT对玻璃的倾斜角度有要求吗？
 
 ## Question
 

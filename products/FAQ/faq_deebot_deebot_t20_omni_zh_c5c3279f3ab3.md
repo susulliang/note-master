@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果機器人自動開始清掃，但尚未設定預約清掃，我該怎麼辦？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如果機器人自動開始清掃，但尚未設定預約清掃，我該怎麼辦？
 
 ## Question
 

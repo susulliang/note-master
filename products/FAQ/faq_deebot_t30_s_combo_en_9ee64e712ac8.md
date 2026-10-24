@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to disassemble/clean/install the side brush correctly?
+# DEEBOT / T30 S Combo / EN - How to disassemble/clean/install the side brush correctly?
 
 ## Question
 

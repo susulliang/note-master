@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the cover not tightly closed after installing the additional connection module?
+# GOAT / GX / ZH - Why is the cover not tightly closed after installing the additional connection module?
 
 ## Question
 

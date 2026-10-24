@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the narrow passageways in my garden affect the installation of the navigation beacons?
+# GOAT / GOAT G1 / ZH - Will the narrow passageways in my garden affect the installation of the navigation beacons?
 
 ## Question
 

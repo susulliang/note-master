@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot missed areas while cleaning?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - What should I do if the robot missed areas while cleaning?
 
 ## Question
 

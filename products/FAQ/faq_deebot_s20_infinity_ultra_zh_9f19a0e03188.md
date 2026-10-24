@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置单拖模式？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何设置单拖模式？
 
 ## Question
 

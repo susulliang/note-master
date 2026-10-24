@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if charging fails?
+# DEEBOT / X9S PRO OMNI / ZH - What should I do if charging fails?
 
 ## Question
 

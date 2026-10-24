@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人提示“滚筒拖布被缠绕 ”如何处理？
+# DEEBOT / X12 PRO OMNI / ZH - 机器人提示“滚筒拖布被缠绕 ”如何处理？
 
 ## Question
 

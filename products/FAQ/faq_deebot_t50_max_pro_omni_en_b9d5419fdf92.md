@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robots sometimes can't avoid obstacles.
+# DEEBOT / T50 MAX PRO OMNI / EN - Robots sometimes can't avoid obstacles.
 
 ## Question
 

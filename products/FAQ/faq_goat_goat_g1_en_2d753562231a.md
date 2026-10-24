@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the mode for switching between Wi-Fi and auto-connection module?
+# GOAT / GOAT G1 / EN - What is the mode for switching between Wi-Fi and auto-connection module?
 
 ## Question
 

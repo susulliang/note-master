@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Charging Instructions
+# DEEBOT / T30 S Combo / EN - Robot Charging Instructions
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot misses cleaning?
+# DEEBOT / DEEBOT T30 OMNI Rosé / EN - What should I do if the robot misses cleaning?
 
 ## Question
 

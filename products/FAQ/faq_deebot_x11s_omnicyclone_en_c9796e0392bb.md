@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set up a scenario clean?
+# DEEBOT / X11S Omnicyclone / EN - How to set up a scenario clean?
 
 ## Question
 

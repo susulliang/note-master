@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 何使用地宝童锁功能？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 何使用地宝童锁功能？
 
 ## Question
 

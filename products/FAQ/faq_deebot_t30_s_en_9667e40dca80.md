@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When the robot has a mopping pad plate that rotates or does not rotate, or the mopping pad plate does not rotate, how to deal with it?
+# DEEBOT / T30 S / EN - When the robot has a mopping pad plate that rotates or does not rotate, or the mopping pad plate does not rotate, how to deal with it?
 
 ## Question
 

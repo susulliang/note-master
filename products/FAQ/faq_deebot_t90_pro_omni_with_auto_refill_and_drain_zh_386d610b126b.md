@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：激光传感器异常
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 报警：激光传感器异常
 
 ## Question
 

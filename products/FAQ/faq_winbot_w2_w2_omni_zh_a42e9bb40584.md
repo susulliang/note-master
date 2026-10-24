@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 语音提醒“请避开窗户边缘，重新吸附WINBOT”如何处理？
+# WINBOT / W2/W2 OMNI / ZH - 语音提醒“请避开窗户边缘，重新吸附WINBOT”如何处理？
 
 ## Question
 

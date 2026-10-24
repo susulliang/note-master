@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Are there any requirements on the tilt angle of the glass?
+# WINBOT / WINBOT W1/W1 Pro / EN - Are there any requirements on the tilt angle of the glass?
 
 ## Question
 

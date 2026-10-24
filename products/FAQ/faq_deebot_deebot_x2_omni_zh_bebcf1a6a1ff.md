@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO 語音助理無法運作，或在用「OK YIKO」喚醒後出現反應延遲。
+# DEEBOT / DEEBOT X2 OMNI / ZH - YIKO 語音助理無法運作，或在用「OK YIKO」喚醒後出現反應延遲。
 
 ## Question
 

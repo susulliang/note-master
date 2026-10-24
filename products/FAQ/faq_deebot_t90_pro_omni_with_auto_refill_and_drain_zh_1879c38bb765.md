@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何添加标准清洁液/重污清洁液？
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 如何添加标准清洁液/重污清洁液？
 
 ## Question
 

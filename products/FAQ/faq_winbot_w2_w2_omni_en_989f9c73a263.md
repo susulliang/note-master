@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What kinds of glass surfaces cannot be used with the WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - What kinds of glass surfaces cannot be used with the WINBOT W2?
 
 ## Question
 

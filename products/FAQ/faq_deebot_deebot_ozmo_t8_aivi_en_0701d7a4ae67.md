@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does DEEBOT spill dust when I move the robot manually?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does DEEBOT spill dust when I move the robot manually?
 
 ## Question
 

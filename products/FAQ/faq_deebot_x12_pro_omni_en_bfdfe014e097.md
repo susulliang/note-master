@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of Roller Mop Tangled？
+# DEEBOT / X12 PRO OMNI / EN - How to solve the issue of Roller Mop Tangled？
 
 ## Question
 

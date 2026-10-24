@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安全电池充一次电需要多长时间？
+# WINBOT / W2 / ZH - 安全电池充一次电需要多长时间？
 
 ## Question
 

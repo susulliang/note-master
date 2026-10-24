@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安装和拆卸基站爬坡板？
+# DEEBOT / X12 OmniCyclone / ZH - 如何安装和拆卸基站爬坡板？
 
 ## Question
 

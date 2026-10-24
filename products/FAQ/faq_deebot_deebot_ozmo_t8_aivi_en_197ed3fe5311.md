@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What if I experience significant lag when using the remote control?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What if I experience significant lag when using the remote control?
 
 ## Question
 

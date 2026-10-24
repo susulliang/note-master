@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT W2 missed an area during cleaning.
+# WINBOT / W2/W2 OMNI / EN - WINBOT W2 missed an area during cleaning.
 
 ## Question
 

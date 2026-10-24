@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I charge WINBOT without powering it on (with the power switch on 0)?
+# WINBOT / WINBOT W1/W1 Pro / EN - Can I charge WINBOT without powering it on (with the power switch on 0)?
 
 ## Question
 

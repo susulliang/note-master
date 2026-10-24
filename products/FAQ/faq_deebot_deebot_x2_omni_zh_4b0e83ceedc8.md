@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットがステーションに戻れない。どうすればよいですか。
+# DEEBOT / DEEBOT X2 OMNI / ZH - ロボットがステーションに戻れない。どうすればよいですか。
 
 ## Question
 

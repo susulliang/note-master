@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何调整地宝返回基站洗拖布的间隔时间？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何调整地宝返回基站洗拖布的间隔时间？
 
 ## Question
 

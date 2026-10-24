@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to maintain my WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - How to maintain my WINBOT W2?
 
 ## Question
 

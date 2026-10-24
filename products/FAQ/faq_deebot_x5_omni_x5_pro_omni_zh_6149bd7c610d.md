@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The driving wheels are stuck or not clean.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - The driving wheels are stuck or not clean.
 
 ## Question
 

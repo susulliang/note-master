@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to start a mopping task?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to start a mopping task?
 
 ## Question
 

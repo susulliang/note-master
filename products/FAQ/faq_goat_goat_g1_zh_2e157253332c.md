@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I change the PIN code after it has been set?
+# GOAT / GOAT G1 / ZH - Can I change the PIN code after it has been set?
 
 ## Question
 

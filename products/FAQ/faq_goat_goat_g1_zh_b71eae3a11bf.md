@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# In unattended mode, will areas that haven't been mowed due to the blades being stopped be re-mowed?
+# GOAT / GOAT G1 / ZH - In unattended mode, will areas that haven't been mowed due to the blades being stopped be re-mowed?
 
 ## Question
 

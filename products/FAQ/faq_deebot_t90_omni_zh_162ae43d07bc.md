@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dust bag installation is abnormal
+# DEEBOT / T90 OMNI / ZH - Alarm: Dust bag installation is abnormal
 
 ## Question
 

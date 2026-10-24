@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用拖地功能？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何使用拖地功能？
 
 ## Question
 

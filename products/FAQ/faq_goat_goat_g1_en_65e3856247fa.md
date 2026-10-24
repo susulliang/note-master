@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will grass be cut during map learning?
+# GOAT / GOAT G1 / EN - Will grass be cut during map learning?
 
 ## Question
 

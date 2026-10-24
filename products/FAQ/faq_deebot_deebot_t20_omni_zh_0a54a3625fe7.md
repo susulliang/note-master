@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用區域清掃/傢俱區清掃/自訂清掃/管家模式？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何使用區域清掃/傢俱區清掃/自訂清掃/管家模式？
 
 ## Question
 

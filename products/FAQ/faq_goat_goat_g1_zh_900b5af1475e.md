@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I create a restricted area anywhere?
+# GOAT / GOAT G1 / ZH - Can I create a restricted area anywhere?
 
 ## Question
 

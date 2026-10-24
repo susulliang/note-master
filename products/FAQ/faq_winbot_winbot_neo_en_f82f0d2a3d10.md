@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do I need to differentiate between the front and back of the mopping pad? Can both sides be used for cleaning?
+# WINBOT / WINBOT NEO / EN - Do I need to differentiate between the front and back of the mopping pad? Can both sides be used for cleaning?
 
 ## Question
 

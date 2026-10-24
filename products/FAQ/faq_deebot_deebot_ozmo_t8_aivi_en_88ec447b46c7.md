@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot creates a map, and it works normally at first. However, later on an overlay effect starts to appear (maps are overlaid onto each other, and the layers are misaligned). What can I do?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - The robot creates a map, and it works normally at first. However, later on an overlay effect starts to appear (maps are overlaid onto each other, and the layers are misaligned). What can I do?
 
 ## Question
 

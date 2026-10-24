@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用自訂情境清掃功能？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何使用自訂情境清掃功能？
 
 ## Question
 

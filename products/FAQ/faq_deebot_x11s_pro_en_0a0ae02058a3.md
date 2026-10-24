@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of Abnormal cleaning sink？
+# DEEBOT / X11S Pro / EN - How to solve the issue of Abnormal cleaning sink？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the spring falls out when the navigation beacon batteries are being replaced?
+# GOAT / GOAT G1 / ZH - What should I do if the spring falls out when the navigation beacon batteries are being replaced?
 
 ## Question
 

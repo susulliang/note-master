@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT still be used as normal if the signal rod on the upper part of the navigation beacon is removed and not reinstalled in the original order?
+# GOAT / GOAT G1 / ZH - Can the GOAT still be used as normal if the signal rod on the upper part of the navigation beacon is removed and not reinstalled in the original order?
 
 ## Question
 

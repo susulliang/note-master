@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Machine alarm: The machine is running difficult. Please check the driving wheels. What should I do?
+# DEEBOT / DEEBOT T30 PRO OMNI Rosé / EN - Machine alarm: The machine is running difficult. Please check the driving wheels. What should I do?
 
 ## Question
 

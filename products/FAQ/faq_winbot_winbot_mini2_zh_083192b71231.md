@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# 低温运行（0℃）时，在有框玻璃中间，报错窗宝被困
+# WINBOT / WINBOT mini2 / ZH - 低温运行（0℃）时，在有框玻璃中间，报错窗宝被困
 
 ## Question
 

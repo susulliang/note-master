@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Clean and Maintain the Dust Container？
+# DEEBOT / X11S Omnicyclone / EN - How to Clean and Maintain the Dust Container？
 
 ## Question
 

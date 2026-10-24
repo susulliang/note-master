@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I create a map in the evening or on a rainy day?
+# GOAT / GOAT G1 / ZH - Can I create a map in the evening or on a rainy day?
 
 ## Question
 

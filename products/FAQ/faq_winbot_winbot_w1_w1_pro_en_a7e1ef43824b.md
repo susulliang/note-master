@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why are W1 PRO's safety tether and power cord attached to the robot?
+# WINBOT / WINBOT W1/W1 Pro / EN - Why are W1 PRO's safety tether and power cord attached to the robot?
 
 ## Question
 

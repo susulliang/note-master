@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人无法越过门槛/台 阶，如何处理？
+# DEEBOT / X11S Pro / ZH - 机器人无法越过门槛/台 阶，如何处理？
 
 ## Question
 

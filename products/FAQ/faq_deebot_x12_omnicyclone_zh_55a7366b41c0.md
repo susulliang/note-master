@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 旋风集尘桶如何清理/保养？
+# DEEBOT / X12 OmniCyclone / ZH - 旋风集尘桶如何清理/保养？
 
 ## Question
 

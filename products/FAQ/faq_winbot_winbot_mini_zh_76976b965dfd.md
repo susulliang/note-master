@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清洁窗宝驱动轮履带？
+# WINBOT / WINBOT MINI / ZH - 如何清洁窗宝驱动轮履带？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What can I do if DEEBOT's DTOF crashes, stops working or encounters a problem seldomly?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What can I do if DEEBOT's DTOF crashes, stops working or encounters a problem seldomly?
 
 ## Question
 

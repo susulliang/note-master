@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 最小可适用玻璃尺寸是多大吗？
+# WINBOT / WINBOT MINI / ZH - 最小可适用玻璃尺寸是多大吗？
 
 ## Question
 

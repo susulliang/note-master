@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What can I do if the robot quickly runs out of battery and returns to the charging dock?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What can I do if the robot quickly runs out of battery and returns to the charging dock?
 
 ## Question
 

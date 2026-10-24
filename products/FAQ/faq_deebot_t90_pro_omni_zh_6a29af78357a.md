@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 尘盒的拆卸，清理和安装指导
+# DEEBOT / T90 PRO OMNI / ZH - 尘盒的拆卸，清理和安装指导
 
 ## Question
 

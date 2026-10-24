@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the mop washing tray?
+# DEEBOT / X12 OmniCyclone / EN - How to clean the mop washing tray?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Disassembly, clean and installation guide of mopping pad plate and mopping pad
+# DEEBOT / T50 MAX PRO OMNI / EN - Disassembly, clean and installation guide of mopping pad plate and mopping pad
 
 ## Question
 

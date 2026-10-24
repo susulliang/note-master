@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I select the mowing efficiency for the GOAT?
+# GOAT / GX / ZH - How can I select the mowing efficiency for the GOAT?
 
 ## Question
 

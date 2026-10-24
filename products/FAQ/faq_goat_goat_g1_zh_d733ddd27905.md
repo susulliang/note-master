@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT mow at night?
+# GOAT / GOAT G1 / ZH - Can the GOAT mow at night?
 
 ## Question
 

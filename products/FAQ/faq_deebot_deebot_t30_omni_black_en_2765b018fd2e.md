@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I open the Dust Collection Cabin and replace the Dust Bag?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - How do I open the Dust Collection Cabin and replace the Dust Bag?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT W2 encounters an obstruction and is unable to move forward.
+# WINBOT / W2/W2 OMNI / EN - WINBOT W2 encounters an obstruction and is unable to move forward.
 
 ## Question
 

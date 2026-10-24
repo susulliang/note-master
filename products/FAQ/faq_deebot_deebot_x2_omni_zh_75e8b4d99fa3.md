@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# メインブラシをクリーニングする方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - メインブラシをクリーニングする方法を教えてください。
 
 ## Question
 

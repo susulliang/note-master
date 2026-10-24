@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT W2 failed to pair with the ECOVACS HOME App via Bluetooth.
+# WINBOT / W2/W2 OMNI / EN - WINBOT W2 failed to pair with the ECOVACS HOME App via Bluetooth.
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the robot not performing intelligent breakpoint continuation scanning?
+# DEEBOT / T30 S / EN - How to deal with the robot not performing intelligent breakpoint continuation scanning?
 
 ## Question
 

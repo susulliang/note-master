@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 集尘袋更换指导
+# DEEBOT / X9S PRO OMNI / ZH - 集尘袋更换指导
 
 ## Question
 

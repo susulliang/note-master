@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# My garden is not big. Why are several navigation beacons recommended?
+# GOAT / GOAT G1 / EN - My garden is not big. Why are several navigation beacons recommended?
 
 ## Question
 

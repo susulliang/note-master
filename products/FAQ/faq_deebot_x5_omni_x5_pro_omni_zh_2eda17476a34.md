@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何给地宝连接网络？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何给地宝连接网络？
 
 ## Question
 

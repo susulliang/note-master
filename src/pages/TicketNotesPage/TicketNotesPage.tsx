@@ -67,7 +67,6 @@ import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import AuthPanel from '@/components/AuthPanel';
-import AdminPanel from '@/components/AdminPanel';
 import { useAuth } from '@/lib/auth-context';
 import { getStoredToken, submitQaAward } from '@/lib/auth-client';
 import { QA_CHECKLIST_TOTAL } from '@/data/qaCallChecklist';
@@ -75,11 +74,12 @@ import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import CatAssistant from '@/components/CatAssistant';
-import { CatAskPanel } from '@/components/CatAskPanel';
 import { useCatAssistant } from '@/hooks/use-cat-assistant';
 import { useCatPet } from '@/hooks/use-cat-pet';
 import { useKittyHelp } from '@/hooks/use-kitty-help';
-import KittyHelpPanel from '@/components/KittyHelpPanel';
+import { readStoredAskModel, storeAskModel } from '@/lib/ask-model-preferences';
+import type { SupportEvidence } from '@/lib/support-evidence';
+import type { AskModel } from '@shared/ask-models';
 import { useKeywordAlerts } from '@/hooks/use-keyword-alerts';
 import { useVoiceTranscription } from '@/hooks/use-voice-transcription';
 import type { AutoFillSource } from '@/lib/field-extraction';
@@ -91,7 +91,6 @@ import { isMultilingualModel } from '@/lib/whisper-models';
 import { useCloudParser } from '@/hooks/use-cloud-parser';
 import { useCcpExtensionBridge, type PendingExtensionPush } from '@/hooks/use-ccp-extension-bridge';
 import { generateWithRemoteLlm } from '@/lib/cloud-parser';
-import { searchTemplates } from '@/lib/amr-templates';
 import { useScopedState } from '@/hooks/use-scoped-state';
 import { CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import {
@@ -119,6 +118,8 @@ import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
 import type { TemplateEntry } from '@/lib/amr-templates';
 
 const OutputModal = lazy(() => import('@/components/OutputModal'));
+const AdminPanel = lazy(() => import('@/components/AdminPanel'));
+const KittyHelpWorkspace = lazy(() => import('@/components/KittyHelpWorkspace'));
 const GbuPopup = lazy(() => import('@/components/GbuPopup'));
 const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
 const TicketTrackerPanel = lazy(() => import('@/components/TicketTrackerPanel'));
@@ -896,8 +897,16 @@ export default function TicketNotesPage() {
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const authRequired = !authResolving && !authUser;
   const signedInUsername = authUser?.username ?? null;
-  /** Spotlight-style AI Search ask panel (long-press on cat / Shift+C). */
-  const [askOpen, setAskOpen] = useState(false);
+  const [kittyHelpOpen, setKittyHelpOpen] = useState(false);
+  const [autoAskOnOpen, setAutoAskOnOpen] = useState(false);
+  const [kittyModel, setKittyModel] = useState<AskModel>(readStoredAskModel);
+  const [kittyAskEvidence, setKittyAskEvidence] = useState<SupportEvidence[]>([]);
+  const openKittyHelp = useCallback(() => setKittyHelpOpen(true), []);
+  const consumeAutoAsk = useCallback(() => setAutoAskOnOpen(false), []);
+  const changeKittyModel = useCallback((model: AskModel) => {
+    setKittyModel(model);
+    storeAskModel(model);
+  }, []);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
     if (authResolving) return;
@@ -908,6 +917,25 @@ export default function TicketNotesPage() {
     setAuthPanelOpen(false);
     setWorkView('commune');
   }, [authResolving, signedInUsername]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key !== 'C' && event.key !== 'c') return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) return;
+      if (!authUser) return;
+      event.preventDefault();
+      openKittyHelp();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authUser, openKittyHelp]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1061,9 +1089,14 @@ export default function TicketNotesPage() {
     ]
       .filter(Boolean)
       .join(' ');
+    if (!query.trim()) {
+      setTemplateMatches([]);
+      return;
+    }
     let alive = true;
     const timer = window.setTimeout(() => {
-      searchTemplates(query)
+      import('@/lib/amr-templates')
+        .then(({ searchTemplates }) => searchTemplates(query))
         .then((matches) => alive && setTemplateMatches(matches))
         .catch(() => alive && setTemplateMatches([]));
     }, 300);
@@ -1744,11 +1777,8 @@ Additional information (if needed): ${additional}`;
   });
 
   // -------------------------------------------------------------------------
-  //  Kitty Help — double-click the cat mascot: a persistent cloud-LLM
-  //  conversation that fills the notes (task 1), picks ≤12 knowledge sources
-  //  from ≤50 pre-matched titles (task 2), then reads their full content and
-  //  writes a bilingual customer-facing resolution with cited sources
-  //  (task 3). Messages are append-only so provider KV-cache prefixes hit.
+  //  Kitty Help custom resolution path — source selection and full-source
+  //  synthesis run alongside the separate Worker-backed AI Search path.
   // -------------------------------------------------------------------------
   const kitty = useKittyHelp({
     transcript: call.transcript,
@@ -1756,6 +1786,11 @@ Additional information (if needed): ${additional}`;
     isCapturing: call.isCapturing,
     applyOutcome: call.applyParsedOutcome,
   });
+  const runBothKittyWorkflows = useCallback(() => {
+    setKittyHelpOpen(true);
+    setAutoAskOnOpen(true);
+    void kitty.start();
+  }, [kitty.start]);
 
   // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
@@ -2341,7 +2376,6 @@ Additional information (if needed): ${additional}`;
             petCooldown={catPet.petCooldown}
             onPet={catPet.petCat}
             onToggleNap={catPet.toggleNap}
-            callSupported={call.isSupported}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}
             engine={{
@@ -2418,7 +2452,7 @@ Additional information (if needed): ${additional}`;
               .slice(-3)
           : [];
         return (
-      <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
@@ -2874,7 +2908,11 @@ Additional information (if needed): ${additional}`;
 
       {/* Required sign-in on entry; Shift+R opens the account panel afterwards. */}
       {authPanelOpen && <AuthPanel required={authRequired} onClose={() => setAuthPanelOpen(false)} />}
-      {adminPanelOpen && authUser?.canAccessAdmin && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
+      {adminPanelOpen && authUser?.canAccessAdmin && (
+        <Suspense fallback={null}>
+          <AdminPanel onClose={() => setAdminPanelOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Keep the floating mascot out of the pixel-world scene. */}
       {workView !== 'commune' && (
@@ -2885,25 +2923,35 @@ Additional information (if needed): ${additional}`;
           isThinking={cat.isThinking || kitty.busy}
           onDismiss={cat.dismiss}
           moveRequest={catMoveRequest}
-          onKittyHelp={() => { void kitty.start(); }}
+          onKittyHelp={runBothKittyWorkflows}
           kittyStage={kitty.stage}
           pet={catPet.pet}
           onPet={catPet.petCat}
           petCooldown={catPet.petCooldown}
-          onAskOpen={() => setAskOpen(true)}
+          onAskOpen={openKittyHelp}
         />
       )}
-      {askOpen && (
-        <CatAskPanel
-          onClose={() => setAskOpen(false)}
-          notes={askNotes}
-          transcript={askTranscript}
-          customerName={typeof formData[NODE_IDS.CUSTOMER_NAME] === 'string' ? formData[NODE_IDS.CUSTOMER_NAME] as string : ''}
-          agentName={authUser?.username ?? ''}
-        />
-      )}
-      {kitty.panelOpen && kitty.result && (
-        <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
+      {kittyHelpOpen && (
+        <Suspense fallback={null}>
+          <KittyHelpWorkspace
+            onClose={() => setKittyHelpOpen(false)}
+            model={kittyModel}
+            onModelChange={changeKittyModel}
+            notes={askNotes}
+            transcript={askTranscript}
+            customerName={typeof formData[NODE_IDS.CUSTOMER_NAME] === 'string' ? formData[NODE_IDS.CUSTOMER_NAME] as string : ''}
+            agentName={authUser?.username ?? ''}
+            resolveBusy={kitty.busy}
+            resolveStage={kitty.stage}
+            resolveError={kitty.error}
+            result={kitty.result}
+            onResolve={() => { void kitty.start(); }}
+            autoAskOnOpen={autoAskOnOpen}
+            onAutoAskConsumed={consumeAutoAsk}
+            askEvidence={kittyAskEvidence}
+            onAskEvidenceChange={setKittyAskEvidence}
+          />
+        </Suspense>
       )}
     </div>
   );

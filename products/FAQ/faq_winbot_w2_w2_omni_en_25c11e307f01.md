@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do I need to empty the cleaning solution from the water tank after using the WINBOT W2?
+# WINBOT / W2/W2 OMNI / EN - Do I need to empty the cleaning solution from the water tank after using the WINBOT W2?
 
 ## Question
 

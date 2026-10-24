@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Difficult operation, check Driving Wheels
+# DEEBOT / T90 PRO OMNI / ZH - Warning: Difficult operation, check Driving Wheels
 
 ## Question
 

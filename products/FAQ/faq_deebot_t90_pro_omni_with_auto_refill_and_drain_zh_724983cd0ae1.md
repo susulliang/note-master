@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人连接网络指导
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 机器人连接网络指导
 
 ## Question
 

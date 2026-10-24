@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人语音提示“基站清洁槽异常”如何处理？
+# DEEBOT / X11S Omnicyclone / ZH - 机器人语音提示“基站清洁槽异常”如何处理？
 
 ## Question
 

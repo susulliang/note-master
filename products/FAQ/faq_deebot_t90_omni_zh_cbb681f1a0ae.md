@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Laser Sensor Abnormal
+# DEEBOT / T90 OMNI / ZH - Alarm: Laser Sensor Abnormal
 
 ## Question
 

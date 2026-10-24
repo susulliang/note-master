@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the base station bottom damp?
+# DEEBOT / X11S Omnicyclone / EN - Why is the base station bottom damp?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置预约清洁？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何设置预约清洁？
 
 ## Question
 

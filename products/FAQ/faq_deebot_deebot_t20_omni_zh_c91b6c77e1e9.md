@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人提示請輕觸 D-ToF 感應器。我該怎麼做？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 機器人提示請輕觸 D-ToF 感應器。我該怎麼做？
 
 ## Question
 

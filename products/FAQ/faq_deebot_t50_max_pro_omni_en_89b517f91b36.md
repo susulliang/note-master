@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the mopping pad plate not lifting automatically?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with the mopping pad plate not lifting automatically?
 
 ## Question
 

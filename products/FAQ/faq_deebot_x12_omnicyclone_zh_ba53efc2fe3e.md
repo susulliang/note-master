@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置沿地板方向清洁
+# DEEBOT / X12 OmniCyclone / ZH - 如何设置沿地板方向清洁
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何變更冬令和日光節約時間？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何變更冬令和日光節約時間？
 
 ## Question
 

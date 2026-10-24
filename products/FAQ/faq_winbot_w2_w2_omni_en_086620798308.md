@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I disable Auto Spray?
+# WINBOT / W2/W2 OMNI / EN - Can I disable Auto Spray?
 
 ## Question
 

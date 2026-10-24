@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The ECOVACS HOME App shows that the robot is offline.
+# DEEBOT / DEEBOT T30 OMNI Rosé / EN - The ECOVACS HOME App shows that the robot is offline.
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 駆動ホイールが動かない場合の点検方法を教えてください。
+# DEEBOT / DEEBOT T20 OMNI / ZH - 駆動ホイールが動かない場合の点検方法を教えてください。
 
 ## Question
 

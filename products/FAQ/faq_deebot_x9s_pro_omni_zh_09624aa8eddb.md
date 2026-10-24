@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：激光传感器异常
+# DEEBOT / X9S PRO OMNI / ZH - 报警：激光传感器异常
 
 ## Question
 

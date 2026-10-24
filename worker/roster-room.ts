@@ -1,5 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
+type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
+
 /**
  * RosterRoom — one Durable Object instance per roster month
  * (`roster-YYYY-MM`, see worker/index.ts routing). The DO's own SQLite is the
@@ -73,7 +75,7 @@ export class RosterRoom extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    const name = ctx.id.name;
+    const name = ctx.id.name ?? '';
     const month = name.startsWith('roster-') ? name.slice('roster-'.length) : '';
     if (!MONTH_RE.test(month)) throw new Error(`RosterRoom requires a "roster-YYYY-MM" instance name (got "${name}")`);
     this.month = month;
@@ -122,7 +124,7 @@ export class RosterRoom extends DurableObject<Env> {
   /** All cells for this month, straight from the DO's SQLite (first line). */
   async getCells(): Promise<Array<RosterCell & { updatedAt: number }>> {
     return this.ctx.storage.sql
-      .exec<StoredCell>('SELECT en, iso, code, updated_at FROM roster_cells ORDER BY en, iso')
+        .exec<SqlRow<StoredCell>>('SELECT en, iso, code, updated_at FROM roster_cells ORDER BY en, iso')
       .toArray()
       .map((row) => ({ en: row.en, iso: row.iso, code: row.code, updatedAt: row.updated_at }));
   }
@@ -219,7 +221,7 @@ export class RosterRoom extends DurableObject<Env> {
       return new Response('Month does not match this room', { status: 400 });
     }
     const row = this.ctx.storage.sql
-      .exec<WsTicketRow>(
+      .exec<SqlRow<WsTicketRow>>(
         'SELECT ticket, username, month, expires_at FROM roster_ws_tickets WHERE ticket = ? AND month = ? AND expires_at >= ?',
         ticket,
         this.month,

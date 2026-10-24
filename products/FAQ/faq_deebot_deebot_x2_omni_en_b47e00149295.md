@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why do the mopping pads plates sometimes lift up and sometimes not when DEEBOT is cleaning?
+# DEEBOT / DEEBOT X2 OMNI / EN - Why do the mopping pads plates sometimes lift up and sometimes not when DEEBOT is cleaning?
 
 ## Question
 

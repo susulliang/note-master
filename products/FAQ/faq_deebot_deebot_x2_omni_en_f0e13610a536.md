@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot return to the station. What should I do?
+# DEEBOT / DEEBOT X2 OMNI / EN - The robot cannot return to the station. What should I do?
 
 ## Question
 

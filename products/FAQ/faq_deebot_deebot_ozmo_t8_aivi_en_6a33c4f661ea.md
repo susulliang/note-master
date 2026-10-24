@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The map that the DEEBOT created is incomplete.
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - The map that the DEEBOT created is incomplete.
 
 ## Question
 

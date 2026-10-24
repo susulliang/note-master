@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 玻璃表面有哪些特征不能使用WINBOT？
+# WINBOT / W2/W2 OMNI / ZH - 玻璃表面有哪些特征不能使用WINBOT？
 
 ## Question
 

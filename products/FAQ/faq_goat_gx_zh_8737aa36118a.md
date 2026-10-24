@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When mowing in manual mode, the App always prompts that the distance does not meet the requirements and the blades cannot be turned on.
+# GOAT / GX / ZH - When mowing in manual mode, the App always prompts that the distance does not meet the requirements and the blades cannot be turned on.
 
 ## Question
 

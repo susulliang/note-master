@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is "Indoor Use Only" displayed on the adapter?
+# GOAT / GX / ZH - Why is "Indoor Use Only" displayed on the adapter?
 
 ## Question
 

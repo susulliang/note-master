@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT 清掃時，拖地布板不會抬起，或會撞到地墊。我該怎麼做？
+# DEEBOT / DEEBOT X2 OMNI / ZH - DEEBOT 清掃時，拖地布板不會抬起，或會撞到地墊。我該怎麼做？
 
 ## Question
 

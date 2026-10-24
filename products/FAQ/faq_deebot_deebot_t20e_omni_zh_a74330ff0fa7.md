@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何下載 ECOVACS Home App？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何下載 ECOVACS Home App？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 为什么擦完玻璃会留下水痕？
+# WINBOT / WINBOT MINI / ZH - 为什么擦完玻璃会留下水痕？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have removed the Navigation Beacon from the current GOAT, but the Navigation Beacon cannot be paired with another machine.
+# GOAT / GOAT G1 / EN - I have removed the Navigation Beacon from the current GOAT, but the Navigation Beacon cannot be paired with another machine.
 
 ## Question
 

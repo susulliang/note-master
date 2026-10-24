@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { History, PanelLeftClose, Settings, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HistoryPanel from '@/components/HistoryPanel';
-import EngineSettingsPanel, {
-  type CloudState,
-  type EngineState,
-  type ParserState,
+import type {
+  CloudState,
+  EngineState,
+  ParserState,
 } from '@/components/EngineSettingsPanel';
 import type { TranscriptEntry } from '@/hooks/use-call-capture';
 import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
@@ -29,7 +29,6 @@ interface RailControlsProps {
   /** CCP tab-audio + mic capture state — only used by the Settings
    *  panel (the standalone mic rail button moved to the sticky bottom
    *  call bar in v0.2.0). */
-  callSupported?: boolean;
   callCapturing?: boolean;
   onToggleCall?: () => void;
   /** Settings panel (gear): cat selection plus whisper/LLM state and handlers */
@@ -68,6 +67,8 @@ interface RailControlsProps {
 const RAIL_BTN =
   'relative size-10 rounded-full text-muted-foreground transition-all duration-200 hover:scale-110 hover:bg-foreground/5 hover:text-foreground active:scale-90';
 
+const EngineSettingsPanel = lazy(() => import('@/components/EngineSettingsPanel'));
+
 /**
  * Vertical control stack docked at the BOTTOM of the left rail pill
  * (portaled in by the page). Replaces the old draggable corner toolbar:
@@ -88,7 +89,6 @@ export default function RailControls({
   onClearHistory,
   uiScale,
   onToggleUiScale,
-  callSupported,
   callCapturing,
   onToggleCall,
   engine,
@@ -218,27 +218,29 @@ export default function RailControls({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setEngineOpen(false)} aria-hidden="true" />
           <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
-            <EngineSettingsPanel
-              engine={engine}
-              selectedCat={selectedCat}
-              onSelectCat={onSelectCat}
-              pet={pet}
-              petCooldown={petCooldown}
-              onPet={onPet}
-              onToggleNap={onToggleNap}
-              parser={parser}
-              cloud={cloud}
-              transcript={transcript ?? []}
-              isCapturing={!!callCapturing}
-              isTranscribing={!!isTranscribing}
-              onToggleCapture={() => onToggleCall?.()}
-              onClose={() => setEngineOpen(false)}
-              gridboxVisibility={gridboxVisibility}
-              keywordAlerts={keywordAlerts}
-              keywordAlertSource={keywordAlertSource}
-              onOpenAuth={onOpenAuth}
-              onOpenAdmin={onOpenAdmin}
-            />
+            <Suspense fallback={null}>
+              <EngineSettingsPanel
+                engine={engine}
+                selectedCat={selectedCat}
+                onSelectCat={onSelectCat}
+                pet={pet}
+                petCooldown={petCooldown}
+                onPet={onPet}
+                onToggleNap={onToggleNap}
+                parser={parser}
+                cloud={cloud}
+                transcript={transcript ?? []}
+                isCapturing={!!callCapturing}
+                isTranscribing={!!isTranscribing}
+                onToggleCapture={() => onToggleCall?.()}
+                onClose={() => setEngineOpen(false)}
+                gridboxVisibility={gridboxVisibility}
+                keywordAlerts={keywordAlerts}
+                keywordAlertSource={keywordAlertSource}
+                onOpenAuth={onOpenAuth}
+                onOpenAdmin={onOpenAdmin}
+              />
+            </Suspense>
           </div>
         </>
       )}

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does the camera on the AIVI 3D module violate the user's privacy?
+# DEEBOT / DEEBOT X2 OMNI / EN - Does the camera on the AIVI 3D module violate the user's privacy?
 
 ## Question
 

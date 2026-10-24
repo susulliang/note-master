@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# スケジュール清掃を設定する方法を教えてください。
+# DEEBOT / DEEBOT T20e OMNI / ZH - スケジュール清掃を設定する方法を教えてください。
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I create a linear no-go zone?
+# GOAT / GOAT G1 / ZH - Can I create a linear no-go zone?
 
 ## Question
 

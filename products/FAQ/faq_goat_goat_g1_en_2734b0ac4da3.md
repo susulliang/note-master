@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 automatically return to the docking station after I pause mowing on the app?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 automatically return to the docking station after I pause mowing on the app?
 
 ## Question
 

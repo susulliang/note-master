@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of Water Tray Not Installed？
+# DEEBOT / X12 PRO OMNI / EN - How to solve the issue of Water Tray Not Installed？
 
 ## Question
 

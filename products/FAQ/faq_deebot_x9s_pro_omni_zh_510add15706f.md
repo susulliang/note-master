@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Abnormal Cleaning Solution Consumption
+# DEEBOT / X9S PRO OMNI / ZH - Abnormal Cleaning Solution Consumption
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the Navigation Beacon making a sound?
+# GOAT / GOAT G1 / EN - Why is the Navigation Beacon making a sound?
 
 ## Question
 

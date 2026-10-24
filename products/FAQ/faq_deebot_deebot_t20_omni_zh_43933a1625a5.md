@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用自動清潔功能來清潔髒掉的充電站清潔水槽？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何使用自動清潔功能來清潔髒掉的充電站清潔水槽？
 
 ## Question
 

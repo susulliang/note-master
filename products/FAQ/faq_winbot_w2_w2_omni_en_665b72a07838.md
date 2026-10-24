@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# A voice reminder says that please keep WINBOT W2 away from window edges and attach it to the surface again.
+# WINBOT / W2/W2 OMNI / EN - A voice reminder says that please keep WINBOT W2 away from window edges and attach it to the surface again.
 
 ## Question
 

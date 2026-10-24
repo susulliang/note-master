@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布使用时需要注意什么？
+# WINBOT / W2/W2 OMNI / ZH - 抹布使用时需要注意什么？
 
 ## Question
 

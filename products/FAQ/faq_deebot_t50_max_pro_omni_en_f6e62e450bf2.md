@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Disassembly, clean and installation guide of main brush
+# DEEBOT / T50 MAX PRO OMNI / EN - Disassembly, clean and installation guide of main brush
 
 ## Question
 

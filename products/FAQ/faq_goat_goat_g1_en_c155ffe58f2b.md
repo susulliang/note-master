@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is the docking station waterproof?
+# GOAT / GOAT G1 / EN - Is the docking station waterproof?
 
 ## Question
 

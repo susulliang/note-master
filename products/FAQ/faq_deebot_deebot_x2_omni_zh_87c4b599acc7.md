@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 在 DEEBOT 清掃時，為什麼拖地布板有時會抬起有時卻不會？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 在 DEEBOT 清掃時，為什麼拖地布板有時會抬起有時卻不會？
 
 ## Question
 

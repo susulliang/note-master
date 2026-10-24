@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# AIVI 3D 模組上的攝影機是否會侵犯使用者的隱私？
+# DEEBOT / DEEBOT X2 OMNI / ZH - AIVI 3D 模組上的攝影機是否會侵犯使用者的隱私？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if WINBOT reminds "Insufficient suction power"?
+# WINBOT / WINBOT NEO / EN - What should I do if WINBOT reminds "Insufficient suction power"?
 
 ## Question
 

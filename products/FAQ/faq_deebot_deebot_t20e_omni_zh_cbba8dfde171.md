@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地布板斷斷續續地旋轉或完全不旋轉時，我該怎麼辦？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 拖地布板斷斷續續地旋轉或完全不旋轉時，我該怎麼辦？
 
 ## Question
 

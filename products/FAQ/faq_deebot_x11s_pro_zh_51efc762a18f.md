@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆卸清理及安装滚刷？
+# DEEBOT / X11S Pro / ZH - 如何拆卸清理及安装滚刷？
 
 ## Question
 

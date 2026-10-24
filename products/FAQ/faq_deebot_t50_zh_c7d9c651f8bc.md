@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# APP提示“清洁液液位低”如何处理？（仅高配）
+# DEEBOT / T50降配版 / ZH - APP提示“清洁液液位低”如何处理？（仅高配）
 
 ## Question
 

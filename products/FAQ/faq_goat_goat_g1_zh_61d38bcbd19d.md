@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the frequency of the robot getting stuck increase with use of automatic edge optimization?
+# GOAT / GOAT G1 / ZH - Why does the frequency of the robot getting stuck increase with use of automatic edge optimization?
 
 ## Question
 

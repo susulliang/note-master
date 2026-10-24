@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do I need to move the Navigation Beacons indoors in winter?
+# GOAT / GOAT G1 / ZH - Do I need to move the Navigation Beacons indoors in winter?
 
 ## Question
 

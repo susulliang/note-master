@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 为什么清洁时；有时候抹布外扩有时候不外扩？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 为什么清洁时；有时候抹布外扩有时候不外扩？
 
 ## Question
 

@@ -1,0 +1,25 @@
+---
+category: "DEEBOT"
+model: "ECOVACS T80 Series"
+model_slug: "ecovacs_t80_series"
+lang: "en"
+source: "FAQ/DEEBOT/【FAQ 2.0】ECOVACS T80 Series（YEEDI M14 Plus）.xlsx"
+source_sheet: "ECOVACS-EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT / ECOVACS T80 Series / EN - ALERT: Waste Water Tank Anomaly
+
+## Question
+
+ALERT: Waste Water Tank Anomaly
+
+## Answer
+
+1. Remove the tank and dump the sewage. (If dirt remains in the bottom of the tank, a cleaning brush may be used to assist in cleaning it out.)
+2. Check the float in the Waste Water Tank to ensure that it is pivoted to return properly.
+3. Reclose the top lid of the Waste Water Tank and ensure that the clips are securely fitted in place.
+4. Reinstall the Waste Water Tank back into the station.
+Note: Cleaning brush not supplied as standard

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Cleaning Guide for dirty water tank and clean water tanks
+# DEEBOT / T90 PRO OMNI / ZH - Cleaning Guide for dirty water tank and clean water tanks
 
 ## Question
 

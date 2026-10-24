@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 冬時間と夏時間を変更するにはどうすればよいですか？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 冬時間と夏時間を変更するにはどうすればよいですか？
 
 ## Question
 

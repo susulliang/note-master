@@ -1,12 +1,12 @@
-/* Register --glass-glow as an animatable shadow so the email / empty-name
+/* Register the animated glass glow tint so the email / empty-name
  * prompt glows can pulse smoothly without clobbering the rest of the node's
  * box-shadow (inset specular edge + floating ambient shadows). Without this
  * registration, animating box-shadow directly would wipe the base layers and
  * look like a single flash instead of a continuous breath. */
-@property --glass-glow {
-  syntax: '<shadow>';
+@property --glass-glow-color {
+  syntax: '<color>';
   inherits: true;
-  initial-value: 0 0 0 transparent;
+  initial-value: transparent;
 }
 
 :root {
@@ -1115,7 +1115,7 @@ body[data-ui-scale="small"] {
   /* ---------------------------------------------------------------- */
   .glass-panel {
     --glass-border: color-mix(in oklab, var(--foreground) 13%, transparent);
-    --glass-glow: 0 0 0 transparent;
+    --glass-glow-color: transparent;
     /* Brightened, near-opaque frosted surface — the canvas is now darker so
        the gridboxes read as bright, solid cards with strong contrast.
        A 12% white lift keeps dark-theme cards from feeling muddy. */
@@ -1131,7 +1131,8 @@ body[data-ui-scale="small"] {
       0 1px 1px rgba(0, 0, 0, 0.07),
       0 4px 10px rgba(0, 0, 0, 0.1),
       0 12px 28px rgba(0, 0, 0, 0.14),
-      var(--glass-glow);
+      0 0 3px color-mix(in oklab, var(--glass-glow-color) 75%, transparent),
+      0 0 24px var(--glass-glow-color);
   }
 
   /* DASH readability — on dark themes, panels/widgets inside the AMR
@@ -1155,22 +1156,20 @@ body[data-ui-scale="small"] {
 
   .glass-accent-green {
     --glass-border: color-mix(in oklab, var(--primary) 50%, transparent);
-    --glass-glow: 0 0 12px color-mix(in oklab, var(--primary) 16%, transparent);
+    --glass-glow-color: color-mix(in oklab, var(--primary) 16%, transparent);
   }
   .glass-accent-blue {
     --glass-border: color-mix(in oklab, var(--info) 50%, transparent);
-    --glass-glow: 0 0 12px color-mix(in oklab, var(--info) 16%, transparent);
+    --glass-glow-color: color-mix(in oklab, var(--info) 16%, transparent);
   }
   .glass-accent-red {
     --glass-border: color-mix(in oklab, var(--destructive) 50%, transparent);
-    --glass-glow: 0 0 12px color-mix(in oklab, var(--destructive) 16%, transparent);
+    --glass-glow-color: color-mix(in oklab, var(--destructive) 16%, transparent);
   }
 
   /* Active/focused node — edge lights up, surface stays flat */
   .glass-active {
-    --glass-glow:
-      0 0 2px color-mix(in oklab, var(--glass-border) 55%, transparent),
-      0 0 22px color-mix(in oklab, var(--glass-border) 22%, transparent);
+    --glass-glow-color: color-mix(in oklab, var(--glass-border) 22%, transparent);
     background: color-mix(in oklab, var(--card) 70%, transparent);
   }
 
@@ -1179,9 +1178,7 @@ body[data-ui-scale="small"] {
      accents); the page removes it as soon as the agent edits the field. */
   .glass-parsed {
     --glass-border: color-mix(in oklab, #fbbf24 65%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, #fbbf24 55%, transparent),
-      0 0 26px color-mix(in oklab, #fbbf24 30%, transparent);
+    --glass-glow-color: color-mix(in oklab, #fbbf24 30%, transparent);
   }
 
   /* Customer name "address count" lifecycle glow — the node color tracks
@@ -1189,29 +1186,22 @@ body[data-ui-scale="small"] {
      call: 0 → amber-red (not yet), 1 → yellow (once), 2+ → green (done). */
   .glass-address-red {
     --glass-border: color-mix(in oklab, #f97316 65%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, #f97316 60%, transparent),
-      0 0 28px color-mix(in oklab, #ef4444 40%, transparent);
+    --glass-glow-color: color-mix(in oklab, #ef4444 40%, transparent);
   }
   .glass-address-yellow {
     --glass-border: color-mix(in oklab, #facc15 60%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, #facc15 55%, transparent),
-      0 0 26px color-mix(in oklab, #eab308 35%, transparent);
+    --glass-glow-color: color-mix(in oklab, #eab308 35%, transparent);
   }
   .glass-address-green {
     --glass-border: color-mix(in oklab, var(--primary) 55%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, var(--primary) 55%, transparent),
-      0 0 26px color-mix(in oklab, var(--primary) 35%, transparent);
+    --glass-glow-color: color-mix(in oklab, var(--primary) 35%, transparent);
   }
 
   /* Email prompt glow — triggered when the resolution summary mentions
      "email". Bright blue = email field still needs filling (auto-scrolls
      the agent to it); green slow pulse = email already captured.
-     Animates --glass-glow directly (registered @property above) so the
-     node keeps its inset edge + floating shadows and only the glow
-     breathes — continuous, not a one-shot flash. */
+     Animates only the registered glow color so inset edges and the base
+     floating shadows remain while the halo breathes smoothly. */
   .glass-email-need {
     --glass-border: color-mix(in oklab, var(--accent) 70%, transparent);
     animation: pulse-glow-blue 1.8s ease-in-out infinite;
@@ -1221,12 +1211,12 @@ body[data-ui-scale="small"] {
     animation: pulse-glow-green 3s ease-in-out infinite;
   }
   @keyframes pulse-glow-blue {
-    0%, 100% { --glass-glow: 0 0 3px color-mix(in oklab, var(--accent) 50%, transparent), 0 0 14px color-mix(in oklab, var(--accent) 25%, transparent); }
-    50%      { --glass-glow: 0 0 6px color-mix(in oklab, var(--accent) 80%, transparent), 0 0 34px color-mix(in oklab, var(--accent) 55%, transparent); }
+    0%, 100% { --glass-glow-color: color-mix(in oklab, var(--accent) 25%, transparent); }
+    50%      { --glass-glow-color: color-mix(in oklab, var(--accent) 55%, transparent); }
   }
   @keyframes pulse-glow-green {
-    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent), 0 0 12px color-mix(in oklab, var(--primary) 20%, transparent); }
-    50%      { --glass-glow: 0 0 4px color-mix(in oklab, var(--primary) 65%, transparent), 0 0 26px color-mix(in oklab, var(--primary) 40%, transparent); }
+    0%, 100% { --glass-glow-color: color-mix(in oklab, var(--primary) 20%, transparent); }
+    50%      { --glass-glow-color: color-mix(in oklab, var(--primary) 40%, transparent); }
   }
 
   /* Customer-name empty pulse — when the Customer Name field is still blank,
@@ -1236,8 +1226,8 @@ body[data-ui-scale="small"] {
     animation: pulse-glow-amber 4s ease-in-out infinite;
   }
   @keyframes pulse-glow-amber {
-    0%, 100% { --glass-glow: 0 0 2px color-mix(in oklab, #f97316 40%, transparent), 0 0 10px color-mix(in oklab, #f97316 16%, transparent); }
-    50%      { --glass-glow: 0 0 4px color-mix(in oklab, #f97316 60%, transparent), 0 0 22px color-mix(in oklab, #ef4444 30%, transparent); }
+    0%, 100% { --glass-glow-color: color-mix(in oklab, #f97316 16%, transparent); }
+    50%      { --glass-glow-color: color-mix(in oklab, #ef4444 30%, transparent); }
   }
 
   /* REGEX-parsed field — cool blue glow, distinctly different from the AI
@@ -1246,9 +1236,7 @@ body[data-ui-scale="small"] {
      rules as .glass-parsed. */
   .glass-parsed-regex {
     --glass-border: color-mix(in oklab, #58a6ff 65%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, #58a6ff 55%, transparent),
-      0 0 26px color-mix(in oklab, #58a6ff 30%, transparent);
+    --glass-glow-color: color-mix(in oklab, #58a6ff 30%, transparent);
   }
 
   /* Salesforce DOM-filled fields — cool turquoise. Distinct from yellow
@@ -1257,9 +1245,7 @@ body[data-ui-scale="small"] {
      extension scrape and needs review before moving on. */
   .glass-parsed-dom {
     --glass-border: color-mix(in oklab, #22d3ee 65%, transparent);
-    --glass-glow:
-      0 0 2px color-mix(in oklab, #22d3ee 55%, transparent),
-      0 0 28px color-mix(in oklab, #22d3ee 32%, transparent);
+    --glass-glow-color: color-mix(in oklab, #22d3ee 32%, transparent);
   }
 
   /* Expanded node (hovered quick-insert panel): much frostier, near-opaque

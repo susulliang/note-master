@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to charge a handheld vacuum cleaner?
+# DEEBOT / T30 S Combo / EN - How to charge a handheld vacuum cleaner?
 
 ## Question
 

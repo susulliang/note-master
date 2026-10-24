@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of Bumper Stuck？
+# DEEBOT / S20 Infinity Ultra / EN - How to solve the issue of Bumper Stuck？
 
 ## Question
 

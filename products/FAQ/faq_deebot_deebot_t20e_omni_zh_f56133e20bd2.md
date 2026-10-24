@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# マップをすばやく作成する方法を教えてください。
+# DEEBOT / DEEBOT T20e OMNI / ZH - マップをすばやく作成する方法を教えてください。
 
 ## Question
 

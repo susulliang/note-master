@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットの設置方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - ロボットの設置方法を教えてください。
 
 ## Question
 

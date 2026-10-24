@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The WINBOT W2 does not work after powering it on.
+# WINBOT / W2/W2 OMNI / EN - The WINBOT W2 does not work after powering it on.
 
 ## Question
 

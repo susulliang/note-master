@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO音声アシスタントの使用方法を教えてください。
+# DEEBOT / DEEBOT T20 OMNI / ZH - YIKO音声アシスタントの使用方法を教えてください。
 
 ## Question
 

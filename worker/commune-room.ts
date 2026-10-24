@@ -1,5 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
+type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
+
 export interface CommuneRoomLoadout {
   cards: string[];
   pet: { id: string; name: string; stage: string; mood: number; xp: number } | null;
@@ -153,8 +155,8 @@ const PARKED_CAR_SPEED = 220;
 const CAR_HALF_WIDTH = 39;
 const CAR_HALF_LENGTH = 59;
 const PARKED_CARS: Record<string, Omit<CommuneCarPosition, 'id'>> = {
-  'meadow-cruiser': { x: 1740, y: 820, heading: 0 },
-  'orchard-wagon': { x: 2300, y: 1880, heading: 0 },
+  'meadow-cruiser': { x: 1740, y: 820, heading: 0, lastMoveAt: 0 },
+  'orchard-wagon': { x: 2300, y: 1880, heading: 0, lastMoveAt: 0 },
 };
 const CAR_STATIC_BLOCKERS: { x: number; y: number; w: number; h: number }[] = [
   { x: 650, y: 96, w: 300, h: 134 },
@@ -557,7 +559,7 @@ export class CommuneRoom extends DurableObject<Env> {
     const ticket = url.searchParams.get('ticket');
     if (!ticket || ticket.length > 100) return new Response('Invalid connection ticket', { status: 401 });
     const row = this.ctx.storage.sql
-      .exec<TicketRow>(
+      .exec<SqlRow<TicketRow>>(
         'SELECT ticket, profile, expires_at FROM commune_ws_tickets WHERE ticket = ? AND expires_at >= ?',
         ticket,
         Date.now(),
@@ -596,7 +598,7 @@ export class CommuneRoom extends DurableObject<Env> {
     if (authority.changed) {
       this.broadcastMowerAuthority(authority.clientId, authority.state);
     }
-    const recentMessages = this.ctx.storage.sql.exec<PublicChatRow>(
+    const recentMessages = this.ctx.storage.sql.exec<SqlRow<PublicChatRow>>(
       `SELECT id, username, message, sent_at
        FROM commune_public_chat_messages
        WHERE sent_at >= ?
@@ -1276,14 +1278,14 @@ export class CommuneRoom extends DurableObject<Env> {
   }
 
   private getCarPosition(carId: string): CommuneCarPosition | null {
-    return this.ctx.storage.sql.exec<CommuneCarPosition>(
+    return this.ctx.storage.sql.exec<SqlRow<CommuneCarPosition>>(
       'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars WHERE id = ?',
       carId,
     ).toArray()[0] ?? null;
   }
 
   private getMowerRow(): CommuneMowerRow {
-    return this.ctx.storage.sql.exec<CommuneMowerRow>(
+    return this.ctx.storage.sql.exec<SqlRow<CommuneMowerRow>>(
       'SELECT state_json, authority_client_id, updated_at FROM commune_mower_state WHERE singleton = 1',
     ).toArray()[0] ?? { state_json: null, authority_client_id: null, updated_at: 0 };
   }
@@ -1358,7 +1360,7 @@ export class CommuneRoom extends DurableObject<Env> {
   }
 
   private listCarPositions(): CommuneCarPosition[] {
-    return this.ctx.storage.sql.exec<CommuneCarPosition>(
+    return this.ctx.storage.sql.exec<SqlRow<CommuneCarPosition>>(
       'SELECT id, x, y, heading, last_move_at AS lastMoveAt FROM commune_parked_cars ORDER BY id',
     ).toArray();
   }

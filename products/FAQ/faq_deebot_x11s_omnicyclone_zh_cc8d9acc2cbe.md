@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆卸，清理及安装边刷？
+# DEEBOT / X11S Omnicyclone / ZH - 如何拆卸，清理及安装边刷？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT return to the docking station before mowing is complete?
+# GOAT / GX / ZH - Why does the GOAT return to the docking station before mowing is complete?
 
 ## Question
 

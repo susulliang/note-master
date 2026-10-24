@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Side Brush Removal, Cleaning, and Installation Guide
+# DEEBOT / T90 PRO OMNI / ZH - Side Brush Removal, Cleaning, and Installation Guide
 
 ## Question
 

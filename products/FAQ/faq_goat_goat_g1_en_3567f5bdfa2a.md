@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The indicator light on the docking station keeps flashing blue.
+# GOAT / GOAT G1 / EN - The indicator light on the docking station keeps flashing blue.
 
 ## Question
 

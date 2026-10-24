@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the reminder about adding ECOVACS cleaning solution be disabled?
+# WINBOT / W2/W2 OMNI / EN - Can the reminder about adding ECOVACS cleaning solution be disabled?
 
 ## Question
 

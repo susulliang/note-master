@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Some water remains when the clean water tank and dirty water tank are removed.
+# DEEBOT / DEEBOT X2 OMNI / EN - Some water remains when the clean water tank and dirty water tank are removed.
 
 ## Question
 

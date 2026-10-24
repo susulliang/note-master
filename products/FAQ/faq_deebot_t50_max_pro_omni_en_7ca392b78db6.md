@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install and remove the station base?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to install and remove the station base?
 
 ## Question
 

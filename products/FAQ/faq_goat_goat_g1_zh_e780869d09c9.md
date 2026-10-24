@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The App shows that the lens is being cleaned, but it is not actually being cleaned.
+# GOAT / GOAT G1 / ZH - The App shows that the lens is being cleaned, but it is not actually being cleaned.
 
 ## Question
 

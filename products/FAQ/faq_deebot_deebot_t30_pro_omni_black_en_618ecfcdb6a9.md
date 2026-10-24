@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The carpet strategy has been set to auto mode. When the robot encounters a carpet/mat, it does not lift the mopping pad plate or knocks the carpet/mat off. What should I do?
+# DEEBOT / DEEBOT T30 PRO OMNI Black / EN - The carpet strategy has been set to auto mode. When the robot encounters a carpet/mat, it does not lift the mopping pad plate or knocks the carpet/mat off. What should I do?
 
 ## Question
 

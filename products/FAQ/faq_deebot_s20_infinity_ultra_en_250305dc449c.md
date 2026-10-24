@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to add Disinfectant Cleaning Solution/Heavy-Duty Cleaning Solution?
+# DEEBOT / S20 Infinity Ultra / EN - How to add Disinfectant Cleaning Solution/Heavy-Duty Cleaning Solution?
 
 ## Question
 

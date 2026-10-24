@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：标准清洁液位低/重污清洁液位低
+# DEEBOT / X9S PRO OMNI / ZH - 报警：标准清洁液位低/重污清洁液位低
 
 ## Question
 

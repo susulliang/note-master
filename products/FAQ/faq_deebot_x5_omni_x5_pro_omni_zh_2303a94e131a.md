@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用定制清洁？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何使用定制清洁？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 無法將機器人與 ECOVACS HOME App 連線
+# DEEBOT / DEEBOT T20e OMNI / ZH - 無法將機器人與 ECOVACS HOME App 連線
 
 ## Question
 

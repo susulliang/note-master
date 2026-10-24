@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何处理清水箱异常？
+# DEEBOT / X12 PRO OMNI / ZH - 如何处理清水箱异常？
 
 ## Question
 

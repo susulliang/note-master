@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the waste water tank and the clean water tank?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How to clean the waste water tank and the clean water tank?
 
 ## Question
 

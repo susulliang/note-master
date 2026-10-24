@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：污水箱异常
+# DEEBOT / T90 OMNI / ZH - 报警：污水箱异常
 
 ## Question
 

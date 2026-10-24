@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot be charged.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - The robot cannot be charged.
 
 ## Question
 

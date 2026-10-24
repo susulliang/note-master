@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will DEEBOT disturb my pet?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Will DEEBOT disturb my pet?
 
 ## Question
 

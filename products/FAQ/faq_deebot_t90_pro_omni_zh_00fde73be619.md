@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Installation Guide
+# DEEBOT / T90 PRO OMNI / ZH - Robot Installation Guide
 
 ## Question
 

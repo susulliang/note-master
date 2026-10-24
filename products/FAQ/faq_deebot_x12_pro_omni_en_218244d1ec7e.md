@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to connect the robot to the network?
+# DEEBOT / X12 PRO OMNI / EN - How to connect the robot to the network?
 
 ## Question
 

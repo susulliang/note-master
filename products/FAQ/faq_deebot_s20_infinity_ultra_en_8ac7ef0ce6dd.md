@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to remove/install the dust cabin filter sponge?
+# DEEBOT / S20 Infinity Ultra / EN - How to remove/install the dust cabin filter sponge?
 
 ## Question
 

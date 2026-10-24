@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT按键无反应，机器死机怎么办？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT按键无反应，机器死机怎么办？
 
 ## Question
 

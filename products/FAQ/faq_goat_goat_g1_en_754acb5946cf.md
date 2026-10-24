@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have replaced the Navigation Beacon battery according to the App prompt. Why does the App still display low Navigation Beacon battery or no signal?
+# GOAT / GOAT G1 / EN - I have replaced the Navigation Beacon battery according to the App prompt. Why does the App still display low Navigation Beacon battery or no signal?
 
 ## Question
 

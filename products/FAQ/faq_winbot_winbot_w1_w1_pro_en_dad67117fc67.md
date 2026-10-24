@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After the WINBOT sprays water, there are occasionally droplets on the robot, which will converge and fall.
+# WINBOT / WINBOT W1/W1 Pro / EN - After the WINBOT sprays water, there are occasionally droplets on the robot, which will converge and fall.
 
 ## Question
 

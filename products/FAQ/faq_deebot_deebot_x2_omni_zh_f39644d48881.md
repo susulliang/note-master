@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人無法返回充電站。我該怎麼做？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 機器人無法返回充電站。我該怎麼做？
 
 ## Question
 

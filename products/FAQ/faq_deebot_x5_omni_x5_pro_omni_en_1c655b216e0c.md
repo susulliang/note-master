@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is there still hair wrapped around the main brush?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - Why is there still hair wrapped around the main brush?
 
 ## Question
 

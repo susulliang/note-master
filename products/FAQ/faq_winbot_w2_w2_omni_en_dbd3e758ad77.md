@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the water spray onto the window frame?
+# WINBOT / W2/W2 OMNI / EN - Will the water spray onto the window frame?
 
 ## Question
 

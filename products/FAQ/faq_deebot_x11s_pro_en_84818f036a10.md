@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the robot being unable to return to the base station?
+# DEEBOT / X11S Pro / EN - How to handle the issue of the robot being unable to return to the base station?
 
 ## Question
 

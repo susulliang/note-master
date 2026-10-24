@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拆/装集尘仓过滤棉指导
+# DEEBOT / T90 OMNI / ZH - 拆/装集尘仓过滤棉指导
 
 ## Question
 

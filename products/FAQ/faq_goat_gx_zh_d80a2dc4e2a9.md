@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT mow the area at the bottom of a trampoline?
+# GOAT / GX / ZH - Can the GOAT mow the area at the bottom of a trampoline?
 
 ## Question
 

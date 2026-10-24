@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the Auto light flash after the robot has charged?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does the Auto light flash after the robot has charged?
 
 ## Question
 

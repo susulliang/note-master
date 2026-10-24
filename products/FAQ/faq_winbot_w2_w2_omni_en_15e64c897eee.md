@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How many times can a 60ml water tank spray?
+# WINBOT / W2/W2 OMNI / EN - How many times can a 60ml water tank spray?
 
 ## Question
 

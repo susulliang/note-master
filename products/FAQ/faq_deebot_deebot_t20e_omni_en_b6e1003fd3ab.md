@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot is unable to update firmware.
+# DEEBOT / DEEBOT T20e OMNI / EN - The robot is unable to update firmware.
 
 ## Question
 

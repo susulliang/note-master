@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝采用的是什么喷水方式？
+# WINBOT / WINBOT MINI / ZH - 窗宝采用的是什么喷水方式？
 
 ## Question
 

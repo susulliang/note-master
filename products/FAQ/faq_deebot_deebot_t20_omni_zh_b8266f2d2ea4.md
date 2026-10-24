@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何取出/清潔塵盒？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何取出/清潔塵盒？
 
 ## Question
 

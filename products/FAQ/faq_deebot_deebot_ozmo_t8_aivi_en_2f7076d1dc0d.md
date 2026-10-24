@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT did not detect a drop off, like stairs. What should I do?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - DEEBOT did not detect a drop off, like stairs. What should I do?
 
 ## Question
 

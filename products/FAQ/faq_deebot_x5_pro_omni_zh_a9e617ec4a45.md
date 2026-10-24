@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确使用OKYIKO语音助手？
+# DEEBOT / X5 PRO OMNI / ZH - 如何正确使用OKYIKO语音助手？
 
 ## Question
 

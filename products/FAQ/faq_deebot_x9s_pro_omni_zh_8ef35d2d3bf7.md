@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Map Creation Guide
+# DEEBOT / X9S PRO OMNI / ZH - Map Creation Guide
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the position and shape of an obstacle marked on the map different from real life?
+# GOAT / GOAT G1 / ZH - Why is the position and shape of an obstacle marked on the map different from real life?
 
 ## Question
 

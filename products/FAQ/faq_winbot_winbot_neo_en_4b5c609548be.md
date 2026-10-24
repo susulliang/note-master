@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if WINBOT slips (sliding sideways or shuddering)?
+# WINBOT / WINBOT NEO / EN - What should I do if WINBOT slips (sliding sideways or shuddering)?
 
 ## Question
 

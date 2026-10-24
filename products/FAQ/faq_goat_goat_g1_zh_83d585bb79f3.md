@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# My front and back yards are not connected. Can I use the automatic mapping function?
+# GOAT / GOAT G1 / ZH - My front and back yards are not connected. Can I use the automatic mapping function?
 
 ## Question
 

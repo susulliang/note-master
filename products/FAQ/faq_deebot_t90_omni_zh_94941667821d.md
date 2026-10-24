@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Cleaning Guide for ROBOT Water Tray
+# DEEBOT / T90 OMNI / ZH - Cleaning Guide for ROBOT Water Tray
 
 ## Question
 

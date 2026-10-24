@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the Robot alarm "Difficulty in running, please check the drive wheels"?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with the Robot alarm "Difficulty in running, please check the drive wheels"?
 
 ## Question
 

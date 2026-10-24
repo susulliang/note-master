@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝卡住边缘无法取下如何操作？
+# WINBOT / WINBOT MINI / ZH - 窗宝卡住边缘无法取下如何操作？
 
 ## Question
 

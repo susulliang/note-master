@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I remote control the map into any desired shape?
+# GOAT / GOAT G1 / ZH - Can I remote control the map into any desired shape?
 
 ## Question
 

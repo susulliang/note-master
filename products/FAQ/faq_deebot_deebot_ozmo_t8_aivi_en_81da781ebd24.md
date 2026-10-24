@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# In what circumstances does DEEBOT sound alarms?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - In what circumstances does DEEBOT sound alarms?
 
 ## Question
 

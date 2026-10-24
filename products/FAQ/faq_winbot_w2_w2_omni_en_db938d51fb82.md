@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why are there water marks on the surface after cleaning?
+# WINBOT / W2/W2 OMNI / EN - Why are there water marks on the surface after cleaning?
 
 ## Question
 

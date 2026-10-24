@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 我要如何快速建立地圖？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 我要如何快速建立地圖？
 
 ## Question
 

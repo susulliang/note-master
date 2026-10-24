@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT failing to return to charge after completing map learning?
+# GOAT / GOAT G1 / EN - Why is the GOAT failing to return to charge after completing map learning?
 
 ## Question
 

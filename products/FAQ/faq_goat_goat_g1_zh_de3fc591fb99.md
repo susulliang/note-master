@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the robot often get stuck when mowing?
+# GOAT / GOAT G1 / ZH - Why does the robot often get stuck when mowing?
 
 ## Question
 

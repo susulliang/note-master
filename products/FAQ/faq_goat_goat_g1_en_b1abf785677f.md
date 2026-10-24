@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I turn off the human recognition feature for spot patrols?
+# GOAT / GOAT G1 / EN - How can I turn off the human recognition feature for spot patrols?
 
 ## Question
 

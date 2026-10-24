@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the real-time positioning function be used after installing the auto-connection module?
+# GOAT / GOAT G1 / EN - Can the real-time positioning function be used after installing the auto-connection module?
 
 ## Question
 

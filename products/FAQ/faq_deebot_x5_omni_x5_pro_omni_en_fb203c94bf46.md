@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When cleaning, why does the mopping pad not always extend?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - When cleaning, why does the mopping pad not always extend?
 
 ## Question
 

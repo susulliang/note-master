@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I create multiple maps for different areas?
+# GOAT / GOAT G1 / EN - Can I create multiple maps for different areas?
 
 ## Question
 

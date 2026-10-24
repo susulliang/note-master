@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置地宝拖布烘干时长？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何设置地宝拖布烘干时长？
 
 ## Question
 

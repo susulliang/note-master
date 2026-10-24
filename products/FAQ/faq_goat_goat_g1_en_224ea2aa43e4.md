@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Learning is displayed as completed despite the GOAT only learning part of the map.
+# GOAT / GOAT G1 / EN - Learning is displayed as completed despite the GOAT only learning part of the map.
 
 ## Question
 

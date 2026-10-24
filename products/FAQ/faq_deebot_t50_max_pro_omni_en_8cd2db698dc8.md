@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to correctly install the robot?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to correctly install the robot?
 
 ## Question
 

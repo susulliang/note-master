@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Network Connection Guide
+# DEEBOT / X9S PRO OMNI / ZH - Robot Network Connection Guide
 
 ## Question
 

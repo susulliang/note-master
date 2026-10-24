@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I replace DEEBOT's cleaning pad with paper towels?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Can I replace DEEBOT's cleaning pad with paper towels?
 
 ## Question
 

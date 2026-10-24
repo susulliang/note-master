@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does the WINBOT W2 have a memory mode?
+# WINBOT / W2/W2 OMNI / EN - Does the WINBOT W2 have a memory mode?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# App prompts that the robot is disconnected from the station. Or the station cannot control the robot.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - App prompts that the robot is disconnected from the station. Or the station cannot control the robot.
 
 ## Question
 

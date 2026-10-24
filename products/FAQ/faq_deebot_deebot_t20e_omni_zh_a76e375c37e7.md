@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人無法充電。
+# DEEBOT / DEEBOT T20e OMNI / ZH - 機器人無法充電。
 
 ## Question
 

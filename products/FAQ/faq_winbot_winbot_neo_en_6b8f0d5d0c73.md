@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How many sprays are in a 60 ml water tank? How big a house area can it serve?
+# WINBOT / WINBOT NEO / EN - How many sprays are in a 60 ml water tank? How big a house area can it serve?
 
 ## Question
 

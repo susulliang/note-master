@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站底座导向轮如何拆装？
+# DEEBOT / S20 Infinity Ultra / ZH - 基站底座导向轮如何拆装？
 
 ## Question
 

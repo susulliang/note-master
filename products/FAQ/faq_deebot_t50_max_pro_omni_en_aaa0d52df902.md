@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with abnormal situations(skew、overlapping) in the map?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with abnormal situations(skew、overlapping) in the map?
 
 ## Question
 

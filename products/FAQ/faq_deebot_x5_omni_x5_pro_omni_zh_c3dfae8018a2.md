@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确清理污水箱及清水箱？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何正确清理污水箱及清水箱？
 
 ## Question
 

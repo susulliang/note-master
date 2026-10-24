@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 remain in place without mowing?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 remain in place without mowing?
 
 ## Question
 

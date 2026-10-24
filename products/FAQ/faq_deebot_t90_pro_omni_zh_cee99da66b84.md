@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Station Alarm: Base Station Mop Washing Tray Abnormal
+# DEEBOT / T90 PRO OMNI / ZH - Station Alarm: Base Station Mop Washing Tray Abnormal
 
 ## Question
 

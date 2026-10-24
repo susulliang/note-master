@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is the GOAT more likely to get stuck when mowing along the edges?
+# GOAT / GX / ZH - Is the GOAT more likely to get stuck when mowing along the edges?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# In addition to using APP to control GOAT, are there any other smart ways?
+# GOAT / GOAT G1 / ZH - In addition to using APP to control GOAT, are there any other smart ways?
 
 ## Question
 

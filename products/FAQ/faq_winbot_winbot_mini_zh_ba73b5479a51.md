@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布的使用寿命是多少？
+# WINBOT / WINBOT MINI / ZH - 抹布的使用寿命是多少？
 
 ## Question
 

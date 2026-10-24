@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT G1 give alarms when it is in the docking station?
+# GOAT / GOAT G1 / EN - Can the GOAT G1 give alarms when it is in the docking station?
 
 ## Question
 

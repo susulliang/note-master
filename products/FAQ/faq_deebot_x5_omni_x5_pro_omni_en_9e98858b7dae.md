@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the Map Management function?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How do I use the Map Management function?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the robot always leave its charging dock and move in a loop around the room when it's charging?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does the robot always leave its charging dock and move in a loop around the room when it's charging?
 
 ## Question
 

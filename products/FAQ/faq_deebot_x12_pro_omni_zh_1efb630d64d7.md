@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人集尘不干净如何处理？
+# DEEBOT / X12 PRO OMNI / ZH - 机器人集尘不干净如何处理？
 
 ## Question
 

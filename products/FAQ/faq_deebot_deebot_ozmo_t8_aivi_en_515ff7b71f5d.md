@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT makes a u-turn in open space.
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - DEEBOT makes a u-turn in open space.
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How should I map when there is a road in my garden?
+# GOAT / GOAT G1 / EN - How should I map when there is a road in my garden?
 
 ## Question
 

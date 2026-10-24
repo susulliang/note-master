@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean dirty water tank and clean water tank?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to clean dirty water tank and clean water tank?
 
 ## Question
 

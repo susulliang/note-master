@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Where do I need to create restricted areas?
+# GOAT / GOAT G1 / ZH - Where do I need to create restricted areas?
 
 ## Question
 

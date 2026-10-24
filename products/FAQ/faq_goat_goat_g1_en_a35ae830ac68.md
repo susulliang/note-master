@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why do I often hear "Relocation Failed" when I trigger "Return to Charge" near the docking station?
+# GOAT / GOAT G1 / EN - Why do I often hear "Relocation Failed" when I trigger "Return to Charge" near the docking station?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do when the mopping pad plates are rotating intermittently or do not rotate at all?
+# DEEBOT / DEEBOT T20e OMNI / EN - What should I do when the mopping pad plates are rotating intermittently or do not rotate at all?
 
 ## Question
 

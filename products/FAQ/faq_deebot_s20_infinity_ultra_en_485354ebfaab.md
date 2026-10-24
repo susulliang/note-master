@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Create a Map？
+# DEEBOT / S20 Infinity Ultra / EN - How to Create a Map？
 
 ## Question
 

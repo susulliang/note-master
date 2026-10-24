@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：滚筒拖布被缠绕
+# DEEBOT / T90 PRO OMNI / ZH - 报警：滚筒拖布被缠绕
 
 ## Question
 

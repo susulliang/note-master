@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOTの清掃中に、モップパッドプレートが持ち上がることがあるのはなぜですか？
+# DEEBOT / DEEBOT X2 OMNI / ZH - DEEBOTの清掃中に、モップパッドプレートが持ち上がることがあるのはなぜですか？
 
 ## Question
 

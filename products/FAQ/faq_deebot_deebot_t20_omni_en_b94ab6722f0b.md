@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot makes a loud noise when cleaning or an abnormal noise when mopping.
+# DEEBOT / DEEBOT T20 OMNI / EN - The robot makes a loud noise when cleaning or an abnormal noise when mopping.
 
 ## Question
 

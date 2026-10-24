@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT detect possible intruders？
+# GOAT / GX / ZH - Can the GOAT detect possible intruders？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# There is a strange sound when drawing water during the mopping pads cleaning.
+# DEEBOT / DEEBOT X2 OMNI / EN - There is a strange sound when drawing water during the mopping pads cleaning.
 
 ## Question
 

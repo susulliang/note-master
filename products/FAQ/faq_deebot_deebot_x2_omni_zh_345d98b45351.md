@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# AIVI 3Dモジュールのカメラはユーザーのプライバシーに違反していますか？
+# DEEBOT / DEEBOT X2 OMNI / ZH - AIVI 3Dモジュールのカメラはユーザーのプライバシーに違反していますか？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When DEEBOT is cleaning, the mopping pad plates do not lift up or bump into mats. What should I do?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - When DEEBOT is cleaning, the mopping pad plates do not lift up or bump into mats. What should I do?
 
 ## Question
 

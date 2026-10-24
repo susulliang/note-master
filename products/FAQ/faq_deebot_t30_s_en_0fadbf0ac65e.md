@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the water tank not coming out?
+# DEEBOT / T30 S / EN - How to deal with the water tank not coming out?
 
 ## Question
 

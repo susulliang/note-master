@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洁槽内污水无法回收/污水箱没水，报污水箱满，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 清洁槽内污水无法回收/污水箱没水，报污水箱满，如何处理？
 
 ## Question
 

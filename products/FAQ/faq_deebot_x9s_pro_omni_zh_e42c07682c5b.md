@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清理主机接水槽指导
+# DEEBOT / X9S PRO OMNI / ZH - 清理主机接水槽指导
 
 ## Question
 

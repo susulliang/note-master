@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人充电使用指导
+# DEEBOT / T50 MAX PRO OMNI / ZH - 机器人充电使用指导
 
 ## Question
 

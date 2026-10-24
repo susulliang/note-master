@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站无法收线，怎么办？
+# WINBOT / W2 OMNI / ZH - 基站无法收线，怎么办？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何打开自动集尘仓/更换集尘袋？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何打开自动集尘仓/更换集尘袋？
 
 ## Question
 

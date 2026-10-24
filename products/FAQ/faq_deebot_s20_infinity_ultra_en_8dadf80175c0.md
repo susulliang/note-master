@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Properly Charge the Robot？
+# DEEBOT / S20 Infinity Ultra / EN - How to Properly Charge the Robot？
 
 ## Question
 

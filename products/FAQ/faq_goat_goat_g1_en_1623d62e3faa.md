@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I lifted up my GOAT G1. Why did it not immediately lock and sound the alarm?
+# GOAT / GOAT G1 / EN - I lifted up my GOAT G1. Why did it not immediately lock and sound the alarm?
 
 ## Question
 

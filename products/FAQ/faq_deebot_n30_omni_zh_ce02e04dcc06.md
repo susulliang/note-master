@@ -1,6 +1,6 @@
 ---
 category: "DEEBOT"
-model: "N30 OMNI"
+model: "N30 OMNI 海外"
 model_slug: "n30_omni"
 lang: "zh"
 source: "FAQ/DEEBOT/N30 OMNI FAQ V2.0 海外.xlsx"
@@ -10,7 +10,7 @@ kind: faq
 version: 2
 ---
 
-# 片名+章节
+# DEEBOT / N30 OMNI 海外 / ZH - 片名+章节
 
 ## Question
 

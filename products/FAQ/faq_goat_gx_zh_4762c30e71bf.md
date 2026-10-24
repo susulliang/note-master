@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is there a limit to the number of Wi-Fi networks that can be added?
+# GOAT / GX / ZH - Is there a limit to the number of Wi-Fi networks that can be added?
 
 ## Question
 

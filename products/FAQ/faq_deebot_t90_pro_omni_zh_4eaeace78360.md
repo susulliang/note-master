@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 集尘效果不好，如何处理？
+# DEEBOT / T90 PRO OMNI / ZH - 集尘效果不好，如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器运行不贴边应该如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 机器运行不贴边应该如何处理？
 
 ## Question
 

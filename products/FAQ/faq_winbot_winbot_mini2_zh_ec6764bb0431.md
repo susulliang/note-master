@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# 50ml水箱可以喷多少次？可以适用多大的家庭面积？100㎡-120㎡可以吗？
+# WINBOT / WINBOT mini2 / ZH - 50ml水箱可以喷多少次？可以适用多大的家庭面积？100㎡-120㎡可以吗？
 
 ## Question
 

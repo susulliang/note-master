@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站翻盖打不开，怎么办？
+# WINBOT / W2 OMNI / ZH - 基站翻盖打不开，怎么办？
 
 ## Question
 

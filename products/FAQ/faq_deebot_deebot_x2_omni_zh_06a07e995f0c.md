@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果機器人找到充電站但無法進入，我該怎麼辦？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如果機器人找到充電站但無法進入，我該怎麼辦？
 
 ## Question
 

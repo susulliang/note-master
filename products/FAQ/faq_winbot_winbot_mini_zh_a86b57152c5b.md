@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布分正反面吗？两面都可以擦吗？
+# WINBOT / WINBOT MINI / ZH - 抹布分正反面吗？两面都可以擦吗？
 
 ## Question
 

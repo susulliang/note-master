@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 尘盒拆卸清理安装指导
+# DEEBOT / T50 MAX PRO OMNI / ZH - 尘盒拆卸清理安装指导
 
 ## Question
 

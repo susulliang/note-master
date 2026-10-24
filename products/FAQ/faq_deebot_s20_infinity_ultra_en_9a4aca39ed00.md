@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Removal, Cleaning, and Reinstallation Side Brush？
+# DEEBOT / S20 Infinity Ultra / EN - How to Removal, Cleaning, and Reinstallation Side Brush？
 
 ## Question
 

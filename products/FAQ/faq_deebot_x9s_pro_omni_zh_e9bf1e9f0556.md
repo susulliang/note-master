@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 无法充电，如何处理？
+# DEEBOT / X9S PRO OMNI / ZH - 无法充电，如何处理？
 
 ## Question
 

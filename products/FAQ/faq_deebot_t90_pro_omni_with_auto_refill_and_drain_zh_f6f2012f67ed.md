@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站底部为什么会潮湿？
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 基站底部为什么会潮湿？
 
 ## Question
 

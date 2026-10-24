@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dust bag installation is abnormal
+# DEEBOT / X9S PRO OMNI / ZH - Alarm: Dust bag installation is abnormal
 
 ## Question
 

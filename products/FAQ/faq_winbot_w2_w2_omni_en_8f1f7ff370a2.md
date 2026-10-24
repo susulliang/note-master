@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I get my windows cleaner?
+# WINBOT / W2/W2 OMNI / EN - How do I get my windows cleaner?
 
 ## Question
 

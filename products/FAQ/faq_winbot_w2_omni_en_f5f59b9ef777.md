@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Tips for the station placement of WINBOT W2 OMNI
+# WINBOT / W2 OMNI / EN - Tips for the station placement of WINBOT W2 OMNI
 
 ## Question
 

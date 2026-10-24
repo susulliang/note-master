@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When the robot is in Auto strategy, the mopping pad plates do not lift up or bump into mats. What should I do?
+# DEEBOT / DEEBOT T20e OMNI / EN - When the robot is in Auto strategy, the mopping pad plates do not lift up or bump into mats. What should I do?
 
 ## Question
 

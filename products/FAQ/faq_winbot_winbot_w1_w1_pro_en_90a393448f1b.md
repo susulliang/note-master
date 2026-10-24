@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does WINBOT W1/W1 PRO have an increase in walking speed compared to W920?
+# WINBOT / WINBOT W1/W1 Pro / EN - Does WINBOT W1/W1 PRO have an increase in walking speed compared to W920?
 
 ## Question
 

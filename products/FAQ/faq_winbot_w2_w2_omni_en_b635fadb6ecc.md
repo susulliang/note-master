@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why doesn't the WINBOT W2 return to its original position automatically?
+# WINBOT / W2/W2 OMNI / EN - Why doesn't the WINBOT W2 return to its original position automatically?
 
 ## Question
 

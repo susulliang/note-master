@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Map Creation Guide
+# DEEBOT / T90 PRO OMNI / ZH - Map Creation Guide
 
 ## Question
 

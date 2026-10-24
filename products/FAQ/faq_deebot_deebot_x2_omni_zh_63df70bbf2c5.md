@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 自動集塵失敗，或者未偵測到集塵袋或集塵袋已滿。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 自動集塵失敗，或者未偵測到集塵袋或集塵袋已滿。
 
 ## Question
 

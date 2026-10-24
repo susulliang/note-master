@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install my robot?
+# DEEBOT / DEEBOT T30 OMNI Silver / EN - How to install my robot?
 
 ## Question
 

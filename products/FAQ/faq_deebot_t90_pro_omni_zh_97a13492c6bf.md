@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：撞板被卡住
+# DEEBOT / T90 PRO OMNI / ZH - 报警：撞板被卡住
 
 ## Question
 

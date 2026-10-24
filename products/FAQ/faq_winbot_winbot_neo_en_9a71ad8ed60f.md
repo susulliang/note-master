@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the suction power decrease when the robot is unplugged?
+# WINBOT / WINBOT NEO / EN - Will the suction power decrease when the robot is unplugged?
 
 ## Question
 

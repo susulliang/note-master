@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆解及清潔邊清潔刷？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何拆解及清潔邊清潔刷？
 
 ## Question
 

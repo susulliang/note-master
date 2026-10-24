@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝无法返回基站应该如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 地宝无法返回基站应该如何处理？
 
 ## Question
 

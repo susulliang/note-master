@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Connect your T20e OMNI with the ECOVACS HOME App
+# DEEBOT / DEEBOT T20e OMNI / EN - Connect your T20e OMNI with the ECOVACS HOME App
 
 ## Question
 

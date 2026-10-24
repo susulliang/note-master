@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot cannot return to the station, what should I do?
+# DEEBOT / DEEBOT T30 OMNI Rosé / EN - The robot cannot return to the station, what should I do?
 
 ## Question
 

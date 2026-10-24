@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ステーション機能の使用方法を教えてください。
+# DEEBOT / DEEBOT T20e OMNI / ZH - ステーション機能の使用方法を教えてください。
 
 ## Question
 

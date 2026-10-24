@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 automatically return to the docking station when it is on standby?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 automatically return to the docking station when it is on standby?
 
 ## Question
 

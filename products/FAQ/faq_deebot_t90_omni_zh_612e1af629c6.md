@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Agent Mode Cleaning & Parameter Setup Guide
+# DEEBOT / T90 OMNI / ZH - Agent Mode Cleaning & Parameter Setup Guide
 
 ## Question
 

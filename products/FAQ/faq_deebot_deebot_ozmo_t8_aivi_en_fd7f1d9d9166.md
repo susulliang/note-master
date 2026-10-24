@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does DEEBOT become loud and stop cleaning well after cleaning for a while?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does DEEBOT become loud and stop cleaning well after cleaning for a while?
 
 ## Question
 

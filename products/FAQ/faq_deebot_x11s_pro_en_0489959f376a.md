@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the robot not cleaning along the edge/wall?
+# DEEBOT / X11S Pro / EN - How to handle the issue of the robot not cleaning along the edge/wall?
 
 ## Question
 

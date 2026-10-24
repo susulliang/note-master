@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# 如何清洁窗宝驱动轮履带？
+# WINBOT / WINBOT mini2 / ZH - 如何清洁窗宝驱动轮履带？
 
 ## Question
 

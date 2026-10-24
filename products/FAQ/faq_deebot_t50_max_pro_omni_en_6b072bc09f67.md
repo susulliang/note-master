@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# No water coming out of the clean water tank, what should I do?
+# DEEBOT / T50 MAX PRO OMNI / EN - No water coming out of the clean water tank, what should I do?
 
 ## Question
 

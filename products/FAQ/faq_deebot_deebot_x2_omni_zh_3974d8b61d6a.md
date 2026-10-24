@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# モップパッドの清掃中、水を汲み上げているときに異音がします。
+# DEEBOT / DEEBOT X2 OMNI / ZH - モップパッドの清掃中、水を汲み上げているときに異音がします。
 
 ## Question
 

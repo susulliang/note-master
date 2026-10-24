@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the water spray function not working?
+# DEEBOT / S20 Infinity Ultra / EN - How to handle the issue of the water spray function not working?
 
 ## Question
 

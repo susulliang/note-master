@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I clean the hair off the roller brush? Should I use water?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - How can I clean the hair off the roller brush? Should I use water?
 
 ## Question
 

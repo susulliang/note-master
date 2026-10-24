@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to open the automatic dust bin/replace the dust bag?
+# DEEBOT / T30 S / EN - How to open the automatic dust bin/replace the dust bag?
 
 ## Question
 

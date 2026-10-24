@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：运行困难，请检查驱动轮
+# DEEBOT / T90 OMNI / ZH - 报警：运行困难，请检查驱动轮
 
 ## Question
 

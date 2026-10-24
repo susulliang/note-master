@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# 机器在沿边运行时自动返回原点或冲出边框报警，怎么办？
+# WINBOT / WINBOT mini2 / ZH - 机器在沿边运行时自动返回原点或冲出边框报警，怎么办？
 
 ## Question
 

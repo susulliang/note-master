@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 护角（选装）该如何使用？
+# DEEBOT / S20 Infinity Ultra / ZH - 护角（选装）该如何使用？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Water spray failed?
+# WINBOT / W2/W2 OMNI / EN - Water spray failed?
 
 ## Question
 

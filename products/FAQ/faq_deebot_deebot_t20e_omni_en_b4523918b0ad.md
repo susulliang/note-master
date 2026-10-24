@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Setting up the drying duration for the mopping pads
+# DEEBOT / DEEBOT T20e OMNI / EN - Setting up the drying duration for the mopping pads
 
 ## Question
 

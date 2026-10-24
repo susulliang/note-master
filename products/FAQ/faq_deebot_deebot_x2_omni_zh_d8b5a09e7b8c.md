@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# モップ掛け
+# DEEBOT / DEEBOT X2 OMNI / ZH - モップ掛け
 
 ## Question
 

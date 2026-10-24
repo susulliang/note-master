@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can you use the real-time location function after installing the Cellullar Module?
+# GOAT / GX / ZH - Can you use the real-time location function after installing the Cellullar Module?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why didn't DEEBOT start cleaning automatically at the scheduled time?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why didn't DEEBOT start cleaning automatically at the scheduled time?
 
 ## Question
 

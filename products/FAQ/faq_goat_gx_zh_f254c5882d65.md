@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The live video is unable to launch or there is no image.
+# GOAT / GX / ZH - The live video is unable to launch or there is no image.
 
 ## Question
 

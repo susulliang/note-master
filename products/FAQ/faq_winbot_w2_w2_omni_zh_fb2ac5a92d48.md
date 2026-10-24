@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 有镀膜的玻璃可以使用吗？
+# WINBOT / W2/W2 OMNI / ZH - 有镀膜的玻璃可以使用吗？
 
 ## Question
 

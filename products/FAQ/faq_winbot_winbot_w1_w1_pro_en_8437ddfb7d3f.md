@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT has a low battery level and is connected to the power cord for charging. A while later, all the indicators are off. What is the status of the robot?
+# WINBOT / WINBOT W1/W1 Pro / EN - WINBOT has a low battery level and is connected to the power cord for charging. A while later, all the indicators are off. What is the status of the robot?
 
 ## Question
 

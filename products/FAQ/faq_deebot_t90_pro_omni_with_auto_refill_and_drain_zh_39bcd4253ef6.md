@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dust bag installation is abnormal
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Alarm: Dust bag installation is abnormal
 
 ## Question
 

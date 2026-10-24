@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地图创建指导
+# DEEBOT / X9S PRO OMNI / ZH - 地图创建指导
 
 ## Question
 

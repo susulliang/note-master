@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the robot's Child Lock function?
+# DEEBOT / DEEBOT X2 OMNI / EN - How do I use the robot's Child Lock function?
 
 ## Question
 

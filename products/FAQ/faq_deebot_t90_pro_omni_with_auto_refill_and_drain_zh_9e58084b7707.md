@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Agent Mode Cleaning & Parameter Setup Guide
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Agent Mode Cleaning & Parameter Setup Guide
 
 ## Question
 

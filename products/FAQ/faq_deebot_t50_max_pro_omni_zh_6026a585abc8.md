@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理污水箱及清水箱？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何清理污水箱及清水箱？
 
 ## Question
 

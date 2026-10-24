@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What are Cellullar Module and SIM cards used for?
+# GOAT / GOAT G1 / ZH - What are Cellullar Module and SIM cards used for?
 
 ## Question
 

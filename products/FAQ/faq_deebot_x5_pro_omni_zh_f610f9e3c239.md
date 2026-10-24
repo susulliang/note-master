@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the Video Manager?
+# DEEBOT / X5 PRO OMNI / ZH - How do I use the Video Manager?
 
 ## Question
 

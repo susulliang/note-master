@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT be used in the rain?
+# GOAT / GOAT G1 / ZH - Can the GOAT be used in the rain?
 
 ## Question
 

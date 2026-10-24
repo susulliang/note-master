@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why are there water marks on the glass after cleaning?
+# WINBOT / WINBOT W1/W1 Pro / EN - Why are there water marks on the glass after cleaning?
 
 ## Question
 

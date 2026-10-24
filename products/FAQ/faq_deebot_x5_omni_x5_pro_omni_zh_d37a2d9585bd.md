@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝在拖地时打湿地毯，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝在拖地时打湿地毯，如何处理？
 
 ## Question
 

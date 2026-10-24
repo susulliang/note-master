@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Water Tray not installed
+# DEEBOT / T90 OMNI / ZH - Warning: Water Tray not installed
 
 ## Question
 

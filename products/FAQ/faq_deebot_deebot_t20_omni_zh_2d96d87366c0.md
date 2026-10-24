@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果機器人在拖地時弄濕地毯，該怎麼辦？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如果機器人在拖地時弄濕地毯，該怎麼辦？
 
 ## Question
 

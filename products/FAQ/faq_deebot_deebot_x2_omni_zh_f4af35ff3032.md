@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 取出淨水箱和廢水箱後，仍殘留一些水。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 取出淨水箱和廢水箱後，仍殘留一些水。
 
 ## Question
 

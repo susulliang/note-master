@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用自訂情境清掃/清掃順序功能？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何使用自訂情境清掃/清掃順序功能？
 
 ## Question
 

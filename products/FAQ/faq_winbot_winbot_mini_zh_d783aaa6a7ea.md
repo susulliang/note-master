@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝断点续擦是断电之后可以继续还是暂停续擦？
+# WINBOT / WINBOT MINI / ZH - 窗宝断点续擦是断电之后可以继续还是暂停续擦？
 
 ## Question
 

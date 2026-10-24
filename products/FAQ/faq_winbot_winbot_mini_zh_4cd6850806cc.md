@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝保养/养护/清理，如何使用？
+# WINBOT / WINBOT MINI / ZH - 窗宝保养/养护/清理，如何使用？
 
 ## Question
 

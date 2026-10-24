@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is auto-connection module still available after robot replacement?
+# GOAT / GOAT G1 / EN - Is auto-connection module still available after robot replacement?
 
 ## Question
 

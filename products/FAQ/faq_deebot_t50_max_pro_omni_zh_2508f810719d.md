@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆卸拖布支架及拖布清理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何拆卸拖布支架及拖布清理？
 
 ## Question
 

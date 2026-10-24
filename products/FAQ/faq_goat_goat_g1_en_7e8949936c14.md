@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# There is currently no rain outside. Why did the GOAT trigger the rain protection mode?
+# GOAT / GOAT G1 / EN - There is currently no rain outside. Why did the GOAT trigger the rain protection mode?
 
 ## Question
 

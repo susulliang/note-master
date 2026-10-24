@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How long is my service valid for, and how should I renew it after it expires?
+# GOAT / GOAT G1 / EN - How long is my service valid for, and how should I renew it after it expires?
 
 ## Question
 

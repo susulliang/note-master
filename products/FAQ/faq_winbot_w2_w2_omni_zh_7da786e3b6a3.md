@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT工作中有异响/摩擦异音，如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT工作中有异响/摩擦异音，如何处理？
 
 ## Question
 

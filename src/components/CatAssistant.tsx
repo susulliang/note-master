@@ -34,10 +34,9 @@ interface CatAssistantProps {
   isThinking: boolean;
   onDismiss: () => void;
   moveRequest?: { id: number; x: number; y: number } | null;
-  /** Double-click the cat → run the Kitty Help routine (persistent cloud
-   *  LLM conversation: fill notes → pick sources → write resolution). */
+  /** Double-click the cat → run both AI Search and the custom Kitty workflow. */
   onKittyHelp?: () => void;
-  /** Long-press the cat (or Shift+C) → open the AI Search ask panel. */
+  /** Long-press the cat → open Kitty Help in Ask Knowledge mode. */
   onAskOpen?: () => void;
   /** Live stage of the Kitty Help routine — rendered as a persistent
    *  violet bubble above the cat while non-null. */
@@ -139,22 +138,6 @@ export function CatAssistant({
    *  release afterwards must not count as a pet. */
   const askTimerRef = useRef<number | undefined>(undefined);
   const askFiredRef = useRef(false);
-  /** Shift+C opener — ref pattern keeps the global listener bound once. */
-  const onAskOpenRef = useRef(onAskOpen);
-  onAskOpenRef.current = onAskOpen;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key !== 'C' && e.key !== 'c') return;
-      const el = document.activeElement as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable))
-        return;
-      e.preventDefault();
-      onAskOpenRef.current?.();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
   /** Brief pet-reaction flash (+Mood). */
   const [pettedAt, setPettedAt] = useState(0);
   /** Napping mirror in a ref so the idle-animation timer sees fresh value. */

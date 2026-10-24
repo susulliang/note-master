@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to operate the station brush head storage compartment when it is used or cannot be opened?
+# DEEBOT / T30 S Combo / EN - How to operate the station brush head storage compartment when it is used or cannot be opened?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 水是否会喷到窗框上？
+# WINBOT / W2/W2 OMNI / ZH - 水是否会喷到窗框上？
 
 ## Question
 

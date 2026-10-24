@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I enable the AIVI function?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - How do I enable the AIVI function?
 
 ## Question
 

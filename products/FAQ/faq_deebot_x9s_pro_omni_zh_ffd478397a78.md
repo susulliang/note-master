@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: clean water tank Abnormal
+# DEEBOT / X9S PRO OMNI / ZH - Alarm: clean water tank Abnormal
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I disassemble and clean the side brushes?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I disassemble and clean the side brushes?
 
 ## Question
 

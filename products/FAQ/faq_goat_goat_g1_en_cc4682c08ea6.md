@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Where can I check the status of the additional Connection Module in the App?
+# GOAT / GOAT G1 / EN - Where can I check the status of the additional Connection Module in the App?
 
 ## Question
 

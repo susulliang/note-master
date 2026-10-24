@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set mop-only mode?
+# DEEBOT / X9S PRO OMNI / ZH - How to set mop-only mode?
 
 ## Question
 

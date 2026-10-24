@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if I have forgotten the PIN code for my GOAT?
+# GOAT / GOAT G1 / ZH - What should I do if I have forgotten the PIN code for my GOAT?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does my GOAT leave the map boundaries or enter the restricted areas?
+# GOAT / GOAT G1 / ZH - Why does my GOAT leave the map boundaries or enter the restricted areas?
 
 ## Question
 

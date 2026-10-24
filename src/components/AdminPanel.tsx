@@ -256,7 +256,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-background/50 p-2 backdrop-blur-md sm:p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -268,7 +268,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Admin panel"
-        className="glass-panel relative flex max-h-[80vh] w-[min(560px,calc(100vw-32px))] flex-col rounded-2xl border-sky-400/30 p-6 shadow-2xl"
+        className="glass-panel relative flex h-[min(1100px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col rounded-2xl p-4 sm:h-[min(1100px,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(1600px,calc(100vw-2rem))] sm:p-6"
       >
         <button
           type="button"

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I restore the GOAT G1 to default settings?
+# GOAT / GOAT G1 / EN - How do I restore the GOAT G1 to default settings?
 
 ## Question
 

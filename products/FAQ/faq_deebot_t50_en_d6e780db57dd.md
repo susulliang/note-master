@@ -1,0 +1,24 @@
+---
+category: "DEEBOT"
+model: "T50降配版"
+model_slug: "t50"
+lang: "en"
+source: "FAQ/DEEBOT/T50降配版 FAQ 2.0（CN&EN）.xlsx"
+source_sheet: "EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT / T50降配版 / EN - How to deal with cluttered cleaning routes?
+
+## Question
+
+How to deal with cluttered cleaning routes?
+
+## Answer
+
+During use, If you encounter situations where the robot is spinning in circles or has abnormal walking trajectory, etc. You can follow the following steps to try:
+1.Please check the laser module(In the center of the bumper directly in front of the robot)for dust, If yes, please gently wipe it with a dry tissue;
+2.Check if there are many obstacles in the environment. It is recommended to tidy up a bit;
+3.Check if the drive wheels are dirty, if so, please wipe them with a dry cloth.

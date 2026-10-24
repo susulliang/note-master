@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Roller Mop Removal & Installation Guide
+# DEEBOT / X11S Omnicyclone / EN - Roller Mop Removal & Installation Guide
 
 ## Question
 

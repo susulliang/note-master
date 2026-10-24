@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清理主机接水槽指导
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 清理主机接水槽指导
 
 ## Question
 

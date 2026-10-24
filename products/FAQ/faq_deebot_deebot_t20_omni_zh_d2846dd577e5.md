@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOMEアプリにロボットがオフラインであることが表示される。
+# DEEBOT / DEEBOT T20 OMNI / ZH - ECOVACS HOMEアプリにロボットがオフラインであることが表示される。
 
 ## Question
 

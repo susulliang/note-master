@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何為機器人充電？
+# DEEBOT / DEEBOT T20 OMNI / ZH - 如何為機器人充電？
 
 ## Question
 

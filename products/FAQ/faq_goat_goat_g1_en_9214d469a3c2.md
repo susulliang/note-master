@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is the auto-connection module suitable for any robot?
+# GOAT / GOAT G1 / EN - Is the auto-connection module suitable for any robot?
 
 ## Question
 

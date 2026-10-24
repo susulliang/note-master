@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清潔拖地布時，基座充電站並未流出熱水。
+# DEEBOT / DEEBOT T20 OMNI / ZH - 清潔拖地布時，基座充電站並未流出熱水。
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットが充電できない。
+# DEEBOT / DEEBOT X2 OMNI / ZH - ロボットが充電できない。
 
 ## Question
 

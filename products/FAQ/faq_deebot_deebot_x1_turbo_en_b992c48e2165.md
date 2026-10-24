@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does YIKO respond in English?
+# DEEBOT / DEEBOT X1 TURBO / EN - Why does YIKO respond in English?
 
 ## Question
 

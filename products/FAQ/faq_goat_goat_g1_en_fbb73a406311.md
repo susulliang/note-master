@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't the GOAT G1 find or be connected to the docking station correctly?
+# GOAT / GOAT G1 / EN - Why can't the GOAT G1 find or be connected to the docking station correctly?
 
 ## Question
 

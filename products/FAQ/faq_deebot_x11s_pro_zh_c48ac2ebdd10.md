@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆/装集尘仓过滤棉？
+# DEEBOT / X11S Pro / ZH - 如何拆/装集尘仓过滤棉？
 
 ## Question
 

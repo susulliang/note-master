@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the issue of the station not supplying hot water?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with the issue of the station not supplying hot water?
 
 ## Question
 

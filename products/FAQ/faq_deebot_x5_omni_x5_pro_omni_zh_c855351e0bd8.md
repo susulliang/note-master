@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 运行困难，请检查驱动轮如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 运行困难，请检查驱动轮如何处理？
 
 ## Question
 

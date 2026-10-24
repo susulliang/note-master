@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清水桶污水桶拿出后有水渍残留？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 清水桶污水桶拿出后有水渍残留？
 
 ## Question
 

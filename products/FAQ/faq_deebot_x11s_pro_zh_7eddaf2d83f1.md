@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确安装机器人？
+# DEEBOT / X11S Pro / ZH - 如何正确安装机器人？
 
 ## Question
 

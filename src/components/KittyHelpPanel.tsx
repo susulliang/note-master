@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Check, Sparkles, X } from 'lucide-react';
+import { Cat, Copy, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { KittyHelpResult } from '@/hooks/use-kitty-help';
 
@@ -58,9 +58,13 @@ function FormattedText({ text, className }: { text: string; className?: string }
 export function KittyHelpPanel({
   result,
   onClose,
+  embedded = false,
+  inline = false,
 }: {
   result: KittyHelpResult;
   onClose: () => void;
+  embedded?: boolean;
+  inline?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -97,20 +101,29 @@ export function KittyHelpPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
+      className={embedded
+        ? inline
+          ? 'w-full animate-in fade-in slide-in-from-bottom-1 duration-200'
+          : 'h-full overflow-y-auto overscroll-contain p-3 sm:p-4'
+        : 'fixed inset-0 z-[70] flex items-center justify-center bg-background/50 p-4 backdrop-blur-md'}
+      onClick={embedded ? undefined : onClose}
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : true}
       aria-label="Kitty Help suggested resolution"
     >
       <div
-        className="glass-panel max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-5 shadow-2xl"
+        className={embedded
+          ? inline
+            ? 'w-full rounded-xl border border-border bg-card/40 p-3 sm:p-4'
+            : 'mx-auto w-full max-w-3xl animate-in fade-in slide-in-from-bottom-1 duration-200'
+          : 'glass-panel max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-5'}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-              <Sparkles className="size-4 text-accent" />
-              Kitty Help — Suggested Resolution
+              <Cat className="size-4 text-accent" />
+              {embedded ? 'Suggested resolution' : 'Kitty Help — Suggested Resolution'}
             </h2>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               {result.picks.length > 0
@@ -122,72 +135,74 @@ export function KittyHelpPanel({
             <button
               type="button"
               onClick={onCopy}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-card/60 px-2.5 py-1.5 text-xs text-foreground transition-colors hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              className="glass-btn inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
               {copied ? 'Copied!' : 'Copy'}
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Kitty Help panel"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-card/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-            >
-              <X className="size-4" />
-            </button>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close Kitty Help panel"
+                className="glass-btn rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
         </div>
 
         <div className="space-y-3">
           {result.sayToCustomer && (
-            <section className="rounded-xl border border-violet-400/50 bg-violet-500/10 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Say to the customer (EN)</p>
+            <section className="rounded-xl border border-accent/30 bg-accent/10 p-3">
+              <p className="text-sm font-semibold text-accent">Say to the customer (EN)</p>
               <FormattedText text={result.sayToCustomer} className="mt-1.5" />
             </section>
           )}
 
-          <section className="rounded-xl border border-sky-400/50 bg-sky-500/10 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300">Resolution (EN)</p>
+          <section className="rounded-xl border border-primary/30 bg-primary/10 p-3">
+            <p className="text-sm font-semibold text-primary">Resolution (EN)</p>
             <FormattedText text={result.resolutionEn} className="mt-1.5" />
           </section>
 
           {result.resolutionZhTldr && (
-            <section className="rounded-xl border border-border/60 bg-card/40 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">解决方法（中文 TLDR）</p>
+            <section className="rounded-xl border border-border bg-card/60 p-3">
+              <p className="text-sm font-semibold text-muted-foreground">解决方法（中文 TLDR）</p>
               <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.resolutionZhTldr}</p>
             </section>
           )}
 
           {result.emotionalSupport && (
-            <section className="rounded-xl border border-emerald-400/50 bg-emerald-500/10 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Emotional support (if needed)</p>
+            <section className="rounded-xl border border-success/30 bg-success/10 p-3">
+              <p className="text-sm font-semibold text-success">Emotional support (if needed)</p>
               <FormattedText text={result.emotionalSupport} className="mt-1.5" />
             </section>
           )}
 
-          <section className="rounded-xl border border-border/60 bg-card/40 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Cited sources</p>
+          <section className="rounded-xl border border-border bg-card/60 p-3">
+            <p className="text-sm font-semibold text-muted-foreground">Cited sources</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {result.sources.length > 0 ? (
                 result.sources.map((s, i) => (
-                  <span key={i} className="rounded-full border border-border/70 bg-card/60 px-2 py-0.5 text-[11px] text-foreground">
+                  <span key={i} className="rounded-full border border-border bg-background/60 px-2.5 py-1 text-sm text-foreground">
                     {s}
                   </span>
                 ))
               ) : (
-                <span className="text-[11px] text-muted-foreground">No sources cited</span>
+                <span className="text-sm text-muted-foreground">No sources cited</span>
               )}
             </div>
           </section>
 
           {result.picks.length > 0 && (
-            <details className="rounded-xl border border-border/60 bg-card/40 p-3">
-              <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            <details className="rounded-xl border border-border bg-card/60 p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-muted-foreground">
                 Why these sources were picked
               </summary>
               <ul className="mt-2 space-y-1">
                 {result.picks.map((p) => (
-                  <li key={p.id} className={cn('text-[11px] leading-snug text-muted-foreground')}>
+                    <li key={p.id} className={cn('text-sm leading-relaxed text-muted-foreground')}>
                     <span className="font-semibold text-foreground">{p.id}</span> — {p.title}
                     {p.reason ? ` · ${p.reason}` : ''}
                   </li>

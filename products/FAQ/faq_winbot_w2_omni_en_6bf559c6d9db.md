@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to charge the station of W2 OMNI?
+# WINBOT / W2 OMNI / EN - How to charge the station of W2 OMNI?
 
 ## Question
 

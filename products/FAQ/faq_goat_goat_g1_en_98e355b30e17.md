@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the slopes in my garden affect the installation of navigation beacons?
+# GOAT / GOAT G1 / EN - Will the slopes in my garden affect the installation of navigation beacons?
 
 ## Question
 

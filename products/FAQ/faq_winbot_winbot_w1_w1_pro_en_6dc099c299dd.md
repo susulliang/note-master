@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT reports that the driving thread is stuck.
+# WINBOT / WINBOT W1/W1 Pro / EN - WINBOT reports that the driving thread is stuck.
 
 ## Question
 

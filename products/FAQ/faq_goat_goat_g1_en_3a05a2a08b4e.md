@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is there no signal when a Navigation Beacon is shown in the Navigation Beacon list in the App?
+# GOAT / GOAT G1 / EN - Why is there no signal when a Navigation Beacon is shown in the Navigation Beacon list in the App?
 
 ## Question
 

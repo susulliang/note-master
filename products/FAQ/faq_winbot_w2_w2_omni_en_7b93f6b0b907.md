@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Are there any requirements on the tilt angle of the glass?
+# WINBOT / W2/W2 OMNI / EN - Are there any requirements on the tilt angle of the glass?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I do when the Auto-Connection service expires?
+# GOAT / GX / ZH - How can I do when the Auto-Connection service expires?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I removed the GOAT G1 from the map. Why didn't it trigger the alarm beyond the range of the map?
+# GOAT / GOAT G1 / EN - I removed the GOAT G1 from the map. Why didn't it trigger the alarm beyond the range of the map?
 
 ## Question
 

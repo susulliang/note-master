@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the maximum effective distance for the App remote control?
+# WINBOT / WINBOT NEO / EN - What is the maximum effective distance for the App remote control?
 
 ## Question
 

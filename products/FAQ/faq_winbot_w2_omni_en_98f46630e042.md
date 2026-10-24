@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Tips for opening the front cover of the station.
+# WINBOT / W2 OMNI / EN - Tips for opening the front cover of the station.
 
 ## Question
 

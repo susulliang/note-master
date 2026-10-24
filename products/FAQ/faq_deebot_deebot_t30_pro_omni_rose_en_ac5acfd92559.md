@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use the YIKO voice assistant?
+# DEEBOT / DEEBOT T30 PRO OMNI Rosé / EN - How to use the YIKO voice assistant?
 
 ## Question
 

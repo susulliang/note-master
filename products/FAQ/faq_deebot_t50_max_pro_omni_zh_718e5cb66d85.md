@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置定制清洁场景？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何设置定制清洁场景？
 
 ## Question
 

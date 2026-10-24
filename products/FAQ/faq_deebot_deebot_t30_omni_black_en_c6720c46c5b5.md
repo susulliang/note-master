@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What to do if the voice prompt says that Communication malfunction between DEEBOT and the Station?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - What to do if the voice prompt says that Communication malfunction between DEEBOT and the Station?
 
 ## Question
 

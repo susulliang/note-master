@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站放置注意事项
+# WINBOT / W2 OMNI / ZH - 基站放置注意事项
 
 ## Question
 

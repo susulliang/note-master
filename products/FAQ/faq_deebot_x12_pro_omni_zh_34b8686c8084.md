@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 遇到污渍熔渍喷水未生效应该如何处理？
+# DEEBOT / X12 PRO OMNI / ZH - 遇到污渍熔渍喷水未生效应该如何处理？
 
 ## Question
 

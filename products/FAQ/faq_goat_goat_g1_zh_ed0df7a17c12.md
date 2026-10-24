@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT fail to reposition and trigger mowing after I move it?
+# GOAT / GOAT G1 / ZH - Why does the GOAT fail to reposition and trigger mowing after I move it?
 
 ## Question
 

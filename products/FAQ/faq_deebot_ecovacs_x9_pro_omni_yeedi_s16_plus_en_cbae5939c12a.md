@@ -1,0 +1,27 @@
+---
+category: "DEEBOT"
+model: "ECOVACS X9 PRO OMNI&YEEDI S16 PLUS 中英文版"
+model_slug: "ecovacs_x9_pro_omni_yeedi_s16_plus"
+lang: "en"
+source: "FAQ/DEEBOT/【FAQ 2.0】ECOVACS X9 PRO OMNI&YEEDI S16 PLUS 中英文版.xlsx"
+source_sheet: "ECOVACS-EN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT / ECOVACS X9 PRO OMNI&YEEDI S16 PLUS 中英文版 / EN - V-Shaped Comb Removal, Cleaning, and Reinstallation
+
+## Question
+
+V-Shaped Comb Removal, Cleaning, and Reinstallation
+
+## Answer
+
+1.Power off the robot by switching the toggle to "O", remove the dirty water box, and flip the robot upside down.
+2.Press the two tabs on the main brush cover to release it, then remove the main brush.
+3.Detach the V-shaped comb (Tip: Rinse with water and ensure it’s fully dry before reuse).
+4.Reinstall the V-shaped comb.
+5.Reinstall the main brush and rotate it manually to confirm smooth movement.
+6.Align the main brush cover with the slots on the robot and press firmly until a "click" confirms proper installation.
+7.Reattach the dirty water box.

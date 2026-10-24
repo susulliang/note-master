@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why do the driving threads produce a friction sound when moving on the surface?
+# WINBOT / W2/W2 OMNI / EN - Why do the driving threads produce a friction sound when moving on the surface?
 
 ## Question
 

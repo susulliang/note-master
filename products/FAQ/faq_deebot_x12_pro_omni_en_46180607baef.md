@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use Agent YIKO to set cleaning preferences?
+# DEEBOT / X12 PRO OMNI / EN - How to use Agent YIKO to set cleaning preferences?
 
 ## Question
 

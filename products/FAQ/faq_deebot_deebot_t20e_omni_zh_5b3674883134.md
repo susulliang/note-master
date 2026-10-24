@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何取出和清潔主清潔刷？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何取出和清潔主清潔刷？
 
 ## Question
 

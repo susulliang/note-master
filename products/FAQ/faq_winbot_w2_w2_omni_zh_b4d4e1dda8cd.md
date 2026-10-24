@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 使用完WINBOT需要将水箱内清洁液倾倒干净吗？
+# WINBOT / W2/W2 OMNI / ZH - 使用完WINBOT需要将水箱内清洁液倾倒干净吗？
 
 ## Question
 

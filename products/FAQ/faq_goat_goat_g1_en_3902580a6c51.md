@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why has the outer outline setting failed?
+# GOAT / GOAT G1 / EN - Why has the outer outline setting failed?
 
 ## Question
 

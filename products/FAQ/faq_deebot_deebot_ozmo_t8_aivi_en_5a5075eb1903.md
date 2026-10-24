@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What can I do about limescale in DEEBOT's water tank?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What can I do about limescale in DEEBOT's water tank?
 
 ## Question
 

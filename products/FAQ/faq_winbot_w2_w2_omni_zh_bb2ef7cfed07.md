@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT如何共享？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT如何共享？
 
 ## Question
 

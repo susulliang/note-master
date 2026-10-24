@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if hot water does not come out when cleaning the mops?
+# DEEBOT / DEEBOT T30 OMNI Silver / EN - What should I do if hot water does not come out when cleaning the mops?
 
 ## Question
 

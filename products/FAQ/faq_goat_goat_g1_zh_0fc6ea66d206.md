@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The work log shows that the total mowing area is inconsistent with the sum of the single mowing areas？
+# GOAT / GOAT G1 / ZH - The work log shows that the total mowing area is inconsistent with the sum of the single mowing areas？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will navigation beacons emit radiation?
+# GOAT / GOAT G1 / ZH - Will navigation beacons emit radiation?
 
 ## Question
 

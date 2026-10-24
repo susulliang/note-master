@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT G1 be used in the rain?
+# GOAT / GOAT G1 / EN - Can the GOAT G1 be used in the rain?
 
 ## Question
 

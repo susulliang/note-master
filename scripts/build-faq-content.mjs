@@ -64,11 +64,19 @@ function walkMarkdown(dir) {
 
 const entries = [];
 const shards = new Map();
+const languageCounts = new Map();
 
 for (const filePath of walkMarkdown(SOURCE_DIR)) {
   const markdown = readFileSync(filePath, 'utf8');
   const { values, body } = readFrontmatter(markdown);
   if (values.kind !== 'faq') continue;
+  const rawLanguage = String(values.lang ?? 'en').toLowerCase();
+  const lang = rawLanguage === 'zh' || rawLanguage.startsWith('zh-')
+    ? 'zh'
+    : rawLanguage === 'en' || rawLanguage.startsWith('en-')
+      ? 'en'
+      : '';
+  if (!lang) continue;
 
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? '';
   const question = section(body, 'Question') || title;
@@ -79,7 +87,6 @@ for (const filePath of walkMarkdown(SOURCE_DIR)) {
   const category = String(values.category ?? 'OTHER');
   const model = String(values.model ?? '');
   const modelSlug = String(values.model_slug ?? 'general');
-  const lang = String(values.lang ?? 'en').toLowerCase();
   const shardKey = `${category}:${modelSlug}:${lang}`;
   const shard = `faq-${digest(shardKey)}.json`;
 
@@ -89,6 +96,7 @@ for (const filePath of walkMarkdown(SOURCE_DIR)) {
     model,
     modelSlug,
     lang,
+    title: `${category} / ${model || 'General'} / ${lang.toUpperCase()} - ${question.replace(/\s+/g, ' ')}`,
     source: String(values.source ?? ''),
     sourceSheet: String(values.source_sheet ?? ''),
     question,
@@ -97,6 +105,7 @@ for (const filePath of walkMarkdown(SOURCE_DIR)) {
     shard,
   };
   entries.push(entry);
+  languageCounts.set(lang, (languageCounts.get(lang) ?? 0) + 1);
   if (!shards.has(shard)) shards.set(shard, {});
   shards.get(shard)[id] = { answer };
 }
@@ -118,5 +127,6 @@ for (const [filename, content] of shards) {
 const indexBytes = statSync(join(OUT_DIR, 'index.json')).size;
 console.log(
   `[faq-content] ${entries.length} entries, ${shards.size} content shards; ` +
-  `index ${(indexBytes / 1024).toFixed(0)} KB`
+  `index ${(indexBytes / 1024).toFixed(0)} KB; ` +
+  `EN ${languageCounts.get('en') ?? 0}, ZH ${languageCounts.get('zh') ?? 0}`
 );

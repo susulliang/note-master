@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I adjust the time interval for the robot to return to the station to clean the mopping pads?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I adjust the time interval for the robot to return to the station to clean the mopping pads?
 
 ## Question
 

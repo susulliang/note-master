@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does WINBOT use tap water or purified water? What will happen if purified water is used?
+# WINBOT / WINBOT W1/W1 Pro / EN - Does WINBOT use tap water or purified water? What will happen if purified water is used?
 
 ## Question
 

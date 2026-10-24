@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the disorderly cleaning route when the robot is working?
+# DEEBOT / T30 S Combo / EN - How to deal with the disorderly cleaning route when the robot is working?
 
 ## Question
 

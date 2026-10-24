@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The docking station indicator remains red.
+# GOAT / GOAT G1 / ZH - The docking station indicator remains red.
 
 ## Question
 

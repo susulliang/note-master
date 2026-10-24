@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT的断点续擦是什么工作逻辑？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT的断点续擦是什么工作逻辑？
 
 ## Question
 

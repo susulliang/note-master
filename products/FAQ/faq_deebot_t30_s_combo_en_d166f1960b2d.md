@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the cleaning sink?
+# DEEBOT / T30 S Combo / EN - How to clean the cleaning sink?
 
 ## Question
 

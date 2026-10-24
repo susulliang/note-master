@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 滚筒遮蔽罩如何安装？
+# DEEBOT / S20 Infinity Ultra / ZH - 滚筒遮蔽罩如何安装？
 
 ## Question
 

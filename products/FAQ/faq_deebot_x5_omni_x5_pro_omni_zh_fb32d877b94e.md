@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Upgrade your DEEBOT - firmware upgrade
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - Upgrade your DEEBOT - firmware upgrade
 
 ## Question
 

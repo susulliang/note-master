@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Side Brush Removal, Cleaning, and Installation Guide
+# DEEBOT / X9S PRO OMNI / ZH - Side Brush Removal, Cleaning, and Installation Guide
 
 ## Question
 

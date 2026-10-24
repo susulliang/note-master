@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 not start mowing automatically at the scheduled time?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 not start mowing automatically at the scheduled time?
 
 ## Question
 

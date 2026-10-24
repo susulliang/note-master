@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人提示“滚筒拖布被缠绕 ”如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 机器人提示“滚筒拖布被缠绕 ”如何处理？
 
 ## Question
 

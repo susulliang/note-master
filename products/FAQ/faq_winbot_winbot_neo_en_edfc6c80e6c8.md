@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is continous cleaning?
+# WINBOT / WINBOT NEO / EN - What is continous cleaning?
 
 ## Question
 

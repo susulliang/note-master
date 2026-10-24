@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT does not finish cleaning after returning to the dock to charge in Continuous Clean mode. Why?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - DEEBOT does not finish cleaning after returning to the dock to charge in Continuous Clean mode. Why?
 
 ## Question
 

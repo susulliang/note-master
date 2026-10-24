@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# サイドブラシを取り外してクリーニングする方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - サイドブラシを取り外してクリーニングする方法を教えてください。
 
 ## Question
 

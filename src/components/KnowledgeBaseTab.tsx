@@ -100,7 +100,7 @@ export default function KnowledgeBaseTab() {
         setDocs(
           (entries ?? []).map((e) => ({
             id: e.id,
-            title: e.question,
+            title: e.title || `${e.category} / ${e.model || 'General'} / ${e.lang.toUpperCase()} - ${e.question}`,
             body: '',
             updatedBy: 'faq-index',
             updatedAt: '',
@@ -245,11 +245,17 @@ export default function KnowledgeBaseTab() {
     if (r2) return;
     const label = meta.label;
     try {
-      const total = await exportKbToR2(KIND_R2_SOURCES[kind], (p) => setR2(p));
-      if (total === null) toast.error('R2 export failed (not admin?)');
+      const result = await exportKbToR2(
+        KIND_R2_SOURCES[kind],
+        (p) => setR2(p),
+        { pruneFaq: kind === 'faq' }
+      );
+      if (result === null) toast.error('R2 export failed (not admin?)');
       else
         toast.success(
-          `Copied ${total.toLocaleString()} objects to R2 (${label})${kind === 'app_photo' ? ' — manifest.json written' : ''}`
+          `Copied ${result.exported.toLocaleString()} objects to R2 (${label})` +
+          `${result.pruned ? ` · removed ${result.pruned.toLocaleString()} stale FAQ objects` : ''}` +
+          `${kind === 'app_photo' ? ' — manifest.json written' : ''}`
         );
     } finally {
       setR2(null);
@@ -259,9 +265,9 @@ export default function KnowledgeBaseTab() {
   const syncNewsR2 = async () => {
     if (r2) return;
     try {
-      const total = await exportKbToR2(['news', 'news_assets'], (p) => setR2(p));
-      if (total === null) toast.error('News R2 export failed (not admin?)');
-      else toast.success(`Copied ${total.toLocaleString()} News & Updates articles and images to R2`);
+      const result = await exportKbToR2(['news', 'news_assets'], (p) => setR2(p));
+      if (result === null) toast.error('News R2 export failed (not admin?)');
+      else toast.success(`Copied ${result.exported.toLocaleString()} News & Updates articles and images to R2`);
     } finally {
       setR2(null);
     }

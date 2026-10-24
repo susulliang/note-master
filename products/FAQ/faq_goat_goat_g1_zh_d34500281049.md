@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What factors in the environment will prevent automatic mapping?
+# GOAT / GOAT G1 / ZH - What factors in the environment will prevent automatic mapping?
 
 ## Question
 

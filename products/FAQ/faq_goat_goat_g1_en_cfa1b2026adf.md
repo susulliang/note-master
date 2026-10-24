@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT G1 only identify and warn people that are present in the garden?
+# GOAT / GOAT G1 / EN - Can the GOAT G1 only identify and warn people that are present in the garden?
 
 ## Question
 

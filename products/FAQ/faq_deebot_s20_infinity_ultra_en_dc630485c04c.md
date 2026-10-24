@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the Off-Peak Charging Function? How do I use it?
+# DEEBOT / S20 Infinity Ultra / EN - What is the Off-Peak Charging Function? How do I use it?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：撞板被卡住
+# DEEBOT / X9S PRO OMNI / ZH - 报警：撞板被卡住
 
 ## Question
 

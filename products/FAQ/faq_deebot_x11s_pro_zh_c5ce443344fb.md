@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何处理污水箱异常？
+# DEEBOT / X11S Pro / ZH - 如何处理污水箱异常？
 
 ## Question
 

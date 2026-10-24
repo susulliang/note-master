@@ -3,14 +3,14 @@ category: "WINBOT"
 model: "WINBOT mini2"
 model_slug: "winbot_mini2"
 lang: "zh"
-source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0_19langs.xlsx"
+source: "FAQ/WINBOT/Winbot Mini 2/WINBOT mini2 FAQ 2.0.xlsx"
 source_sheet: "中文"
 source_row_id: ""
 kind: faq
 version: 1
 ---
 
-# 为什么新机第一次开机提示“窗宝电量不足，请充满电后使用”？
+# WINBOT / WINBOT mini2 / ZH - 为什么新机第一次开机提示“窗宝电量不足，请充满电后使用”？
 
 ## Question
 

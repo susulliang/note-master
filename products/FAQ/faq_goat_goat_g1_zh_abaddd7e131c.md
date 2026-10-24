@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is the use of the robot affected if the navigation beacon is crooked (not placed upright)?
+# GOAT / GOAT G1 / ZH - Is the use of the robot affected if the navigation beacon is crooked (not placed upright)?
 
 ## Question
 

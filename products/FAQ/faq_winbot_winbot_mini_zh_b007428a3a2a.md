@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安全绳承重、机器承重等，是否有相关证明报告？
+# WINBOT / WINBOT MINI / ZH - 安全绳承重、机器承重等，是否有相关证明报告？
 
 ## Question
 

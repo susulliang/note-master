@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot makes a loud noise when cleaning or an abnormal noise when mopping.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - The robot makes a loud noise when cleaning or an abnormal noise when mopping.
 
 ## Question
 

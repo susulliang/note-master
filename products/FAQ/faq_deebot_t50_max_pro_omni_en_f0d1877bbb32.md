@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Anti-drop sensors have accumulated dust, please wipe it clean.
+# DEEBOT / T50 MAX PRO OMNI / EN - Anti-drop sensors have accumulated dust, please wipe it clean.
 
 ## Question
 

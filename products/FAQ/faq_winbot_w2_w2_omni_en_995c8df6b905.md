@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Unable to control the WINBOT W2 through the ECOVACS HOME App.
+# WINBOT / W2/W2 OMNI / EN - Unable to control the WINBOT W2 through the ECOVACS HOME App.
 
 ## Question
 

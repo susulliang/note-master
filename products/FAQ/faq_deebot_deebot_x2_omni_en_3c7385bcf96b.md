@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot does not perform continuous cleaning?
+# DEEBOT / DEEBOT X2 OMNI / EN - What should I do if the robot does not perform continuous cleaning?
 
 ## Question
 

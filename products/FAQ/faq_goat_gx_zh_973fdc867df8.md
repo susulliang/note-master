@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I lifted up my GOAT. Why did it not immediately lock and sound the alarm?
+# GOAT / GX / ZH - I lifted up my GOAT. Why did it not immediately lock and sound the alarm?
 
 ## Question
 

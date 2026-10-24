@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Unable to take-up the compound cable.
+# WINBOT / W2 OMNI / EN - Unable to take-up the compound cable.
 
 ## Question
 

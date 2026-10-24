@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The DEEBOT keeps failing when trying to create the initial map.
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - The DEEBOT keeps failing when trying to create the initial map.
 
 ## Question
 

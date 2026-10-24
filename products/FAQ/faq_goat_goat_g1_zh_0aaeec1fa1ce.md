@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is there maximum number of navigation beacons?
+# GOAT / GOAT G1 / ZH - Is there maximum number of navigation beacons?
 
 ## Question
 

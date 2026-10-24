@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Did the cleaning work not automatically execute according to the scheduled time?
+# DEEBOT / T30 S / EN - Did the cleaning work not automatically execute according to the scheduled time?
 
 ## Question
 

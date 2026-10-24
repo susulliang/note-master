@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# カスタマイズしたシナリオ清掃機能の使用方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - カスタマイズしたシナリオ清掃機能の使用方法を教えてください。
 
 ## Question
 

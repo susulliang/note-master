@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does the docking station need to be paired with the GOAT?
+# GOAT / GOAT G1 / ZH - Does the docking station need to be paired with the GOAT?
 
 ## Question
 

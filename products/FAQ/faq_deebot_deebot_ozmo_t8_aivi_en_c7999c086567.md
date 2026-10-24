@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why doesn't DEEBOT follow the set cleaning mode while cleaning?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why doesn't DEEBOT follow the set cleaning mode while cleaning?
 
 ## Question
 

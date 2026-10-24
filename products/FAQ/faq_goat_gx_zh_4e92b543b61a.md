@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have installed the Cellullar Module, but the module is still not recognized?
+# GOAT / GX / ZH - I have installed the Cellullar Module, but the module is still not recognized?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The unit still bumps into an object after AIVI recognizes it. (Behavior: still lightly coming into contact with a target object after recognition)
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - The unit still bumps into an object after AIVI recognizes it. (Behavior: still lightly coming into contact with a target object after recognition)
 
 ## Question
 

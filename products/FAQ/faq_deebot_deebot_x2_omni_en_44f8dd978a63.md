@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Connect your DEEBOT X2 with the ECOVACS HOME App
+# DEEBOT / DEEBOT X2 OMNI / EN - Connect your DEEBOT X2 with the ECOVACS HOME App
 
 ## Question
 

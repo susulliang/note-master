@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot is unable to update firmware.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - The robot is unable to update firmware.
 
 ## Question
 

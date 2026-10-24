@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT出现漏擦，如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT出现漏擦，如何处理？
 
 ## Question
 

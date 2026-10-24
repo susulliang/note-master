@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Removal, Cleaning and Reinstallation Main Brush？
+# DEEBOT / X12 PRO OMNI / EN - How to Removal, Cleaning and Reinstallation Main Brush？
 
 ## Question
 

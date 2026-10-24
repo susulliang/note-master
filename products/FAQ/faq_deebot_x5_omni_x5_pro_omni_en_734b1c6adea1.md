@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install my robot?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How to install my robot?
 
 ## Question
 

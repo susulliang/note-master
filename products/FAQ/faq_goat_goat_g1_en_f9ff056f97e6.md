@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT not mowing exactly to the selected edges?
+# GOAT / GOAT G1 / EN - Why is the GOAT not mowing exactly to the selected edges?
 
 ## Question
 

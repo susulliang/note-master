@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I charge my robot?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - How do I charge my robot?
 
 ## Question
 

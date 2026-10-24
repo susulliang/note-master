@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why am I unable to close a restricted area?
+# GOAT / GOAT G1 / ZH - Why am I unable to close a restricted area?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人频繁回基站应该如何处理？
+# DEEBOT / X12 OmniCyclone / ZH - 机器人频繁回基站应该如何处理？
 
 ## Question
 

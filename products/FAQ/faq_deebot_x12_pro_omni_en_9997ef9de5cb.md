@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Fix the Dirty Water Tank Error？
+# DEEBOT / X12 PRO OMNI / EN - How to Fix the Dirty Water Tank Error？
 
 ## Question
 

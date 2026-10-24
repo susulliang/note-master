@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I set up a cleaning schedule?
+# DEEBOT / X12 PRO OMNI / EN - How do I set up a cleaning schedule?
 
 ## Question
 

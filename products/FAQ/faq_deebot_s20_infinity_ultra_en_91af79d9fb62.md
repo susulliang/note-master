@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I remove the roller mop and install the roller mop?
+# DEEBOT / S20 Infinity Ultra / EN - How do I remove the roller mop and install the roller mop?
 
 ## Question
 

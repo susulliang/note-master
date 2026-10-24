@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the APP prompt "low cleaning liquid level"?(For high-end models only)
+# DEEBOT / T50降配版 / EN - How to deal with the APP prompt "low cleaning liquid level"?(For high-end models only)
 
 ## Question
 

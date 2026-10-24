@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 谷电充电是什么？怎样使用？
+# DEEBOT / DEEBOT X12 PRO / ZH - 谷电充电是什么？怎样使用？
 
 ## Question
 

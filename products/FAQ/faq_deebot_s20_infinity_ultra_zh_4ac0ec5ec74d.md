@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清水箱不出清水，如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 清水箱不出清水，如何处理？
 
 ## Question
 

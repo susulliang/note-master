@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Difficult operation, check Driving Wheels
+# DEEBOT / X11S Omnicyclone / EN - Warning: Difficult operation, check Driving Wheels
 
 ## Question
 

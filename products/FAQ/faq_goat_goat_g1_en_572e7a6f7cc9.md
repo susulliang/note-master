@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the range of the automatic edge optimization, and will the edges of restricted areas be optimized?
+# GOAT / GOAT G1 / EN - What is the range of the automatic edge optimization, and will the edges of restricted areas be optimized?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 自动集尘仓/更换集尘袋
+# DEEBOT / T50 MAX PRO OMNI / ZH - 自动集尘仓/更换集尘袋
 
 ## Question
 

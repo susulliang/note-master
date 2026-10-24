@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何升级固件版本？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何升级固件版本？
 
 ## Question
 

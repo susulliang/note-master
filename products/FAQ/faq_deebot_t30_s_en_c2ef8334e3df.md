@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the station not producing hot water?
+# DEEBOT / T30 S / EN - How to deal with the station not producing hot water?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The mopping pad plates are not fully installed/are entangled/there’s powder on the support pole after long-term use.
+# DEEBOT / DEEBOT T20e OMNI / EN - The mopping pad plates are not fully installed/are entangled/there’s powder on the support pole after long-term use.
 
 ## Question
 

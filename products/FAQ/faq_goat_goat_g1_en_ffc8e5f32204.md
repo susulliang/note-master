@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the blades of the GOAT G1 continue turning when passing through non-grass areas?
+# GOAT / GOAT G1 / EN - Will the blades of the GOAT G1 continue turning when passing through non-grass areas?
 
 ## Question
 

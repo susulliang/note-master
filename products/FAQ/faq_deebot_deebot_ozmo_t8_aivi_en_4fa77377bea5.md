@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should be done if DEEBOT accidentally vacuums up liquid?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What should be done if DEEBOT accidentally vacuums up liquid?
 
 ## Question
 

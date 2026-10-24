@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the difference between the auto-connection module and the cellular module? What scenarios are they applicable to?
+# GOAT / GOAT G1 / EN - What is the difference between the auto-connection module and the cellular module? What scenarios are they applicable to?
 
 ## Question
 

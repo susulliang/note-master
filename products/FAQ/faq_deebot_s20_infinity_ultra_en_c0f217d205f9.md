@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the mop washing tray?
+# DEEBOT / S20 Infinity Ultra / EN - How to clean the mop washing tray?
 
 ## Question
 

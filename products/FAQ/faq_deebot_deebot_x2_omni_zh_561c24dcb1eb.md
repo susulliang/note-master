@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 應用程式提示機器人已中斷與充電站的連線。或充電站無法控制機器人。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 應用程式提示機器人已中斷與充電站的連線。或充電站無法控制機器人。
 
 ## Question
 

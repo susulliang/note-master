@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# While DEEBOT is cleaning, why does it become louder when moving to the carpet?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - While DEEBOT is cleaning, why does it become louder when moving to the carpet?
 
 ## Question
 

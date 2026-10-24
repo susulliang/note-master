@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't the GOAT G1 charge?
+# GOAT / GOAT G1 / EN - Why can't the GOAT G1 charge?
 
 ## Question
 

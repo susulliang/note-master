@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The base station is not dispensing hot water when cleaning the mopping pads.
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - The base station is not dispensing hot water when cleaning the mopping pads.
 
 ## Question
 

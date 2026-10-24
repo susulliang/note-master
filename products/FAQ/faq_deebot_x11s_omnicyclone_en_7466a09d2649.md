@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Properly Charge the Robot？
+# DEEBOT / X11S Omnicyclone / EN - How to Properly Charge the Robot？
 
 ## Question
 

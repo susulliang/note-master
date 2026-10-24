@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is continuous cleaning?
+# WINBOT / W2/W2 OMNI / EN - What is continuous cleaning?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What kind of battery does the navigation beacon require? How often do I need to replace the battery?
+# GOAT / GOAT G1 / EN - What kind of battery does the navigation beacon require? How often do I need to replace the battery?
 
 ## Question
 

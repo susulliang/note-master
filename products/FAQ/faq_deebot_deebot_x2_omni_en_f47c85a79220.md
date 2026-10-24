@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I clean the dirty water and clean water tanks?
+# DEEBOT / DEEBOT X2 OMNI / EN - How do I clean the dirty water and clean water tanks?
 
 ## Question
 

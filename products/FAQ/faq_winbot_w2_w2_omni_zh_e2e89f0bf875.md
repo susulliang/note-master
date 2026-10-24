@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 60ML水箱可以喷多少次？
+# WINBOT / W2/W2 OMNI / ZH - 60ML水箱可以喷多少次？
 
 ## Question
 

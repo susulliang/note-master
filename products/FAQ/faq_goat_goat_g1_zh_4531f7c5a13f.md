@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I control the GOAT to be close to the garden or lawn boundary all the way?
+# GOAT / GOAT G1 / ZH - Can I control the GOAT to be close to the garden or lawn boundary all the way?
 
 ## Question
 

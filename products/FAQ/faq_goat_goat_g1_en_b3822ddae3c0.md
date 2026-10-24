@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the docking station be placed in a non-lawn area, such as under an awning or in a garage?
+# GOAT / GOAT G1 / EN - Can the docking station be placed in a non-lawn area, such as under an awning or in a garage?
 
 ## Question
 

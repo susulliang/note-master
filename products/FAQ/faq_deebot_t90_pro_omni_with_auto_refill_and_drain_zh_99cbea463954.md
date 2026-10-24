@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置单拖模式？
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 如何设置单拖模式？
 
 ## Question
 

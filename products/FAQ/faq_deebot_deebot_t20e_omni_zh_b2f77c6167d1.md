@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人警示防掉落感應器發生問題。我該怎麼做？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 機器人警示防掉落感應器發生問題。我該怎麼做？
 
 ## Question
 

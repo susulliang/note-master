@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 滚筒遮蔽罩如何安装？
+# DEEBOT / X12 PRO OMNI / ZH - 滚筒遮蔽罩如何安装？
 
 ## Question
 

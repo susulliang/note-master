@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何设置虚拟墙？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何设置虚拟墙？
 
 ## Question
 

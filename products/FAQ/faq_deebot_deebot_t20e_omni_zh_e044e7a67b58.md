@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果應用程式提示 DEEBOT 受阻擋，且清掃工作在區域清掃過程中結束，我該怎麼做？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如果應用程式提示 DEEBOT 受阻擋，且清掃工作在區域清掃過程中結束，我該怎麼做？
 
 ## Question
 

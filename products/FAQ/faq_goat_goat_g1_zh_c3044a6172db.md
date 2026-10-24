@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The generated map outline is not consistent with outline I actually create remotely, and part of the boundary is missing.
+# GOAT / GOAT G1 / ZH - The generated map outline is not consistent with outline I actually create remotely, and part of the boundary is missing.
 
 ## Question
 

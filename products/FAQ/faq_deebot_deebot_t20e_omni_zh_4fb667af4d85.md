@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地
+# DEEBOT / DEEBOT T20e OMNI / ZH - 拖地
 
 ## Question
 

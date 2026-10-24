@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can sounds be heard from the docking station?
+# GOAT / GOAT G1 / ZH - Why can sounds be heard from the docking station?
 
 ## Question
 

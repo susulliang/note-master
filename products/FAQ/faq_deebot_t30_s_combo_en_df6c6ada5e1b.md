@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install it handheld?
+# DEEBOT / T30 S Combo / EN - How to install it handheld?
 
 ## Question
 

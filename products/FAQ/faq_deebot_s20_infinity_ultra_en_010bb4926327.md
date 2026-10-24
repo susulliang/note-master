@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of Dirty Water Box Abnormal？
+# DEEBOT / S20 Infinity Ultra / EN - How to solve the issue of Dirty Water Box Abnormal？
 
 ## Question
 

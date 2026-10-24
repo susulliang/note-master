@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Bumper is stuck
+# DEEBOT / T90 PRO OMNI / ZH - Alarm: Bumper is stuck
 
 ## Question
 

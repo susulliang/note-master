@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After the WINBOT battery is low, connect the power cord to charge. After a while, all the indicator lights go out. What is the status of the robot at this time?
+# WINBOT / WINBOT NEO / EN - After the WINBOT battery is low, connect the power cord to charge. After a while, all the indicator lights go out. What is the status of the robot at this time?
 
 ## Question
 

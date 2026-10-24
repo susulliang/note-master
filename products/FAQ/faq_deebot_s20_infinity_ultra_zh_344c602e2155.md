@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人语音提示“接水槽未安装”如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 机器人语音提示“接水槽未安装”如何处理？
 
 ## Question
 

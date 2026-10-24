@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# My garden has a poor Wi-Fi signal. Will this affect mapping?
+# GOAT / GOAT G1 / EN - My garden has a poor Wi-Fi signal. Will this affect mapping?
 
 ## Question
 

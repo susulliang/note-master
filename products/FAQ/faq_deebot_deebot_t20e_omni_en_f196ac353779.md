@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The waste water in the cleaning sink cannot be recycled or the waste water tank doesn't have any water, but the robot reminds that the waste water tank is full.
+# DEEBOT / DEEBOT T20e OMNI / EN - The waste water in the cleaning sink cannot be recycled or the waste water tank doesn't have any water, but the robot reminds that the waste water tank is full.
 
 ## Question
 

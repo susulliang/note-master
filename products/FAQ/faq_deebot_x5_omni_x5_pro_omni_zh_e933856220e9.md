@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站清洁槽内有脏污，如何使用自清洁功能来清理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 基站清洁槽内有脏污，如何使用自清洁功能来清理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the App prompts that DEEBOT is blocked, and the cleaning ends during area cleaning?
+# DEEBOT / DEEBOT T20e OMNI / EN - What should I do if the App prompts that DEEBOT is blocked, and the cleaning ends during area cleaning?
 
 ## Question
 

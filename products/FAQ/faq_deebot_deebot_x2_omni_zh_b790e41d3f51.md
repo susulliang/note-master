@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如果機器人無法執行繼續清掃功能，我該怎麼辦？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如果機器人無法執行繼續清掃功能，我該怎麼辦？
 
 ## Question
 

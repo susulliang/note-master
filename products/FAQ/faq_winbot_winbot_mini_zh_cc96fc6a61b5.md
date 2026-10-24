@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 低温运行（0℃）时在有框玻璃中间报错窗宝被困
+# WINBOT / WINBOT MINI / ZH - 低温运行（0℃）时在有框玻璃中间报错窗宝被困
 
 ## Question
 

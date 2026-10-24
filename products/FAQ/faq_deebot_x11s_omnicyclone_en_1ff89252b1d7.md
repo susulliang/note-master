@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of the robot is not charging or fails to charge?
+# DEEBOT / X11S Omnicyclone / EN - How to solve the issue of the robot is not charging or fails to charge?
 
 ## Question
 

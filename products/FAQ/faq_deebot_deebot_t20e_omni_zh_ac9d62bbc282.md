@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットのファームウェアを更新できない。
+# DEEBOT / DEEBOT T20e OMNI / ZH - ロボットのファームウェアを更新できない。
 
 ## Question
 

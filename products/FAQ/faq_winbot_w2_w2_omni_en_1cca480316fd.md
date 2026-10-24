@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the manual control in the ECOVACS HOME App used for?
+# WINBOT / W2/W2 OMNI / EN - What is the manual control in the ECOVACS HOME App used for?
 
 ## Question
 

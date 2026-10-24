@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# “污水盒异常”如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - “污水盒异常”如何处理？
 
 ## Question
 

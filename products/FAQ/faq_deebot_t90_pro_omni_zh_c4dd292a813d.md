@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Dust Bin Removal, Cleaning, and Installation Guide
+# DEEBOT / T90 PRO OMNI / ZH - Dust Bin Removal, Cleaning, and Installation Guide
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install and remove base?
+# DEEBOT / DEEBOT T30 OMNI Rosé / EN - How to install and remove base?
 
 ## Question
 

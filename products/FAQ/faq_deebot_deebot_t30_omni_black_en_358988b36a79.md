@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if my robot is experiencing map confusion/map overlapping/distorted maps?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - What should I do if my robot is experiencing map confusion/map overlapping/distorted maps?
 
 ## Question
 

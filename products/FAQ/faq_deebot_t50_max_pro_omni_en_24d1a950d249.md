@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Charging Guide
+# DEEBOT / T50 MAX PRO OMNI / EN - Robot Charging Guide
 
 ## Question
 

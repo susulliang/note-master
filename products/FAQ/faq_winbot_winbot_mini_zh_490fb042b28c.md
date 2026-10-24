@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 有镀膜的玻璃可以使用吗？会不会刮花镀膜玻璃？
+# WINBOT / WINBOT MINI / ZH - 有镀膜的玻璃可以使用吗？会不会刮花镀膜玻璃？
 
 ## Question
 

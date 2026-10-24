@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Poor dust collection performance? How to address it?
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Poor dust collection performance? How to address it?
 
 ## Question
 

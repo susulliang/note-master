@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT not start mowing automatically at the scheduled time?
+# GOAT / GX / ZH - Why does the GOAT not start mowing automatically at the scheduled time?
 
 ## Question
 

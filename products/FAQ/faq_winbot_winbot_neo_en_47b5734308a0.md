@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the glass of the shower room? Should I wait for it to dry completely before cleaning?
+# WINBOT / WINBOT NEO / EN - How to clean the glass of the shower room? Should I wait for it to dry completely before cleaning?
 
 ## Question
 

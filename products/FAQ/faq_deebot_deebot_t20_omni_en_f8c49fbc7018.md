@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Unable to connect my robot with the ECOVACS HOME App
+# DEEBOT / DEEBOT T20 OMNI / EN - Unable to connect my robot with the ECOVACS HOME App
 
 ## Question
 

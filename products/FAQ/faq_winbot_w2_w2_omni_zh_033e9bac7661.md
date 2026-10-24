@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洁完成后，为什么玻璃上WINBOT吸附位置有抹布印的残留痕迹？
+# WINBOT / W2/W2 OMNI / ZH - 清洁完成后，为什么玻璃上WINBOT吸附位置有抹布印的残留痕迹？
 
 ## Question
 

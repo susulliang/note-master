@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT保养/清理
+# WINBOT / W2/W2 OMNI / ZH - WINBOT保养/清理
 
 ## Question
 

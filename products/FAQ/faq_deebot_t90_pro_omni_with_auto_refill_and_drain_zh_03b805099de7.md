@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: Dirty water box abnormality
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Alarm: Dirty water box abnormality
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I disassemble and clean the side brush?
+# DEEBOT / DEEBOT T30 OMNI Silver / EN - How do I disassemble and clean the side brush?
 
 ## Question
 

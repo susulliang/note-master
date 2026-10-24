@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆卸滚筒拖布及安装滚筒拖布？
+# DEEBOT / X12 OmniCyclone / ZH - 如何拆卸滚筒拖布及安装滚筒拖布？
 
 ## Question
 

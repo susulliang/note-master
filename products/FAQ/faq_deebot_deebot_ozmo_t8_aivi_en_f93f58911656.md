@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Unable to launch real-time video, or there is no image?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Unable to launch real-time video, or there is no image?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have returned the abnormal Navigation Beacon to its original position according to the App prompt. Why does the problem persist on the App?
+# GOAT / GOAT G1 / EN - I have returned the abnormal Navigation Beacon to its original position according to the App prompt. Why does the problem persist on the App?
 
 ## Question
 

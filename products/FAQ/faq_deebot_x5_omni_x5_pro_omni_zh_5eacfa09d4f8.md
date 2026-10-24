@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I check the driving wheels if they are stuck?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - How do I check the driving wheels if they are stuck?
 
 ## Question
 

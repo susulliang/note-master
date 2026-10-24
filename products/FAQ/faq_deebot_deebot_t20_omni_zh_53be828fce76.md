@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拖地布板未完全安裝/遭纏繞/支撐桿在長期使用後有粉末。
+# DEEBOT / DEEBOT T20 OMNI / ZH - 拖地布板未完全安裝/遭纏繞/支撐桿在長期使用後有粉末。
 
 ## Question
 

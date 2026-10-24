@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot is alerting that there is an issue with the Anti-drop Sensor. What should I do?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - The robot is alerting that there is an issue with the Anti-drop Sensor. What should I do?
 
 ## Question
 

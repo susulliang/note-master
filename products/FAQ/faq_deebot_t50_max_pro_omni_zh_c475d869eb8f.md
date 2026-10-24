@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人地图创建
+# DEEBOT / T50 MAX PRO OMNI / ZH - 机器人地图创建
 
 ## Question
 

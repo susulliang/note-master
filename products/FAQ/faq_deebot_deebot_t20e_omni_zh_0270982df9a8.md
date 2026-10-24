@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人無法更新韌體。
+# DEEBOT / DEEBOT T20e OMNI / ZH - 機器人無法更新韌體。
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何打包装箱？
+# DEEBOT / DEEBOT X12 OmniCyclone / ZH - 如何打包装箱？
 
 ## Question
 

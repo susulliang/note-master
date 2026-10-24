@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝找到基站后上不去如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝找到基站后上不去如何处理？
 
 ## Question
 

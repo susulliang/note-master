@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 not continue with the unfinished task after it has fully recharged?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 not continue with the unfinished task after it has fully recharged?
 
 ## Question
 

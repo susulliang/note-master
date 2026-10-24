@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Base Installation & Removal Guide
+# DEEBOT / X9S PRO OMNI / ZH - Base Installation & Removal Guide
 
 ## Question
 

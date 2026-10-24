@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Dust Bag Replacement Guide
+# DEEBOT / X9S PRO OMNI / ZH - Dust Bag Replacement Guide
 
 ## Question
 

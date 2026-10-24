@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot is alerting that there is an issue with the Anti-drop Sensor. What should I do?
+# DEEBOT / DEEBOT X2 OMNI / EN - The robot is alerting that there is an issue with the Anti-drop Sensor. What should I do?
 
 ## Question
 

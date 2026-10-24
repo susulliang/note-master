@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT be moved during map learning?
+# GOAT / GOAT G1 / EN - Can the GOAT be moved during map learning?
 
 ## Question
 

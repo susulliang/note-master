@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I use WINBOT W2 directly on the glass with water?
+# WINBOT / W2/W2 OMNI / EN - Can I use WINBOT W2 directly on the glass with water?
 
 ## Question
 

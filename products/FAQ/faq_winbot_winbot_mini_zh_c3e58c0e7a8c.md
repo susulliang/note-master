@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安全绳和电源线全部在机器上的作用是？
+# WINBOT / WINBOT MINI / ZH - 安全绳和电源线全部在机器上的作用是？
 
 ## Question
 

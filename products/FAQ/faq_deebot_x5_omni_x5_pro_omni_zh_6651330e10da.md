@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# App提示：主机与基站断开连接，请检查/基站无法控制主机
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - App提示：主机与基站断开连接，请检查/基站无法控制主机
 
 ## Question
 

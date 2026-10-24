@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why did automatic mapping fail?
+# GOAT / GOAT G1 / ZH - Why did automatic mapping fail?
 
 ## Question
 

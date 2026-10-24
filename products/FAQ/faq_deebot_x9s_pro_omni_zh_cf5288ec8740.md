@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清理污水箱及清水箱指导
+# DEEBOT / X9S PRO OMNI / ZH - 清理污水箱及清水箱指导
 
 ## Question
 

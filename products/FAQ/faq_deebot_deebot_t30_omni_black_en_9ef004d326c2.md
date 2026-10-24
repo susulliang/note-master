@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I upgrade the robot’s firmware?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - How do I upgrade the robot’s firmware?
 
 ## Question
 

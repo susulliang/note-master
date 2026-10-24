@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Start mowing after moving the GOAT, does the GOAT need to be reacquainted with the environment?
+# GOAT / GX / ZH - Start mowing after moving the GOAT, does the GOAT need to be reacquainted with the environment?
 
 ## Question
 

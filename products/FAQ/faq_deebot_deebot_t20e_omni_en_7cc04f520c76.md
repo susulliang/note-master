@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I set up scheduled cleaning?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I set up scheduled cleaning?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the robot's voice prompting “Abnormal station cleaning sink”?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with the robot's voice prompting “Abnormal station cleaning sink”?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does my GOAT go out of the boundary？
+# GOAT / GX / ZH - Why does my GOAT go out of the boundary？
 
 ## Question
 

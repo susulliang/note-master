@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人出现充不进电/无法充电
+# DEEBOT / T50 降配版 / ZH - 机器人出现充不进电/无法充电
 
 ## Question
 

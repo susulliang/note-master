@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT bump into some obstacles?
+# GOAT / GX / ZH - Why does the GOAT bump into some obstacles?
 
 ## Question
 

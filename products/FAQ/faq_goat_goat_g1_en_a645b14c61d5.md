@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the anti-theft alarm triggered when the mower is inside the map?
+# GOAT / GOAT G1 / EN - Why is the anti-theft alarm triggered when the mower is inside the map?
 
 ## Question
 

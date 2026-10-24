@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of the robot is not charging or fails to charge?
+# DEEBOT / S20 Infinity Ultra / EN - How to solve the issue of the robot is not charging or fails to charge?
 
 ## Question
 

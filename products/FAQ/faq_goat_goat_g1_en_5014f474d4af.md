@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the relationship between the auto-connection module and the SIM card?
+# GOAT / GOAT G1 / EN - What is the relationship between the auto-connection module and the SIM card?
 
 ## Question
 

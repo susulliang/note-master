@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清潔廢水箱與淨水箱？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何清潔廢水箱與淨水箱？
 
 ## Question
 

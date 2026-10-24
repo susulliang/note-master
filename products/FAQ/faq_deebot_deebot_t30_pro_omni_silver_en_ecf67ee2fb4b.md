@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to connect your DEEBOT with the ECOVACS HOME App
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - How to connect your DEEBOT with the ECOVACS HOME App
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 是否可以关闭自动喷水功能？
+# WINBOT / W2/W2 OMNI / ZH - 是否可以关闭自动喷水功能？
 
 ## Question
 

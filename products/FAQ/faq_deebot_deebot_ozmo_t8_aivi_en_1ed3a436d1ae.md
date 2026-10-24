@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does DEEBOT move around in circles and backwards after starting up?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does DEEBOT move around in circles and backwards after starting up?
 
 ## Question
 

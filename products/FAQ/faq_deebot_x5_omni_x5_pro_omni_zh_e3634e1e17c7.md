@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 集尘失败，未检测到集尘袋或尘袋已满，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 集尘失败，未检测到集尘袋或尘袋已满，如何处理？
 
 ## Question
 

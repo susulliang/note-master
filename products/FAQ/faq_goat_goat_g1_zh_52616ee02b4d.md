@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT be used during cold winters?
+# GOAT / GOAT G1 / ZH - Can the GOAT be used during cold winters?
 
 ## Question
 

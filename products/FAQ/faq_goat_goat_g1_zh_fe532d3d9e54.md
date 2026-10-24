@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT cut tall grass?
+# GOAT / GOAT G1 / ZH - Can the GOAT cut tall grass?
 
 ## Question
 

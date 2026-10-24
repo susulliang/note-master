@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Packing Instruction Video
+# DEEBOT / X11S Pro / EN - Robot Packing Instruction Video
 
 ## Question
 

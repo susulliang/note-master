@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何設定預約清掃？
+# DEEBOT / DEEBOT X2 OMNI / ZH - 如何設定預約清掃？
 
 ## Question
 

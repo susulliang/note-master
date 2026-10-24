@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝工作时出现实清扫时路线乱如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝工作时出现实清扫时路线乱如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't I add a Wi-Fi network in multi-Wi-Fi management mode?
+# GOAT / GOAT G1 / EN - Why can't I add a Wi-Fi network in multi-Wi-Fi management mode?
 
 ## Question
 

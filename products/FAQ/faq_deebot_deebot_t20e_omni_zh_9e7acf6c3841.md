@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用機器人的「兒童安全鎖」功能？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何使用機器人的「兒童安全鎖」功能？
 
 ## Question
 

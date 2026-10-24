@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install the Mop Roller Smart Cover?
+# DEEBOT / S20 Infinity Ultra / EN - How to install the Mop Roller Smart Cover?
 
 ## Question
 

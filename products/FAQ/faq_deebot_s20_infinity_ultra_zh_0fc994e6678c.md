@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理污水箱及清水箱？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何清理污水箱及清水箱？
 
 ## Question
 

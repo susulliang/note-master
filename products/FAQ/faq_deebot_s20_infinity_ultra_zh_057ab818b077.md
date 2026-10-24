@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 语音提示撞板被卡住，如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 语音提示撞板被卡住，如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I remove and clean the main brush?
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - How do I remove and clean the main brush?
 
 ## Question
 

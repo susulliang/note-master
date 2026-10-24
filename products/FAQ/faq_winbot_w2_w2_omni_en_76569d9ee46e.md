@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The button on the WINBOT W2 does not respond.
+# WINBOT / W2/W2 OMNI / EN - The button on the WINBOT W2 does not respond.
 
 ## Question
 

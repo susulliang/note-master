@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人装箱指导
+# DEEBOT / T90 OMNI / ZH - 机器人装箱指导
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The voice prompt says that LDS component malfunction. What can I do?
+# DEEBOT / DEEBOT T30 OMNI Silver / EN - The voice prompt says that LDS component malfunction. What can I do?
 
 ## Question
 

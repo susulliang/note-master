@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I rinse the mower with a pressure washer?
+# GOAT / GOAT G1 / EN - Can I rinse the mower with a pressure washer?
 
 ## Question
 

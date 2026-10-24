@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洁液消耗异常
+# DEEBOT / X9S PRO OMNI / ZH - 清洁液消耗异常
 
 ## Question
 

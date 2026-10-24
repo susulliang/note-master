@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT G1 missing some areas when mowing?
+# GOAT / GOAT G1 / EN - Why is the GOAT G1 missing some areas when mowing?
 
 ## Question
 

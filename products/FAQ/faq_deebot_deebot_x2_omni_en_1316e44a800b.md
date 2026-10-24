@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The mopping pad plates are not fully installed/are entangled?
+# DEEBOT / DEEBOT X2 OMNI / EN - The mopping pad plates are not fully installed/are entangled?
 
 ## Question
 

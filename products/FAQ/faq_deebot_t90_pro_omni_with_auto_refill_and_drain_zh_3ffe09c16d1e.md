@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Warning: Roller mop is tangled
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Warning: Roller mop is tangled
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人驅動滾輪遭纏繞或表面有髒汙時，該如何清潔？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 機器人驅動滾輪遭纏繞或表面有髒汙時，該如何清潔？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洁液如何有效储存？
+# WINBOT / W2/W2 OMNI / ZH - 清洁液如何有效储存？
 
 ## Question
 

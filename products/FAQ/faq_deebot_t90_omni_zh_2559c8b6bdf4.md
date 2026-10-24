@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：接水槽未安装
+# DEEBOT / T90 OMNI / ZH - 报警：接水槽未安装
 
 ## Question
 

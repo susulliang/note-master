@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will DEEBOT's audio reminders become a nuisance in daily life?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Will DEEBOT's audio reminders become a nuisance in daily life?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Fix the Anti-Drop Sensor Error
+# DEEBOT / S20 Infinity Ultra / EN - How to Fix the Anti-Drop Sensor Error
 
 ## Question
 

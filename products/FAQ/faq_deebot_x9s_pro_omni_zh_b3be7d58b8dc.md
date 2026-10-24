@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Roller Mop Removal & Installation Guide
+# DEEBOT / X9S PRO OMNI / ZH - Roller Mop Removal & Installation Guide
 
 ## Question
 

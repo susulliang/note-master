@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 充电状态是什么样子的？
+# WINBOT / WINBOT MINI / ZH - 充电状态是什么样子的？
 
 ## Question
 

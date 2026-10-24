@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I install the navigation beacon amongst some plants?
+# GOAT / GOAT G1 / EN - Can I install the navigation beacon amongst some plants?
 
 ## Question
 

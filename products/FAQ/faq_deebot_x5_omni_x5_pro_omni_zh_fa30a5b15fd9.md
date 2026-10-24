@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确设置地宝预约功能？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何正确设置地宝预约功能？
 
 ## Question
 

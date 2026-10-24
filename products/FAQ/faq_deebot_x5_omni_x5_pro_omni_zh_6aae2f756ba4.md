@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝固件版本升级如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝固件版本升级如何处理？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布盘无法自动升降如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 抹布盘无法自动升降如何处理？
 
 ## Question
 

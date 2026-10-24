@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install the robot?
+# DEEBOT / X11S Omnicyclone / EN - How to install the robot?
 
 ## Question
 

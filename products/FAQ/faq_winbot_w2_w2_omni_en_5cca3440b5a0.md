@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is there a range of window area that WINBOT W2 can clean?
+# WINBOT / W2/W2 OMNI / EN - Is there a range of window area that WINBOT W2 can clean?
 
 ## Question
 

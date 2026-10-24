@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 視訊管家
+# DEEBOT / DEEBOT X2 OMNI / ZH - 視訊管家
 
 ## Question
 

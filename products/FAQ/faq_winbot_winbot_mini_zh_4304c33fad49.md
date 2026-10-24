@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 产品对于玻璃的倾斜角度有要求吗？
+# WINBOT / WINBOT MINI / ZH - 产品对于玻璃的倾斜角度有要求吗？
 
 ## Question
 

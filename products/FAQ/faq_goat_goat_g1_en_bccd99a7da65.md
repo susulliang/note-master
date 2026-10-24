@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can restriction zones be intersected or overlapped?
+# GOAT / GOAT G1 / EN - Can restriction zones be intersected or overlapped?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用Agent YIKO来设置清洁偏好？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何使用Agent YIKO来设置清洁偏好？
 
 ## Question
 

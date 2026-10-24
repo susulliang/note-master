@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT遇到阻碍无法前进如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT遇到阻碍无法前进如何处理？
 
 ## Question
 

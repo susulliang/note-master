@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is there a lot of grass left on the edges?
+# GOAT / GOAT G1 / ZH - Why is there a lot of grass left on the edges?
 
 ## Question
 

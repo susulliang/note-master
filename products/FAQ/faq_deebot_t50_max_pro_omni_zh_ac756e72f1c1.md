@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确使用视频管家功能？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何正确使用视频管家功能？
 
 ## Question
 

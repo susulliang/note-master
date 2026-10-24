@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# If I use a SIM card, how much data will I consume in a month?
+# GOAT / GOAT G1 / ZH - If I use a SIM card, how much data will I consume in a month?
 
 ## Question
 

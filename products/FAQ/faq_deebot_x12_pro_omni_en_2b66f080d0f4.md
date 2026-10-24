@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to solve the issue of the cleaning solution consumption is abnormal?
+# DEEBOT / X12 PRO OMNI / EN - How to solve the issue of the cleaning solution consumption is abnormal?
 
 ## Question
 

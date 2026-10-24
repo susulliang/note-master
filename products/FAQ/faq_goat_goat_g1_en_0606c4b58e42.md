@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the GOAT G1 not get out of the docking station and start mowing immediately after I tap Start?
+# GOAT / GOAT G1 / EN - Why does the GOAT G1 not get out of the docking station and start mowing immediately after I tap Start?
 
 ## Question
 

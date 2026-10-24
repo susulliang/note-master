@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The drving threads clean itself during the use of the product. Where does the dust on the drving threads go after cleaning?
+# WINBOT / WINBOT NEO / EN - The drving threads clean itself during the use of the product. Where does the dust on the drving threads go after cleaning?
 
 ## Question
 

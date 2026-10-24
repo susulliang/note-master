@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# A voice reminder says that WINBOT W2 encountered an obstruction, hold the compound cable tightly, pull WINBOT W2 back, and take it off.
+# WINBOT / W2/W2 OMNI / EN - A voice reminder says that WINBOT W2 encountered an obstruction, hold the compound cable tightly, pull WINBOT W2 back, and take it off.
 
 ## Question
 

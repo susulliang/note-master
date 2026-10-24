@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can DEEBOT be damaged if left charging for too long?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Can DEEBOT be damaged if left charging for too long?
 
 ## Question
 

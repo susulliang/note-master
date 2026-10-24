@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 安装和拆卸回充托盘指导
+# DEEBOT / T90 PRO OMNI / ZH - 安装和拆卸回充托盘指导
 
 ## Question
 

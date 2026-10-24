@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットとECOVACS HOMEアプリを接続できない
+# DEEBOT / DEEBOT T20 OMNI / ZH - ロボットとECOVACS HOMEアプリを接続できない
 
 ## Question
 

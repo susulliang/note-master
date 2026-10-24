@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Charging and Off-Peak Charging Instructions
+# DEEBOT / X9S PRO OMNI / ZH - Robot Charging and Off-Peak Charging Instructions
 
 ## Question
 

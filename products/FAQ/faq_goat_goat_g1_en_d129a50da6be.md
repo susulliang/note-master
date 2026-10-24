@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# My front yard and backyard are not connected. How should I map them?
+# GOAT / GOAT G1 / EN - My front yard and backyard are not connected. How should I map them?
 
 ## Question
 

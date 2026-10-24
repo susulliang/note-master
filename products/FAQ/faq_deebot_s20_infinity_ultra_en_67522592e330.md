@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot frequently returns to the station. How to handle it?
+# DEEBOT / S20 Infinity Ultra / EN - Robot frequently returns to the station. How to handle it?
 
 ## Question
 

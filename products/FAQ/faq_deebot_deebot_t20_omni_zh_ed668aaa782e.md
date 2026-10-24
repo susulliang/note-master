@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 家財道具機能の使用方法を教えてください。
+# DEEBOT / DEEBOT T20 OMNI / ZH - 家財道具機能の使用方法を教えてください。
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 機器人在清掃時發出很大的噪音，或是在拖地時發出異常噪音。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 機器人在清掃時發出很大的噪音，或是在拖地時發出異常噪音。
 
 ## Question
 

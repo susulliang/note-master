@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is GOAT shut down automatically when in the station?
+# GOAT / GX / ZH - Why is GOAT shut down automatically when in the station?
 
 ## Question
 

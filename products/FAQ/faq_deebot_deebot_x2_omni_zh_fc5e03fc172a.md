@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 設定擦拭布的風乾時間
+# DEEBOT / DEEBOT X2 OMNI / ZH - 設定擦拭布的風乾時間
 
 ## Question
 

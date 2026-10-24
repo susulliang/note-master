@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After the robot has created a map and started cleaning, why does it lose the map or start creating the map again?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - After the robot has created a map and started cleaning, why does it lose the map or start creating the map again?
 
 ## Question
 

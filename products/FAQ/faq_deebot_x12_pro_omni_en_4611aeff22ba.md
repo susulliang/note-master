@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle the issue of the water spray function not working?
+# DEEBOT / X12 PRO OMNI / EN - How to handle the issue of the water spray function not working?
 
 ## Question
 

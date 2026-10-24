@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is DEEBOT cleaning for a shorter period of time?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why is DEEBOT cleaning for a shorter period of time?
 
 ## Question
 

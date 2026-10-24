@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will people walking behind the GOAT be recognized after safe mode is enabled?
+# GOAT / GOAT G1 / EN - Will people walking behind the GOAT be recognized after safe mode is enabled?
 
 ## Question
 

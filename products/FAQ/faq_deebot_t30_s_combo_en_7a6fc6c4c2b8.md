@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Remove, install and clean the floor brush?
+# DEEBOT / T30 S Combo / EN - Remove, install and clean the floor brush?
 
 ## Question
 

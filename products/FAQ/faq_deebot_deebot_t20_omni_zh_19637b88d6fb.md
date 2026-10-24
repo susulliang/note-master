@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# モップ掛け
+# DEEBOT / DEEBOT T20 OMNI / ZH - モップ掛け
 
 ## Question
 

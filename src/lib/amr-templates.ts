@@ -9,6 +9,8 @@
  * "driving wheel stuck"); content is parsed on demand for the viewer panel.
  */
 
+import { loadFaqIndex } from '@/utils/faqData';
+
 export interface TemplateEntry {
   /** Numeric prefix from the filename, e.g. "026" */
   id: string;
@@ -311,7 +313,6 @@ export async function searchTemplates(query: string, limit = 8): Promise<Templat
   ];
   if (queryTokens.length === 0) return [];
 
-  const { loadFaqIndex } = await import('../utils/faqData');
   let faqEntries: Awaited<ReturnType<typeof loadFaqIndex>> = [];
   try {
     faqEntries = await loadFaqIndex();

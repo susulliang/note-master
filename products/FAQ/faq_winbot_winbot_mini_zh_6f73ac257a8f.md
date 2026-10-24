@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器默认启动模式是什么模式？几次弓字？时间多久？
+# WINBOT / WINBOT MINI / ZH - 机器默认启动模式是什么模式？几次弓字？时间多久？
 
 ## Question
 

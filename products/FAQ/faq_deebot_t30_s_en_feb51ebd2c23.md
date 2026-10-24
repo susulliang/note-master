@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install filtering components?
+# DEEBOT / T30 S / EN - How to install filtering components?
 
 ## Question
 

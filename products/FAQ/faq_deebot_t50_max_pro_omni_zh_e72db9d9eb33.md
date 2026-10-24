@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人未按预约时间自动执行清洁工作?
+# DEEBOT / T50 MAX PRO OMNI / ZH - 机器人未按预约时间自动执行清洁工作?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The robot firmware version upgrade failed, how to deal with it?
+# DEEBOT / T30 S Combo / EN - The robot firmware version upgrade failed, how to deal with it?
 
 ## Question
 

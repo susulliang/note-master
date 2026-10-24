@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何打包装箱？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何打包装箱？
 
 ## Question
 

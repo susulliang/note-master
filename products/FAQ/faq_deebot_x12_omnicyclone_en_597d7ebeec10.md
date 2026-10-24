@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Fix the Clean Water Tank Error？
+# DEEBOT / X12 OmniCyclone / EN - How to Fix the Clean Water Tank Error？
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Is it possible to remotely control the GOAT in live video mode?
+# GOAT / GOAT G1 / EN - Is it possible to remotely control the GOAT in live video mode?
 
 ## Question
 

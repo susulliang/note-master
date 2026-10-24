@@ -21,7 +21,7 @@ import { createRequire } from 'node:module';
 import XLSX from 'xlsx';
 import mammoth from 'mammoth';
 const __require = createRequire(import.meta.url);
-const pdfParse = __require('pdf-parse');
+const { PDFParse } = __require('pdf-parse');
 
 const __dirname = dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Z]:)/, '$1');
 const ROOT = resolve(__dirname, '..');
@@ -84,6 +84,14 @@ function extractDateStamp(name) {
     const y = +eightDigit[1].slice(0, 4), m = +eightDigit[1].slice(4, 6), d = +eightDigit[1].slice(6, 8);
     if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return new Date(y, m - 1, d).getTime();
   }
+  const compactDate = name.match(/(?:^|[^0-9])(?:v|ver(?:sion)?[\s._-]*)?(\d{6})(?:[^0-9]|$)/i);
+  if (compactDate) {
+    const value = compactDate[1];
+    const y = 2000 + Number(value.slice(0, 2));
+    const m = Number(value.slice(2, 4));
+    const d = Number(value.slice(4, 6));
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return new Date(y, m - 1, d).getTime();
+  }
   const ymdDot = name.match(/(20\d{2}|\d{2})[._](\d{1,2})[._](\d{1,2})/);
   if (ymdDot) {
     let y = +ymdDot[1];
@@ -141,8 +149,8 @@ function detectLang(name) {
 const QUESTION_HEADER = /^(?:q|question|query|problem|issue|situation|topic|title|faq(?:\s*item)?|问题|常见问题|问题描述|故障问题|故障现象|症状|标题)$/i;
 const ANSWER_HEADER = /^(?:a|answer|solution|resolution|reply|detail|content|solutions?|处理方法|解决方法|解决方案|答案|答复|详细内容)$/i;
 const MODEL_HEADER = /^(?:product\s*model|model(?:\s*name)?|product(?:\s*name)?|适用机型|适配机型|机型|产品型号|产品名称)$/i;
-const IGNORE_HEADER = /^(?:(?:answer|question|faq|record|article|knowledge)\s+)?(?:id|code|tags?|visit type|status|ranking|language|language code|编号|序号|标记)$/i;
-const SUPPORTED_LANGUAGES = new Set(['en', 'zh', 'fr']);
+const IGNORE_HEADER = /^(?:(?:answer|question|faq|record|article|knowledge)\s+)?(?:id|code|tags?|visit type|status|ranking|language|language code|编号|序号|标记|no\.?|s\.?\s*no\.?|number)$/i;
+const SUPPORTED_LANGUAGES = new Set(['en', 'zh']);
 const LANGUAGE_CODES = new Set([
   'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'he', 'hi',
   'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro',
@@ -161,6 +169,11 @@ function normalizeHeader(value) {
 
 function languageCode(value) {
   const raw = String(value ?? '').normalize('NFKC').trim().toLowerCase();
+  const locale = raw.replace(/_/g, '-').match(/^([a-z]{2,3})(?:-[a-z0-9]+)*$/);
+  if (locale) {
+    if (locale[1] === 'cn') return 'zh';
+    if (LANGUAGE_CODES.has(locale[1])) return locale[1];
+  }
   const known = raw.match(/(?:^|[^a-z])([a-z]{2,3}(?:-[a-z]{2})?)(?:$|[^a-z])/);
   if (known) {
     if (/^en(?:-|$)/.test(known[1])) return 'en';
@@ -206,7 +219,9 @@ function inferLanguage(...values) {
 
 function normalizeSupportedLanguage(value) {
   const language = String(value ?? '').toLowerCase();
-  return language === 'zh' || language.startsWith('zh-') ? 'zh' : language;
+  if (language === 'zh' || language.startsWith('zh-')) return 'zh';
+  if (language === 'en' || language.startsWith('en-')) return 'en';
+  return language;
 }
 
 function findHeaderRow(aoa) {
@@ -270,6 +285,11 @@ async function readWorkbook(file) {
     return XLSX.readFile(file, { cellDates: true });
   } catch (e) {
     console.warn(`  [xlsx] 读失败 ${basename(file)}: ${e.message}`);
+    buildIssues.push({
+      source: relative(ROOT, file).replace(/\\/g, '/'),
+      sheet: '',
+      reason: `Workbook could not be read: ${e.message}`,
+    });
     return null;
   }
 }
@@ -292,7 +312,10 @@ let docCount = 0;
 let skippedDupeCount = 0;
 const faqRecords = [];
 const buildIssues = [];
-const unsupportedLanguageReports = new Set();
+const skippedLanguageRows = new Map();
+const skippedLanguageSheets = new Map();
+const skippedNonQaSheets = [];
+const sheetStats = new Map();
 
 // ------------------------- main dedupe + dispatch -------------------------
 
@@ -302,7 +325,7 @@ async function main() {
     if (name.startsWith('~$')) return false; // Office temp lock files → delete later
     const ext = extname(name).toLowerCase();
     return ['.xlsx', '.xls', '.docx', '.pdf'].includes(ext);
-  });
+  }).sort((a, b) => a.localeCompare(b));
   console.log(`[discover] FAQ 源文件候选：${allFiles.length} 个`);
 
   // Dedupe records, not workbooks: one workbook may contain unique language
@@ -361,6 +384,20 @@ async function main() {
     throw new Error('No valid FAQ records were parsed; leaving the existing FAQ library untouched.');
   }
   skippedDupeCount = faqRecords.length - winners.length;
+  const baseIds = winners.map((record) =>
+    digest16(`${record.category}::${record.modelSlug}::${record.lang}::${record.question}`)
+  );
+  const baseIdCounts = new Map();
+  for (const id of baseIds) baseIdCounts.set(id, (baseIdCounts.get(id) ?? 0) + 1);
+  const finalIds = new Set();
+  winners.forEach((record, index) => {
+    const baseId = baseIds[index];
+    record.id = baseIdCounts.get(baseId) === 1
+      ? baseId
+      : digest16(`${record.category}::${record.modelSlug}::${record.model}::${record.lang}::${record.question}`);
+    if (finalIds.has(record.id)) throw new Error(`FAQ id collision after disambiguation: ${record.id}`);
+    finalIds.add(record.id);
+  });
   for (const record of winners) writeFaqRecord(record);
 
   if (!DRY) {
@@ -382,6 +419,10 @@ async function main() {
       faqRecordsWritten: winners.length,
       duplicatesSkipped: skippedDupeCount,
       documentsWritten: docCount,
+      skippedLanguageRows: Object.fromEntries([...skippedLanguageRows].sort(([a], [b]) => a.localeCompare(b))),
+      skippedLanguageSheets: Object.fromEntries([...skippedLanguageSheets].sort(([a], [b]) => a.localeCompare(b))),
+      skippedNonQaSheets,
+      sheets: [...sheetStats].map(([sourceSheet, stats]) => ({ sourceSheet, ...stats })),
       issues: buildIssues,
     }, null, 2) + '\n');
   }
@@ -391,6 +432,9 @@ async function main() {
   console.log(`  duplicate rows:      ${skippedDupeCount}`);
   console.log(`  FAQ entries written: ${qaCount}`);
   console.log(`  imported documents:  ${docCount}`);
+  console.log(`  non-EN/ZH rows skipped: ${[...skippedLanguageRows.values()].reduce((sum, count) => sum + count, 0)}`);
+  console.log(`  non-EN/ZH sheets skipped: ${[...skippedLanguageSheets.values()].reduce((sum, count) => sum + count, 0)}`);
+  console.log(`  non-Q&A sheets skipped: ${skippedNonQaSheets.length}`);
   console.log(`  build issues:        ${buildIssues.length}`);
   console.log(`  total files written: ${writtenCount}`);
   console.log(`  review report:       ${relative(ROOT, REPORT_FILE)}`);
@@ -408,6 +452,11 @@ async function processSheet(meta) {
   if (!wb) return;
 
   for (const sheetName of wb.SheetNames) {
+    const sheetLanguage = normalizeSupportedLanguage(inferLanguage(sheetName));
+    if (sheetLanguage && !SUPPORTED_LANGUAGES.has(sheetLanguage)) {
+      skippedLanguageSheets.set(sheetLanguage, (skippedLanguageSheets.get(sheetLanguage) ?? 0) + 1);
+      continue;
+    }
     const ws = wb.Sheets[sheetName];
     if (!ws) continue;
     const aoa = sheetToAoa(ws);
@@ -415,7 +464,11 @@ async function processSheet(meta) {
 
     const header = findHeaderRow(aoa);
     if (!header) {
-      buildIssues.push({ source: relative(ROOT, meta.path), sheet: sheetName, reason: 'No explicit question-and-answer headers found; sheet skipped.' });
+      skippedNonQaSheets.push({
+        source: relative(ROOT, meta.path).replace(/\\/g, '/'),
+        sheet: sheetName,
+        reason: 'No explicit question-and-answer headers found.',
+      });
       continue;
     }
     const headerRowIdx = header.rowIndex;
@@ -425,7 +478,11 @@ async function processSheet(meta) {
 
     const { pairs, roles, unmatchedQuestions, unmatchedAnswers } = getQaColumnPairs(headers);
     if (pairs.length === 0) {
-      buildIssues.push({ source: relative(ROOT, meta.path), sheet: sheetName, reason: 'Headers were ambiguous; no question/answer column pair selected.' });
+      skippedNonQaSheets.push({
+        source: relative(ROOT, meta.path).replace(/\\/g, '/'),
+        sheet: sheetName,
+        reason: 'No unambiguous question/answer column pair was found.',
+      });
       continue;
     }
     if (unmatchedQuestions.length || unmatchedAnswers.length) {
@@ -435,20 +492,23 @@ async function processSheet(meta) {
         reason: `Unpaired language columns were skipped (${unmatchedQuestions.length} question, ${unmatchedAnswers.length} answer).`,
       });
     }
-    collectQaRows(headers, rows, roles, pairs, meta, sheetName);
+    const sourceSheet = `${relative(ROOT, meta.path).replace(/\\/g, '/')}:${sheetName}`;
+    sheetStats.set(sourceSheet, { rows: rows.length, qaPairs: pairs.length, records: 0 });
+    collectQaRows(headers, rows, roles, pairs, meta, sheetName, sourceSheet);
   }
 }
 
-function collectQaRows(headers, rows, roles, pairs, meta, sheetName) {
+function collectQaRows(headers, rows, roles, pairs, meta, sheetName, sourceSheet) {
   const modelIdx = roles.findIndex((r) => r.role === 'model');
-    const languageIdx = headers.findIndex((header) => /^language\b/i.test(normalizeHeader(header)));
+  const languageIdx = headers.findIndex((header) => /^language\b/i.test(normalizeHeader(header)));
   const visitTypeIdx = headers.findIndex((header) => /^visit type$/i.test(normalizeHeader(header)));
   const idIdx = headers.findIndex((header) => /^(?:answer id|id|编号)$/i.test(normalizeHeader(header)));
+  const stats = sheetStats.get(sourceSheet);
 
   for (const row of rows) {
     if (visitTypeIdx >= 0 && /^redirect$/i.test(String(row[visitTypeIdx] ?? '').trim())) continue;
     const modelCell = modelIdx >= 0 ? String(row[modelIdx] ?? '').trim() : '';
-    const models = splitModelNames(modelCell || inferModelFromFilename(meta.name));
+    const models = splitModelNames(modelCell || inferModelFromFilename(meta.name, meta.category, meta.path));
     for (const pair of pairs) {
       const question = String(row[pair.questionIdx] ?? '').trim();
       const answer = String(row[pair.answerIdx] ?? '').trim();
@@ -463,18 +523,14 @@ function collectQaRows(headers, rows, roles, pairs, meta, sheetName) {
         continue;
       }
       const rowLanguage = languageIdx >= 0 ? String(row[languageIdx] ?? '') : '';
-      const detectedLanguage = pair.lang || inferLanguage(rowLanguage, sheetName, meta.name, question);
+      const inferredLanguage = inferLanguage(rowLanguage, sheetName, meta.name, question);
+      const fileLanguage = normalizeSupportedLanguage(meta.lang);
+      const detectedLanguage = pair.lang || inferredLanguage
+        || (SUPPORTED_LANGUAGES.has(fileLanguage) ? fileLanguage : '');
       const lang = normalizeSupportedLanguage(detectedLanguage);
       if (!SUPPORTED_LANGUAGES.has(lang)) {
-        const reportKey = `${meta.path}::${sheetName}::${lang || 'unknown'}`;
-        if (!unsupportedLanguageReports.has(reportKey)) {
-          unsupportedLanguageReports.add(reportKey);
-          buildIssues.push({
-            source: relative(ROOT, meta.path),
-            sheet: sheetName,
-            reason: `Unsupported or unknown language "${lang || 'unknown'}" skipped; only EN, ZH, and FR are included.`,
-          });
-        }
+        const skippedLanguage = lang || 'unknown';
+        skippedLanguageRows.set(skippedLanguage, (skippedLanguageRows.get(skippedLanguage) ?? 0) + 1);
         continue;
       }
       for (const model of models) {
@@ -493,6 +549,7 @@ function collectQaRows(headers, rows, roles, pairs, meta, sheetName) {
           fileSize: meta.size,
           mtime: meta.mtime,
         });
+        if (stats) stats.records += 1;
       }
     }
   }
@@ -505,14 +562,28 @@ function splitModelNames(value) {
     .filter(Boolean))];
 }
 
-function inferModelFromFilename(filename) {
-  return basename(filename, extname(filename))
-    .replace(/^\s*[【\[(]|[】\])]\s*$/g, '')
-    .replace(/(?:FAQ|multi[- ]language|中英文|中英|中文版|英文版|overseas|海外|basic data|纯文字版|用户侧|user side|终版|多语言).*/ig, '')
-    .replace(/\b(?:v(?:ersion)?\s*)?\d+(?:[._]\d+){0,2}\b/ig, '')
+function inferModelFromFilename(filename, category, sourcePath) {
+  let label = basename(filename, extname(filename))
+    .replace(/【[^】]*】|\[[^\]]*\]/g, ' ')
+    .replace(/（[^）]*）|\([^)]*\)/g, ' ')
+    .replace(/\b(?:FAQ|multi[- ]language|中英文|中英|中文版|英文版|overseas|海外|basic data|纯文字版|用户侧|user side|终版|多语言|\d+\s*(?:languages?|langs?))\b/ig, ' ')
+    .replace(/\b(?:v(?:ersion)?\s*)?\d+(?:[._]\d+){0,2}\b/ig, ' ')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim() || 'General';
+    .trim();
+  if (/^(?:faq|general|item)$/i.test(label)) label = '';
+
+  if (!label) {
+    const parent = basename(dirname(sourcePath)).replace(/\b20\d{2}\b/g, '').replace(/\s+/g, ' ').trim();
+    const categoryName = category.toLowerCase();
+    if (parent && !['faq', categoryName].includes(parent.toLowerCase())) {
+      label = /^winbot\b/i.test(parent) || parent.toLowerCase().startsWith(categoryName)
+        ? parent
+        : `${category} ${parent}`;
+    }
+  }
+
+  return label || 'General';
 }
 
 function normalizeContent(value) {
@@ -554,9 +625,14 @@ function dedupeFaqRecords(records) {
 }
 
 function writeFaqRecord(record) {
-  const id = digest16(`${record.category}::${record.modelSlug}::${record.lang}::${record.question}`);
+  const id = record.id;
   const filename = `faq_${slugify(record.category)}_${record.modelSlug}_${record.lang}_${id}.md`;
   const safe = (value) => JSON.stringify(String(value ?? ''));
+  const displayTitle = [
+    record.category,
+    record.model || 'General',
+    record.lang.toUpperCase(),
+  ].join(' / ') + ` - ${normalizeContent(record.question).replace(/\s+/g, ' ')}`;
   const body = `---
 category: ${safe(record.category)}
 model: ${safe(record.model)}
@@ -569,7 +645,7 @@ kind: faq
 version: ${record.version}
 ---
 
-# ${record.question.replace(/\s+/g, ' ')}
+# ${displayTitle}
 
 ## Question
 
@@ -616,7 +692,13 @@ kind: faq-doc
 async function processPdf(meta) {
   try {
     const buf = readFileSync(meta.path);
-    const data = await pdfParse(buf);
+    const parser = new PDFParse({ data: buf });
+    let data;
+    try {
+      data = await parser.getText();
+    } finally {
+      await parser.destroy();
+    }
     const text = (data.text || '').trim();
     if (!text) return;
     // Split PDF text into rough sections at empty lines; use ## headings for paragraph breaks

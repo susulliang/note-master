@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 地宝出现漏扫情况，如何处理？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 地宝出现漏扫情况，如何处理？
 
 ## Question
 

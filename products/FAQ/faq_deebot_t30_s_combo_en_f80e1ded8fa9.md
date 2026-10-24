@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to use fixed-point cleaning?
+# DEEBOT / T30 S Combo / EN - How to use fixed-point cleaning?
 
 ## Question
 

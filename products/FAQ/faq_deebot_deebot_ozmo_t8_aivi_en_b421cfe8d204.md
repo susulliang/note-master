@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why can't DEEBOT recharge?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why can't DEEBOT recharge?
 
 ## Question
 

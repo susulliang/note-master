@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to handle it when the robot prompts "Dust Bag Installation Error"?
+# DEEBOT / X11S Pro / EN - How to handle it when the robot prompts "Dust Bag Installation Error"?
 
 ## Question
 

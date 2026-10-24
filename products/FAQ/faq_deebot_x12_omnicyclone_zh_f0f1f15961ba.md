@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理污水箱及清水箱？
+# DEEBOT / X12 OmniCyclone / ZH - 如何清理污水箱及清水箱？
 
 ## Question
 

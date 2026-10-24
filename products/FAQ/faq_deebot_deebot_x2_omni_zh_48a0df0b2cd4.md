@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOMEアプリを使用してDEEBOT X2を接続する
+# DEEBOT / DEEBOT X2 OMNI / ZH - ECOVACS HOMEアプリを使用してDEEBOT X2を接続する
 
 ## Question
 

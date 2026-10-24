@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Agent Mode Cleaning & Parameter Setup Guide
+# DEEBOT / X9S PRO OMNI / ZH - Agent Mode Cleaning & Parameter Setup Guide
 
 ## Question
 

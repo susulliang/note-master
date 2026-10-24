@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I quickly create a map?
+# DEEBOT / DEEBOT T30 OMNI Black / EN - How do I quickly create a map?
 
 ## Question
 

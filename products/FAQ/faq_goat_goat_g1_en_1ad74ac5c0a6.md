@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Who is the local operator of the auto-connection module? How much data is there? What is the speed?
+# GOAT / GOAT G1 / EN - Who is the local operator of the auto-connection module? How much data is there? What is the speed?
 
 ## Question
 

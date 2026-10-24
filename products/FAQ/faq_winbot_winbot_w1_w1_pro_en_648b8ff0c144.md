@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT does not spray water.
+# WINBOT / WINBOT W1/W1 Pro / EN - WINBOT does not spray water.
 
 ## Question
 

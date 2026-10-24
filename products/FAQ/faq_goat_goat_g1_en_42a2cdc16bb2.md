@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the signal coverage of the Navigation Beacon?
+# GOAT / GOAT G1 / EN - What is the signal coverage of the Navigation Beacon?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can I change the position of an Navigation Beacon after it is installed?
+# GOAT / GOAT G1 / ZH - Can I change the position of an Navigation Beacon after it is installed?
 
 ## Question
 

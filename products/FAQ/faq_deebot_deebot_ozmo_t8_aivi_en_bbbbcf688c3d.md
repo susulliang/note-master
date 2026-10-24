@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will DEEBOT go over the carpet while mopping?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Will DEEBOT go over the carpet while mopping?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I check the driving wheels if they are stuck?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I check the driving wheels if they are stuck?
 
 ## Question
 

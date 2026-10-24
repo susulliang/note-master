@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What size of SIM card is needed?
+# GOAT / GOAT G1 / EN - What size of SIM card is needed?
 
 ## Question
 

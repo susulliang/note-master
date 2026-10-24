@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to download the ECOVACS HOME App?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How to download the ECOVACS HOME App?
 
 ## Question
 

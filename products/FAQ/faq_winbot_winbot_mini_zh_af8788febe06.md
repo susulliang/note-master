@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 抹布是否一定要拧？湿度如何才合适？
+# WINBOT / WINBOT MINI / ZH - 抹布是否一定要拧？湿度如何才合适？
 
 ## Question
 

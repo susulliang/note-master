@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Use the Mopping Function？
+# DEEBOT / X11S Pro / EN - How to Use the Mopping Function？
 
 ## Question
 

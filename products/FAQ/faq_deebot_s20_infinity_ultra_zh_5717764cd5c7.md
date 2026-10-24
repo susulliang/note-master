@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安装和拆卸基站爬坡板？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何安装和拆卸基站爬坡板？
 
 ## Question
 

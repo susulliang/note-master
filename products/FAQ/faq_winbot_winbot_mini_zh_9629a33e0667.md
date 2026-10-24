@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何给窗宝充电？
+# WINBOT / WINBOT MINI / ZH - 如何给窗宝充电？
 
 ## Question
 

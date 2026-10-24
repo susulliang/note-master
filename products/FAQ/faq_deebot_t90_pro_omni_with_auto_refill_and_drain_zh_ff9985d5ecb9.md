@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Mopping Task Guide
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Mopping Task Guide
 
 ## Question
 

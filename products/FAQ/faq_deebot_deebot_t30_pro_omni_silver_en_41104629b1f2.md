@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the mopping pad plate cannot expand normally when mopping the floor?
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - What should I do if the mopping pad plate cannot expand normally when mopping the floor?
 
 ## Question
 

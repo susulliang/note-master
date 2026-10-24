@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# モップパッドの乾燥時間の設定
+# DEEBOT / DEEBOT X2 OMNI / ZH - モップパッドの乾燥時間の設定
 
 ## Question
 

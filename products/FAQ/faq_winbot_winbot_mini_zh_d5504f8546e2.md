@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# APP如何与窗宝连接？
+# WINBOT / WINBOT MINI / ZH - APP如何与窗宝连接？
 
 ## Question
 

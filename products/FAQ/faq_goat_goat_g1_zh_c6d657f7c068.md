@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT work properly if any Navigation Beacon is missing or broken during daily use?
+# GOAT / GOAT G1 / ZH - Can the GOAT work properly if any Navigation Beacon is missing or broken during daily use?
 
 ## Question
 

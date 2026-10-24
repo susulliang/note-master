@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理清洁槽？
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 如何清理清洁槽？
 
 ## Question
 

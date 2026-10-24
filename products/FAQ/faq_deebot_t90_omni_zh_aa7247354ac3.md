@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 拆卸&安装滚筒拖布指导
+# DEEBOT / T90 OMNI / ZH - 拆卸&安装滚筒拖布指导
 
 ## Question
 

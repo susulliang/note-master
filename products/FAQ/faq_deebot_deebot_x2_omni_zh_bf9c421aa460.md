@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOME App 顯示機器人已離線。
+# DEEBOT / DEEBOT X2 OMNI / ZH - ECOVACS HOME App 顯示機器人已離線。
 
 ## Question
 

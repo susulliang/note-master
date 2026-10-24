@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How many restricted areas can I create?
+# GOAT / GOAT G1 / ZH - How many restricted areas can I create?
 
 ## Question
 

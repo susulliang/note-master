@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the outline position displayed on the App inconsistent with the actual one?
+# GOAT / GOAT G1 / EN - Why is the outline position displayed on the App inconsistent with the actual one?
 
 ## Question
 

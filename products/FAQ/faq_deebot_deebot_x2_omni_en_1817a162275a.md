@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO voice assistant doesn't work or there is a response delay after waking up "OK YIKO".
+# DEEBOT / DEEBOT X2 OMNI / EN - YIKO voice assistant doesn't work or there is a response delay after waking up "OK YIKO".
 
 ## Question
 

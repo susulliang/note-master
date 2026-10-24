@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT moving in a chaotic route when mowing?
+# GOAT / GX / ZH - Why is the GOAT moving in a chaotic route when mowing?
 
 ## Question
 

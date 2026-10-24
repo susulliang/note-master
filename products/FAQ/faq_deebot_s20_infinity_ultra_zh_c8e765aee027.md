@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人无法越过门槛/台阶，如何处理？
+# DEEBOT / S20 Infinity Ultra / ZH - 机器人无法越过门槛/台阶，如何处理？
 
 ## Question
 

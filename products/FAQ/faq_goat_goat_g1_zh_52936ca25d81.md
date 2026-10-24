@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the working time of the GOAT shorten after it has fully charged?
+# GOAT / GOAT G1 / ZH - Why does the working time of the GOAT shorten after it has fully charged?
 
 ## Question
 

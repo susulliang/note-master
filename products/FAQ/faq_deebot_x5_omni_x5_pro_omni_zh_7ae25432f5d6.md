@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 清洗抹布期间抽水时有奇怪声音？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 清洗抹布期间抽水时有奇怪声音？
 
 ## Question
 

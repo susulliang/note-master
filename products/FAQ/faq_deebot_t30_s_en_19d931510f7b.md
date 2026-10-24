@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The foot touch function cannot be used; how to deal with it?
+# DEEBOT / T30 S / EN - The foot touch function cannot be used; how to deal with it?
 
 ## Question
 

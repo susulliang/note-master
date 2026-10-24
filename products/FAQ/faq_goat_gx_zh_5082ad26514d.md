@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I moved the GOAT far away, why didn't it trigger the ”GOAT alarms when it goes beyond the station's signal coverage“?
+# GOAT / GX / ZH - I moved the GOAT far away, why didn't it trigger the ”GOAT alarms when it goes beyond the station's signal coverage“?
 
 ## Question
 

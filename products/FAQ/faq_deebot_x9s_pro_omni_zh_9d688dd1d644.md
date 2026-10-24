@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人连接网络指导
+# DEEBOT / X9S PRO OMNI / ZH - 机器人连接网络指导
 
 ## Question
 

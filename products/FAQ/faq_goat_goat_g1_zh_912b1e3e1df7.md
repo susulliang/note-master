@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# There is currently no rain outside. Why is the rain protection mode still on?
+# GOAT / GOAT G1 / ZH - There is currently no rain outside. Why is the rain protection mode still on?
 
 ## Question
 

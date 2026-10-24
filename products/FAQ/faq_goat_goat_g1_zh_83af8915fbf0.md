@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Will the automatic mapping be affected if the Bluetooth is disconnected or the APP is exited during the automatic mapping process?
+# GOAT / GOAT G1 / ZH - Will the automatic mapping be affected if the Bluetooth is disconnected or the APP is exited during the automatic mapping process?
 
 ## Question
 

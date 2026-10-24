@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot does not perform continuous cleaning?
+# DEEBOT / DEEBOT T30 PRO OMNI Black / EN - What should I do if the robot does not perform continuous cleaning?
 
 ## Question
 

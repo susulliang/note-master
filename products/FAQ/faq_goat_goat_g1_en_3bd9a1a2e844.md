@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do the AI camera and panoramic camera violate the user's privacy?
+# GOAT / GOAT G1 / EN - Do the AI camera and panoramic camera violate the user's privacy?
 
 ## Question
 

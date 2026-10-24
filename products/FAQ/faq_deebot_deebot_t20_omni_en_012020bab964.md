@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I update the robot’s cleaning modes?
+# DEEBOT / DEEBOT T20 OMNI / EN - How do I update the robot’s cleaning modes?
 
 ## Question
 

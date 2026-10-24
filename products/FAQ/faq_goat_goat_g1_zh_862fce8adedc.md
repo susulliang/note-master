@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How long can GOAT's battery last in standby mode?
+# GOAT / GOAT G1 / ZH - How long can GOAT's battery last in standby mode?
 
 ## Question
 

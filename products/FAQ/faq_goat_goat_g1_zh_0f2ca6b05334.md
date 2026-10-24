@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the Navigation Beacon be installed and used directly after it is powered on and its assembly is complete?
+# GOAT / GOAT G1 / ZH - Can the Navigation Beacon be installed and used directly after it is powered on and its assembly is complete?
 
 ## Question
 

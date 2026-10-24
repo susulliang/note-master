@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何快速建立地图？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 如何快速建立地图？
 
 ## Question
 

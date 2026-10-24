@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何安装和拆卸基站斜坡底座？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 如何安装和拆卸基站斜坡底座？
 
 ## Question
 

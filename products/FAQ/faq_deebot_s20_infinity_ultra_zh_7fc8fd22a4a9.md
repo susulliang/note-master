@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何清理主机接水槽？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何清理主机接水槽？
 
 ## Question
 

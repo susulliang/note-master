@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot finds the station but cannot enter?
+# DEEBOT / DEEBOT T20 OMNI / EN - What should I do if the robot finds the station but cannot enter?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# スケジュール清掃を設定する方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - スケジュール清掃を設定する方法を教えてください。
 
 ## Question
 

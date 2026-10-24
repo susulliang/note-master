@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# About the use of wifi or wifi amplifiers?
+# GOAT / GX / ZH - About the use of wifi or wifi amplifiers?
 
 ## Question
 

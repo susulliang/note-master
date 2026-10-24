@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何使用智能体模式？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何使用智能体模式？
 
 ## Question
 

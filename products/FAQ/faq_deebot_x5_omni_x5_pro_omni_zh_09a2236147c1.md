@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ECOVACS HOME APP和地宝连接后离线如何处理?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - ECOVACS HOME APP和地宝连接后离线如何处理?
 
 ## Question
 

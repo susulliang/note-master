@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the GOAT G1 recognize humans or small animals at night when AI recognition is enabled?
+# GOAT / GOAT G1 / EN - Can the GOAT G1 recognize humans or small animals at night when AI recognition is enabled?
 
 ## Question
 

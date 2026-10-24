@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：污水盒异常
+# DEEBOT / X11S Omnicyclone / ZH - 报警：污水盒异常
 
 ## Question
 

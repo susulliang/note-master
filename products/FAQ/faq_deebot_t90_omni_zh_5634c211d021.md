@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Alarm: dirty water tank Abnormal
+# DEEBOT / T90 OMNI / ZH - Alarm: dirty water tank Abnormal
 
 ## Question
 

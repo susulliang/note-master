@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why map learning is needed after controlling the GOAT to finish mapping?
+# GOAT / GOAT G1 / EN - Why map learning is needed after controlling the GOAT to finish mapping?
 
 ## Question
 

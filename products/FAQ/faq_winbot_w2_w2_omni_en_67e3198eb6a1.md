@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT W2 is a little noisy when working, is it possible to adjust the suction power?
+# WINBOT / W2/W2 OMNI / EN - WINBOT W2 is a little noisy when working, is it possible to adjust the suction power?
 
 ## Question
 

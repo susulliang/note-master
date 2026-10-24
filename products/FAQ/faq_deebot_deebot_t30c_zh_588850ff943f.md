@@ -1,0 +1,27 @@
+---
+category: "DEEBOT"
+model: "DEEBOT T30C"
+model_slug: "deebot_t30c"
+lang: "zh"
+source: "FAQ/DEEBOT/【FAQ2.0】DEEBOT T30C.xlsx"
+source_sheet: "CN"
+source_row_id: ""
+kind: faq
+version: 1
+---
+
+# DEEBOT / DEEBOT T30C / ZH - 机器人装箱指导视频
+
+## Question
+
+机器人装箱指导视频
+
+## Answer
+
+温馨提示：
+在装箱之前，请确保完成以下步骤：排空清污水箱中的水、清洁液盒中的清洁液，排出主机内置小水箱的水，并将潮湿的拖布取下晾干（上下水版本需排出空基站水箱中的水）
+1.长按AUTO键将主机关机。
+2.取下基站清污水箱并清空其内的水，重新安装回原位。
+3.拔下基站电源线，取下基站斜坡底座。
+4.先将基站平稳地放入包装箱内。在基站上方放入下纸塑保护层。
+5.轻轻放置主机于下纸塑之上，再放入上纸塑保护层，以保护主机不受损伤。依次将拆下的边刷、清洁液、电源线、基站斜坡底座等配件放回包装箱内。

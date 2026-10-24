@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何添加清洁消毒液/重污清洁液？
+# DEEBOT / X12 PRO OMNI / ZH - 如何添加清洁消毒液/重污清洁液？
 
 ## Question
 

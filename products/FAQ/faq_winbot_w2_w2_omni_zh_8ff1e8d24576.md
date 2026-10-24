@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# WINBOT喷水口不喷水如何处理？
+# WINBOT / W2/W2 OMNI / ZH - WINBOT喷水口不喷水如何处理？
 
 ## Question
 

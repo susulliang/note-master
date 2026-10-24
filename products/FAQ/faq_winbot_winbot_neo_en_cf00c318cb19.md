@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Does the mopping pad have to be wrung? What is an acceptable level of moisture?
+# WINBOT / WINBOT NEO / EN - Does the mopping pad have to be wrung? What is an acceptable level of moisture?
 
 ## Question
 

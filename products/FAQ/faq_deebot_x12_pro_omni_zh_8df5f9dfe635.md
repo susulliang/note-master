@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人语音提示“接水槽未安装”如何处理？
+# DEEBOT / X12 PRO OMNI / ZH - 机器人语音提示“接水槽未安装”如何处理？
 
 ## Question
 

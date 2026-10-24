@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站如何充电？
+# WINBOT / W2 OMNI / ZH - 基站如何充电？
 
 ## Question
 

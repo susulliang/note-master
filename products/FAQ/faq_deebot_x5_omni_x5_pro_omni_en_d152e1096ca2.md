@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the Home Furnishing function?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / EN - How do I use the Home Furnishing function?
 
 ## Question
 

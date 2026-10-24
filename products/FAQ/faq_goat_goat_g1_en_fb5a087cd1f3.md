@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can my auto-connection module support OTA upgrades?
+# GOAT / GOAT G1 / EN - Can my auto-connection module support OTA upgrades?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何更新機器人的清掃模式？
+# DEEBOT / DEEBOT T20e OMNI / ZH - 如何更新機器人的清掃模式？
 
 ## Question
 

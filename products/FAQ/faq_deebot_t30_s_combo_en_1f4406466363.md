@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to connect a robot to the internet?
+# DEEBOT / T30 S Combo / EN - How to connect a robot to the internet?
 
 ## Question
 

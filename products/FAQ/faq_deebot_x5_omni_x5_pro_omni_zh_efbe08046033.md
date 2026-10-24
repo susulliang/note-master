@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How can I use the self-cleaning function to clean the cleaning sink of the station that are dirty?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - How can I use the self-cleaning function to clean the cleaning sink of the station that are dirty?
 
 ## Question
 

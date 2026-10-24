@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Auto-emptying failed, or dust bag not detcted or is full.
+# DEEBOT / DEEBOT X2 OMNI / EN - Auto-emptying failed, or dust bag not detcted or is full.
 
 ## Question
 

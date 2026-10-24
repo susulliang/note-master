@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with a robot that cannot be charged?
+# DEEBOT / T30 S / EN - How to deal with a robot that cannot be charged?
 
 ## Question
 

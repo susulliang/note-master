@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with the situation where the robot missed scanning?
+# DEEBOT / T30 S Combo / EN - How to deal with the situation where the robot missed scanning?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot cannot cross thresholds/steps. How to handle?
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - Robot cannot cross thresholds/steps. How to handle?
 
 ## Question
 

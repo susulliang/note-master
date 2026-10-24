@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The GOAT returns to the charging dock before it has finished learning.
+# GOAT / GOAT G1 / EN - The GOAT returns to the charging dock before it has finished learning.
 
 ## Question
 

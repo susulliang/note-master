@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why does the AIVI function sometimes fail to recognize objects?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why does the AIVI function sometimes fail to recognize objects?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if the robot automatically starts cleaning but scheduled cleaning has not be set?
+# DEEBOT / DEEBOT T20 OMNI / EN - What should I do if the robot automatically starts cleaning but scheduled cleaning has not be set?
 
 ## Question
 

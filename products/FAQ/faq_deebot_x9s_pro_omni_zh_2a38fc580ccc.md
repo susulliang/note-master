@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Robot Packaging Guide
+# DEEBOT / X9S PRO OMNI / ZH - Robot Packaging Guide
 
 ## Question
 

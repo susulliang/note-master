@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to install and remove the station ramp base?
+# DEEBOT / T30 S Combo / EN - How to install and remove the station ramp base?
 
 ## Question
 

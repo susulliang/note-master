@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The machine didn't start the scheduled cleaning task，why？
+# DEEBOT / DEEBOT T30 OMNI Silver / EN - The machine didn't start the scheduled cleaning task，why？
 
 ## Question
 

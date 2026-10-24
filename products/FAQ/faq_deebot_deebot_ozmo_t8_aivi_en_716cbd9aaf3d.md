@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can DEEBOT clean up water from the kitchen or bathroom floor?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Can DEEBOT clean up water from the kitchen or bathroom floor?
 
 ## Question
 

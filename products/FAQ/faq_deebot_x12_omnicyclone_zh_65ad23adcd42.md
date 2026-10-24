@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# “污水盒异常”如何处理？
+# DEEBOT / X12 OmniCyclone / ZH - “污水盒异常”如何处理？
 
 ## Question
 

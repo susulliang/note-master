@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器报障“运行困难，请检查驱动轮”时应该如何处理?
+# DEEBOT / X12 OmniCyclone / ZH - 机器报障“运行困难，请检查驱动轮”时应该如何处理?
 
 ## Question
 

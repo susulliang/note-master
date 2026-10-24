@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After cleaning, why is there a trace of wiping pad left on the surface where the WINBOT W2 was adsorbed?
+# WINBOT / W2/W2 OMNI / EN - After cleaning, why is there a trace of wiping pad left on the surface where the WINBOT W2 was adsorbed?
 
 ## Question
 

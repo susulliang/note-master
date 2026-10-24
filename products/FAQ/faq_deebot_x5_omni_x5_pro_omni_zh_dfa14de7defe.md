@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 为什么清洁时，地宝有时候拖布抬升有时候不抬升？
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - 为什么清洁时，地宝有时候拖布抬升有时候不抬升？
 
 ## Question
 

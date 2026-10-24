@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ダストボックスの取り外し/クリーニング方法を教えてください。
+# DEEBOT / DEEBOT T20e OMNI / ZH - ダストボックスの取り外し/クリーニング方法を教えてください。
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：接水槽未安装
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - 报警：接水槽未安装
 
 ## Question
 

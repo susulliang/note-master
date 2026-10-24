@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人充电及谷电充电说明
+# DEEBOT / X9S PRO OMNI / ZH - 机器人充电及谷电充电说明
 
 ## Question
 

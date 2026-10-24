@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How long does it take to charge the safety battery?
+# WINBOT / W2 / EN - How long does it take to charge the safety battery?
 
 ## Question
 

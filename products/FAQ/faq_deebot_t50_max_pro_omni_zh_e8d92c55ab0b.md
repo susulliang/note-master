@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 机器人不执行智能断点续扫如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 机器人不执行智能断点续扫如何处理？
 
 ## Question
 

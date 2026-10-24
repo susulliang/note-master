@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the default startup mode of WINBOT? How many back and forth cleaning sessions will be performed? How long will it take?
+# WINBOT / WINBOT NEO / EN - What is the default startup mode of WINBOT? How many back and forth cleaning sessions will be performed? How long will it take?
 
 ## Question
 

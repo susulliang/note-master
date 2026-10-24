@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the GOAT charging so slowly?
+# GOAT / GOAT G1 / ZH - Why is the GOAT charging so slowly?
 
 ## Question
 

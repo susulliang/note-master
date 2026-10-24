@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Roller Mop Removal & Installation Guide
+# DEEBOT / T90 OMNI / ZH - Roller Mop Removal & Installation Guide
 
 ## Question
 

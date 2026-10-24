@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Dust collection failed, no dust bag detected or the dust bag is full, how to deal with it?
+# DEEBOT / T30 S / EN - Dust collection failed, no dust bag detected or the dust bag is full, how to deal with it?
 
 ## Question
 

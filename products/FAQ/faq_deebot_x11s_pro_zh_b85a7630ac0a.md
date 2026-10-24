@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确给机器人充电？
+# DEEBOT / X11S Pro / ZH - 如何正确给机器人充电？
 
 ## Question
 

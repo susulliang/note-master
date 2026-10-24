@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I restore the GOAT to default settings?
+# GOAT / GX / ZH - How do I restore the GOAT to default settings?
 
 ## Question
 

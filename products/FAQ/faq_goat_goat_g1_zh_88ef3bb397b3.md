@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the mowing process in the schedule automatically cleared?
+# GOAT / GOAT G1 / ZH - Why is the mowing process in the schedule automatically cleared?
 
 ## Question
 

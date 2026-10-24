@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Removal, Cleaning, and Reinstallation Side Brush？
+# DEEBOT / X12 OmniCyclone / EN - How to Removal, Cleaning, and Reinstallation Side Brush？
 
 ## Question
 

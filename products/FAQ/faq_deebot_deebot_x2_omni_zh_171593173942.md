@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# マップ管理機能を使用する方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - マップ管理機能を使用する方法を教えてください。
 
 ## Question
 

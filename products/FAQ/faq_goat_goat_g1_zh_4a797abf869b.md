@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# When using the schedule task function, what should I do if the grass has not been completely mowed by the end time, or the grass has been completely mowed before the end time is up?
+# GOAT / GOAT G1 / ZH - When using the schedule task function, what should I do if the grass has not been completely mowed by the end time, or the grass has been completely mowed before the end time is up?
 
 ## Question
 

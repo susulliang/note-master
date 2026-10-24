@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I remove/clean the Dust Bin?
+# DEEBOT / DEEBOT T30 PRO OMNI Black / EN - How do I remove/clean the Dust Bin?
 
 ## Question
 

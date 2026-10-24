@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# After double-clicking the station button, the handheld vacuum cleaner cannot perform automatic dust collection. How to deal with it?
+# DEEBOT / T30 S Combo / EN - After double-clicking the station button, the handheld vacuum cleaner cannot perform automatic dust collection. How to deal with it?
 
 ## Question
 

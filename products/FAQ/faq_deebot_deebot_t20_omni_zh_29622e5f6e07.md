@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# YIKO音声アシスタントが機能しない、または「OK YIKO」のウェイクアップの反応が遅れる。
+# DEEBOT / DEEBOT T20 OMNI / ZH - YIKO音声アシスタントが機能しない、または「OK YIKO」のウェイクアップの反応が遅れる。
 
 ## Question
 

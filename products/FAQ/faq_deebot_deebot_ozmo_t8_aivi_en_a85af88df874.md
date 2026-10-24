@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Nothing happens when I press the reset button. What should I do?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Nothing happens when I press the reset button. What should I do?
 
 ## Question
 

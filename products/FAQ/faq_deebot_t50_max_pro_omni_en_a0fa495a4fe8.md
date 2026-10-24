@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to set virtual boundaries?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to set virtual boundaries?
 
 ## Question
 

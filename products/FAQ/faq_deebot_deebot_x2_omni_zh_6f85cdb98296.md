@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットの清掃モードを更新する方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - ロボットの清掃モードを更新する方法を教えてください。
 
 ## Question
 

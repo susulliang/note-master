@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Can the firmware upgrade process be canceled midway?
+# GOAT / GOAT G1 / EN - Can the firmware upgrade process be canceled midway?
 
 ## Question
 

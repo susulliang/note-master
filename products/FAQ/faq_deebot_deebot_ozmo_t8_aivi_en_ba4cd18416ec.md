@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why doesn't the main brush rotate while DEEBOT is cleaning?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - Why doesn't the main brush rotate while DEEBOT is cleaning?
 
 ## Question
 

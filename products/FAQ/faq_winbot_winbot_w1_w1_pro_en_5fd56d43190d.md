@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What is the walking route of WINBOT?
+# WINBOT / WINBOT W1/W1 Pro / EN - What is the walking route of WINBOT?
 
 ## Question
 

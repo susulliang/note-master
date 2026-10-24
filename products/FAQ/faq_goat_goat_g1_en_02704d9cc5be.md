@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Do you have to nail down the docking station?
+# GOAT / GOAT G1 / EN - Do you have to nail down the docking station?
 
 ## Question
 

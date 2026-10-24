@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# If the Bluetooth connection fails or you exit the App while controlling the GOAT, will mapping be affected?
+# GOAT / GOAT G1 / ZH - If the Bluetooth connection fails or you exit the App while controlling the GOAT, will mapping be affected?
 
 ## Question
 

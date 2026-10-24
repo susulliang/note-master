@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The GOAT fails to return and recharge after map learning. Can I just move it back to the docking station?
+# GOAT / GOAT G1 / EN - The GOAT fails to return and recharge after map learning. Can I just move it back to the docking station?
 
 ## Question
 

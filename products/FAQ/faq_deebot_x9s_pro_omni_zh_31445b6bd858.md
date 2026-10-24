@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Poor dust collection performance? How to address it?
+# DEEBOT / X9S PRO OMNI / ZH - Poor dust collection performance? How to address it?
 
 ## Question
 

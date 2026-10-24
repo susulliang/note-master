@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the customized scenario cleaning/cleaning sequence functions?
+# DEEBOT / DEEBOT T20e OMNI / EN - How do I use the customized scenario cleaning/cleaning sequence functions?
 
 ## Question
 

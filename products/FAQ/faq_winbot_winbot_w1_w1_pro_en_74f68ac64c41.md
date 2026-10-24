@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the self-cleaning brush of the drving threads?
+# WINBOT / WINBOT W1/W1 Pro / EN - How to clean the self-cleaning brush of the drving threads?
 
 ## Question
 

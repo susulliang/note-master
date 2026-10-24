@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# ロボットが連続清掃を実行しない場合はどうすればよいですか。
+# DEEBOT / DEEBOT T20e OMNI / ZH - ロボットが連続清掃を実行しない場合はどうすればよいですか。
 
 ## Question
 

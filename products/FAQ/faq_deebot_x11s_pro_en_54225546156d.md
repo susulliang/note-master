@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to Removal, Cleaning, and Reinstallation Dustbin？
+# DEEBOT / X11S Pro / EN - How to Removal, Cleaning, and Reinstallation Dustbin？
 
 ## Question
 

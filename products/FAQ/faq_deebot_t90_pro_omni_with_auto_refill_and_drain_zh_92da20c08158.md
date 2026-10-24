@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to clean the mop washing tray?
+# DEEBOT / T90 PRO OMNI With Auto Refill And Drain / ZH - How to clean the mop washing tray?
 
 ## Question
 

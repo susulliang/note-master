@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何拆/装集尘仓过滤棉？
+# DEEBOT / S20 Infinity Ultra / ZH - 如何拆/装集尘仓过滤棉？
 
 ## Question
 

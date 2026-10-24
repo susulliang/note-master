@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 窗宝报警“驱动轮卡住”，怎么办？
+# WINBOT / WINBOT MINI / ZH - 窗宝报警“驱动轮卡住”，怎么办？
 
 ## Question
 

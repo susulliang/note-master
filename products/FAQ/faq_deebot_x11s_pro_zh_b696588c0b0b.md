@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 报警：运行困难,请检查驱动轮
+# DEEBOT / X11S Pro / ZH - 报警：运行困难,请检查驱动轮
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Mini electric brush disassembly and cleaning?
+# DEEBOT / T30 S Combo / EN - Mini electric brush disassembly and cleaning?
 
 ## Question
 

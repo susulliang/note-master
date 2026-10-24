@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The machine's firmware version upgrade failed, what should I do?
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - The machine's firmware version upgrade failed, what should I do?
 
 ## Question
 

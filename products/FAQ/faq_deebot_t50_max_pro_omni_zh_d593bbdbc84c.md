@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 基站不出热水如何处理？
+# DEEBOT / T50 MAX PRO OMNI / ZH - 基站不出热水如何处理？
 
 ## Question
 

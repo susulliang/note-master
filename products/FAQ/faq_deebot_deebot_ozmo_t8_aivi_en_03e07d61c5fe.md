@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# DEEBOT misses certain areas when it cleans.
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - DEEBOT misses certain areas when it cleans.
 
 ## Question
 

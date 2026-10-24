@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to remove/install the Dust Collection Cabin filter cotton?
+# DEEBOT / T90 PRO OMNI / ZH - How to remove/install the Dust Collection Cabin filter cotton?
 
 ## Question
 

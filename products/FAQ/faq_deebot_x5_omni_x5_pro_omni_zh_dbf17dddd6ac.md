@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I connect DEEBOT to the Internet?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - How do I connect DEEBOT to the Internet?
 
 ## Question
 

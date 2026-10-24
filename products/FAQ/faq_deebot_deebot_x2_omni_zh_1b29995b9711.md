@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 汚水タンクと洗浄水タンクのクリーニング方法を教えてください。
+# DEEBOT / DEEBOT X2 OMNI / ZH - 汚水タンクと洗浄水タンクのクリーニング方法を教えてください。
 
 ## Question
 

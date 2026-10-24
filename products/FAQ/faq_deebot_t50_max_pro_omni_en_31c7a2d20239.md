@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to add more WIFI signals?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to add more WIFI signals?
 
 ## Question
 

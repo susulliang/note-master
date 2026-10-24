@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Disassembly, cleaning and installation guide of V-shaped comb teeth
+# DEEBOT / T50 MAX PRO OMNI / EN - Disassembly, cleaning and installation guide of V-shaped comb teeth
 
 ## Question
 

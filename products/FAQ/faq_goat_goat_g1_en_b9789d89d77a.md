@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# I have installed the additional Connection Module. Why can't it be recognized?
+# GOAT / GOAT G1 / EN - I have installed the additional Connection Module. Why can't it be recognized?
 
 ## Question
 

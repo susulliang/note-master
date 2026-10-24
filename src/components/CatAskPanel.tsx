@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Mail, PawPrint, Search, Send, Trash2, X } from 'lucide-react';
+import { Cat, ChevronDown, Mail, Search, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getApiBase, getStoredToken } from '@/lib/auth-client';
 import AskEmailModal, { type AskEmailContext } from '@/components/AskEmailModal';
+import { evidenceFromSourceNames, type SupportEvidence } from '@/lib/support-evidence';
+import type { KittyHelpResult, KittyStage } from '@/hooks/use-kitty-help';
+import KittyHelpPanel from '@/components/KittyHelpPanel';
 import {
   ASK_MODELS,
-  DEFAULT_ASK_MODEL,
-  isAskModel,
   type AskModel,
 } from '@shared/ask-models';
+import { readStoredAskModel, storeAskModel } from '@/lib/ask-model-preferences';
 
-const MODEL_STORAGE_KEY = '__app_shiftc_ask_model';
 const CONVERSATION_STORAGE_PREFIX = '__app_shiftc_ask_conversation_v1:';
+const EMPTY_ANSWER_NOTICE =
+  'The answer model returned no text. The retrieved sources are shown in the Evidence rail; try sending the question again.';
 
 /**
  * Spotlight-style glassy ask panel — opens via long-press on the cat or
@@ -23,6 +26,7 @@ const CONVERSATION_STORAGE_PREFIX = '__app_shiftc_ask_conversation_v1:';
 interface AskResponse {
   answer?: string;
   sources?: string[];
+  evidence?: SupportEvidence[];
   error?: string;
   text?: string;
 }
@@ -30,8 +34,40 @@ interface AskResponse {
 interface AskTurn extends AskEmailContext {
   id: string;
   sources: string[];
+  evidence: SupportEvidence[];
   fromNotes: boolean;
+  resolution?: KittyHelpResult;
+  resolutionRunId?: string;
   error?: string;
+}
+
+function readKittyResult(value: unknown): KittyHelpResult | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const result = value as Partial<KittyHelpResult>;
+  if (
+    typeof result.sayToCustomer !== 'string' ||
+    typeof result.resolutionEn !== 'string' ||
+    typeof result.resolutionZhTldr !== 'string' ||
+    typeof result.emotionalSupport !== 'string' ||
+    !Array.isArray(result.sources) ||
+    !Array.isArray(result.picks) ||
+    typeof result.ms !== 'number'
+  ) return undefined;
+  return {
+    ...(result as KittyHelpResult),
+    evidence: readEvidence(result.evidence),
+  };
+}
+
+function readEvidence(value: unknown): SupportEvidence[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((source): source is SupportEvidence => (
+    !!source &&
+    typeof source === 'object' &&
+    typeof (source as SupportEvidence).id === 'string' &&
+    typeof (source as SupportEvidence).title === 'string' &&
+    typeof (source as SupportEvidence).excerpt === 'string'
+  ));
 }
 
 function conversationStorageKey(agentName: string): string {
@@ -45,31 +81,30 @@ function readConversation(storageKey: string): AskTurn[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((turn): turn is AskTurn => (
-      !!turn &&
-      typeof turn === 'object' &&
-      typeof (turn as AskTurn).id === 'string' &&
-      typeof (turn as AskTurn).question === 'string' &&
-      typeof (turn as AskTurn).answer === 'string' &&
-      Array.isArray((turn as AskTurn).sources)
-    ));
+    return parsed.flatMap((turn): AskTurn[] => {
+      if (
+        !turn ||
+        typeof turn !== 'object' ||
+        typeof (turn as AskTurn).id !== 'string' ||
+        typeof (turn as AskTurn).question !== 'string' ||
+        typeof (turn as AskTurn).answer !== 'string' ||
+        !Array.isArray((turn as AskTurn).sources)
+      ) return [];
+      const saved = turn as AskTurn;
+      return [{
+        ...saved,
+        evidence: readEvidence(saved.evidence),
+        resolution: readKittyResult(saved.resolution),
+      }];
+    });
   } catch {
     return [];
   }
 }
 
-function getStoredAskModel(): AskModel {
-  try {
-    const stored = window.localStorage.getItem(MODEL_STORAGE_KEY);
-    return isAskModel(stored) ? stored : DEFAULT_ASK_MODEL;
-  } catch {
-    return DEFAULT_ASK_MODEL;
-  }
-}
-
 async function consumeAskStream(
   response: Response,
-  onSources: (sources: string[]) => void,
+  onEvidence: (sources: string[], evidence: SupportEvidence[]) => void,
   onToken: (text: string) => void,
 ): Promise<boolean> {
   if (!response.body) throw new Error('The answer stream was unavailable. Please try again.');
@@ -90,7 +125,12 @@ async function consumeAskStream(
     try {
       const payload = JSON.parse(dataLines.join('\n')) as AskResponse;
       if (eventName === 'meta' && Array.isArray(payload.sources)) {
-        onSources(payload.sources.filter((source): source is string => typeof source === 'string'));
+        const sources = payload.sources.filter((source): source is string => typeof source === 'string');
+        const evidence = readEvidence(payload.evidence);
+        onEvidence(
+          sources,
+          evidence.length > 0 ? evidence : evidenceFromSourceNames(sources),
+        );
       } else if (eventName === 'token' && typeof payload.text === 'string') {
         receivedText = true;
         onToken(payload.text);
@@ -144,12 +184,34 @@ export function CatAskPanel({
   transcript = '',
   customerName = '',
   agentName = '',
+  embedded = false,
+  selectedModel,
+  onModelChange,
+  onEvidenceChange,
+  onResolveRequest,
+  resolveResult,
+  resolveBusy = false,
+  resolveStage,
+  resolveError,
+  autoAskOnMount = false,
+  onAutoAskConsumed,
 }: {
   onClose: () => void;
   notes: string;
   transcript?: string;
   customerName?: string;
   agentName?: string;
+  embedded?: boolean;
+  selectedModel?: AskModel;
+  onModelChange?: (model: AskModel) => void;
+  onEvidenceChange?: (evidence: SupportEvidence[]) => void;
+  onResolveRequest?: () => void;
+  resolveResult?: KittyHelpResult | null;
+  resolveBusy?: boolean;
+  resolveStage?: KittyStage | null;
+  resolveError?: string | null;
+  autoAskOnMount?: boolean;
+  onAutoAskConsumed?: () => void;
 }) {
   const storageKey = conversationStorageKey(agentName);
   const [conversation, setConversation] = useState<AskTurn[]>(() => readConversation(storageKey));
@@ -159,11 +221,14 @@ export function CatAskPanel({
   const [searchingFromNotes, setSearchingFromNotes] = useState(false);
   const [loadingTurnId, setLoadingTurnId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [model, setModel] = useState<AskModel>(getStoredAskModel);
+  const [localModel, setLocalModel] = useState<AskModel>(readStoredAskModel);
+  const model = selectedModel ?? localModel;
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const submitRef = useRef<((runKittyIfEmpty?: boolean) => Promise<void>) | null>(null);
+  const autoAskHandledRef = useRef(false);
 
   useEffect(() => {
     if (loadedStorageKey === storageKey) return;
@@ -189,12 +254,19 @@ export function CatAskPanel({
   }, [conversation, loading]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(MODEL_STORAGE_KEY, model);
-    } catch {
-      // Keep the current choice for this panel when storage is unavailable.
-    }
+    const latest = conversation[conversation.length - 1];
+    const evidence = latest?.evidence ?? [];
+    onEvidenceChange?.(evidence.length ? evidence : evidenceFromSourceNames(latest?.sources ?? []));
+  }, [conversation, onEvidenceChange]);
+
+  useEffect(() => {
+    storeAskModel(model);
   }, [model]);
+
+  const changeModel = (nextModel: AskModel) => {
+    setLocalModel(nextModel);
+    onModelChange?.(nextModel);
+  };
 
   const emailConversation = useMemo(
     () => conversation
@@ -210,20 +282,48 @@ export function CatAskPanel({
     setConversation((current) => current.map((turn) => (turn.id === id ? update(turn) : turn)));
   };
 
-  const submit = async () => {
+  useEffect(() => {
+    if (loadedStorageKey !== storageKey || !resolveResult) return;
+    const resolutionRunId = resolveResult.runId
+      || `${resolveResult.ms}-${resolveResult.resolutionEn.slice(0, 48)}`;
+    const id = `kitty-${resolutionRunId}`;
+    const answer = [
+      resolveResult.sayToCustomer ? `Say to the customer:\n${resolveResult.sayToCustomer}` : '',
+      resolveResult.resolutionEn,
+      resolveResult.resolutionZhTldr ? `Chinese TLDR:\n${resolveResult.resolutionZhTldr}` : '',
+      resolveResult.emotionalSupport ? `Empathy:\n${resolveResult.emotionalSupport}` : '',
+    ].filter(Boolean).join('\n\n');
+    setConversation((current) => {
+      if (current.some((turn) => turn.resolutionRunId === resolutionRunId)) return current;
+      return [...current, {
+        id,
+        question: 'Resolve the current ticket with Kitty Help',
+        answer,
+        sources: resolveResult.sources,
+        evidence: resolveResult.evidence ?? [],
+        fromNotes: true,
+        resolution: resolveResult,
+        resolutionRunId,
+      }];
+    });
+  }, [loadedStorageKey, resolveResult, storageKey]);
+
+  const submit = async (runKittyIfEmpty = true) => {
     const q = question.trim();
     if (loading) return;
     const fromNotes = !q;
-    if (fromNotes && !notes.trim()) {
+    if (fromNotes && !notes.trim() && !transcript.trim()) {
       setError('No support notes are filled in yet. Add ticket details or type a question.');
       return;
     }
+    if (fromNotes && runKittyIfEmpty) onResolveRequest?.();
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const turn: AskTurn = {
       id,
-      question: q || 'Search current ticket notes',
+      question: q || (notes.trim() ? 'Search current ticket context' : 'Search the current call transcript'),
       answer: '',
       sources: [],
+      evidence: [],
       fromNotes,
     };
     const history = conversation
@@ -250,6 +350,7 @@ export function CatAskPanel({
         body: JSON.stringify({
           question: q,
           notes: notes || undefined,
+          transcript: transcript || undefined,
           history,
           model,
         }),
@@ -261,17 +362,23 @@ export function CatAskPanel({
       if (res.headers.get('content-type')?.includes('text/event-stream')) {
         const receivedText = await consumeAskStream(
           res,
-          (sources) => updateTurn(id, (current) => ({ ...current, sources })),
+          (sources, evidence) => updateTurn(id, (current) => ({ ...current, sources, evidence })),
           (text) => updateTurn(id, (current) => ({ ...current, answer: current.answer + text })),
         );
-        if (!receivedText) updateTurn(id, (current) => ({ ...current, answer: '(empty answer)' }));
+        if (!receivedText) {
+          updateTurn(id, (current) => ({ ...current, answer: EMPTY_ANSWER_NOTICE }));
+        }
       } else {
         const payload = (await res.json().catch(() => ({}))) as AskResponse;
         if (payload.error) throw new Error(payload.error);
         updateTurn(id, (current) => ({
           ...current,
-          answer: payload.answer?.trim() || '(empty answer)',
+          answer: payload.answer?.trim() || EMPTY_ANSWER_NOTICE,
           sources: payload.sources ?? [],
+          evidence: (() => {
+            const evidence = readEvidence(payload.evidence);
+            return evidence.length > 0 ? evidence : evidenceFromSourceNames(payload.sources ?? []);
+          })(),
         }));
       }
     } catch (cause) {
@@ -283,9 +390,21 @@ export function CatAskPanel({
       setLoadingTurnId(null);
     }
   };
+  submitRef.current = submit;
+
+  useEffect(() => {
+    if (!autoAskOnMount) {
+      autoAskHandledRef.current = false;
+      return;
+    }
+    if (autoAskHandledRef.current) return;
+    autoAskHandledRef.current = true;
+    onAutoAskConsumed?.();
+    void submitRef.current?.(false);
+  }, [autoAskOnMount, onAutoAskConsumed]);
 
   const clearConversation = () => {
-    if (!conversation.length || !window.confirm('Clear this saved SHIFT+C conversation? This cannot be undone.')) return;
+    if (!conversation.length || !window.confirm('Clear this saved Kitty Help conversation? This cannot be undone.')) return;
     setConversation([]);
     setError('');
     try {
@@ -298,10 +417,25 @@ export function CatAskPanel({
   const canGenerateEmail = emailConversation.length > 0 && !loading;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-5" role="dialog" aria-modal="true" aria-label="Ask the knowledge base">
-      <button type="button" aria-label="Close Ask panel" onClick={onClose} className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm" />
-      <section className="glass-panel relative flex max-h-[calc(100dvh-1rem)] min-h-0 w-full max-w-3xl flex-col overflow-visible rounded-xl border border-white/15 bg-card/90 shadow-[0_24px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/5 backdrop-blur-2xl sm:max-h-[92dvh] sm:rounded-2xl">
-        <header className="flex shrink-0 items-center gap-2 rounded-t-xl border-b border-border/60 bg-gradient-to-b from-white/[0.06] to-transparent px-3 py-2.5 sm:gap-3 sm:rounded-t-2xl sm:px-5 sm:py-3">
+    <>
+      {!embedded && (
+        <button
+          type="button"
+          aria-label="Close Ask panel"
+          onClick={onClose}
+          className="fixed inset-0 z-[89] cursor-default bg-background/50 backdrop-blur-md"
+        />
+      )}
+      <section
+        className={embedded
+          ? 'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent'
+          : 'glass-panel fixed inset-x-2 bottom-2 top-2 z-[90] mx-auto flex min-h-0 w-full max-w-3xl flex-col overflow-visible rounded-2xl bg-card sm:inset-x-5 sm:bottom-[4vh] sm:top-[4vh]'}
+        role={embedded ? undefined : 'dialog'}
+        aria-modal={embedded ? undefined : true}
+        aria-label="Ask the knowledge base"
+      >
+        <header className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-3 py-2 sm:gap-3 sm:px-4">
+          {!embedded && (
           <div
             className="relative z-30 shrink-0"
             onMouseEnter={() => !loading && setModelMenuOpen(true)}
@@ -322,7 +456,7 @@ export function CatAskPanel({
               title="Choose answer model"
               disabled={loading}
               onClick={() => setModelMenuOpen((open) => !open)}
-              className="flex items-center gap-0.5 rounded-md p-1 text-sky-300/90 transition hover:bg-white/10 hover:text-sky-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:opacity-50"
+              className="glass-btn flex items-center gap-0.5 rounded-md p-1 text-accent transition hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
             >
               <Search className="size-5" />
               <ChevronDown className="size-3" />
@@ -337,66 +471,81 @@ export function CatAskPanel({
                     role="menuitemradio"
                     aria-checked={model === option.id}
                     onClick={() => {
-                      setModel(option.id);
+                      changeModel(option.id);
                       setModelMenuOpen(false);
                       inputRef.current?.focus();
                     }}
-                    className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-300 ${model === option.id ? 'bg-sky-400/10 text-sky-200' : 'text-foreground'}`}
+                    className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 ${model === option.id ? 'bg-accent/10 text-accent' : 'text-foreground'}`}
                   >
                     <span className="text-xs font-medium">{option.label}</span>
-                    <span className="font-mono text-[9px] text-muted-foreground">{option.id}</span>
+                    <span className="text-xs text-muted-foreground">{option.id}</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
+          )}
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold text-foreground">Knowledge assistant</h2>
-            <p className="truncate text-[10px] text-muted-foreground">
-              {conversation.length ? `${conversation.length} saved ${conversation.length === 1 ? 'exchange' : 'exchanges'} · ${model}` : `Grounded answers · ${model}`}
-            </p>
+            {!embedded && <h2 className="truncate text-sm font-semibold text-foreground">Knowledge assistant</h2>}
           </div>
           {conversation.length > 0 && (
-            <button type="button" onClick={clearConversation} title="Clear saved conversations" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-2 focus-visible:outline-sky-300">
+            <button type="button" onClick={clearConversation} title="Clear saved conversations" className="glass-btn inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
               <Trash2 className="size-3.5" />
               <span className="hidden sm:inline">Clear conversations</span>
             </button>
           )}
-          <button type="button" aria-label="Close Ask panel" onClick={onClose} className="rounded-md p-1.5 text-muted-foreground transition hover:bg-white/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-sky-300">
-            <X className="size-4" />
-          </button>
+          {!embedded && (
+            <button type="button" aria-label="Close Ask panel" onClick={onClose} className="glass-btn rounded-md p-1.5 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+              <X className="size-4" />
+            </button>
+          )}
         </header>
 
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-5 sm:px-5 sm:py-4">
           {conversation.length === 0 && (
-            <p className="rounded-xl border border-border/50 bg-black/10 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
-              Ask about a support issue, or leave the box below empty to search these ticket notes. Follow-up questions will stay grounded in the support sources.
+            <p className="rounded-xl border border-border bg-card/40 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+              Ask a question for AI Search, or leave the box empty to run AI Search and Kitty Help together on the current ticket notes and call transcript.
+            </p>
+          )}
+          {resolveBusy && (
+            <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+              <Cat className="size-4 animate-pulse text-primary" />
+              <span>{resolveStage?.label ?? 'Kitty Help is selecting sources and preparing a resolution…'}</span>
+            </div>
+          )}
+          {resolveError && !resolveBusy && (
+            <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              Kitty Help: {resolveError}
             </p>
           )}
           {conversation.map((turn) => (
             <article key={turn.id} className="space-y-3">
-              <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-sky-400/20 bg-sky-400/10 px-4 py-2.5 text-sm text-foreground">
+              <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-accent/25 bg-accent/10 px-4 py-2.5 text-sm text-foreground">
                 {turn.question}
               </div>
               <div className="flex items-start gap-2.5">
-                <PawPrint className="mt-1 size-4 shrink-0 text-sky-300" />
+                {(loadingTurnId !== turn.id || Boolean(turn.answer)) && (
+                  <Cat className="mt-1 size-4 shrink-0 text-accent" />
+                )}
                 <div className="min-w-0 flex-1">
-                  {turn.answer ? (
-                    <div className="prose prose-sm prose-invert max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-sky-300 prose-code:text-amber-200 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-black/30">
+                  {turn.resolution ? (
+                    <KittyHelpPanel result={turn.resolution} onClose={() => {}} embedded inline />
+                  ) : turn.answer ? (
+                    <div className="prose prose-sm max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-accent prose-code:text-warning prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/60">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
                     </div>
                   ) : loadingTurnId === turn.id ? (
                     <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-                      <PawPrint className="size-4 animate-pulse text-sky-300" />
+                      <Cat className="size-4 animate-pulse text-accent" />
                       <span className="animate-pulse">{searchingFromNotes ? 'Rewriting ticket notes and searching…' : 'Searching and writing a grounded answer…'}</span>
                     </div>
                   ) : null}
-                  {turn.error && <p className="mt-2 text-sm text-red-400">{turn.error}</p>}
+                  {turn.error && <p className="mt-2 text-sm text-destructive">{turn.error}</p>}
                   {turn.answer && loadingTurnId === turn.id && <p className="mt-2 text-xs text-muted-foreground">Writing answer…</p>}
-                  {turn.sources.length > 0 && (
+                  {!turn.resolution && turn.sources.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {turn.sources.map((source) => (
-                        <span key={source} className="rounded-full border border-border/60 bg-black/20 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">{source}</span>
+                        <span key={source} className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">{source}</span>
                       ))}
                     </div>
                   )}
@@ -404,10 +553,10 @@ export function CatAskPanel({
               </div>
             </article>
           ))}
-          {error && !conversation.some((turn) => turn.error === error) && <p role="alert" className="text-sm text-red-400">{error}</p>}
+          {error && !conversation.some((turn) => turn.error === error) && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
 
-        <footer className="shrink-0 border-t border-border/60 bg-black/10 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-3">
+        <footer className="shrink-0 border-t border-border bg-card/30 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-3">
           <textarea
             ref={inputRef}
             value={question}
@@ -427,17 +576,17 @@ export function CatAskPanel({
             disabled={loading}
             maxLength={1000}
             rows={2}
-            placeholder={loading ? 'Searching and streaming your answer…' : 'Ask a follow-up, or press Enter to search current ticket notes…'}
-            className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-base text-foreground outline-none placeholder:text-sm placeholder:text-muted-foreground/70 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:opacity-60 sm:text-sm"
+            placeholder={loading ? 'Searching and streaming your answer…' : 'Ask a question, or press Enter empty to run AI Search + Kitty Help…'}
+            className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-base text-foreground outline-none placeholder:text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60 sm:text-sm"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="hidden text-[10px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line</span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">Enter asks · Empty Enter runs both · Shift+Enter adds a line</span>
             <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
               <button
                 type="button"
                 onClick={() => setEmailOpen(true)}
                 disabled={!canGenerateEmail || loading}
-                className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-2 py-2 text-xs font-medium text-foreground transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-sky-300 sm:flex-none sm:px-3"
+                className="glass-btn inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-foreground transition disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex-none sm:px-3"
               >
                 <Mail className="size-3.5" />
                 Generate Email
@@ -445,11 +594,11 @@ export function CatAskPanel({
               <button
                 type="button"
                 onClick={() => void submit()}
-                disabled={loading || (!question.trim() && !notes.trim())}
-                className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 sm:flex-none sm:px-3.5"
+                disabled={loading || (!question.trim() && !notes.trim() && !transcript.trim())}
+                className="glass-btn glass-btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-primary-foreground transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex-none sm:px-3.5"
               >
                 <Send className="size-3.5" />
-                {loading ? 'Working…' : 'Send'}
+                {loading ? 'Working…' : question.trim() ? 'Ask' : 'Ask + Kitty Help'}
               </button>
             </div>
           </div>
@@ -465,7 +614,7 @@ export function CatAskPanel({
           onClose={() => setEmailOpen(false)}
         />
       )}
-    </div>
+    </>
   );
 }
 

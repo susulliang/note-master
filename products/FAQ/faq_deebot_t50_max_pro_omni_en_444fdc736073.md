@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to deal with a robot that doesn't perform Auto Resume?
+# DEEBOT / T50 MAX PRO OMNI / EN - How to deal with a robot that doesn't perform Auto Resume?
 
 ## Question
 

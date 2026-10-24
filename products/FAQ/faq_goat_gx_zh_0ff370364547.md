@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I change winter and daylight saving time?
+# GOAT / GX / ZH - How do I change winter and daylight saving time?
 
 ## Question
 

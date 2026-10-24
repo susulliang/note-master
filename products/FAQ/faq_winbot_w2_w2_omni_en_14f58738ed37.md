@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# There is an abnormal sound (friction) during the working of WINBOT W2.
+# WINBOT / W2/W2 OMNI / EN - There is an abnormal sound (friction) during the working of WINBOT W2.
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 为什么WINBOT没有自动返回原点？
+# WINBOT / W2/W2 OMNI / ZH - 为什么WINBOT没有自动返回原点？
 
 ## Question
 

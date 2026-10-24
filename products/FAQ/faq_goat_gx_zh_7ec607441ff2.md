@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# Why is the “GOAT alarms when it goes beyond the station's signal coverage" triggered when the mower is inside the courtyard?
+# GOAT / GX / ZH - Why is the “GOAT alarms when it goes beyond the station's signal coverage" triggered when the mower is inside the courtyard?
 
 ## Question
 

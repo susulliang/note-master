@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How do I use the Area Cleaning/Custom Cleaning/AI Hosting modes?
+# DEEBOT / X5 OMNI/X5 PRO OMNI / ZH - How do I use the Area Cleaning/Custom Cleaning/AI Hosting modes?
 
 ## Question
 

@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# What should I do if DEEBOT has lost the map after being powered off?
+# DEEBOT / DEEBOT OZMO T8 AIVI / EN - What should I do if DEEBOT has lost the map after being powered off?
 
 ## Question
 

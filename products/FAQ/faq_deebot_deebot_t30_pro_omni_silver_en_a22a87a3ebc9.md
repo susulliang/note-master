@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# How to start select/draw/intelligent hosting cleaning?
+# DEEBOT / DEEBOT T30 PRO OMNI Silver / EN - How to start select/draw/intelligent hosting cleaning?
 
 ## Question
 

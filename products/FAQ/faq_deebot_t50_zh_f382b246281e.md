@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 如何正确使用视频管家功能？（仅高配）
+# DEEBOT / T50降配版 / ZH - 如何正确使用视频管家功能？（仅高配）
 
 ## Question
 

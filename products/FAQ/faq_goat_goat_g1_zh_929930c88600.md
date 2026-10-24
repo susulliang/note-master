@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# The GOAT stopped in its original location without completing its learning.
+# GOAT / GOAT G1 / ZH - The GOAT stopped in its original location without completing its learning.
 
 ## Question
 

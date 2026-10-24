@@ -10,7 +10,7 @@ kind: faq
 version: 1
 ---
 
-# 下视传感器积灰，请擦拭
+# DEEBOT / T50 MAX PRO OMNI / ZH - 下视传感器积灰，请擦拭
 
 ## Question
 
