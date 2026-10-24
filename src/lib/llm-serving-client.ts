@@ -86,10 +86,12 @@ export async function requestRemoteChatCompletion(input: {
   maxTokens: number;
   temperature?: number;
   stream?: boolean;
+  signal?: AbortSignal;
 }): Promise<Response> {
   const response = await authenticatedFetch('/api/llm/chat', {
     method: 'POST',
     headers: { accept: input.stream ? 'text/event-stream' : 'application/json' },
+    signal: input.signal,
     body: JSON.stringify({
       model: input.model,
       messages: input.messages,

@@ -1676,6 +1676,13 @@ Additional information (if needed): ${additional}`;
     isTauri && customerAudioDeviceName ? customerAudioDeviceName : undefined,
     isTauri ? agentMicDeviceName || undefined : undefined
   );
+  const askTranscript = useMemo(
+    () => call.transcript
+      .map((entry) => `${entry.speaker === 'agent' ? 'Agent' : entry.speaker === 'customer' ? 'Customer' : 'Recording'}: ${entry.text}`)
+      .join('\n')
+      .slice(-16_000),
+    [call.transcript],
+  );
 
   // ---------------------------------------------------------------------
   //  Live EN/ZH whole-call TLDR — FR calls only (a multilingual .fr model
@@ -2886,7 +2893,15 @@ Additional information (if needed): ${additional}`;
           onAskOpen={() => setAskOpen(true)}
         />
       )}
-      {askOpen && <CatAskPanel onClose={() => setAskOpen(false)} notes={askNotes} />}
+      {askOpen && (
+        <CatAskPanel
+          onClose={() => setAskOpen(false)}
+          notes={askNotes}
+          transcript={askTranscript}
+          customerName={typeof formData[NODE_IDS.CUSTOMER_NAME] === 'string' ? formData[NODE_IDS.CUSTOMER_NAME] as string : ''}
+          agentName={authUser?.username ?? ''}
+        />
+      )}
       {kitty.panelOpen && kitty.result && (
         <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
       )}

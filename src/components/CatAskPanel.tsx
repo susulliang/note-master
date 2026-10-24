@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, PawPrint, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Mail, PawPrint, Search, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getApiBase, getStoredToken } from '@/lib/auth-client';
+import AskEmailModal, { type AskEmailContext } from '@/components/AskEmailModal';
 import {
   ASK_MODELS,
   DEFAULT_ASK_MODEL,
@@ -11,6 +12,7 @@ import {
 } from '@shared/ask-models';
 
 const MODEL_STORAGE_KEY = '__app_shiftc_ask_model';
+const CONVERSATION_STORAGE_PREFIX = '__app_shiftc_ask_conversation_v1:';
 
 /**
  * Spotlight-style glassy ask panel — opens via long-press on the cat or
@@ -23,6 +25,37 @@ interface AskResponse {
   sources?: string[];
   error?: string;
   text?: string;
+}
+
+interface AskTurn extends AskEmailContext {
+  id: string;
+  sources: string[];
+  fromNotes: boolean;
+  error?: string;
+}
+
+function conversationStorageKey(agentName: string): string {
+  const scope = agentName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') || 'default';
+  return `${CONVERSATION_STORAGE_PREFIX}${scope}`;
+}
+
+function readConversation(storageKey: string): AskTurn[] {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((turn): turn is AskTurn => (
+      !!turn &&
+      typeof turn === 'object' &&
+      typeof (turn as AskTurn).id === 'string' &&
+      typeof (turn as AskTurn).question === 'string' &&
+      typeof (turn as AskTurn).answer === 'string' &&
+      Array.isArray((turn as AskTurn).sources)
+    ));
+  } catch {
+    return [];
+  }
 }
 
 function getStoredAskModel(): AskModel {
@@ -105,17 +138,47 @@ async function consumeAskStream(
   return receivedText;
 }
 
-export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: string }) {
+export function CatAskPanel({
+  onClose,
+  notes,
+  transcript = '',
+  customerName = '',
+  agentName = '',
+}: {
+  onClose: () => void;
+  notes: string;
+  transcript?: string;
+  customerName?: string;
+  agentName?: string;
+}) {
+  const storageKey = conversationStorageKey(agentName);
+  const [conversation, setConversation] = useState<AskTurn[]>(() => readConversation(storageKey));
+  const [loadedStorageKey, setLoadedStorageKey] = useState(storageKey);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchingFromNotes, setSearchingFromNotes] = useState(false);
-  const [answer, setAnswer] = useState('');
-  const [sources, setSources] = useState<string[]>([]);
+  const [loadingTurnId, setLoadingTurnId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [model, setModel] = useState<AskModel>(getStoredAskModel);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (loadedStorageKey === storageKey) return;
+    setConversation(readConversation(storageKey));
+    setLoadedStorageKey(storageKey);
+  }, [loadedStorageKey, storageKey]);
+
+  useEffect(() => {
+    if (loadedStorageKey !== storageKey) return;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(conversation));
+    } catch {
+      setError('Conversation could not be saved in this browser.');
+    }
+  }, [conversation, loadedStorageKey, storageKey]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -123,7 +186,7 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [answer, loading, error]);
+  }, [conversation, loading]);
 
   useEffect(() => {
     try {
@@ -133,6 +196,20 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
     }
   }, [model]);
 
+  const emailConversation = useMemo(
+    () => conversation
+      .filter((turn) => turn.answer.trim())
+      .map(({ question: turnQuestion, answer: turnAnswer }) => ({
+        question: turnQuestion,
+        answer: turnAnswer,
+      })),
+    [conversation],
+  );
+
+  const updateTurn = (id: string, update: (turn: AskTurn) => AskTurn) => {
+    setConversation((current) => current.map((turn) => (turn.id === id ? update(turn) : turn)));
+  };
+
   const submit = async () => {
     const q = question.trim();
     if (loading) return;
@@ -141,10 +218,30 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
       setError('No support notes are filled in yet. Add ticket details or type a question.');
       return;
     }
-    setLoading(true);
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turn: AskTurn = {
+      id,
+      question: q || 'Search current ticket notes',
+      answer: '',
+      sources: [],
+      fromNotes,
+    };
+    const history = conversation
+      .filter((item) => item.answer.trim())
+      .slice(-5)
+      .flatMap((item) => [
+        {
+          role: 'user' as const,
+          content: item.fromNotes ? 'Asked for guidance using the current ticket notes.' : item.question,
+        },
+        { role: 'assistant' as const, content: item.answer },
+      ]);
+
+    setConversation((current) => [...current, turn]);
+    setQuestion('');
     setError('');
-    setAnswer('');
-    setSources([]);
+    setLoading(true);
+    setLoadingTurnId(id);
     setSearchingFromNotes(fromNotes);
     try {
       const res = await fetch(`${getApiBase()}/api/ask`, {
@@ -152,7 +249,8 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
         headers: { 'content-type': 'application/json', authorization: `Bearer ${getStoredToken() ?? ''}` },
         body: JSON.stringify({
           question: q,
-          notes: fromNotes ? notes : undefined,
+          notes: notes || undefined,
+          history,
           model,
         }),
       });
@@ -163,51 +261,54 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
       if (res.headers.get('content-type')?.includes('text/event-stream')) {
         const receivedText = await consumeAskStream(
           res,
-          setSources,
-          (text) => setAnswer((current) => current + text),
+          (sources) => updateTurn(id, (current) => ({ ...current, sources })),
+          (text) => updateTurn(id, (current) => ({ ...current, answer: current.answer + text })),
         );
-        if (!receivedText) setAnswer('(empty answer)');
+        if (!receivedText) updateTurn(id, (current) => ({ ...current, answer: '(empty answer)' }));
       } else {
         const payload = (await res.json().catch(() => ({}))) as AskResponse;
         if (payload.error) throw new Error(payload.error);
-        setAnswer(payload.answer?.trim() || '(empty answer)');
-        setSources(payload.sources ?? []);
+        updateTurn(id, (current) => ({
+          ...current,
+          answer: payload.answer?.trim() || '(empty answer)',
+          sources: payload.sources ?? [],
+        }));
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      updateTurn(id, (current) => ({ ...current, error: message }));
     } finally {
       setLoading(false);
+      setLoadingTurnId(null);
     }
   };
 
+  const clearConversation = () => {
+    if (!conversation.length || !window.confirm('Clear this saved SHIFT+C conversation? This cannot be undone.')) return;
+    setConversation([]);
+    setError('');
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // The in-memory conversation is still cleared.
+    }
+  };
+
+  const canGenerateEmail = emailConversation.length > 0 && !loading;
+
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-start justify-center px-4 pt-[14vh]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Ask the knowledge base"
-    >
-      {/* Dim + blur backdrop — click dismisses. */}
-      <button
-        type="button"
-        aria-label="Close ask panel"
-        onClick={onClose}
-        className="absolute inset-0 cursor-default bg-black/55 backdrop-blur-sm"
-      />
-      <div className="glass-panel relative w-full max-w-2xl overflow-visible rounded-2xl border border-white/15 bg-card/85 shadow-[0_24px_80px_rgba(0,0,0,0.6)] ring-1 ring-white/5 backdrop-blur-2xl">
-        {/* Question row */}
-        <div className="flex items-center gap-3 rounded-t-2xl border-b border-border/50 bg-gradient-to-b from-white/[0.06] to-transparent px-5 py-4">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-5" role="dialog" aria-modal="true" aria-label="Ask the knowledge base">
+      <button type="button" aria-label="Close Ask panel" onClick={onClose} className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm" />
+      <section className="glass-panel relative flex max-h-[92dvh] min-h-[420px] w-full max-w-3xl flex-col overflow-visible rounded-2xl border border-white/15 bg-card/90 shadow-[0_24px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/5 backdrop-blur-2xl">
+        <header className="flex shrink-0 items-center gap-3 rounded-t-2xl border-b border-border/60 bg-gradient-to-b from-white/[0.06] to-transparent px-4 py-3 sm:px-5">
           <div
             className="relative z-30 shrink-0"
-            onMouseEnter={() => {
-              if (!loading) setModelMenuOpen(true);
-            }}
+            onMouseEnter={() => !loading && setModelMenuOpen(true)}
             onMouseLeave={() => setModelMenuOpen(false)}
             onFocus={() => setModelMenuOpen(true)}
             onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setModelMenuOpen(false);
-              }
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setModelMenuOpen(false);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') setModelMenuOpen(false);
@@ -227,14 +328,8 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
               <ChevronDown className="size-3" />
             </button>
             {modelMenuOpen && (
-              <div
-                role="menu"
-                aria-label="AI Search answer models"
-                className="absolute left-0 top-[calc(100%+0.65rem)] z-50 w-80 max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-2xl backdrop-blur-xl"
-              >
-                <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Answer model
-                </p>
+              <div role="menu" aria-label="AI Search answer models" className="absolute left-0 top-[calc(100%+0.65rem)] z-50 w-80 max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-2xl backdrop-blur-xl">
+                <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Answer model</p>
                 {ASK_MODELS.map((option) => (
                   <button
                     key={option.id}
@@ -246,9 +341,7 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
                       setModelMenuOpen(false);
                       inputRef.current?.focus();
                     }}
-                    className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-300 ${
-                      model === option.id ? 'bg-sky-400/10 text-sky-200' : 'text-foreground'
-                    }`}
+                    className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-300 ${model === option.id ? 'bg-sky-400/10 text-sky-200' : 'text-foreground'}`}
                   >
                     <span className="text-xs font-medium">{option.label}</span>
                     <span className="font-mono text-[9px] text-muted-foreground">{option.id}</span>
@@ -257,71 +350,121 @@ export function CatAskPanel({ onClose, notes }: { onClose: () => void; notes: st
               </div>
             )}
           </div>
-          <input
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold text-foreground">Knowledge assistant</h2>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {conversation.length ? `${conversation.length} saved ${conversation.length === 1 ? 'exchange' : 'exchanges'} · ${model}` : `Grounded answers · ${model}`}
+            </p>
+          </div>
+          {conversation.length > 0 && (
+            <button type="button" onClick={clearConversation} title="Clear saved conversations" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-2 focus-visible:outline-sky-300">
+              <Trash2 className="size-3.5" />
+              <span className="hidden sm:inline">Clear conversations</span>
+            </button>
+          )}
+          <button type="button" aria-label="Close Ask panel" onClick={onClose} className="rounded-md p-1.5 text-muted-foreground transition hover:bg-white/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-sky-300">
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
+          {conversation.length === 0 && (
+            <p className="rounded-xl border border-border/50 bg-black/10 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+              Ask about a support issue, or leave the box below empty to search these ticket notes. Follow-up questions will stay grounded in the support sources.
+            </p>
+          )}
+          {conversation.map((turn) => (
+            <article key={turn.id} className="space-y-3">
+              <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-sky-400/20 bg-sky-400/10 px-4 py-2.5 text-sm text-foreground">
+                {turn.question}
+              </div>
+              <div className="flex items-start gap-2.5">
+                <PawPrint className="mt-1 size-4 shrink-0 text-sky-300" />
+                <div className="min-w-0 flex-1">
+                  {turn.answer ? (
+                    <div className="prose prose-sm prose-invert max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-sky-300 prose-code:text-amber-200 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-black/30">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
+                    </div>
+                  ) : loadingTurnId === turn.id ? (
+                    <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
+                      <PawPrint className="size-4 animate-pulse text-sky-300" />
+                      <span className="animate-pulse">{searchingFromNotes ? 'Rewriting ticket notes and searching…' : 'Searching and writing a grounded answer…'}</span>
+                    </div>
+                  ) : null}
+                  {turn.error && <p className="mt-2 text-sm text-red-400">{turn.error}</p>}
+                  {turn.answer && loadingTurnId === turn.id && <p className="mt-2 text-xs text-muted-foreground">Writing answer…</p>}
+                  {turn.sources.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {turn.sources.map((source) => (
+                        <span key={source} className="rounded-full border border-border/60 bg-black/20 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">{source}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+          ))}
+          {error && !conversation.some((turn) => turn.error === error) && <p role="alert" className="text-sm text-red-400">{error}</p>}
+        </div>
+
+        <footer className="shrink-0 border-t border-border/60 bg-black/10 px-4 py-3 sm:px-5">
+          <textarea
             ref={inputRef}
             value={question}
-            onChange={(e) => {
-              setQuestion(e.target.value);
+            onChange={(event) => {
+              setQuestion(event.target.value);
               setError('');
             }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 void submit();
-              } else if (e.key === 'Escape') {
-                e.stopPropagation();
+              } else if (event.key === 'Escape') {
+                event.stopPropagation();
                 onClose();
               }
             }}
             disabled={loading}
             maxLength={1000}
-            placeholder={loading
-              ? searchingFromNotes ? 'Rewriting ticket notes and searching…' : 'Searching the knowledge base…'
-              : 'Ask a question, or press Enter to search these ticket notes…'}
-            className="flex-1 bg-transparent text-lg text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
+            rows={2}
+            placeholder={loading ? 'Searching and streaming your answer…' : 'Ask a follow-up, or press Enter to search current ticket notes…'}
+            className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:opacity-60"
           />
-          <kbd className="rounded-md border border-border/60 bg-black/20 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            esc
-          </kbd>
-        </div>
-
-        {/* Answer area */}
-        <div ref={scrollRef} className="max-h-[52vh] overflow-y-auto px-5 py-4">
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {loading && !answer && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <PawPrint className="size-4 animate-pulse text-sky-300" />
-              <span className="animate-pulse">
-                {searchingFromNotes ? 'Rewriting ticket notes and searching…' : 'Searching the knowledge base…'}
-              </span>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="hidden text-[10px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line</span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEmailOpen(true)}
+                disabled={!canGenerateEmail || loading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-3 py-2 text-xs font-medium text-foreground transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-sky-300"
+              >
+                <Mail className="size-3.5" />
+                Generate Email
+              </button>
+              <button
+                type="button"
+                onClick={() => void submit()}
+                disabled={loading || (!question.trim() && !notes.trim())}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+              >
+                <Send className="size-3.5" />
+                {loading ? 'Working…' : 'Send'}
+              </button>
             </div>
-          )}
-          {!loading && !error && !answer && (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Ask naturally, or leave the search box empty and press Enter to look up this call’s product and issue
-              notes. Answers are grounded in the eco-kb AI Search index.
-            </p>
-          )}
-          {answer && (
-            <div className="prose prose-sm prose-invert max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-sky-300 prose-code:text-amber-200 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-black/30">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
-            </div>
-          )}
-          {loading && answer && <p className="mt-2 text-xs text-muted-foreground">Writing answer…</p>}
-          {sources.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {sources.map((key) => (
-                <span
-                  key={key}
-                  className="rounded-full border border-border/60 bg-black/20 px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
-                >
-                  {key}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </footer>
+      </section>
+      {emailOpen && (
+        <AskEmailModal
+          notes={notes}
+          transcript={transcript}
+          conversation={emailConversation}
+          customerName={customerName}
+          agentName={agentName}
+          onClose={() => setEmailOpen(false)}
+        />
+      )}
     </div>
   );
 }
