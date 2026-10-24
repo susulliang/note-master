@@ -652,6 +652,25 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_form_data',
     INITIAL_FORM_DATA
   );
+  const askNotes = useMemo(() => {
+    const fields: Array<[string, string | string[]]> = [
+      ['Robot model', formData[NODE_IDS.DEEBOT_MODEL] ?? ''],
+      ['SKU number', formData[NODE_IDS.SKU_NUMBER] ?? ''],
+      ['Serial number', formData[NODE_IDS.SERIAL_NUMBER] ?? ''],
+      ['Order number', formData[NODE_IDS.ORDER_NUMBER] ?? ''],
+      ['Issue type', formData[NODE_IDS.ISSUE_TYPE] ?? ''],
+      ['Detailed issue description', formData[NODE_IDS.DETAILED_ISSUE] ?? ''],
+      ['Purchase channel and date', formData[NODE_IDS.PURCHASE_INFO] ?? ''],
+      ['Resolution summary', formData[NODE_IDS.RESOLUTION_SUMMARY] ?? ''],
+      ['Additional notes', formData[NODE_IDS.ADDITIONAL_NOTES] ?? ''],
+    ];
+    return fields.flatMap(([label, value]) => {
+      const text = Array.isArray(value)
+        ? value.map((entry) => entry.trim()).filter(Boolean).join('\n')
+        : value.trim();
+      return text ? [`${label}: ${text}`] : [];
+    }).join('\n');
+  }, [formData]);
   // Per-call counter: how many times the agent has addressed the customer by
   // name. Drives the Customer Name node's lifecycle glow (red → yellow →
   // green). Resets when the form resets.
@@ -2867,7 +2886,7 @@ Additional information (if needed): ${additional}`;
           onAskOpen={() => setAskOpen(true)}
         />
       )}
-      {askOpen && <CatAskPanel onClose={() => setAskOpen(false)} />}
+      {askOpen && <CatAskPanel onClose={() => setAskOpen(false)} notes={askNotes} />}
       {kitty.panelOpen && kitty.result && (
         <KittyHelpPanel result={kitty.result} onClose={() => kitty.setPanelOpen(false)} />
       )}
