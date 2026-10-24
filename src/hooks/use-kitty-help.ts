@@ -158,14 +158,19 @@ export function useKittyHelp(args: {
     return { entries: transcript, transcriptText, formTail, query: `${transcriptText}\n\n${formTail}`.trim() };
   }, [transcript, formData]);
 
-  const start = useCallback(async (): Promise<void> => {
+  const start = useCallback(async (askQuestion = ''): Promise<void> => {
     if (runRef.current) return;
-    const { entries, transcriptText, formTail } = buildQueryContext();
+    const { entries, transcriptText, formTail, query } = buildQueryContext();
+    const specificQuestion = askQuestion.trim();
+    const ticketContext = [
+      specificQuestion ? `Agent's question: ${specificQuestion}` : '',
+      query,
+    ].filter(Boolean).join('\n\n');
     // Kitty Help activates on EITHER a live transcript OR enough drafted
     // ticket-note content — the notes are fed to the LLM as the Task-1
     // source when the transcript is empty.
     const hasTranscript = transcriptText.trim().length > 0;
-    const hasNotes = formTail.trim().length >= 120;
+    const hasNotes = formTail.trim().length >= 120 || specificQuestion.length > 0;
     if (!hasTranscript && !hasNotes) {
       setError('Need a transcript or a filled ticket note to help with.');
       setStage({ label: 'Nothing to help with yet', detail: 'Capture a call or fill some ticket notes first.' });
@@ -187,6 +192,7 @@ export function useKittyHelp(args: {
         fetchKittySourceContent,
         kittyChat,
         KITTY_FIELD_IDS,
+        kittyModelGuidance,
         parseResolutionReply,
       } = await import('@/lib/kitty-help');
 
@@ -226,6 +232,7 @@ export function useKittyHelp(args: {
           '',
           '[TRANSCRIPT]',
           parseUser,
+          specificQuestion ? `\n[AGENT QUESTION]\n${specificQuestion}` : '',
         ].join('\n');
       } else {
         task1User = [
@@ -237,7 +244,7 @@ export function useKittyHelp(args: {
           `Valid fieldIds: ${KITTY_FIELD_IDS.join(', ')}. Omit fields the draft does not mention.`,
           '',
           '[TICKET NOTE DRAFT]',
-          formTail,
+          [formTail, specificQuestion ? `Agent question: ${specificQuestion}` : ''].filter(Boolean).join('\n\n'),
         ].join('\n');
       }
       messages.push({ role: 'user', content: task1User });
@@ -253,8 +260,7 @@ export function useKittyHelp(args: {
       // Stage 2 — preselect ≤50 knowledge titles, model picks ≤12.
       // ---------------------------------------------------------------
       setStage({ label: 'Scanning knowledge sources…', detail: 'Spec sheets · FAQs · News · Error codes · SOP' });
-      const { query } = buildQueryContext();
-      const candidates = await collectKittyCandidates(query, 50);
+      const candidates = await collectKittyCandidates(ticketContext, 50);
       if (candidates.length === 0) {
         messages.push({ role: 'user', content: 'TASK 2 — no candidate knowledge sources matched. Reply ONLY: {"picks":[]}' });
         const emptyReply = await kittyChat(messages, 64);
@@ -325,6 +331,7 @@ export function useKittyHelp(args: {
         role: 'user',
         content: [
           'TASK 3 — FINAL RESOLUTION',
+          kittyModelGuidance(ticketContext),
           'Full content of the selected sources:',
           sourceBlock,
           '',

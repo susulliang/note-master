@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Cat, ChevronDown, Mail, Search, Send, Trash2, X } from 'lucide-react';
+import { ChevronDown, Mail, Search, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getApiBase, getStoredToken } from '@/lib/auth-client';
@@ -189,6 +189,7 @@ export function CatAskPanel({
   onModelChange,
   onEvidenceChange,
   onResolveRequest,
+  onResolutionTldrChange,
   resolveResult,
   resolveBusy = false,
   resolveStage,
@@ -205,7 +206,8 @@ export function CatAskPanel({
   selectedModel?: AskModel;
   onModelChange?: (model: AskModel) => void;
   onEvidenceChange?: (evidence: SupportEvidence[]) => void;
-  onResolveRequest?: () => void;
+  onResolveRequest?: (question: string) => void;
+  onResolutionTldrChange?: (tldr: string) => void;
   resolveResult?: KittyHelpResult | null;
   resolveBusy?: boolean;
   resolveStage?: KittyStage | null;
@@ -260,6 +262,11 @@ export function CatAskPanel({
   }, [conversation, onEvidenceChange]);
 
   useEffect(() => {
+    const latestResolution = [...conversation].reverse().find((turn) => turn.resolution);
+    onResolutionTldrChange?.(latestResolution?.resolution?.resolutionZhTldr ?? '');
+  }, [conversation, onResolutionTldrChange]);
+
+  useEffect(() => {
     storeAskModel(model);
   }, [model]);
 
@@ -308,7 +315,7 @@ export function CatAskPanel({
     });
   }, [loadedStorageKey, resolveResult, storageKey]);
 
-  const submit = async (runKittyIfEmpty = true) => {
+  const submit = async (runKitty = true) => {
     const q = question.trim();
     if (loading) return;
     const fromNotes = !q;
@@ -316,7 +323,7 @@ export function CatAskPanel({
       setError('No support notes are filled in yet. Add ticket details or type a question.');
       return;
     }
-    if (fromNotes && runKittyIfEmpty) onResolveRequest?.();
+    if (runKitty) onResolveRequest?.(q);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const turn: AskTurn = {
       id,
@@ -488,10 +495,25 @@ export function CatAskPanel({
           <div className="min-w-0 flex-1">
             {!embedded && <h2 className="truncate text-sm font-semibold text-foreground">Knowledge assistant</h2>}
           </div>
+          {embedded && (
+            <label className="shrink-0">
+              <select
+                value={model}
+                onChange={(event) => changeModel(event.target.value as AskModel)}
+                disabled={loading || resolveBusy}
+                aria-label="AI Search model"
+                className="h-8 max-w-36 appearance-none rounded-md border border-border/60 bg-background/40 px-2 text-[10px] text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50 sm:max-w-44 sm:text-xs"
+              >
+                {ASK_MODELS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {conversation.length > 0 && (
             <button type="button" onClick={clearConversation} title="Clear saved conversations" className="glass-btn inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-              <Trash2 className="size-3.5" />
-              <span className="hidden sm:inline">Clear conversations</span>
+              <Trash2 aria-hidden="true" className="size-3.5" />
+              <span className="sr-only">Clear saved conversations</span>
             </button>
           )}
           {!embedded && (
@@ -504,12 +526,12 @@ export function CatAskPanel({
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-5 sm:px-5 sm:py-4">
           {conversation.length === 0 && (
             <p className="rounded-xl border border-border bg-card/40 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
-              Ask a question for AI Search, or leave the box empty to run AI Search and Kitty Help together on the current ticket notes and call transcript.
+              Submit a question to run AI Search and Kitty Help together. Leave the box empty to run both on the current ticket notes and call transcript.
             </p>
           )}
           {resolveBusy && (
             <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
-              <Cat className="size-4 animate-pulse text-primary" />
+              <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary shadow-[0_0_8px_var(--primary)]" />
               <span>{resolveStage?.label ?? 'Kitty Help is selecting sources and preparing a resolution…'}</span>
             </div>
           )}
@@ -524,9 +546,6 @@ export function CatAskPanel({
                 {turn.question}
               </div>
               <div className="flex items-start gap-2.5">
-                {(loadingTurnId !== turn.id || Boolean(turn.answer)) && (
-                  <Cat className="mt-1 size-4 shrink-0 text-accent" />
-                )}
                 <div className="min-w-0 flex-1">
                   {turn.resolution ? (
                     <KittyHelpPanel result={turn.resolution} onClose={() => {}} embedded inline />
@@ -536,7 +555,7 @@ export function CatAskPanel({
                     </div>
                   ) : loadingTurnId === turn.id ? (
                     <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-                      <Cat className="size-4 animate-pulse text-accent" />
+                      <span className="size-2 shrink-0 animate-pulse rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
                       <span className="animate-pulse">{searchingFromNotes ? 'Rewriting ticket notes and searching…' : 'Searching and writing a grounded answer…'}</span>
                     </div>
                   ) : null}
@@ -576,11 +595,11 @@ export function CatAskPanel({
             disabled={loading}
             maxLength={1000}
             rows={2}
-            placeholder={loading ? 'Searching and streaming your answer…' : 'Ask a question, or press Enter empty to run AI Search + Kitty Help…'}
+            placeholder={loading ? 'Searching and resolving…' : 'Ask a question to run AI Search + Kitty Help…'}
             className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-base text-foreground outline-none placeholder:text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60 sm:text-sm"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="hidden text-xs text-muted-foreground sm:inline">Enter asks · Empty Enter runs both · Shift+Enter adds a line</span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">Enter runs AI Search + Kitty Help · Shift+Enter adds a line</span>
             <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
               <button
                 type="button"
@@ -598,7 +617,7 @@ export function CatAskPanel({
                 className="glass-btn glass-btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-primary-foreground transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex-none sm:px-3.5"
               >
                 <Send className="size-3.5" />
-                {loading ? 'Working…' : question.trim() ? 'Ask' : 'Ask + Kitty Help'}
+                {loading ? 'Working…' : 'Ask + Kitty Help'}
               </button>
             </div>
           </div>

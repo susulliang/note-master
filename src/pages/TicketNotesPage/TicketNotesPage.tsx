@@ -2915,7 +2915,7 @@ Additional information (if needed): ${additional}`;
       )}
 
       {/* Keep the floating mascot out of the pixel-world scene. */}
-      {workView !== 'commune' && (
+      {workView !== 'commune' && !kittyHelpOpen && (
         <CatAssistant
           catId={selectedCat}
           currentThought={cat.currentThought}
@@ -2934,6 +2934,7 @@ Additional information (if needed): ${additional}`;
       {kittyHelpOpen && (
         <Suspense fallback={null}>
           <KittyHelpWorkspace
+            catId={selectedCat}
             onClose={() => setKittyHelpOpen(false)}
             model={kittyModel}
             onModelChange={changeKittyModel}
@@ -2945,7 +2946,7 @@ Additional information (if needed): ${additional}`;
             resolveStage={kitty.stage}
             resolveError={kitty.error}
             result={kitty.result}
-            onResolve={() => { void kitty.start(); }}
+            onResolve={(question) => { void kitty.start(question); }}
             autoAskOnOpen={autoAskOnOpen}
             onAutoAskConsumed={consumeAutoAsk}
             askEvidence={kittyAskEvidence}

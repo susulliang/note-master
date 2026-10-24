@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
-  Cat,
   X,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { ASK_MODELS, type AskModel } from '@shared/ask-models';
+import type { AskModel } from '@shared/ask-models';
+import { getCatSprite, type CatId } from '@/lib/cat-sprites';
 import type { KittyHelpResult, KittyStage } from '@/hooks/use-kitty-help';
 import { hydrateSupportEvidence, type SupportEvidence } from '@/lib/support-evidence';
 import { CatAskPanel } from '@/components/CatAskPanel';
 
 interface KittyHelpWorkspaceProps {
+  catId: CatId;
   onClose: () => void;
   model: AskModel;
   onModelChange: (model: AskModel) => void;
@@ -22,14 +23,14 @@ interface KittyHelpWorkspaceProps {
   resolveStage: KittyStage | null;
   resolveError: string | null;
   result: KittyHelpResult | null;
-  onResolve: () => void;
+  onResolve: (question: string) => void;
   autoAskOnOpen: boolean;
   onAutoAskConsumed: () => void;
   askEvidence: SupportEvidence[];
   onAskEvidenceChange: (evidence: SupportEvidence[]) => void;
 }
 
-function EvidenceRail({ sources }: { sources: SupportEvidence[] }) {
+function EvidenceRail({ sources, tldr }: { sources: SupportEvidence[]; tldr: string }) {
   return (
     <aside className="hidden min-h-0 flex-col border-l border-border bg-card/30 lg:flex">
       <div className="border-b border-border px-4 py-3">
@@ -41,6 +42,12 @@ function EvidenceRail({ sources }: { sources: SupportEvidence[] }) {
           Sources retrieved for Ask and Kitty Help answers
         </p>
       </div>
+      {tldr && (
+        <section className="mx-3 mt-3 shrink-0 rounded-lg border border-accent/25 bg-accent/5 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-accent">Chinese TLDR</p>
+          <p lang="zh" className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{tldr}</p>
+        </section>
+      )}
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {sources.length ? sources.map((source, index) => (
           <article
@@ -86,6 +93,7 @@ function EvidenceRail({ sources }: { sources: SupportEvidence[] }) {
 }
 
 export function KittyHelpWorkspace({
+  catId,
   onClose,
   model,
   onModelChange,
@@ -111,6 +119,7 @@ export function KittyHelpWorkspace({
     return [...unique.values()];
   }, [askEvidence, result?.evidence]);
   const [evidence, setEvidence] = useState(rawEvidence);
+  const [resolutionTldr, setResolutionTldr] = useState(result?.resolutionZhTldr ?? '');
 
   useEffect(() => {
     let active = true;
@@ -123,6 +132,12 @@ export function KittyHelpWorkspace({
     };
   }, [rawEvidence]);
 
+  useEffect(() => {
+    setResolutionTldr(result?.resolutionZhTldr ?? '');
+  }, [result?.resolutionZhTldr]);
+
+  const hasRailContent = evidence.length > 0 || Boolean(resolutionTldr);
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
@@ -134,12 +149,16 @@ export function KittyHelpWorkspace({
           <div className="flex items-center gap-3">
             <div className="relative grid size-10 shrink-0 place-items-center rounded-xl border border-accent/40 bg-card text-accent">
               {resolveBusy && <span className="absolute inset-0 animate-pulse rounded-xl bg-primary/10" />}
-                <Cat className="relative size-5" />
+              <span
+                aria-hidden="true"
+                className="cat-sprite-frame size-9"
+                style={{ backgroundImage: `url("${getCatSprite(catId)}")` }}
+              />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <DialogTitle className="truncate text-base font-semibold text-foreground">Kitty Help</DialogTitle>
-            <span className="hidden rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground sm:inline-flex">
+                <span className="hidden rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground sm:inline-flex">
                   {resolveBusy ? resolveStage?.label ?? 'Kitty Help working' : 'AI Search + Kitty Help'}
                 </span>
               </div>
@@ -147,19 +166,6 @@ export function KittyHelpWorkspace({
                 Ask a question, or leave the box empty to run both support workflows
               </p>
             </div>
-            <label className="hidden shrink-0 sm:flex">
-              <select
-                value={model}
-                onChange={(event) => onModelChange(event.target.value as AskModel)}
-                disabled={resolveBusy}
-                aria-label="AI Search model"
-                className="h-8 max-w-40 appearance-none rounded-md border border-transparent bg-transparent px-1.5 text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
-              >
-                {ASK_MODELS.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-            </label>
             <button
               type="button"
               onClick={onClose}
@@ -170,20 +176,9 @@ export function KittyHelpWorkspace({
             </button>
           </div>
 
-          <label className="mt-2 flex sm:hidden">
-            <select
-              value={model}
-              onChange={(event) => onModelChange(event.target.value as AskModel)}
-              disabled={resolveBusy}
-              aria-label="AI Search model"
-              className="h-8 max-w-40 appearance-none rounded-md border border-transparent bg-transparent px-1.5 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              {ASK_MODELS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
-          </label>
         </header>
 
-        <div className={`grid min-h-0 flex-1 grid-cols-1 ${evidence.length ? 'lg:grid-cols-[minmax(0,1fr)_270px]' : 'lg:grid-cols-1'}`}>
+        <div className={`grid min-h-0 flex-1 grid-cols-1 ${hasRailContent ? 'lg:grid-cols-[minmax(0,1fr)_270px]' : 'lg:grid-cols-1'}`}>
           <div className="flex min-h-0 flex-col overflow-hidden">
             <CatAskPanel
               embedded
@@ -195,6 +190,7 @@ export function KittyHelpWorkspace({
               selectedModel={model}
               onModelChange={onModelChange}
               onEvidenceChange={onAskEvidenceChange}
+              onResolutionTldrChange={setResolutionTldr}
               onResolveRequest={onResolve}
               resolveResult={result}
               resolveBusy={resolveBusy}
@@ -204,26 +200,36 @@ export function KittyHelpWorkspace({
               onAutoAskConsumed={onAutoAskConsumed}
             />
           </div>
-            {evidence.length > 0 && <EvidenceRail sources={evidence} />}
-            {evidence.length > 0 && (
+          {hasRailContent && <EvidenceRail sources={evidence} tldr={resolutionTldr} />}
+          {hasRailContent && (
             <div className="max-h-[22dvh] overflow-y-auto border-t border-border bg-card/30 p-3 lg:hidden">
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <BookOpen className="size-4 text-accent" />
-              Evidence · {evidence.length}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {evidence.length ? evidence.map((source, index) => (
-                <details key={`${source.id}-${index}`} className="min-w-0 max-w-full rounded-md border border-border bg-card/50 px-2 py-1">
-                  <summary className="cursor-pointer break-words text-xs text-foreground">
-                    {source.id} {source.title.replace(/_/g, ' ')}
-                  </summary>
-                  <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-                    {source.excerpt}
+              {resolutionTldr && (
+                <section className="mb-3 rounded-lg border border-accent/25 bg-accent/5 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-accent">Chinese TLDR</p>
+                  <p lang="zh" className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{resolutionTldr}</p>
+                </section>
+              )}
+              {evidence.length > 0 && (
+                <>
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                    <BookOpen className="size-4 text-accent" />
+                    Evidence · {evidence.length}
                   </p>
-                </details>
-              )) : <span className="text-sm text-muted-foreground">Retrieved citations appear here.</span>}
+                  <div className="flex flex-wrap gap-1.5">
+                    {evidence.map((source, index) => (
+                      <details key={`${source.id}-${index}`} className="min-w-0 max-w-full rounded-md border border-border bg-card/50 px-2 py-1">
+                        <summary className="cursor-pointer break-words text-xs text-foreground">
+                          {source.id} {source.title.replace(/_/g, ' ')}
+                        </summary>
+                        <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                          {source.excerpt}
+                        </p>
+                      </details>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-          </div>
           )}
         </div>
       </DialogContent>

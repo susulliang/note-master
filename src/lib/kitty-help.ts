@@ -23,7 +23,6 @@
 
 import {
   entryFromAmrTemplate,
-  parseTemplate,
   rankEntries,
   searchTemplates,
   type TemplateEntry,
@@ -42,6 +41,10 @@ import {
   tokenize,
   type SopSection,
 } from '@/utils/sopIndexer';
+import {
+  expandRobotModelSearchQuery,
+  robotModelGuidance,
+} from '../../shared/model-intelligence';
 
 /* ------------------------------------------------------------------ */
 /*  Remote chat through the shared authenticated Worker serving API   */
@@ -178,6 +181,8 @@ function scoreNews(items: NewsItem[], query: string): Array<{ item: NewsItem; sc
  * the others before the cap.
  */
 export async function collectKittyCandidates(query: string, max = 50): Promise<KittyCandidate[]> {
+  const modelSearch = expandRobotModelSearchQuery(query);
+  query = modelSearch.query;
   const pooled: Array<{ kind: KittyKind; title: string; origin: string; candidate: Omit<KittyCandidate, 'id' | 'kind' | 'title' | 'origin'> }> = [];
 
   const safe = async <T,>(p: Promise<T>): Promise<T | null> => {
@@ -263,6 +268,21 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
 
   // Spec sheets — matched product models.
   const models = await safe((async () => findModels(getProductIndex(), query, 6))());
+  const familySheetPrefix = {
+    DEEBOT: 1,
+    GOAT: 2,
+    WINBOT: 4,
+  } as const;
+  for (const family of new Set(modelSearch.intents.map((intent) => intent.family))) {
+    const sheet = SHEET_RECORDS.find((record) => record.numericPrefix === familySheetPrefix[family]);
+    if (!sheet) continue;
+    pooled.push({
+      kind: 'spec',
+      title: `${family} series reference — ${sheet.sheetKey}`,
+      origin: `${family} series`,
+      candidate: { sheetKey: sheet.sheetKey },
+    });
+  }
   for (const m of models ?? []) {
     const sheet =
       SHEET_RECORDS.find((r) => r.sheetKey === m.origin) ??
@@ -301,6 +321,10 @@ export async function collectKittyCandidates(query: string, max = 50): Promise<K
     ...p,
     id: `K${String(i + 1).padStart(2, '0')}`,
   }));
+}
+
+export function kittyModelGuidance(query: string): string {
+  return robotModelGuidance(expandRobotModelSearchQuery(query).intents);
 }
 
 /**

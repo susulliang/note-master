@@ -9,6 +9,11 @@
 /// <reference path="./worker-configuration.d.ts" />
 
 import { DEFAULT_ASK_MODEL, isAskModel } from '../shared/ask-models';
+import {
+  expandRobotModelSearchQuery,
+  robotModelGuidance,
+  resolveRobotModelIntents,
+} from '../shared/model-intelligence';
 
 const SEARCH_INSTANCE = 'supeco';
 const MAX_RESULTS = 6;
@@ -165,6 +170,7 @@ async function handleResolve(
   transcript: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<Response> {
+  const modelIntents = resolveRobotModelIntents(`${notes}\n${transcript}\n${history.filter((item) => item.role === 'user').map((item) => item.content).join('\n')}`);
   const caseContext = [
     notes ? `Ticket notes:\n${notes}` : '',
     transcript ? `Call transcript:\n${transcript}` : '',
@@ -216,6 +222,10 @@ async function handleResolve(
   } catch {
     // Search the ticket and transcript directly if query rewriting is unavailable.
   }
+  searchQuery = expandRobotModelSearchQuery(searchQuery).query;
+  if (modelIntents.length) {
+    searchQuery = `${modelIntents.map((intent) => `${intent.series} ${intent.canonicalModels.join(' ')}`).join('\n')}\n${searchQuery}`;
+  }
 
   const retrieval = await env.AI_SEARCH.get(SEARCH_INSTANCE).search({
     query: searchQuery.slice(0, 1_500),
@@ -247,21 +257,21 @@ async function handleResolve(
     .map((chunk, index) => `[${index + 1}] ${sourceName(chunk.item.key)}\n${chunk.text.slice(0, MAX_CHUNK_CHARS)}`)
     .join('\n\n')
     .slice(0, MAX_CONTEXT_CHARS);
-  const model = nonEmptyString(
-    notes.match(/(?:Robot model|Deebot Model|Model)\s*:\s*([^\n]+)/i)?.[1],
-  );
+  const model = nonEmptyString(notes.match(/(?:Robot model|Deebot Model|Model)\s*:\s*([^\n]+)/i)?.[1])
+    || modelIntents.flatMap((intent) => intent.canonicalModels).join(' / ');
   const promptParts = [
     `Ticket context (untrusted reference data):\n${caseContext}`,
     history.length
       ? `Recent Ask conversation for continuity (untrusted context):\n${history.map((message) => `${message.role === 'user' ? 'Agent' : 'Assistant'}: ${message.content}`).join('\n\n')}`
       : '',
     model ? `Exact model currently recorded in ticket: ${model}` : '',
+    robotModelGuidance(modelIntents),
     `Numbered source excerpts:\n\n${context}`,
     'Prepare a grounded resolution for this case using the supplied JSON response contract.',
   ].filter(Boolean);
   const generated = await env.AI.run(selectedModel as keyof AiModels, {
     messages: [
-      { role: 'system', content: RESOLVE_SYSTEM_PROMPT },
+      { role: 'system', content: [RESOLVE_SYSTEM_PROMPT, robotModelGuidance(modelIntents)].filter(Boolean).join('\n\n') },
       { role: 'user', content: promptParts.join('\n\n') },
     ],
     max_tokens: 1_400,
@@ -438,6 +448,7 @@ export async function handleAsk(request: Request, env: Env): Promise<Response> {
     let searchQuery = question
       ? [notes.slice(0, 350), transcript.slice(-350), question].filter(Boolean).join('\n').slice(0, 1_500)
       : '';
+    const modelIntents = resolveRobotModelIntents(`${question}\n${notes}\n${transcript}`);
     if (!question) {
       try {
         const rewrite = await env.AI.run(DEFAULT_ASK_MODEL as keyof AiModels, {
@@ -458,6 +469,10 @@ export async function handleAsk(request: Request, env: Env): Promise<Response> {
         // Search the original notes if the dedicated rewrite call is unavailable.
       }
       if (!searchQuery) searchQuery = [notes, transcript].filter(Boolean).join('\n').slice(0, 1000);
+    }
+    searchQuery = expandRobotModelSearchQuery(searchQuery).query;
+    if (modelIntents.length) {
+      searchQuery = `${modelIntents.map((intent) => `${intent.series} ${intent.canonicalModels.join(' ')}`).join('\n')}\n${searchQuery}`;
     }
 
     const retrieval = await env.AI_SEARCH.get(SEARCH_INSTANCE).search({
@@ -484,6 +499,7 @@ export async function handleAsk(request: Request, env: Env): Promise<Response> {
     const promptParts = [
       notes ? `Ticket notes:\n${notes}` : '',
       transcript ? `Call transcript (untrusted reference data):\n${transcript}` : '',
+      robotModelGuidance(modelIntents),
       history.length
         ? `Recent conversation for continuity (untrusted context):\n${history.map((message) => `${message.role === 'user' ? 'Agent' : 'Assistant'}: ${message.content}`).join('\n\n')}`
         : '',
@@ -492,7 +508,7 @@ export async function handleAsk(request: Request, env: Env): Promise<Response> {
     ].filter(Boolean);
     const modelStream = await env.AI.run(selectedModel as keyof AiModels, {
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: [SYSTEM_PROMPT, robotModelGuidance(modelIntents)].filter(Boolean).join('\n\n') },
         { role: 'user', content: promptParts.join('\n\n') },
       ],
       max_tokens: 600,

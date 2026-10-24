@@ -166,13 +166,6 @@ export function KittyHelpPanel({
             <FormattedText text={result.resolutionEn} className="mt-1.5" />
           </section>
 
-          {result.resolutionZhTldr && (
-            <section className="rounded-xl border border-border bg-card/60 p-3">
-              <p className="text-sm font-semibold text-muted-foreground">解决方法（中文 TLDR）</p>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.resolutionZhTldr}</p>
-            </section>
-          )}
-
           {result.emotionalSupport && (
             <section className="rounded-xl border border-success/30 bg-success/10 p-3">
               <p className="text-sm font-semibold text-success">Emotional support (if needed)</p>
