@@ -40,7 +40,7 @@ snapshot under `dashboard_publish/`; `npm run publish:dashboard-data` validates
 it and publishes it to the public R2 bucket. These commands need current report
 exports and local Cloudflare credentials.
 
-See [REPORT_REFRESH_RUNBOOK.md](REPORT_REFRESH_RUNBOOK.md) for download,
+See [REPORT_REFRESH_RUNBOOK.md](runbooks/REPORT_REFRESH_RUNBOOK.md) for download,
 validation, and publishing steps. FAQ source workbooks under `FAQ/` are
 versioned application inputs and should remain in Git.
 

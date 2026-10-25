@@ -496,7 +496,8 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                 </div>
               </div>
             </header>
-            <div className="grid gap-3">
+            {/* Suite table — responsive rows × columns of test cards */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {SELF_TEST_SUITES.map((suite, idx) => {
                 const p = progress[suite.id];
                 const attempts = p?.attempts ?? 0;
@@ -511,46 +512,55 @@ export default function SelfTestWorkspace({ onCatThought, onCatMoveTo }: SelfTes
                     disabled={done}
                     onClick={() => openNameEntry(suite)}
                     className={cn(
-                      'glass-panel group flex w-full items-center gap-4 rounded-xl px-4 py-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+                      'glass-panel group flex w-full flex-col items-start gap-3 rounded-xl px-4 py-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
                       done
                         ? 'border-border opacity-55'
                         : cn('border-border/80 hover:-translate-y-0.5 hover:bg-card', color.ring, color.glow)
                     )}
                   >
-                    <div
-                      className={cn(
-                        'flex size-14 shrink-0 items-center justify-center rounded-xl border font-mono text-base font-extrabold transition-transform duration-200 group-hover:rotate-2 group-hover:scale-105',
-                        done ? 'border-border text-muted-foreground' : color.badge
-                      )}
-                      style={done ? undefined : { backgroundImage: color.gradient }}
-                    >
-                      {done ? <Lock className="size-5" /> : suite.label.replace('Week ', 'W')}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-base font-bold text-foreground">{suite.label}</span>
-                        <span className="font-mono text-xs text-muted-foreground">{suite.range}</span>
-                      </div>
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {suite.articles.length} articles · {qCount} questions
-                        {attempts > 0 && ` · attempt ${Math.min(attempts, MAX_ATTEMPTS_PER_SUITE)}/${MAX_ATTEMPTS_PER_SUITE}${done ? ' — completed' : ''}`}
-                      </div>
-                    </div>
-                    {latest !== null && (
+                    <div className="flex w-full items-center gap-3">
                       <div
                         className={cn(
-                          'glass-chip shrink-0 rounded-lg px-3 py-1 font-mono text-base font-extrabold',
-                          latest >= 80
-                            ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-300'
-                            : latest >= 60
-                              ? 'border-amber-400/60 bg-amber-400/15 text-amber-300'
-                              : 'border-rose-400/60 bg-rose-400/15 text-rose-300'
+                          'flex size-12 shrink-0 items-center justify-center rounded-xl border font-mono text-sm font-extrabold transition-transform duration-200 group-hover:rotate-2 group-hover:scale-105',
+                          done ? 'border-border text-muted-foreground' : color.badge
                         )}
+                        style={done ? undefined : { backgroundImage: color.gradient }}
                       >
-                        {latest}%
+                        {done ? <Lock className="size-5" /> : suite.label.replace('Week ', 'W')}
                       </div>
-                    )}
-                    {!done && <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />}
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-mono text-base font-bold text-foreground">{suite.label}</span>
+                        <span className="block font-mono text-xs text-muted-foreground">{suite.range}</span>
+                      </div>
+                      {latest !== null && (
+                        <div
+                          className={cn(
+                            'glass-chip shrink-0 rounded-lg px-2.5 py-1 font-mono text-sm font-extrabold',
+                            latest >= 80
+                              ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-300'
+                              : latest >= 60
+                                ? 'border-amber-400/60 bg-amber-400/15 text-amber-300'
+                                : 'border-rose-400/60 bg-rose-400/15 text-rose-300'
+                          )}
+                        >
+                          {latest}%
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <div className="text-xs text-muted-foreground">
+                        {suite.articles.length} articles · {qCount} questions
+                        {attempts > 0 && (
+                          <span className="block">
+                            attempt {Math.min(attempts, MAX_ATTEMPTS_PER_SUITE)}/{MAX_ATTEMPTS_PER_SUITE}
+                            {done ? ' — completed' : ''}
+                          </span>
+                        )}
+                      </div>
+                      {!done && (
+                        <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
+                      )}
+                    </div>
                   </button>
                 );
               })}

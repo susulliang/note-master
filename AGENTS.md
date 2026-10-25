@@ -1,3 +1,7 @@
+> **Agents:** this file is the original product spec (historical reference).
+> For recurring data-update procedures, see [AGENT.md](AGENT.md) and
+> [`runbooks/`](runbooks/).
+
 # Ecovacs Ticket Notes - 需求拆解文档
 
 ## 产品概述

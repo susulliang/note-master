@@ -4,6 +4,7 @@ import { suitesPart2 } from './suites-part2';
 import { suitesPart3 } from './suites-part3';
 import { suitesPart4 } from './suites-part4';
 import { suitesPart5 } from './suites-part5';
+import { suitesPart6 } from './suites-part6';
 
 export type { QuizQuestion, ArticleQuiz, TestSuite, SuiteProgress, SelfTestProgress } from './types';
 
@@ -13,6 +14,7 @@ export const SELF_TEST_SUITES: TestSuite[] = [
   ...suitesPart3,
   ...suitesPart4,
   ...suitesPart5,
+  ...suitesPart6,
 ];
 
 export const MAX_ATTEMPTS_PER_SUITE = 2;

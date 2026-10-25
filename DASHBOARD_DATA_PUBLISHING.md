@@ -10,7 +10,7 @@ The report entry-point URLs are cataloged in
 [`scripts/report-download-sources.json`](scripts/report-download-sources.json)
 for future download automation. Each source requires an authenticated session;
 the registry stores no credentials or session data. See the
-[report refresh runbook](REPORT_REFRESH_RUNBOOK.md) for the browser download,
+[report refresh runbook](runbooks/REPORT_REFRESH_RUNBOOK.md) for the browser download,
 parse, review, and publish routine.
 
 ## Cloudflare R2 setup

@@ -2,13 +2,13 @@
   "title": "Crazy New 2.0",
   "period": "October 2026",
   "scoreLabel": "V3 SCORE",
-  "totalScore": 91.6,
+  "totalScore": 91.5195,
   "settlementCoefficient": 1,
   "source": {
     "documentTitle": "KPI Money Go High!",
     "sheetName": "Crazy New 2.0 (Oct 2026)",
-    "revision": 2514,
-    "updatedAt": "2026-10-12T22:42:18.000Z"
+    "revision": 2612,
+    "updatedAt": "2026-10-24T00:28:35.000Z"
   },
   "notes": [
     "Attrition deductions: 1 departure deducts 2 points; 2 departures deduct 5 points.",
@@ -24,8 +24,8 @@
       "target": 95,
       "threshold": 90,
       "weight": 10,
-      "achievement": 93.57,
-      "score": 9.85
+      "achievement": 92.81,
+      "score": 9.7695
     },
     {
       "category": "Quality",
@@ -36,7 +36,7 @@
       "target": 95,
       "threshold": 90,
       "weight": 20,
-      "achievement": 95.27,
+      "achievement": 95.01,
       "score": 20
     },
     {
