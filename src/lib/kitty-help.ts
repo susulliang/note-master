@@ -113,13 +113,65 @@ export function unwrapNestedLlmJson(
  * prefix caching, but keeping them identical keeps behavior predictable.
  * Throws on failure so the orchestrating hook can surface the stage.
  */
-export async function kittyChat(messages: ChatMsg[], maxTokens: number): Promise<string> {
+export async function kittyChat(
+  messages: ChatMsg[],
+  maxTokens: number,
+  onDelta?: (text: string, accumulated: string) => void,
+): Promise<string> {
   const response = await requestRemoteChatCompletion({
     model: readRemoteLlmModel(),
     messages,
     temperature: 0.2,
     maxTokens: Math.max(1, Math.min(8192, maxTokens | 0)),
+    stream: Boolean(onDelta),
   });
+  if (onDelta && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let accumulated = '';
+    let finished = false;
+    const consumeFrames = (flush = false) => {
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = flush ? '' : (frames.pop() ?? '');
+      for (const frame of frames) {
+        const payload = frame.split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n');
+        if (!payload) continue;
+        if (payload === '[DONE]') {
+          finished = true;
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(payload) as {
+            choices?: Array<{ delta?: { content?: unknown } }>;
+          };
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta) {
+            accumulated += delta;
+            onDelta(delta, accumulated);
+          }
+        } catch {
+          // Ignore malformed provider frames, but keep reading the stream.
+        }
+      }
+    };
+    try {
+      while (!finished) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        consumeFrames();
+      }
+      buffer += decoder.decode();
+      consumeFrames(true);
+    } finally {
+      reader.releaseLock();
+    }
+    return accumulated;
+  }
   const body = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };

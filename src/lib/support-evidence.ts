@@ -7,6 +7,7 @@ export interface SupportEvidence {
   id: string;
   title: string;
   excerpt: string;
+  language?: 'en' | 'zh';
 }
 
 const evidenceBodyCache = new Map<string, Promise<string>>();

@@ -95,6 +95,16 @@ function buildSourceBlock(contents: Array<{ candidate: KittyCandidate; content: 
     .join('\n\n');
 }
 
+function readPartialJsonString(text: string, key: string): string {
+  const match = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)`));
+  if (!match) return '';
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+}
+
 export function useKittyHelp(args: {
   transcript: TranscriptEntry[];
   formData: CatFormData;
@@ -158,7 +168,11 @@ export function useKittyHelp(args: {
     return { entries: transcript, transcriptText, formTail, query: `${transcriptText}\n\n${formTail}`.trim() };
   }, [transcript, formData]);
 
-  const start = useCallback(async (askQuestion = ''): Promise<void> => {
+  const start = useCallback(async (
+    askQuestion = '',
+    pairedRunId?: string,
+    onStream?: (preview: string) => void,
+  ): Promise<void> => {
     if (runRef.current) return;
     const { entries, transcriptText, formTail, query } = buildQueryContext();
     const specificQuestion = askQuestion.trim();
@@ -184,7 +198,7 @@ export function useKittyHelp(args: {
     setResult(null);
     setPanelOpen(true);
     const started = performance.now();
-    const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const runId = pairedRunId ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
       const {
@@ -325,6 +339,9 @@ export function useKittyHelp(args: {
           id: `[${candidate.id}]`,
           title: candidate.title,
           excerpt: content.slice(0, 1_200),
+          language: candidate.faq?.lang === 'en' || candidate.faq?.lang === 'zh'
+            ? candidate.faq.lang
+            : undefined,
         }));
       }
       messages.push({
@@ -340,7 +357,17 @@ export function useKittyHelp(args: {
           '({"say_to_customer","resolution_en","resolution_zh_tldr","emotional_support","sources"}).',
         ].join('\n'),
       });
-      const reply3 = await kittyChat(messages, 2500);
+      const reply3 = await kittyChat(messages, 2500, onStream
+        ? (_delta, accumulated) => {
+            const sayToCustomer = readPartialJsonString(accumulated, 'say_to_customer');
+            const resolution = readPartialJsonString(accumulated, 'resolution_en');
+            const preview = [
+              sayToCustomer ? `**Say to the customer**\n${sayToCustomer}` : '',
+              resolution ? `**Grounded resolution**\n${resolution}` : '',
+            ].filter(Boolean).join('\n\n');
+            if (preview) onStream(preview);
+          }
+        : undefined);
       messages.push({ role: 'assistant', content: reply3 });
 
       // Hardened parse: direct/fenced/brace-slice JSON, line salvage, then a

@@ -1789,8 +1789,7 @@ Additional information (if needed): ${additional}`;
   const runBothKittyWorkflows = useCallback(() => {
     setKittyHelpOpen(true);
     setAutoAskOnOpen(true);
-    void kitty.start();
-  }, [kitty.start]);
+  }, []);
 
   // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
@@ -2935,6 +2934,8 @@ Additional information (if needed): ${additional}`;
         <Suspense fallback={null}>
           <KittyHelpWorkspace
             catId={selectedCat}
+            callBarVisible={workView === 'callNotes'}
+            callBarExpanded={call.isCapturing || transcriptEditing}
             onClose={() => setKittyHelpOpen(false)}
             model={kittyModel}
             onModelChange={changeKittyModel}
@@ -2946,7 +2947,7 @@ Additional information (if needed): ${additional}`;
             resolveStage={kitty.stage}
             resolveError={kitty.error}
             result={kitty.result}
-            onResolve={(question) => { void kitty.start(question); }}
+            onResolve={(question, runId, onStream) => { void kitty.start(question, runId, onStream); }}
             autoAskOnOpen={autoAskOnOpen}
             onAutoAskConsumed={consumeAutoAsk}
             askEvidence={kittyAskEvidence}

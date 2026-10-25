@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Mail, Search, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,6 +36,9 @@ interface AskTurn extends AskEmailContext {
   sources: string[];
   evidence: SupportEvidence[];
   fromNotes: boolean;
+  isKittyTurn?: boolean;
+  kittyPreview?: string;
+  kittyPending?: boolean;
   resolution?: KittyHelpResult;
   resolutionRunId?: string;
   error?: string;
@@ -66,7 +69,10 @@ function readEvidence(value: unknown): SupportEvidence[] {
     typeof source === 'object' &&
     typeof (source as SupportEvidence).id === 'string' &&
     typeof (source as SupportEvidence).title === 'string' &&
-    typeof (source as SupportEvidence).excerpt === 'string'
+    typeof (source as SupportEvidence).excerpt === 'string' &&
+    ((source as SupportEvidence).language === undefined ||
+      (source as SupportEvidence).language === 'en' ||
+      (source as SupportEvidence).language === 'zh')
   ));
 }
 
@@ -187,6 +193,7 @@ export function CatAskPanel({
   embedded = false,
   selectedModel,
   onModelChange,
+  onConversationControlsChange,
   onEvidenceChange,
   onResolveRequest,
   onResolutionTldrChange,
@@ -205,8 +212,13 @@ export function CatAskPanel({
   embedded?: boolean;
   selectedModel?: AskModel;
   onModelChange?: (model: AskModel) => void;
+  onConversationControlsChange?: (hasConversation: boolean, clearConversation: () => void) => void;
   onEvidenceChange?: (evidence: SupportEvidence[]) => void;
-  onResolveRequest?: (question: string) => void;
+  onResolveRequest?: (
+    question: string,
+    runId: string,
+    onStream: (preview: string) => void,
+  ) => void;
   onResolutionTldrChange?: (tldr: string) => void;
   resolveResult?: KittyHelpResult | null;
   resolveBusy?: boolean;
@@ -229,7 +241,7 @@ export function CatAskPanel({
   const [emailOpen, setEmailOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const submitRef = useRef<((runKittyIfEmpty?: boolean) => Promise<void>) | null>(null);
+  const submitRef = useRef<(() => Promise<void>) | null>(null);
   const autoAskHandledRef = useRef(false);
 
   useEffect(() => {
@@ -301,30 +313,56 @@ export function CatAskPanel({
       resolveResult.emotionalSupport ? `Empathy:\n${resolveResult.emotionalSupport}` : '',
     ].filter(Boolean).join('\n\n');
     setConversation((current) => {
-      if (current.some((turn) => turn.resolutionRunId === resolutionRunId)) return current;
-      return [...current, {
+      const resolvedTurn: AskTurn = {
         id,
-        question: 'Resolve the current ticket with Kitty Help',
+        question: 'Kitty Help resolution',
         answer,
         sources: resolveResult.sources,
         evidence: resolveResult.evidence ?? [],
         fromNotes: true,
+        isKittyTurn: true,
+        kittyPending: false,
         resolution: resolveResult,
         resolutionRunId,
-      }];
+      };
+      const existing = current.findIndex((turn) => turn.isKittyTurn && turn.resolutionRunId === resolutionRunId);
+      if (existing >= 0) return current.map((turn, index) => index === existing ? resolvedTurn : turn);
+      return [resolvedTurn, ...current];
     });
   }, [loadedStorageKey, resolveResult, storageKey]);
 
-  const submit = async (runKitty = true) => {
+  useEffect(() => {
+    if (resolveBusy || !resolveError) return;
+    setConversation((current) => {
+      const pending = [...current].reverse().find((turn) => turn.isKittyTurn && turn.kittyPending);
+      if (!pending) return current;
+      return current.map((turn) => turn.id === pending.id
+        ? { ...turn, kittyPending: false, error: resolveError }
+        : turn);
+    });
+  }, [resolveBusy, resolveError]);
+
+  const submit = async () => {
     const q = question.trim();
-    if (loading) return;
+    if (loading || resolveBusy) return;
     const fromNotes = !q;
     if (fromNotes && !notes.trim() && !transcript.trim()) {
       setError('No support notes are filled in yet. Add ticket details or type a question.');
       return;
     }
-    if (runKitty) onResolveRequest?.(q);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const kittyId = `kitty-${id}`;
+    const kittyTurn: AskTurn = {
+      id: kittyId,
+      question: 'Kitty Help resolution',
+      answer: '',
+      sources: [],
+      evidence: [],
+      fromNotes,
+      isKittyTurn: true,
+      kittyPending: true,
+      resolutionRunId: id,
+    };
     const turn: AskTurn = {
       id,
       question: q || (notes.trim() ? 'Search current ticket context' : 'Search the current call transcript'),
@@ -344,7 +382,10 @@ export function CatAskPanel({
         { role: 'assistant' as const, content: item.answer },
       ]);
 
-    setConversation((current) => [...current, turn]);
+    setConversation((current) => [...current, kittyTurn, turn]);
+    onResolveRequest?.(q, id, (preview) => {
+      updateTurn(kittyId, (current) => ({ ...current, kittyPreview: preview }));
+    });
     setQuestion('');
     setError('');
     setLoading(true);
@@ -407,10 +448,10 @@ export function CatAskPanel({
     if (autoAskHandledRef.current) return;
     autoAskHandledRef.current = true;
     onAutoAskConsumed?.();
-    void submitRef.current?.(false);
+    void submitRef.current?.();
   }, [autoAskOnMount, onAutoAskConsumed]);
 
-  const clearConversation = () => {
+  const clearConversation = useCallback(() => {
     if (!conversation.length || !window.confirm('Clear this saved Kitty Help conversation? This cannot be undone.')) return;
     setConversation([]);
     setError('');
@@ -419,7 +460,11 @@ export function CatAskPanel({
     } catch {
       // The in-memory conversation is still cleared.
     }
-  };
+  }, [conversation.length, storageKey]);
+
+  useEffect(() => {
+    onConversationControlsChange?.(conversation.length > 0, clearConversation);
+  }, [conversation.length, clearConversation, onConversationControlsChange]);
 
   const canGenerateEmail = emailConversation.length > 0 && !loading;
 
@@ -441,7 +486,7 @@ export function CatAskPanel({
         aria-modal={embedded ? undefined : true}
         aria-label="Ask the knowledge base"
       >
-        <header className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-3 py-2 sm:gap-3 sm:px-4">
+        {!embedded && <header className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-3 py-2 sm:gap-3 sm:px-4">
           {!embedded && (
           <div
             className="relative z-30 shrink-0"
@@ -495,21 +540,6 @@ export function CatAskPanel({
           <div className="min-w-0 flex-1">
             {!embedded && <h2 className="truncate text-sm font-semibold text-foreground">Knowledge assistant</h2>}
           </div>
-          {embedded && (
-            <label className="shrink-0">
-              <select
-                value={model}
-                onChange={(event) => changeModel(event.target.value as AskModel)}
-                disabled={loading || resolveBusy}
-                aria-label="AI Search model"
-                className="h-8 max-w-36 appearance-none rounded-md border border-border/60 bg-background/40 px-2 text-[10px] text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50 sm:max-w-44 sm:text-xs"
-              >
-                {ASK_MODELS.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-          )}
           {conversation.length > 0 && (
             <button type="button" onClick={clearConversation} title="Clear saved conversations" className="glass-btn inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
               <Trash2 aria-hidden="true" className="size-3.5" />
@@ -521,7 +551,7 @@ export function CatAskPanel({
               <X className="size-4" />
             </button>
           )}
-        </header>
+        </header>}
 
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-5 sm:px-5 sm:py-4">
           {conversation.length === 0 && (
@@ -542,13 +572,29 @@ export function CatAskPanel({
           )}
           {conversation.map((turn) => (
             <article key={turn.id} className="space-y-3">
-              <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-accent/25 bg-accent/10 px-4 py-2.5 text-sm text-foreground">
-                {turn.question}
-              </div>
+              {!turn.isKittyTurn && (
+                <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-accent/25 bg-accent/10 px-4 py-2.5 text-sm text-foreground">
+                  {turn.question}
+                </div>
+              )}
               <div className="flex items-start gap-2.5">
                 <div className="min-w-0 flex-1">
                   {turn.resolution ? (
                     <KittyHelpPanel result={turn.resolution} onClose={() => {}} embedded inline />
+                  ) : turn.isKittyTurn ? (
+                    <div className="space-y-2">
+                      {turn.kittyPreview && (
+                        <div className="prose prose-sm max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-accent">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.kittyPreview}</ReactMarkdown>
+                        </div>
+                      )}
+                      {turn.kittyPending && (
+                        <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
+                          <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary shadow-[0_0_8px_var(--primary)]" />
+                          <span>{turn.kittyPreview ? 'Streaming Kitty Help resolution…' : resolveStage?.label ?? 'Kitty Help is selecting sources…'}</span>
+                        </div>
+                      )}
+                    </div>
                   ) : turn.answer ? (
                     <div className="prose prose-sm max-w-none break-words text-sm leading-relaxed text-foreground prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-a:text-accent prose-code:text-warning prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/60">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
@@ -592,10 +638,10 @@ export function CatAskPanel({
                 onClose();
               }
             }}
-            disabled={loading}
+            disabled={loading || resolveBusy}
             maxLength={1000}
             rows={2}
-            placeholder={loading ? 'Searching and resolving…' : 'Ask a question to run AI Search + Kitty Help…'}
+            placeholder={loading || resolveBusy ? 'Searching and resolving…' : 'Ask a question to run AI Search + Kitty Help…'}
             className="max-h-32 min-h-14 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-base text-foreground outline-none placeholder:text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60 sm:text-sm"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
@@ -604,7 +650,7 @@ export function CatAskPanel({
               <button
                 type="button"
                 onClick={() => setEmailOpen(true)}
-                disabled={!canGenerateEmail || loading}
+                disabled={!canGenerateEmail || loading || resolveBusy}
                 className="glass-btn inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-foreground transition disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex-none sm:px-3"
               >
                 <Mail className="size-3.5" />
@@ -613,7 +659,7 @@ export function CatAskPanel({
               <button
                 type="button"
                 onClick={() => void submit()}
-                disabled={loading || (!question.trim() && !notes.trim() && !transcript.trim())}
+                disabled={loading || resolveBusy || (!question.trim() && !notes.trim() && !transcript.trim())}
                 className="glass-btn glass-btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-primary-foreground transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex-none sm:px-3.5"
               >
                 <Send className="size-3.5" />

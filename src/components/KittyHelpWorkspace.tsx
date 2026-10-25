@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  Trash2,
   X,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import type { AskModel } from '@shared/ask-models';
+import { ASK_MODELS, type AskModel } from '@shared/ask-models';
 import { getCatSprite, type CatId } from '@/lib/cat-sprites';
 import type { KittyHelpResult, KittyStage } from '@/hooks/use-kitty-help';
 import { hydrateSupportEvidence, type SupportEvidence } from '@/lib/support-evidence';
@@ -12,6 +13,8 @@ import { CatAskPanel } from '@/components/CatAskPanel';
 
 interface KittyHelpWorkspaceProps {
   catId: CatId;
+  callBarVisible: boolean;
+  callBarExpanded: boolean;
   onClose: () => void;
   model: AskModel;
   onModelChange: (model: AskModel) => void;
@@ -23,7 +26,7 @@ interface KittyHelpWorkspaceProps {
   resolveStage: KittyStage | null;
   resolveError: string | null;
   result: KittyHelpResult | null;
-  onResolve: (question: string) => void;
+  onResolve: (question: string, runId: string, onStream: (preview: string) => void) => void;
   autoAskOnOpen: boolean;
   onAutoAskConsumed: () => void;
   askEvidence: SupportEvidence[];
@@ -63,7 +66,14 @@ function EvidenceRail({ sources, tldr }: { sources: SupportEvidence[]; tldr: str
                 <p className="break-words text-[11px] leading-relaxed text-foreground/85">
                   {source.title.replace(/_/g, ' ')}
                 </p>
-                <p className="mt-1 text-[10px] text-muted-foreground">Retrieved excerpt</p>
+                <p className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  {source.language && (
+                    <span className="rounded border border-accent/25 bg-accent/5 px-1 py-0.5 font-semibold text-accent">
+                      {source.language.toUpperCase()}
+                    </span>
+                  )}
+                  Retrieved excerpt
+                </p>
               </div>
             </div>
             <details className="mt-2 border-t border-border pt-2">
@@ -94,6 +104,8 @@ function EvidenceRail({ sources, tldr }: { sources: SupportEvidence[]; tldr: str
 
 export function KittyHelpWorkspace({
   catId,
+  callBarVisible,
+  callBarExpanded,
   onClose,
   model,
   onModelChange,
@@ -120,6 +132,18 @@ export function KittyHelpWorkspace({
   }, [askEvidence, result?.evidence]);
   const [evidence, setEvidence] = useState(rawEvidence);
   const [resolutionTldr, setResolutionTldr] = useState(result?.resolutionZhTldr ?? '');
+  const [hasConversation, setHasConversation] = useState(false);
+  const clearConversationRef = useRef<() => void>(() => {});
+
+  const updateConversationControls = useCallback((hasItems: boolean, clear: () => void) => {
+    setHasConversation(hasItems);
+    clearConversationRef.current = clear;
+  }, []);
+  const callBarClearance = callBarVisible
+    ? callBarExpanded
+      ? 'top-4 bottom-[calc(12rem+env(safe-area-inset-bottom))] h-auto max-h-none translate-y-0 max-md:top-4 max-md:h-auto max-md:max-h-none max-md:bottom-[calc(12rem+env(safe-area-inset-bottom))] max-md:translate-y-0 max-md:pb-0'
+      : 'top-4 bottom-[calc(6rem+env(safe-area-inset-bottom))] h-auto max-h-none translate-y-0 max-md:top-4 max-md:h-auto max-md:max-h-none max-md:bottom-[calc(6rem+env(safe-area-inset-bottom))] max-md:translate-y-0 max-md:pb-0'
+    : '';
 
   useEffect(() => {
     let active = true;
@@ -142,7 +166,7 @@ export function KittyHelpWorkspace({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(900px,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] max-w-6xl flex-col gap-0 overflow-hidden border-[1.5px] border-foreground/10 p-0 font-sans shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:w-full max-md:rounded-none max-md:pb-[calc(env(safe-area-inset-bottom)+5rem)] max-sm:max-w-none max-sm:w-full"
+        className={`flex h-[min(900px,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] max-w-6xl flex-col gap-0 overflow-hidden border-[1.5px] border-foreground/10 p-0 font-sans shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:w-full max-md:rounded-none max-md:pb-[calc(env(safe-area-inset-bottom)+5rem)] max-sm:max-w-none max-sm:w-full ${callBarClearance}`}
         style={{ backgroundColor: 'color-mix(in oklab, var(--card) 30%, transparent)' }}
       >
         <header className="shrink-0 border-b border-border bg-card/40 px-3 py-3 sm:px-5">
@@ -166,6 +190,30 @@ export function KittyHelpWorkspace({
                 Ask a question, or leave the box empty to run both support workflows
               </p>
             </div>
+            <label className="shrink-0">
+              <select
+                value={model}
+                onChange={(event) => onModelChange(event.target.value as AskModel)}
+                disabled={resolveBusy}
+                aria-label="AI Search model"
+                className="h-8 max-w-28 appearance-none rounded-md border border-border/60 bg-background/40 px-2 text-[10px] text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50 sm:max-w-44 sm:text-xs"
+              >
+                {ASK_MODELS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            {hasConversation && (
+              <button
+                type="button"
+                onClick={() => clearConversationRef.current()}
+                title="Clear saved conversations"
+                aria-label="Clear saved conversations"
+                className="glass-btn grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -189,6 +237,7 @@ export function KittyHelpWorkspace({
               agentName={agentName}
               selectedModel={model}
               onModelChange={onModelChange}
+              onConversationControlsChange={updateConversationControls}
               onEvidenceChange={onAskEvidenceChange}
               onResolutionTldrChange={setResolutionTldr}
               onResolveRequest={onResolve}
@@ -219,7 +268,7 @@ export function KittyHelpWorkspace({
                     {evidence.map((source, index) => (
                       <details key={`${source.id}-${index}`} className="min-w-0 max-w-full rounded-md border border-border bg-card/50 px-2 py-1">
                         <summary className="cursor-pointer break-words text-xs text-foreground">
-                          {source.id} {source.title.replace(/_/g, ' ')}
+                          {source.id} {source.language ? `${source.language.toUpperCase()} · ` : ''}{source.title.replace(/_/g, ' ')}
                         </summary>
                         <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                           {source.excerpt}
