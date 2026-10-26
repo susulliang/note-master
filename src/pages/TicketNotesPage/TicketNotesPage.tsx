@@ -69,7 +69,13 @@ import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas from '@/components/FlowchartCanvas';
 import AuthPanel from '@/components/AuthPanel';
 import { useAuth } from '@/lib/auth-context';
-import { getStoredToken, submitQaAward } from '@/lib/auth-client';
+import {
+  getStoredToken,
+  saveGeneratedTicketNote,
+  submitQaAward,
+  updateGeneratedTicketNote,
+  type SavedTicketNoteInput,
+} from '@/lib/auth-client';
 import { QA_CHECKLIST_TOTAL } from '@/data/qaCallChecklist';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
 import QuickRepliesMenu from '@/components/QuickRepliesMenu';
@@ -1032,6 +1038,8 @@ export default function TicketNotesPage() {
   const [gbuOpen, setGbuOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
+  const [generatedTicketNoteId, setGeneratedTicketNoteId] = useState('');
+  const [generatedTicketIssueType, setGeneratedTicketIssueType] = useState('');
   /** Hang Up guard — prevents the "press twice" bug by guaranteeing the
    *  button does exactly ONE full lifecycle per click: stop capture → drain
    *  transcript → run final LLM → build note → open modal. Re-entrant
@@ -1376,6 +1384,7 @@ SKU: ${getStr(NODE_IDS.SKU_NUMBER) || 'N/A'}
 Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
+Solved: N
 
 Additional information (if needed): ${additional}`;
     }, []);
@@ -1405,6 +1414,19 @@ Additional information (if needed): ${additional}`;
       setHistory((prev) => [entry, ...prev].slice(0, MAX_HISTORY_ENTRIES));
     },
     [formData, setHistory]
+  );
+
+  const handleArchiveTicketNote = useCallback(
+    async (note: SavedTicketNoteInput) => {
+      await saveGeneratedTicketNote(note);
+    },
+    []
+  );
+  const handleUpdateArchivedTicketNote = useCallback(
+    async (note: SavedTicketNoteInput) => {
+      await updateGeneratedTicketNote(note);
+    },
+    []
   );
 
   const handleDeleteHistory = useCallback(
@@ -2049,6 +2071,10 @@ Additional information (if needed): ${additional}`;
       // the modal. ALWAYS runs regardless of capture errors above — this
       // is the actual "one click shows the note" guarantee.
       const text = buildNoteText(formDataRef.current);
+      const rawIssueType = formDataRef.current[NODE_IDS.ISSUE_TYPE];
+      const issueType = typeof rawIssueType === 'string' ? rawIssueType : '';
+      setGeneratedTicketNoteId(crypto.randomUUID());
+      setGeneratedTicketIssueType(issueType);
       setNoteText(text);
       setShowOutput(true);
 
@@ -2865,6 +2891,10 @@ Additional information (if needed): ${additional}`;
               open={showOutput}
               onOpenChange={setShowOutput}
               noteText={noteText}
+              ticketNoteId={generatedTicketNoteId}
+              ticketIssueType={generatedTicketIssueType}
+              onArchiveTicketNote={handleArchiveTicketNote}
+              onUpdateArchivedTicketNote={handleUpdateArchivedTicketNote}
               onSaveToHistory={handleOutputClose}
             />
           </Suspense>

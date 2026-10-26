@@ -14,10 +14,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
+import { BookOpen, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import KnowledgeBaseTab from '@/components/KnowledgeBaseTab';
+import SavedTicketNotesTab from '@/components/SavedTicketNotesTab';
 import {
   adminDeleteStoreProduct,
   adminDeleteUser,
@@ -42,7 +43,7 @@ const PRIVILEGE_LABELS: { key: PrivilegeKey; label: string }[] = [
   { key: 'trak', label: 'TRAK' },
 ];
 
-type AdminTab = 'privileges' | 'store' | 'knowledge';
+type AdminTab = 'privileges' | 'store' | 'knowledge' | 'savedNotes';
 
 const TABS: { key: AdminTab; label: string; icon: typeof ShieldCheck }[] = [
   { key: 'privileges', label: 'Privileges', icon: UserCog },
@@ -99,6 +100,10 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
   const canAccessAdmin = user?.canAccessAdmin ?? false;
   const canManageStore = user?.canManageStore ?? false;
   const [tab, setTab] = useState<AdminTab>('privileges');
+  const visibleTabs: { key: AdminTab; label: string; icon: typeof ShieldCheck }[] =
+    user?.isSuperAdmin
+      ? [...TABS, { key: 'savedNotes', label: 'Saved Notes', icon: ClipboardList }]
+      : TABS;
 
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -289,6 +294,8 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
             <p className="text-xs text-muted-foreground">
               {tab === 'knowledge'
                 ? 'D1 knowledge base · bundled blobs as fallback'
+                : tab === 'savedNotes'
+                  ? 'Ticket QA archive · issue type + push time'
                 : tab === 'privileges'
                   ? users
                     ? `${users.length} account${users.length === 1 ? '' : 's'} · toggles apply instantly`
@@ -298,7 +305,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                     : 'Loading products…'}
             </p>
           </div>
-          {tab !== 'knowledge' && (
+          {tab !== 'knowledge' && tab !== 'savedNotes' && (
             <button
               type="button"
               onClick={() => (tab === 'privileges' ? void load() : void loadProducts())}
@@ -314,7 +321,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
 
         {/* Tabs */}
         <div className="mb-3 flex shrink-0 items-center rounded-lg border border-border/60 bg-card/40 p-0.5" role="tablist">
-          {TABS.map(({ key, label, icon: Icon }) => (
+          {visibleTabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               type="button"
@@ -806,6 +813,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
 
         {/* ── Tab: Knowledge (D1 KB editor) ── */}
         {tab === 'knowledge' && <KnowledgeBaseTab />}
+        {tab === 'savedNotes' && user?.isSuperAdmin && <SavedTicketNotesTab />}
 
         <p className="mt-3 shrink-0 text-center text-[10px] text-muted-foreground/70">
           Shift+A toggles this panel

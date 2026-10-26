@@ -301,7 +301,7 @@ function authJson(data: unknown, status = 200): Response {
   // token in the payload/headers, so permissive CORS carries no CSRF risk.
   response.headers.set('access-control-allow-origin', '*');
   response.headers.set('access-control-allow-headers', 'content-type, authorization');
-  response.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
+  response.headers.set('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
   return response;
 }
 
@@ -2823,6 +2823,177 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   return authJson({ ok: true, product: row ? storeProductPublic(row) : null });
 }
 
+interface SavedTicketNoteRow {
+  id: string;
+  note_text: string;
+  issue_type: string;
+  solved: number;
+  pushed_at: number;
+  updated_at: number;
+  created_by: string;
+}
+
+interface SavedTicketNotePayload {
+  id?: unknown;
+  noteText?: unknown;
+  issueType?: unknown;
+  solved?: unknown;
+}
+
+function savedTicketNotePublic(row: SavedTicketNoteRow) {
+  return {
+    id: row.id,
+    noteText: row.note_text,
+    issueType: row.issue_type,
+    solved: Number(row.solved) === 1,
+    pushedAt: Number(row.pushed_at),
+    updatedAt: Number(row.updated_at),
+    createdBy: row.created_by,
+  };
+}
+
+function savedTicketNoteText(noteText: string, solved: boolean): string {
+  const normalized = noteText.replace(/\r\n?/g, '\n');
+  const line = `Solved: ${solved ? 'Y' : 'N'}`;
+  if (/^Solved:\s*[YN]\s*$/im.test(normalized)) {
+    return normalized.replace(/^Solved:\s*[YN]\s*$/im, line);
+  }
+  const additionalInfoLine = /^Additional information\b/im;
+  if (additionalInfoLine.test(normalized)) {
+    return normalized.replace(additionalInfoLine, `${line}\n\n$&`);
+  }
+  return normalized ? `${normalized}\n\n${line}` : line;
+}
+
+async function readSavedTicketNotePayload(request: Request): Promise<
+  | { ok: true; payload: SavedTicketNotePayload }
+  | { ok: false; response: Response }
+> {
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > 72_000) {
+    return { ok: false, response: authJson({ error: 'Ticket note is too large' }, 413) };
+  }
+  try {
+    return { ok: true, payload: JSON.parse(raw) as SavedTicketNotePayload };
+  } catch {
+    return { ok: false, response: authJson({ error: 'Invalid JSON body' }, 400) };
+  }
+}
+
+function normalizeSavedTicketNotePayload(payload: SavedTicketNotePayload):
+  | { ok: true; value: { id: string; noteText: string; issueType: string; solved: boolean } }
+  | { ok: false; response: Response } {
+  const id = typeof payload.id === 'string' ? payload.id : '';
+  const noteText = typeof payload.noteText === 'string' ? payload.noteText : '';
+  const issueType = typeof payload.issueType === 'string' ? payload.issueType.trim() : '';
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    return { ok: false, response: authJson({ error: 'Invalid ticket note id' }, 400) };
+  }
+  if (!noteText.trim()) return { ok: false, response: authJson({ error: 'Ticket note is required' }, 400) };
+  if (new TextEncoder().encode(noteText).byteLength > 64_000) {
+    return { ok: false, response: authJson({ error: 'Ticket note is too large' }, 413) };
+  }
+  if (issueType.length > 180) return { ok: false, response: authJson({ error: 'Issue type is too long' }, 400) };
+  if (typeof payload.solved !== 'boolean') {
+    return { ok: false, response: authJson({ error: 'Solved must be a boolean' }, 400) };
+  }
+  return { ok: true, value: { id, noteText, issueType, solved: payload.solved } };
+}
+
+async function handleSavedTicketNoteCreate(
+  request: Request,
+  env: Env,
+  user: AuthUserRow
+): Promise<Response> {
+  const body = await readSavedTicketNotePayload(request);
+  if ('response' in body) return body.response;
+  const normalized = normalizeSavedTicketNotePayload(body.payload);
+  if ('response' in normalized) return normalized.response;
+
+  const { id, noteText, issueType, solved } = normalized.value;
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO saved_ticket_notes
+       (id, note_text, issue_type, solved, pushed_at, updated_at, created_by)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
+     ON CONFLICT(id) DO NOTHING`
+  )
+    .bind(id, savedTicketNoteText(noteText, solved), issueType, solved ? 1 : 0, now, user.username)
+    .run();
+
+  const row = await env.DB.prepare(
+    'SELECT * FROM saved_ticket_notes WHERE id = ?1'
+  ).bind(id).first<SavedTicketNoteRow>();
+  if (!row) return authJson({ error: 'Could not save ticket note' }, 500);
+  if (row.created_by !== user.username) return authJson({ error: 'Ticket note id already exists' }, 409);
+  return authJson({ id: row.id, pushedAt: Number(row.pushed_at) });
+}
+
+async function handleSavedTicketNoteUpdate(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+  superAdminOnly = false
+): Promise<Response> {
+  if (superAdminOnly && !isSuperAdminUser(user)) {
+    return authJson({ error: 'Super Admin only' }, 403);
+  }
+  const body = await readSavedTicketNotePayload(request);
+  if ('response' in body) return body.response;
+  const normalized = normalizeSavedTicketNotePayload(body.payload);
+  if ('response' in normalized) return normalized.response;
+
+  const { id, noteText, issueType, solved } = normalized.value;
+  const existing = await env.DB.prepare(
+    'SELECT * FROM saved_ticket_notes WHERE id = ?1'
+  ).bind(id).first<SavedTicketNoteRow>();
+  if (!existing) return authJson({ error: 'Saved ticket note not found' }, 404);
+  if (!isSuperAdminUser(user) && existing.created_by !== user.username) {
+    return authJson({ error: 'You can only update notes you submitted' }, 403);
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE saved_ticket_notes
+     SET note_text = ?1, issue_type = ?2, solved = ?3, updated_at = ?4
+     WHERE id = ?5`
+  )
+    .bind(savedTicketNoteText(noteText, solved), issueType, solved ? 1 : 0, now, id)
+    .run();
+  return authJson({ ok: true, updatedAt: now });
+}
+
+async function handleAdminSavedTicketNotes(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const issueType = (url.searchParams.get('issue_type') ?? '').trim().slice(0, 180);
+  const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50));
+  const offset = Math.max(0, Math.min(1_000_000, Number(url.searchParams.get('offset')) || 0));
+  const where = issueType ? 'WHERE issue_type = ?1' : '';
+  const count = issueType
+    ? await env.DB.prepare(`SELECT COUNT(*) AS total FROM saved_ticket_notes ${where}`)
+        .bind(issueType)
+        .first<{ total: number }>()
+    : await env.DB.prepare('SELECT COUNT(*) AS total FROM saved_ticket_notes')
+        .first<{ total: number }>();
+  const rows = issueType
+    ? await env.DB.prepare(
+        `SELECT * FROM saved_ticket_notes ${where}
+         ORDER BY pushed_at DESC, id DESC LIMIT ?2 OFFSET ?3`
+      )
+        .bind(issueType, limit, offset)
+        .all<SavedTicketNoteRow>()
+    : await env.DB.prepare(
+        `SELECT * FROM saved_ticket_notes
+         ORDER BY pushed_at DESC, id DESC LIMIT ?1 OFFSET ?2`
+      )
+        .bind(limit, offset)
+        .all<SavedTicketNoteRow>();
+  return authJson({
+    notes: (rows.results ?? []).map(savedTicketNotePublic),
+    total: Number(count?.total ?? 0),
+  });
+}
+
 async function handleCallTranscriptionSocketTicket(
   env: Env,
   user: AuthUserRow
@@ -2895,7 +3066,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const preflight = new Response(null, { status: 204 });
     preflight.headers.set('access-control-allow-origin', '*');
     preflight.headers.set('access-control-allow-headers', 'content-type, authorization');
-    preflight.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
+    preflight.headers.set('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
     preflight.headers.set('access-control-max-age', '86400');
     return preflight;
   }
@@ -2905,6 +3076,13 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCallTranscriptionSocketTicket(env, user);
+  }
+  if (path === '/api/ticket-notes' && (request.method === 'POST' || request.method === 'PUT')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return request.method === 'POST'
+      ? handleSavedTicketNoteCreate(request, env, user)
+      : handleSavedTicketNoteUpdate(request, env, user);
   }
   if (path === '/api/auth/health' && request.method === 'GET') return authJson({ ok: true });
   if (path === '/api/auth/names' && request.method === 'GET')
@@ -3049,6 +3227,14 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleWheelSpin(request, env, user);
+  }
+
+  if (path === '/api/admin/saved-ticket-notes') {
+    const user = await authBearerUser(request, env);
+    if (!user || !isSuperAdminUser(user)) return authJson({ error: 'Super Admin only' }, 403);
+    if (request.method === 'GET') return handleAdminSavedTicketNotes(request, env);
+    if (request.method === 'PUT') return handleSavedTicketNoteUpdate(request, env, user, true);
+    return authJson({ error: 'Method not allowed' }, 405);
   }
 
   // TCG card collection — any logged-in user can view their own pulls.
@@ -3451,6 +3637,7 @@ export default {
       url.pathname.startsWith('/api/auth/') ||
       url.pathname.startsWith('/api/llm/') ||
       url.pathname.startsWith('/api/call-transcription/') ||
+      url.pathname === '/api/ticket-notes' ||
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/pet') ||

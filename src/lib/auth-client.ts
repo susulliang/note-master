@@ -28,6 +28,23 @@ export interface StoreProduct {
   category: 'food' | 'wheel' | 'cards' | 'other';
 }
 
+export interface SavedTicketNote {
+  id: string;
+  noteText: string;
+  issueType: string;
+  solved: boolean;
+  pushedAt: number;
+  updatedAt: number;
+  createdBy: string;
+}
+
+export interface SavedTicketNoteInput {
+  id: string;
+  noteText: string;
+  issueType: string;
+  solved: boolean;
+}
+
 /** A card pulled from a TCG set (server-decided; image served from /assets/tcg). */
 export interface TcgCard {
   id: string;
@@ -617,6 +634,56 @@ export async function adminDeleteStoreProduct(id: string): Promise<void> {
   await call('/api/admin/store', {
     method: 'POST',
     body: JSON.stringify({ action: 'delete', product: { id } }),
+    token,
+  });
+}
+
+/** Archive a generated ticket note; the stable client id makes retries idempotent. */
+export async function saveGeneratedTicketNote(
+  note: SavedTicketNoteInput
+): Promise<{ id: string; pushedAt: number }> {
+  const token = getStoredToken();
+  return call<{ id: string; pushedAt: number }>('/api/ticket-notes', {
+    method: 'POST',
+    body: JSON.stringify(note),
+    token,
+  });
+}
+
+/** Update the current agent's archived note, or a note the Super Admin owns. */
+export async function updateGeneratedTicketNote(note: SavedTicketNoteInput): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/ticket-notes', {
+    method: 'PUT',
+    body: JSON.stringify(note),
+    token,
+  });
+}
+
+/** Super Admin-only QA archive, ordered newest first. */
+export async function adminListSavedTicketNotes(options: {
+  offset?: number;
+  limit?: number;
+  issueType?: string;
+} = {}): Promise<{ notes: SavedTicketNote[]; total: number }> {
+  const token = getStoredToken();
+  const params = new URLSearchParams({
+    offset: String(options.offset ?? 0),
+    limit: String(options.limit ?? 50),
+  });
+  if (options.issueType?.trim()) params.set('issue_type', options.issueType.trim());
+  return call<{ notes: SavedTicketNote[]; total: number }>(
+    `/api/admin/saved-ticket-notes?${params.toString()}`,
+    { token }
+  );
+}
+
+/** Super Admin-only edit for a saved ticket note. */
+export async function adminUpdateSavedTicketNote(note: SavedTicketNoteInput): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/admin/saved-ticket-notes', {
+    method: 'PUT',
+    body: JSON.stringify(note),
     token,
   });
 }

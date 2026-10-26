@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useContext } from 'react';
+import { useState, useCallback, useEffect, useMemo, useContext, useRef } from 'react';
 import { Copy, Check, X, Eye, Code2, Upload, Loader2, Minus, CircleAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,16 +9,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { TicketPanelsContext } from './FlowNode';
 import { useCcpExtensionBridge } from '@/hooks/use-ccp-extension-bridge';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv } from '@/lib/tauri-env';
+import type { SavedTicketNoteInput } from '@/lib/auth-client';
 
 interface OutputModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   noteText: string;
+  ticketNoteId: string;
+  ticketIssueType: string;
+  onArchiveTicketNote: (note: SavedTicketNoteInput) => Promise<void>;
+  onUpdateArchivedTicketNote: (note: SavedTicketNoteInput) => Promise<void>;
   onSaveToHistory?: (finalText: string) => void;
 }
 
@@ -29,6 +35,23 @@ const CONTACT_FIELD_LABELS = ['Customer Name', 'Contact number', 'Email address'
  *  are plain-text friendly. */
 function stripMarkdownBold(text: string): string {
   return text.replace(/\*\*/g, '');
+}
+
+function readSolvedValue(noteText: string): boolean {
+  return /^Solved:\s*Y\s*$/im.test(noteText);
+}
+
+function withSolvedLine(noteText: string, solved: boolean): string {
+  const line = `Solved: ${solved ? 'Y' : 'N'}`;
+  const solvedLine = /^Solved:\s*[YN]\s*$/im;
+  if (solvedLine.test(noteText)) return noteText.replace(solvedLine, line);
+
+  const additionalInfoLine = /^Additional information\b/im;
+  if (additionalInfoLine.test(noteText)) {
+    return noteText.replace(additionalInfoLine, `${line}\n\n$&`);
+  }
+  const base = noteText.trimEnd();
+  return base ? `${base}\n\n${line}` : line;
 }
 
 /** Convert the note markdown into the minimal semantic HTML pushed into the
@@ -109,10 +132,19 @@ export default function OutputModal({
   open,
   onOpenChange,
   noteText,
+  ticketNoteId,
+  ticketIssueType,
+  onArchiveTicketNote,
+  onUpdateArchivedTicketNote,
   onSaveToHistory,
 }: OutputModalProps) {
   const [copied, setCopied] = useState<null | 'rich' | 'plain'>(null);
   const [editableText, setEditableText] = useState(noteText);
+  const [solved, setSolved] = useState(() => readSolvedValue(noteText));
+  const [archiveReady, setArchiveReady] = useState(false);
+  const [archiveState, setArchiveState] = useState<'saving' | 'saved' | 'error'>('saving');
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const lastArchivedKeyRef = useRef<string | null>(null);
   const [pushing, setPushing] = useState(false);
   const [pushReport, setPushReport] = useState<PushReport | null>(null);
   /** Raw-source textarea collapsed by default — most calls only need the
@@ -644,7 +676,14 @@ export default function OutputModal({
   // button below.
   useEffect(() => {
     if (open) {
-      setEditableText(noteText);
+      const initialSolved = readSolvedValue(noteText);
+      const initialText = withSolvedLine(noteText, initialSolved);
+      setEditableText(initialText);
+      setSolved(initialSolved);
+      setArchiveReady(false);
+      setArchiveState('saving');
+      setArchiveError(null);
+      lastArchivedKeyRef.current = null;
       writeClipboardRichOnly(noteText).then(
         () => toast.success('Rich-text note auto-copied (bold preserved).'),
         () => {
@@ -652,7 +691,7 @@ export default function OutputModal({
         }
       );
     }
-  }, [open, noteText]);
+  }, [open, noteText, ticketNoteId]);
 
   /** Auto-copy path: writes ONLY the text/html (rendered bold) flavour.
    *  Apps that accept HTML (Confluence, Zendesk, Gmail, Notion) get the
@@ -677,6 +716,81 @@ export default function OutputModal({
     // expectation instead of silently handing back plain text.
     await navigator.clipboard.writeText(html);
   }, []);
+
+  useEffect(() => {
+    if (!open || !ticketNoteId) return;
+    let cancelled = false;
+    const initialSolved = readSolvedValue(noteText);
+    const initialText = withSolvedLine(noteText, initialSolved);
+    const initialKey = JSON.stringify([initialText, ticketIssueType, initialSolved]);
+    setArchiveState('saving');
+    setArchiveError(null);
+
+    void onArchiveTicketNote({
+      id: ticketNoteId,
+      noteText: initialText,
+      issueType: ticketIssueType,
+      solved: initialSolved,
+    }).then(
+      () => {
+        if (cancelled) return;
+        lastArchivedKeyRef.current = initialKey;
+        setArchiveReady(true);
+        setArchiveState('saved');
+      },
+      (err) => {
+        if (cancelled) return;
+        setArchiveState('error');
+        setArchiveError(err instanceof Error ? err.message : 'Could not save note to the QA archive.');
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [open, ticketNoteId, ticketIssueType, noteText, onArchiveTicketNote]);
+
+  useEffect(() => {
+    if (!open || !archiveReady || !ticketNoteId) return;
+    const archivedText = withSolvedLine(editableText, solved);
+    const key = JSON.stringify([archivedText, ticketIssueType, solved]);
+    if (key === lastArchivedKeyRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      setArchiveState('saving');
+      setArchiveError(null);
+      void onUpdateArchivedTicketNote({
+        id: ticketNoteId,
+        noteText: archivedText,
+        issueType: ticketIssueType,
+        solved,
+      }).then(
+        () => {
+          lastArchivedKeyRef.current = key;
+          setArchiveState('saved');
+        },
+        (err) => {
+          setArchiveState('error');
+          setArchiveError(err instanceof Error ? err.message : 'Could not update the QA archive.');
+        }
+      );
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    archiveReady,
+    ticketNoteId,
+    ticketIssueType,
+    editableText,
+    solved,
+    onUpdateArchivedTicketNote,
+  ]);
+
+  const handleSolvedChange = useCallback((nextSolved: boolean) => {
+    const updatedText = withSolvedLine(editableText, nextSolved);
+    setSolved(nextSolved);
+    setEditableText(updatedText);
+    void writeClipboardRichOnly(updatedText).catch(() => undefined);
+  }, [editableText, writeClipboardRichOnly]);
 
   /** Explicit RICH copy button: writes the text/html flavour exactly like
    *  the auto-copy, but also includes a text/plain fallback so plain-text
@@ -735,6 +849,28 @@ export default function OutputModal({
             Ticket Note Generated
           </DialogTitle>
         </DialogHeader>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/35 px-3 py-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-foreground">
+            <Switch
+              checked={solved}
+              onCheckedChange={handleSolvedChange}
+              disabled={!archiveReady}
+              aria-label="Problem solved"
+            />
+            <span>Problem Solved?</span>
+            <span className={solved ? 'text-emerald-400' : 'text-amber-300'}>
+              {solved ? 'Y' : 'N'}
+            </span>
+          </label>
+          <span className="text-[10px] text-muted-foreground">
+            {archiveState === 'saving'
+              ? 'Saving to Super Admin QA archive…'
+              : archiveState === 'saved'
+                ? 'Saved for QA · visible to Super Admins'
+                : archiveError || 'Archive save failed'}
+          </span>
+        </div>
 
         {/* Click-to-copy contact chips (bullet-dotted) */}
         {contactFields.length > 0 && (
@@ -819,7 +955,7 @@ export default function OutputModal({
             </div>
             <textarea
               value={editableText}
-              onChange={(e) => setEditableText(e.target.value)}
+                onChange={(e) => setEditableText(withSolvedLine(e.target.value, solved))}
               spellCheck={false}
               className="glass-field max-h-[30vh] min-h-[150px] w-full resize-none whitespace-pre-wrap break-words rounded-b-xl bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:bg-card/80"
             />
@@ -945,7 +1081,11 @@ export default function OutputModal({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setEditableText(noteText)}
+              onClick={() => {
+                const originalSolved = readSolvedValue(noteText);
+                setSolved(originalSolved);
+                setEditableText(withSolvedLine(noteText, originalSolved));
+              }}
               className="gap-1.5 text-sm text-muted-foreground hover:text-foreground"
             >
               Reset to original
