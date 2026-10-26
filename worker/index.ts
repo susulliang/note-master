@@ -2916,7 +2916,13 @@ async function handleSavedTicketNoteCreate(
     `INSERT INTO saved_ticket_notes
        (id, note_text, issue_type, solved, pushed_at, updated_at, created_by)
      VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
-     ON CONFLICT(id) DO NOTHING`
+     ON CONFLICT(id) DO UPDATE SET
+       note_text = excluded.note_text,
+       issue_type = excluded.issue_type,
+       solved = excluded.solved,
+       pushed_at = excluded.pushed_at,
+       updated_at = excluded.updated_at
+     WHERE saved_ticket_notes.created_by = excluded.created_by`
   )
     .bind(id, savedTicketNoteText(noteText, solved), issueType, solved ? 1 : 0, now, user.username)
     .run();
@@ -2966,7 +2972,7 @@ async function handleSavedTicketNoteUpdate(
 async function handleAdminSavedTicketNotes(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const issueType = (url.searchParams.get('issue_type') ?? '').trim().slice(0, 180);
-  const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50));
+  const limit = Math.max(1, Math.min(10, Number(url.searchParams.get('limit')) || 10));
   const offset = Math.max(0, Math.min(1_000_000, Number(url.searchParams.get('offset')) || 0));
   const where = issueType ? 'WHERE issue_type = ?1' : '';
   const count = issueType

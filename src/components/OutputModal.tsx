@@ -850,28 +850,6 @@ export default function OutputModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/35 px-3 py-2">
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-foreground">
-            <Switch
-              checked={solved}
-              onCheckedChange={handleSolvedChange}
-              disabled={!archiveReady}
-              aria-label="Problem solved"
-            />
-            <span>Problem Solved?</span>
-            <span className={solved ? 'text-emerald-400' : 'text-amber-300'}>
-              {solved ? 'Y' : 'N'}
-            </span>
-          </label>
-          <span className="text-[10px] text-muted-foreground">
-            {archiveState === 'saving'
-              ? 'Saving to Super Admin QA archive…'
-              : archiveState === 'saved'
-                ? 'Saved for QA · visible to Super Admins'
-                : archiveError || 'Archive save failed'}
-          </span>
-        </div>
-
         {/* Click-to-copy contact chips (bullet-dotted) */}
         {contactFields.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -939,6 +917,29 @@ export default function OutputModal({
               {editableText}
             </ReactMarkdown>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/35 px-3 py-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-foreground">
+            <Switch
+              checked={solved}
+              onCheckedChange={handleSolvedChange}
+              disabled={!archiveReady}
+              aria-label="Problem solved"
+            />
+            <span>Problem Solved?</span>
+            <span className={solved ? 'text-emerald-400' : 'text-amber-300'}>
+              {solved ? 'Y' : 'N'}
+            </span>
+          </label>
+          {archiveState === 'saving' && (
+            <span className="text-[10px] text-muted-foreground">Saving note…</span>
+          )}
+          {archiveState === 'error' && (
+            <span className="text-[10px] text-destructive">
+              {archiveError || 'Archive save failed'}
+            </span>
+          )}
         </div>
 
         {/* (C2) Bottom: editable SOURCE textarea — HIDDEN BY DEFAULT (most

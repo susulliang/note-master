@@ -8,7 +8,7 @@ import {
   type SavedTicketNote,
 } from '@/lib/auth-client';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 function withSavedSolvedLine(noteText: string, solved: boolean): string {
   const line = `Solved: ${solved ? 'Y' : 'N'}`;
@@ -25,44 +25,36 @@ export default function SavedTicketNotesTab() {
   const [issueFilter, setIssueFilter] = useState('');
   const [search, setSearch] = useState('');
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (offset: number, append: boolean) => {
+  const load = useCallback(async (pageIndex: number) => {
     setError(null);
-    if (append) setLoadingMore(true);
-    else setLoading(true);
+    setLoading(true);
     try {
       const result = await adminListSavedTicketNotes({
-        offset,
+        offset: pageIndex * PAGE_SIZE,
         limit: PAGE_SIZE,
         issueType: issueFilter,
       });
-      setNotes((current) => append ? [...current, ...result.notes] : result.notes);
-      setDrafts((current) => {
-        const next = append ? { ...current } : {};
-        for (const note of result.notes) next[note.id] = note;
-        return next;
-      });
+      setNotes(result.notes);
+      setDrafts(Object.fromEntries(result.notes.map((note) => [note.id, note])));
       setTotal(result.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load saved ticket notes.');
-      if (!append) {
-        setNotes([]);
-        setDrafts({});
-      }
+      setNotes([]);
+      setDrafts({});
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
   }, [issueFilter]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(0, false), 250);
+    const timer = window.setTimeout(() => void load(page), 250);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, page]);
 
   const updateDraft = (id: string, patch: Partial<SavedTicketNote>) => {
     setDrafts((current) => ({
@@ -109,7 +101,10 @@ export default function SavedTicketNotesTab() {
           <Search className="size-3.5 text-muted-foreground" />
           <input
             value={issueFilter}
-            onChange={(event) => setIssueFilter(event.target.value)}
+            onChange={(event) => {
+              setIssueFilter(event.target.value);
+              setPage(0);
+            }}
             placeholder="Exact issue type"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-xs outline-none placeholder:text-muted-foreground/60"
             aria-label="Filter saved notes by issue type"
@@ -124,7 +119,7 @@ export default function SavedTicketNotesTab() {
         />
         <button
           type="button"
-          onClick={() => void load(0, false)}
+          onClick={() => void load(page)}
           disabled={loading}
           className="rounded-lg border border-border/60 p-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
           aria-label="Reload saved notes"
@@ -220,17 +215,29 @@ export default function SavedTicketNotesTab() {
       {search.trim() && visibleNotes.length === 0 && notes.length > 0 && (
         <p className="py-6 text-center text-xs text-muted-foreground">No loaded notes match that search.</p>
       )}
-      {notes.length < total && (
+      <div className="flex items-center justify-center gap-4 py-2">
         <button
           type="button"
-          onClick={() => void load(notes.length, true)}
-          disabled={loadingMore}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+          onClick={() => setPage((current) => Math.max(0, current - 1))}
+          disabled={loading || page === 0}
+          className="rounded-lg border border-border/60 px-3 py-1.5 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+          aria-label="Previous saved notes page"
         >
-          {loadingMore && <Loader2 className="size-3.5 animate-spin" />}
-          Load older notes ({notes.length} of {total})
+          {'<'}
         </button>
-      )}
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+        </span>
+        <button
+          type="button"
+          onClick={() => setPage((current) => current + 1)}
+          disabled={loading || (page + 1) * PAGE_SIZE >= total}
+          className="rounded-lg border border-border/60 px-3 py-1.5 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+          aria-label="Next saved notes page"
+        >
+          {'>'}
+        </button>
+      </div>
     </div>
   );
 }

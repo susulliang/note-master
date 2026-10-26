@@ -11,6 +11,30 @@ import { createPortal } from 'react-dom';
 // after the agent-typed notes.
 const TLDR_LINE_PREFIX = 'Chinese Summary:';
 const CUSTOMER_CLOUD_TRANSCRIPTION_KEY = 'ecv.customerCloudTranscription';
+const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
+
+function readOrCreateTicketNoteId(username: string | null): string {
+  const key = `${GENERATED_TICKET_NOTE_ID_KEY}:${username || 'guest'}`;
+  try {
+    const current = localStorage.getItem(key);
+    if (current && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(current)) return current;
+    const created = crypto.randomUUID();
+    localStorage.setItem(key, created);
+    return created;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+function rotateTicketNoteId(username: string | null): string {
+  const next = crypto.randomUUID();
+  try {
+    localStorage.setItem(`${GENERATED_TICKET_NOTE_ID_KEY}:${username || 'guest'}`, next);
+  } catch {
+    /* The in-memory id still prevents duplicate submissions this session. */
+  }
+  return next;
+}
 
 function withTldrLine(notes: string, zh: string): string {
   const lines = notes.split('\n');
@@ -138,6 +162,27 @@ const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
 const SopPanel = lazy(() => import('@/components/SopPanel'));
 const ProductLookupPanel = lazy(() => import('@/components/ProductLookupPanel'));
 const VoiceCaptionPanel = lazy(() => import('@/components/VoiceCaptionPanel'));
+
+function parseSolvedDecisionReply(reply: string): boolean | null {
+  const jsonValue = reply.match(/["']?solved["']?\s*:\s*(true|false|"yes"|"no"|"y"|"n")/i)?.[1];
+  const directValue = reply.trim().match(/^(?:SOLVED\s*[:=]\s*)?(Y|N|YES|NO)\b/i)?.[1];
+  const value = (jsonValue ?? directValue)?.replace(/["']/g, '').toLowerCase();
+  if (value === 'y' || value === 'yes' || value === 'true') return true;
+  if (value === 'n' || value === 'no' || value === 'false') return false;
+  return null;
+}
+
+async function settleWithin<T>(task: Promise<T>, timeoutMs: number): Promise<T | null> {
+  let timer: number | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = window.setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
 
 interface NodeConfig {
   id: string;
@@ -1038,8 +1083,13 @@ export default function TicketNotesPage() {
   const [gbuOpen, setGbuOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [noteText, setNoteText] = useState('');
-  const [generatedTicketNoteId, setGeneratedTicketNoteId] = useState('');
+  const [generatedTicketNoteId, setGeneratedTicketNoteId] = useState(() =>
+    readOrCreateTicketNoteId(signedInUsername)
+  );
   const [generatedTicketIssueType, setGeneratedTicketIssueType] = useState('');
+  useEffect(() => {
+    setGeneratedTicketNoteId(readOrCreateTicketNoteId(signedInUsername));
+  }, [signedInUsername]);
   /** Hang Up guard — prevents the "press twice" bug by guaranteeing the
    *  button does exactly ONE full lifecycle per click: stop capture → drain
    *  transcript → run final LLM → build note → open modal. Re-entrant
@@ -1360,7 +1410,7 @@ export default function TicketNotesPage() {
   );
 
   const buildNoteText = useCallback(
-    (data: Record<string, string | string[]>): string => {
+    (data: Record<string, string | string[]>, solved = false): string => {
       const getStr = (key: string) => {
         const v = data[key];
         return typeof v === 'string' ? v : '';
@@ -1384,7 +1434,7 @@ SKU: ${getStr(NODE_IDS.SKU_NUMBER) || 'N/A'}
 Purchase Channel and Date: ${getStr(NODE_IDS.PURCHASE_INFO) || 'N/A'}
 Issue/s: ${getStr(NODE_IDS.ISSUE_TYPE) || 'N/A'} - ${getStr(NODE_IDS.DETAILED_ISSUE) || 'N/A'}
 Resolution/s: ${getStr(NODE_IDS.RESOLUTION_SUMMARY) || 'N/A'}
-Solved: N
+Solved: ${solved ? 'Y' : 'N'}
 
 Additional information (if needed): ${additional}`;
     }, []);
@@ -1972,14 +2022,16 @@ Additional information (if needed): ${additional}`;
    */
   const voiceRef = useRef(voice);
   const callRef = useRef(call);
+  const llmParserRef = useRef(llmParser);
   /** Cloud parser live ref — read inside `handleHangUp` closure which is
    *  only declared once (callback stable across renders). */
   const cloudParserRef = useRef(cloudParser);
   useEffect(() => {
     voiceRef.current = voice;
     callRef.current = call;
+    llmParserRef.current = llmParser;
     cloudParserRef.current = cloudParser;
-  }, [voice, call, cloudParser]);
+  }, [voice, call, llmParser, cloudParser]);
   const handleHangUp = useCallback(async () => {
     // Re-entrant clicks bail into the in-flight work — nothing ever runs
     // twice and the modal always ends up open at the end.
@@ -2039,9 +2091,10 @@ Additional information (if needed): ${additional}`;
     // issue + resolution; the agent can click Concise afterwards if they
     // want a trimmed ticket note).
     try {
-      const transcriptChars = callNow.transcript.reduce((n, e) => n + e.text.length, 0);
+      const finalCall = callRef.current;
+      const transcriptChars = finalCall.transcript.reduce((n, e) => n + e.text.length, 0);
       const enoughChars = transcriptChars >= 400;
-      const noPriorCloudParse = !callNow.hasSuccessfulCloudParse();
+      const noPriorCloudParse = !finalCall.hasSuccessfulCloudParse();
       const hasBackend = !!cloudParserRef.current && (cloudParserRef.current?.isAvailable ?? false);
       if (noPriorCloudParse && hasBackend && enoughChars) {
         // Run with a bounded time-out so network hiccups can't hang the
@@ -2049,7 +2102,7 @@ Additional information (if needed): ${additional}`;
         await Promise.race([
           (async () => {
             try {
-              await callNow.cloudParse('full');
+              await finalCall.cloudParse('full');
             } catch (err) {
               console.warn('[hangup] auto cloud parse threw, falling back:', err);
             }
@@ -2067,13 +2120,66 @@ Additional information (if needed): ${additional}`;
     }
 
     try {
-      // Step 2 & 3: build the note from what is NOW on the form and open
+      // Review the completed transcript at call end. The modal's toggle
+      // remains available for the agent to correct this conservative decision.
+      let solvedDecision = false;
+      try {
+        const entries = callRef.current.transcript;
+        if (entries.length > 0) {
+          const transcript = entries
+            .map((entry) => {
+              const speaker = entry.speaker === 'agent'
+                ? 'AGENT'
+                : entry.speaker === 'recording'
+                  ? 'RECORDING'
+                  : 'CUSTOMER';
+              return `${speaker}: ${entry.text}`;
+            })
+            .join('\n')
+            .slice(-22_000);
+          const fields = formDataRef.current;
+          const system =
+            'You are a strict customer-support QA reviewer. Determine whether the customer issue was actually solved by the end of the call. ' +
+            'Return only SOLVED: Y or SOLVED: N. Use Y only when the transcript contains clear evidence of a completed resolution, such as customer confirmation or an unambiguous successful outcome. ' +
+            'Use N when the issue remains open, the fix is only proposed or unconfirmed, follow-up is pending, or the evidence is uncertain. Do not infer success from an agent promise.';
+          const user = [
+            `Issue: ${String(fields[NODE_IDS.ISSUE_TYPE] ?? '')}`,
+            `Resolution entered: ${String(fields[NODE_IDS.RESOLUTION_SUMMARY] ?? '')}`,
+            'Speaker-labeled transcript:',
+            transcript,
+            'Return only SOLVED: Y or SOLVED: N.',
+          ].join('\n\n');
+
+          let decision: boolean | null = null;
+          const localParser = llmParserRef.current;
+          if (localParser.isReady && localParser.enabled) {
+            try {
+              const result = await settleWithin(localParser.generate(system, user, 24), 15_000);
+              if (result && !result.timedOut) decision = parseSolvedDecisionReply(result.text);
+            } catch {
+              /* Try the configured remote model below. */
+            }
+          }
+          if (decision === null && cloudParserRef.current?.isAvailable) {
+            try {
+              const result = await settleWithin(generateWithRemoteLlm(system, user, 24), 15_000);
+              if (result && !result.timedOut) decision = parseSolvedDecisionReply(result.text);
+            } catch {
+              /* A missing/failed model leaves the conservative N default. */
+            }
+          }
+          solvedDecision = decision ?? false;
+        }
+      } catch (err) {
+        console.warn('[hangup] transcript solved assessment failed; defaulting to N:', err);
+      }
+
+      // Build the note from what is NOW on the form and open
       // the modal. ALWAYS runs regardless of capture errors above — this
       // is the actual "one click shows the note" guarantee.
-      const text = buildNoteText(formDataRef.current);
+      const text = buildNoteText(formDataRef.current, solvedDecision);
       const rawIssueType = formDataRef.current[NODE_IDS.ISSUE_TYPE];
       const issueType = typeof rawIssueType === 'string' ? rawIssueType : '';
-      setGeneratedTicketNoteId(crypto.randomUUID());
       setGeneratedTicketIssueType(issueType);
       setNoteText(text);
       setShowOutput(true);
@@ -2156,6 +2262,10 @@ Additional information (if needed): ${additional}`;
   // — form data, node positions, proofreading glows AND both transcript
   // sources — so a fresh ticket never shows the previous call's leftovers.
   const handleReset = useCallback(() => {
+    setGeneratedTicketNoteId(rotateTicketNoteId(signedInUsername));
+    setGeneratedTicketIssueType('');
+    setNoteText('');
+    setShowOutput(false);
     setFormData(INITIAL_FORM_DATA);
     // Clear drag overrides so all nodes return to the responsive default layout
     setPositions({});
@@ -2169,7 +2279,7 @@ Additional information (if needed): ${additional}`;
     // (mic captions + speaker-tagged call transcript) along with the form
     voice.clear();
     call.clear();
-  }, [setFormData, setPositions, voice, call]);
+  }, [setFormData, setPositions, voice, call, signedInUsername]);
 
   // Portal target for the global controls at the bottom of the canvas's
   // left rail pill. A callback ref (setState) keeps FlowchartCanvas's props

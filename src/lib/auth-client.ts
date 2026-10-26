@@ -669,7 +669,7 @@ export async function adminListSavedTicketNotes(options: {
   const token = getStoredToken();
   const params = new URLSearchParams({
     offset: String(options.offset ?? 0),
-    limit: String(options.limit ?? 50),
+    limit: String(options.limit ?? 10),
   });
   if (options.issueType?.trim()) params.set('issue_type', options.issueType.trim());
   return call<{ notes: SavedTicketNote[]; total: number }>(
