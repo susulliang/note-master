@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, ChevronDown, Cpu, Heart, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, Sparkles, Star, Utensils, X, Zap } from 'lucide-react';
+import { AlertTriangle, Boxes, Braces, Bug, BrainCircuit, ChevronDown, Cloud, Cpu, Heart, Loader2, LogIn, LogOut, Mic, MicOff, ShieldCheck, Sparkles, Star, Utensils, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -112,6 +112,9 @@ interface EngineSettingsPanelProps {
   /** True while capture is live (enables the start/stop transcription button) */
   isCapturing: boolean;
   isTranscribing: boolean;
+  customerCloudTranscription: boolean;
+  customerCloudSupported: boolean;
+  onToggleCustomerCloudTranscription: (enabled: boolean) => void;
   onToggleCapture: () => void;
   onClose: () => void;
   gridboxVisibility?: {
@@ -276,6 +279,9 @@ export default function EngineSettingsPanel({
   transcript,
   isCapturing,
   isTranscribing,
+  customerCloudTranscription,
+  customerCloudSupported,
+  onToggleCustomerCloudTranscription,
   onToggleCapture,
   onClose,
   gridboxVisibility,
@@ -645,10 +651,14 @@ export default function EngineSettingsPanel({
             <div className="flex flex-wrap items-center gap-1.5">
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold leading-none text-emerald-600 dark:text-emerald-400"
-                title="Transcription runs on this machine — audio never leaves the browser"
+                title={
+                  customerCloudTranscription
+                    ? 'Agent audio stays local. Customer audio is streamed to Cloudflare for live transcription.'
+                    : 'Transcription runs on this machine — audio never leaves the browser'
+                }
               >
                 <Cpu className="size-2.5" />
-                Local
+                {customerCloudTranscription ? 'Agent · Local' : 'Local'}
               </span>
               <span className="inline-flex overflow-hidden rounded-full border border-border/40">
                 {WHISPER_MODELS.map((name, index) => (
@@ -678,6 +688,26 @@ export default function EngineSettingsPanel({
                   </Fragment>
                 ))}
               </span>
+              <label
+                className="ml-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                title={
+                  !customerCloudSupported
+                    ? 'Live cloud capture currently requires browser tab-audio capture; desktop stays local.'
+                    : isCapturing
+                    ? 'Stop call capture before changing the customer transcription transport.'
+                    : 'Stream customer audio to Cloudflare Nova-3. Agent audio stays on this device.'
+                }
+              >
+                <Cloud className="size-2.5" />
+                Cloud customer
+                <Switch
+                  checked={customerCloudTranscription}
+                  disabled={isCapturing || !customerCloudSupported}
+                  onCheckedChange={onToggleCustomerCloudTranscription}
+                  aria-label="Enable Cloudflare streaming transcription for customer audio"
+                  className="scale-75"
+                />
+              </label>
               {isMultilingualModel(engine.model) && (
                 <span
                   className="text-[10px] text-muted-foreground"

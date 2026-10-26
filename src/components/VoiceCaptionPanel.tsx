@@ -49,6 +49,8 @@ export interface CallPanelState {
   /** True while DEBUG RECORDING mode captures ONE source (tab audio of a
    *  recorded agent+customer conversation) instead of tab + mic */
   isRecordingDebug: boolean;
+  customerInterimText?: string;
+  customerCloudStatus?: 'off' | 'connecting' | 'live' | 'idle-closed' | 'error';
   onToggle: () => void;
   /** Start/stop the debug single-source recording capture */
   onToggleRecordingDebug: () => void;
@@ -379,7 +381,9 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
             {activeSource === 'call'
               ? call.isRecordingDebug
                 ? 'Live captions — recording debug'
-                : 'Live captions — Agent + Customer'
+                : call.customerCloudStatus && call.customerCloudStatus !== 'off'
+                  ? 'Live captions — Agent local + Customer cloud'
+                  : 'Live captions — Agent + Customer'
               : activeSource === 'mic'
                 ? 'Live captions — mic'
                 : 'Captured transcript'}
@@ -418,6 +422,28 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
           >
             <Bug className="size-3.5" />
           </button>
+
+          {call.customerCloudStatus && call.customerCloudStatus !== 'off' && (
+            <span
+              className={cn(
+                'shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium',
+                call.customerCloudStatus === 'live'
+                  ? 'bg-sky-500/10 text-sky-500'
+                  : call.customerCloudStatus === 'error'
+                    ? 'bg-destructive/10 text-destructive'
+                    : 'bg-foreground/5 text-muted-foreground'
+              )}
+              title="Customer audio is streamed to Cloudflare Nova-3. Agent audio remains local."
+            >
+              {call.customerCloudStatus === 'live'
+                ? 'Customer · Cloud'
+                : call.customerCloudStatus === 'idle-closed'
+                  ? 'Cloud paused · idle'
+                  : call.customerCloudStatus === 'error'
+                    ? 'Cloud unavailable'
+                    : 'Cloud connecting'}
+            </span>
+          )}
 
           {/* Segments sent + in-flight spinner (call mode) */}
           {activeSource === 'call' && (
@@ -579,7 +605,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
           className="custom-scrollbar mt-2 max-h-[220px] min-h-[120px] overflow-y-auto rounded-lg bg-background/50 p-2"
         >
           {showCallEntries ? (
-            call.transcript.length > 0 ? (
+            call.transcript.length > 0 || call.customerInterimText ? (
               <div className="flex flex-col gap-1">
                 {call.transcript.map((entry, i) => {
                   // Sliding-window highlight: amber = inside the AI window
@@ -598,8 +624,11 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
                   // Long same-speaker runs (garbage-filtered calls, the
                   // single-channel RECORDING debug mode) read like a chat
                   // log instead of a wall of repeated chips.
+                  const previous = call.transcript[i - 1];
                   const groupStart =
-                    i === 0 || call.transcript[i - 1].speaker !== entry.speaker;
+                    i === 0 ||
+                    previous?.speaker !== entry.speaker ||
+                    (entry.speaker === 'customer' && previous?.sentiment !== entry.sentiment);
                   return (
                     <p
                       key={i}
@@ -633,7 +662,11 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
                             ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
                             : entry.speaker === 'recording'
                               ? 'bg-red-500/15 text-red-600 dark:text-red-400'
-                              : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              : entry.sentiment === 'negative'
+                                ? 'bg-red-500/15 text-red-700 dark:text-red-400'
+                                : entry.sentiment === 'positive'
+                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                         )}
                         title={
                           groupStart
@@ -641,7 +674,7 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
                               ? 'Your microphone'
                               : entry.speaker === 'recording'
                                 ? 'Single-channel recording — agent and customer mixed; the AI parse attributes each statement'
-                                : 'CCP tab audio'
+                                : `CCP tab audio${entry.sentiment ? ` · ${entry.sentiment} sentiment` : ''}`
                             : undefined
                         }
                       >
@@ -657,6 +690,16 @@ export default function VoiceCaptionPanel({ mic, call, engine, parser, cloud, tl
                     </p>
                   );
                 })}
+                {call.customerInterimText && (
+                  <p className="flex items-start gap-1.5 px-1 py-0.5 text-muted-foreground/70">
+                    <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-sky-500">
+                      Customer · live
+                    </span>
+                    <span className="min-w-0 flex-1 text-[13px] italic leading-relaxed">
+                      {call.customerInterimText}
+                    </span>
+                  </p>
+                )}
               </div>
             ) : (
               <span className="text-[13px] leading-relaxed text-muted-foreground/60">

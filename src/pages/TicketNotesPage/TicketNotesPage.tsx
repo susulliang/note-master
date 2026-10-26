@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 // so repeated parses never pile up; if no line exists yet it is appended
 // after the agent-typed notes.
 const TLDR_LINE_PREFIX = 'Chinese Summary:';
+const CUSTOMER_CLOUD_TRANSCRIPTION_KEY = 'ecv.customerCloudTranscription';
 
 function withTldrLine(notes: string, zh: string): string {
   const lines = notes.split('\n');
@@ -1587,6 +1588,21 @@ Additional information (if needed): ${additional}`;
   //  English, so the ticket note stays in English.
   // ---------------------------------------------------------------------
   const localWhisper = useLocalTranscriber();
+  const [customerCloudTranscription, setCustomerCloudTranscription] = useState(() => {
+    try {
+      return localStorage.getItem(CUSTOMER_CLOUD_TRANSCRIPTION_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const handleToggleCustomerCloudTranscription = useCallback((enabled: boolean) => {
+    setCustomerCloudTranscription(enabled);
+    try {
+      localStorage.setItem(CUSTOMER_CLOUD_TRANSCRIPTION_KEY, String(enabled));
+    } catch {
+      /* Keep the selection for this page session. */
+    }
+  }, []);
 
   // ---------------------------------------------------------------------
   //  Ultra-small on-device LLM — the PRIMARY field parser. It re-reads the
@@ -1707,7 +1723,8 @@ Additional information (if needed): ${additional}`;
     () => formDataRef.current as Record<string, string>,
     (count) => setCustomerAddressCount(count),
     isTauri && customerAudioDeviceName ? customerAudioDeviceName : undefined,
-    isTauri ? agentMicDeviceName || undefined : undefined
+    isTauri ? agentMicDeviceName || undefined : undefined,
+    customerCloudTranscription && !isTauri
   );
   const askTranscript = useMemo(
     () => call.transcript
@@ -2189,6 +2206,8 @@ Additional information (if needed): ${additional}`;
                   call={{
                     isCapturing: call.isCapturing,
                     transcript: call.transcript,
+                    customerInterimText: call.customerInterimText,
+                    customerCloudStatus: call.customerCloudStatus,
                     suggestions: call.suggestions,
                     segmentsSent: call.segmentsSent,
                     queued: call.queued,
@@ -2377,6 +2396,9 @@ Additional information (if needed): ${additional}`;
             onToggleNap={catPet.toggleNap}
             callCapturing={call.isCapturing}
             onToggleCall={handleToggleCall}
+            customerCloudTranscription={customerCloudTranscription && !isTauri}
+            customerCloudSupported={!isTauri}
+            onToggleCustomerCloudTranscription={handleToggleCustomerCloudTranscription}
             engine={{
               isSupported: localWhisper.isSupported,
               model: localWhisper.model,

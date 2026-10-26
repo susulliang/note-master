@@ -66,6 +66,26 @@ export function getApiBase(): string {
   return API_BASE;
 }
 
+/** Issue a short-lived, single-use ticket for customer-audio transcription. */
+export async function createCallTranscriptionSocketTicket(): Promise<string> {
+  const token = getStoredToken();
+  const result = await call<{ ticket: string }>('/api/call-transcription/socket-ticket', {
+    method: 'POST',
+    body: '{}',
+    token,
+  });
+  return result.ticket;
+}
+
+/** WebSocket URL for the authenticated Cloudflare Nova-3 audio stream. */
+export function callTranscriptionSocketUrl(ticket: string): string {
+  const origin = new URL(API_BASE || window.location.origin, window.location.origin).origin;
+  const url = new URL('/api/call-transcription/socket', origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('ticket', ticket);
+  return url.toString();
+}
+
 function setStoredToken(token: string | null): void {
   try {
     if (token) window.localStorage.setItem(TOKEN_KEY, token);

@@ -13,6 +13,12 @@ import {
   familyEligible,
   familyKey,
 } from '@/lib/transcript-noise';
+import {
+  createCustomerTranscriptionTransport,
+  type CustomerSentiment,
+  type CustomerTranscriptionResult,
+  type CustomerTranscriptionTransport,
+} from '@/lib/customer-transcription';
 import type { ParaphraseInput, PriorLlmValues } from '@/lib/llm-parser';
 import { extractJsonLoose, renderTranscript } from '@/lib/llm-parser';
 import { generateWithRemoteLlm } from '@/lib/cloud-parser';
@@ -114,6 +120,12 @@ function pickMimeType(): string | undefined {
   return candidates.find((m) => MediaRecorder.isTypeSupported(m));
 }
 
+/** Nova-3 realtime accepts Opus WebM streams without raw encoding headers. */
+function pickCloudMimeType(): string | undefined {
+  const candidate = 'audio/webm;codecs=opus';
+  return MediaRecorder.isTypeSupported(candidate) ? candidate : undefined;
+}
+
 /**
  * Decode a recorded segment into the 16 kHz mono Float32 PCM that local
  * Whisper expects. decodeAudioData on a 16 kHz AudioContext resamples the
@@ -165,16 +177,14 @@ interface SegmentBlobs {
 /**
  * Call-capture transcription with **speaker separation**.
  *
- * Two streams are recorded simultaneously and transcribed as ~15s segments
- * each by a **local Whisper model** (transformers.js WASM in a Web Worker):
+ * Two streams are recorded separately:
  *
  *   tab audio — getDisplayMedia of the CCP tab  → "customer" entries
  *   mic audio — getUserMedia (echo-cancelled)   → "agent" entries
  *
- * Both recorders share one stop/start segment cycle, so every window yields
- * one blob per speaker. Blobs are queued per cycle (customer first, then
- * agent) and transcribed sequentially, producing an interleaved,
- * speaker-tagged transcript.
+ * Local mode keeps both sources on Whisper. The opt-in browser beta streams
+ * compressed customer audio to Nova-3 while the agent stays on local Whisper.
+ * Tauri desktop capture remains local until its Rust source can stream frames.
  *
  * DEBUG RECORDING MODE (toggleRecordingDebug): captures ONE source only —
  * the tab audio — and never opens the mic. For feeding a RECORDED
@@ -194,8 +204,8 @@ interface SegmentBlobs {
  * still wins. LLM output is validated against the canonical option lists
  * before it reaches the form.
  *
- * Audio never leaves the machine; there is no API key and no per-minute
- * cost.
+ * By default, audio never leaves the machine and there is no per-minute cost.
+ * Cloud mode is explicit: only customer audio is sent to Cloudflare.
  *
  * Known limitation: browsers can only echo-cancel audio this page plays
  * itself, so with loudspeakers the mic also hears the customer and their
@@ -225,7 +235,9 @@ export function useCallCapture(
   /** Optional: Tauri desktop mode — which input device NAME to record the
    *  AGENT's mic from (Rust side, via cpal). Empty/undefined = the system
    *  default microphone. */
-  agentMicDeviceName?: string
+  agentMicDeviceName?: string,
+  /** Beta: stream browser-captured customer audio to Nova-3 over WebSocket. */
+  customerCloudTranscription = false
 ) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -246,6 +258,10 @@ export function useCallCapture(
   const [agentLevel, setAgentLevel] = useState(0);
   /** True when the agent's mic is being recorded alongside the tab audio */
   const [hasMic, setHasMic] = useState(false);
+  const [customerInterimText, setCustomerInterimText] = useState('');
+  const [customerCloudStatus, setCustomerCloudStatus] = useState<
+    'off' | 'connecting' | 'live' | 'idle-closed' | 'error'
+  >('off');
   /** True while DEBUG RECORDING mode is capturing (single source, no mic) */
   const [isRecordingDebug, setIsRecordingDebug] = useState(false);
   /** QA checklist scores from the last LLM scoring pass (null = never run) */
@@ -261,6 +277,12 @@ export function useCallCapture(
   /** One recorder per speaker — this is what keeps the two voices separable */
   const tabRecorderRef = useRef<MediaRecorder | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
+  const customerCloudRecorderRef = useRef<MediaRecorder | null>(null);
+  const customerTransportRef = useRef<CustomerTranscriptionTransport | null>(null);
+  const customerCloudClosePromiseRef = useRef<Promise<void> | null>(null);
+  const customerCloudIdleTimerRef = useRef<number | null>(null);
+  const customerCloudSessionRef = useRef(0);
+  const customerCloudSentimentRef = useRef<CustomerSentiment | undefined>(undefined);
   const tabAnalyserRef = useRef<AnalyserNode | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   /** Rust-mode customer level, fed by 'customer-audio-level' events */
@@ -1016,6 +1038,80 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     [postSegment, armIdleParse]
   );
 
+  const closeCustomerCloudTransport = useCallback(
+    (status: 'off' | 'idle-closed' | 'error') => {
+      if (customerCloudIdleTimerRef.current !== null) {
+        window.clearTimeout(customerCloudIdleTimerRef.current);
+        customerCloudIdleTimerRef.current = null;
+      }
+      const transport = customerTransportRef.current;
+      if (transport) {
+        customerCloudClosePromiseRef.current = transport.close().finally(() => {
+          if (customerTransportRef.current === transport) customerTransportRef.current = null;
+        });
+      }
+      setCustomerInterimText('');
+      setCustomerCloudStatus(status);
+
+      const recorder = customerCloudRecorderRef.current;
+      customerCloudRecorderRef.current = null;
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch {
+          /* Recorder may already be stopping. */
+        }
+      }
+    },
+    []
+  );
+
+  const resetCustomerCloudIdleTimer = useCallback(() => {
+    if (customerCloudIdleTimerRef.current !== null) {
+      window.clearTimeout(customerCloudIdleTimerRef.current);
+    }
+    customerCloudIdleTimerRef.current = window.setTimeout(() => {
+      closeCustomerCloudTransport('idle-closed');
+    }, 60_000);
+  }, [closeCustomerCloudTransport]);
+
+  const handleCustomerCloudResult = useCallback(
+    (result: CustomerTranscriptionResult) => {
+      resetCustomerCloudIdleTimer();
+      if (!result.final) {
+        if (result.sentiment) customerCloudSentimentRef.current = result.sentiment;
+        setCustomerInterimText(result.text);
+        return;
+      }
+
+      const text = result.text.trim();
+      const sentiment = result.sentiment ?? customerCloudSentimentRef.current;
+      customerCloudSentimentRef.current = undefined;
+      setCustomerInterimText('');
+      if (!text || isAsrArtifact(text)) return;
+
+      const garbage = classifyWhisperGarbage(text);
+      if (garbage) {
+        setGarbageFiltered((count) => count + 1);
+        return;
+      }
+
+      const previous = entriesRef.current[entriesRef.current.length - 1];
+      if (previous?.speaker === 'customer' && previous.text === text) return;
+
+      setError(null);
+      entriesRef.current = [
+        ...entriesRef.current,
+        { speaker: 'customer', text, sentiment },
+      ];
+      setTranscript(entriesRef.current);
+      setSegmentsSent((count) => count + 1);
+      runRegexExtraction();
+      armIdleParse();
+    },
+    [armIdleParse, resetCustomerCloudIdleTimer, runRegexExtraction]
+  );
+
   /**
    * Hand finished windows to the transcription queue, in order. A window is
    * finished once the next one has started producing data — by then neither
@@ -1078,7 +1174,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
         flushAllPending();
       }
     },
-    [flushComplete, flushAllPending]
+    [enqueueSegment, flushComplete, flushAllPending]
   );
 
   // -----------------------------------------------------------------
@@ -1116,6 +1212,23 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     }
   }, []);
 
+  /** Cloud customer mode leaves the agent on its independent local cadence. */
+  const beginAgentSegment = useCallback(() => {
+    if (!shouldCaptureRef.current || !micRecorderRef.current) return;
+    try {
+      micRecorderRef.current.start();
+    } catch {
+      // already recording
+    }
+    segmentTimerRef.current = window.setTimeout(() => {
+      try {
+        micRecorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+    }, SEGMENT_MS);
+  }, []);
+
   // -----------------------------------------------------------------
   //  Lifecycle
   // -----------------------------------------------------------------
@@ -1123,6 +1236,10 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     if (!isSupported) return;
 
     setError(null);
+    setCustomerInterimText('');
+    setCustomerCloudStatus('off');
+    customerCloudSessionRef.current += 1;
+    customerCloudSentimentRef.current = undefined;
     shouldCaptureRef.current = true;
     recordingDebugRef.current = recordingDebug;
     setIsRecordingDebug(recordingDebug);
@@ -1138,6 +1255,10 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     //  cpal. The agent mic still uses getUserMedia/MediaRecorder.
     // -----------------------------------------------------------------
     if (customerAudioDeviceName) {
+      if (customerCloudTranscription && !recordingDebug) {
+        setCustomerCloudStatus('error');
+        setError('Live cloud customer transcription is currently available in browser capture mode.');
+      }
       const tauriAudio = await import('@/lib/tauri-audio');
       captureGenRef.current += 1;
       const gen = captureGenRef.current;
@@ -1352,45 +1473,122 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       void stopRef.current?.();
     });
 
-    // 5. One recorder per speaker, driven by the shared segment cycle
+    // 5. Separate customer and agent recorders. Cloud mode streams compressed
+    //    customer WebM/Opus frames independently while the agent stays local.
     const mimeType = pickMimeType();
     const recorderOptions = mimeType
       ? { mimeType, audioBitsPerSecond: 32_000 }
       : undefined;
+    const cloudMimeType = pickCloudMimeType();
+    let cloudCustomerActive =
+      customerCloudTranscription && !recordingDebug && Boolean(cloudMimeType);
+    if (customerCloudTranscription && !recordingDebug && !cloudMimeType) {
+      setCustomerCloudStatus('error');
+      setError('This browser does not support the compressed audio format required for cloud captions.');
+    }
+
+    if (cloudCustomerActive) {
+      setCustomerCloudStatus('connecting');
+      customerCloudClosePromiseRef.current = null;
+      const sessionId = customerCloudSessionRef.current;
+      const transport = createCustomerTranscriptionTransport(
+        'websocket',
+        (result) => {
+          if (sessionId === customerCloudSessionRef.current) handleCustomerCloudResult(result);
+        },
+        (err) => {
+          if (sessionId !== customerCloudSessionRef.current) return;
+          setError(`Cloud transcription failed: ${err.message}`);
+          closeCustomerCloudTransport('error');
+        }
+      );
+      customerTransportRef.current = transport;
+      try {
+        await transport.connect();
+        setCustomerCloudStatus('live');
+        resetCustomerCloudIdleTimer();
+      } catch (err) {
+        cloudCustomerActive = false;
+        customerTransportRef.current?.close();
+        customerTransportRef.current = null;
+        setCustomerCloudStatus('error');
+        setError(`Cloud transcription unavailable; using local capture. ${(err as Error).message}`);
+      }
+    }
 
     const tabAudioStream = new MediaStream([display.getAudioTracks()[0]]);
-    const tabRecorder = new MediaRecorder(tabAudioStream, recorderOptions);
+    const tabRecorder = new MediaRecorder(
+      tabAudioStream,
+      cloudCustomerActive && cloudMimeType
+        ? { mimeType: cloudMimeType, audioBitsPerSecond: 32_000 }
+        : recorderOptions
+    );
     // DEBUG RECORDING mode tags the single-source blobs 'recording' (mixed
     // agent + customer audio); normal mode tags them 'customer'. The tag is
     // bound in the CLOSURE per session — the final dataavailable fires after
     // stop() has already reset the mutable ref, so it must not be read at
     // event time.
     const tabSpeaker: Speaker = recordingDebug ? 'recording' : 'customer';
-    tabRecorder.ondataavailable = (event) => handleSegmentData(tabSpeaker, event);
-    // The tab recorder owns the restart cadence; the mic recorder rides along.
+    tabRecorder.ondataavailable = (event) => {
+      if (cloudCustomerActive && tabSpeaker === 'customer') {
+        customerTransportRef.current?.sendAudio(event.data);
+      } else {
+        handleSegmentData(tabSpeaker, event);
+      }
+    };
+    // In local mode the tab owns the shared cycle. Cloud mode leaves it
+    // running and gives the agent mic its own local-only segment schedule.
     tabRecorder.onstop = () => {
-      if (shouldCaptureRef.current) {
+      if (cloudCustomerActive) {
+        if (!shouldCaptureRef.current) flushAllPending();
+      } else if (shouldCaptureRef.current) {
         restartTimerRef.current = window.setTimeout(beginSegment, RESTART_DELAY_MS);
       } else {
         flushAllPending();
       }
     };
     tabRecorderRef.current = tabRecorder;
+    customerCloudRecorderRef.current = cloudCustomerActive ? tabRecorder : null;
 
     if (mic) {
       const micAudioStream = new MediaStream(mic.getAudioTracks());
       const micRecorder = new MediaRecorder(micAudioStream, recorderOptions);
-      micRecorder.ondataavailable = (event) => handleSegmentData('agent', event);
+      micRecorder.ondataavailable = (event) => {
+        if (cloudCustomerActive) enqueueSegment(event.data, 'agent');
+        else handleSegmentData('agent', event);
+      };
       micRecorder.onstop = () => {
-        if (!shouldCaptureRef.current) flushAllPending();
+        if (cloudCustomerActive && shouldCaptureRef.current) {
+          restartTimerRef.current = window.setTimeout(beginAgentSegment, RESTART_DELAY_MS);
+        } else if (!shouldCaptureRef.current) {
+          flushAllPending();
+        }
       };
       micRecorderRef.current = micRecorder;
     }
 
     setIsCapturing(true);
     startLevelLoop();
-    beginSegment();
-  }, [isSupported, customerAudioDeviceName, agentMicDeviceName, beginSegment, startLevelLoop, handleSegmentData, flushAllPending]);
+    if (cloudCustomerActive) {
+      tabRecorder.start(250);
+      beginAgentSegment();
+    } else {
+      beginSegment();
+    }
+  }, [
+    isSupported,
+    customerAudioDeviceName,
+    agentMicDeviceName,
+    customerCloudTranscription,
+    beginSegment,
+    beginAgentSegment,
+    startLevelLoop,
+    handleSegmentData,
+    flushAllPending,
+    handleCustomerCloudResult,
+    closeCustomerCloudTransport,
+    resetCustomerCloudIdleTimer,
+  ]);
 
   const stop = useCallback(() => {
     shouldCaptureRef.current = false;
@@ -1398,6 +1596,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     setIsCapturing(false);
     setIsRecordingDebug(false);
     setHasMic(false);
+    closeCustomerCloudTransport('off');
 
     // Rust mode: kill the level subscriptions and invalidate the session so
     // any in-flight device segment loop flushes its tail and never restarts.
@@ -1430,6 +1629,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       /* ignore */
     }
     tabRecorderRef.current = null;
+    customerCloudRecorderRef.current = null;
     micRecorderRef.current = null;
 
     displayStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -1439,7 +1639,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
 
     audioCtxRef.current?.close().catch(() => undefined);
     audioCtxRef.current = null;
-  }, [stopLevelLoop]);
+  }, [closeCustomerCloudTransport, stopLevelLoop]);
 
   // Keep the 'ended'-listener ref pointing at the latest stop()
   useEffect(() => {
@@ -1485,6 +1685,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
    * resolves includes everything the call captured.
    */
   const finalize = useCallback(async (): Promise<void> => {
+    await customerCloudClosePromiseRef.current?.catch(() => undefined);
     const deadline = Date.now() + FINALIZE_DRAIN_MS;
     while (
       (pendingCountRef.current > 0 || transcribingRef.current) &&
@@ -1536,6 +1737,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
   const clear = useCallback(() => {
     entriesRef.current = [];
     familyCountsRef.current = new Map();
+    customerCloudSentimentRef.current = undefined;
     setGarbageFiltered(0);
     regexFilledRef.current = new Map();
     llmConfirmedRef.current = new Set();
@@ -1555,6 +1757,7 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       llmIdleTimerRef.current = null;
     }
     setTranscript([]);
+    setCustomerInterimText('');
     setSuggestions([]);
     setSegmentsSent(0);
     setQaScores(null);
@@ -1567,6 +1770,9 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
       shouldCaptureRef.current = false;
       if (segmentTimerRef.current !== null) window.clearTimeout(segmentTimerRef.current);
       if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+      if (customerCloudIdleTimerRef.current !== null) window.clearTimeout(customerCloudIdleTimerRef.current);
+      customerTransportRef.current?.close();
+      customerTransportRef.current = null;
       if (llmIdleTimerRef.current !== null) window.clearTimeout(llmIdleTimerRef.current);
       if (paraphraseTimerRef.current !== null) window.clearTimeout(paraphraseTimerRef.current);
       stopLevelLoop();
@@ -1628,6 +1834,8 @@ const applyLlmFields = useCallback((fields: ExtractedField[]) => {
     clear,
     finalize,
     transcript,
+    customerInterimText,
+    customerCloudStatus,
     suggestions,
     /** On-demand DeepSeek parse of the current window.
      *  mode = 'full' (default) keeps ALL clauses;

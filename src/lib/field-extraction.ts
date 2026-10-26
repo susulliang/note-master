@@ -39,6 +39,7 @@ export type Speaker = 'agent' | 'customer' | 'recording';
 export interface TranscriptEntry {
   speaker: Speaker;
   text: string;
+  sentiment?: 'positive' | 'neutral' | 'negative';
 }
 
 // ---------------------------------------------------------------------------

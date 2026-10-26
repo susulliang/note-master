@@ -2823,6 +2823,67 @@ async function handleAdminStorePost(request: Request, env: Env): Promise<Respons
   return authJson({ ok: true, product: row ? storeProductPublic(row) : null });
 }
 
+async function handleCallTranscriptionSocketTicket(
+  env: Env,
+  user: AuthUserRow
+): Promise<Response> {
+  const now = Date.now();
+  await env.DB.prepare(
+    'DELETE FROM call_transcription_socket_tickets WHERE expires_at <= ?1 OR consumed_at IS NOT NULL'
+  )
+    .bind(now)
+    .run();
+
+  const ticket = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO call_transcription_socket_tickets (ticket, username, expires_at)
+     VALUES (?1, ?2, ?3)`
+  )
+    .bind(ticket, user.username, now + 60_000)
+    .run();
+
+  return authJson({ ticket, expiresAt: now + 60_000 });
+}
+
+async function handleCallTranscriptionSocket(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const ticket = url.searchParams.get('ticket') ?? '';
+  if (!/^[0-9a-f-]{36}$/i.test(ticket)) {
+    return new Response('Invalid transcription ticket', { status: 401 });
+  }
+
+  const now = Date.now();
+  const consumed = await env.DB.prepare(
+    `UPDATE call_transcription_socket_tickets
+     SET consumed_at = ?1
+     WHERE ticket = ?2 AND consumed_at IS NULL AND expires_at > ?1
+     RETURNING username`
+  )
+    .bind(now, ticket)
+    .first<{ username: string }>();
+  if (!consumed) return new Response('Transcription ticket expired or already used', { status: 401 });
+  if (!env.AI) return new Response('Workers AI is not configured', { status: 503 });
+
+  try {
+    // WebM/Opus keeps the browser-to-model audio stream compact. No language
+    // is pinned: Nova-3 performs multilingual recognition on the live stream.
+    return await env.AI.run(
+      '@cf/deepgram/nova-3',
+      {
+        audio: {
+          body: new Uint8Array(),
+          contentType: 'audio/webm;codecs=opus',
+        },
+        interim_results: true,
+        sentiment: true,
+      },
+      { websocket: true }
+    );
+  } catch {
+    return new Response('Could not start Nova-3 transcription', { status: 502 });
+  }
+}
+
 async function handleAuth(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -2840,6 +2901,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   }
   if (path === '/api/llm/models' && request.method === 'GET') return handleLlmModels(request, env);
   if (path === '/api/llm/chat' && request.method === 'POST') return handleLlmChat(request, env);
+  if (path === '/api/call-transcription/socket-ticket' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCallTranscriptionSocketTicket(env, user);
+  }
   if (path === '/api/auth/health' && request.method === 'GET') return authJson({ ok: true });
   if (path === '/api/auth/names' && request.method === 'GET')
     return authJson({ names: AUTH_EXTRA_NAMES, admin: [...AUTH_ADMIN_USERNAMES] });
@@ -3373,12 +3439,18 @@ export default {
         return new Response('Roster room is temporarily unavailable', { status: 503 });
       }
     }
+    if (url.pathname === '/api/call-transcription/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      return handleCallTranscriptionSocket(request, env);
+    }
     if (url.pathname === '/api/keyword-alerts') {
       return handleKeywordAlerts(request, env);
     }
     if (
       url.pathname.startsWith('/api/auth/') ||
       url.pathname.startsWith('/api/llm/') ||
+      url.pathname.startsWith('/api/call-transcription/') ||
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/pet') ||

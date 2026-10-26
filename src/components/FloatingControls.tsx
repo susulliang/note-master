@@ -31,6 +31,9 @@ interface RailControlsProps {
    *  call bar in v0.2.0). */
   callCapturing?: boolean;
   onToggleCall?: () => void;
+  customerCloudTranscription?: boolean;
+  customerCloudSupported?: boolean;
+  onToggleCustomerCloudTranscription?: (enabled: boolean) => void;
   /** Settings panel (gear): cat selection plus whisper/LLM state and handlers */
   engine?: EngineState;
   parser?: ParserState;
@@ -91,6 +94,9 @@ export default function RailControls({
   onToggleUiScale,
   callCapturing,
   onToggleCall,
+  customerCloudTranscription = false,
+  customerCloudSupported = true,
+  onToggleCustomerCloudTranscription,
   engine,
   parser,
   selectedCat,
@@ -232,6 +238,11 @@ export default function RailControls({
                 transcript={transcript ?? []}
                 isCapturing={!!callCapturing}
                 isTranscribing={!!isTranscribing}
+                customerCloudTranscription={customerCloudTranscription}
+                customerCloudSupported={customerCloudSupported}
+                onToggleCustomerCloudTranscription={(enabled) =>
+                  onToggleCustomerCloudTranscription?.(enabled)
+                }
                 onToggleCapture={() => onToggleCall?.()}
                 onClose={() => setEngineOpen(false)}
                 gridboxVisibility={gridboxVisibility}
