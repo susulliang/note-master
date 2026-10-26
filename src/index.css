@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "./tailwind-theme.css";
 @import "./typography.css";
+@import "./styles/quiet-workspace.css";
 
 /* ------------------------------------------------------------------ */
 /*  Inlined minimal subset of @lark-apaas/client-toolkit-lite/styles  */

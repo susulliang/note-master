@@ -129,6 +129,10 @@ interface FlowchartCanvasProps {
    *  screens by the page via matchMedia). */
   railCollapsed?: boolean;
   onToggleRailCollapsed?: () => void;
+  /** The Quiet Workspace shell owns the primary destination navigation. */
+  externalNavigation?: boolean;
+  /** Hide contextual canvas utilities while another workspace is active. */
+  hideUtilityRail?: boolean;
   /** Progressive disclosure: node ids currently rendered collapsed to their
    *  one-line toggle (e.g. Shipping Address until an address is parsed or a
    *  replacement resolution is chosen). */
@@ -447,13 +451,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   railBottomSlotRef,
   railCollapsed = false,
   onToggleRailCollapsed,
+  externalNavigation = false,
+  hideUtilityRail = false,
   collapsedNodes,
   onToggleNodeCollapsed,
 }: FlowchartCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   /** Left space the flow layout must reserve for the rail — 0 when the rail
    *  is collapsed into the corner circle so the canvas uses the full width. */
-  const railReserved = railCollapsed ? 0 : LEFT_RAIL_RESERVED;
+  const railReserved = railCollapsed || hideUtilityRail ? 0 : LEFT_RAIL_RESERVED;
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
 
   // COMMUNE leads the signed-in workspace; support tools follow in workflow
@@ -877,7 +883,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   return (
     <div
       ref={canvasRef}
-      className="custom-scrollbar relative h-full min-h-0 w-full overflow-x-hidden overflow-y-auto bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]"
+      className={cn(
+        'custom-scrollbar relative h-full min-h-0 w-full overflow-x-hidden overflow-y-auto',
+        externalNavigation
+          ? 'bg-[var(--qw-surface)]'
+          : 'bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_0)] [background-size:24px_24px]',
+      )}
     >
       {/* Height anchor — wraps both views so `h-full` on each resolves
           against the canvas's full height even when Call Notes' own
@@ -1067,7 +1078,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           canvas height/width via h-full on the min-h-full anchor.
           Hidden analytics view: only rendered when unlocked (Shift+D). */}
       {activeView === 'caseTrak' && (trakEnabled ?? analyticsEnabled) && (
-        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {caseTrakContent}
         </div>
       )}
@@ -1075,7 +1086,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Self Test workspace — weekly news knowledge quizzes. Kept after the
           support workspaces at the end of the rail. */}
       {activeView === 'selfTest' && (
-        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {selfTestContent}
         </div>
       )}
@@ -1084,7 +1095,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           Salesforce dashboard snapshot. Hidden analytics view: only rendered
           when unlocked (Shift+D). Same full-canvas layout as Trak. */}
       {activeView === 'dash' && (dashEnabled ?? analyticsEnabled) && (
-        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {dashContent}
         </div>
       )}
@@ -1092,7 +1103,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {/* Shifts workspace — agent roster (hidden work view; unlocked with
           Shift+S). Same full-canvas layout as the Case Trak board. */}
       {activeView === 'shifts' && (
-        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {shiftsContent}
         </div>
       )}
@@ -1101,7 +1112,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           a walk-around canvas world with NPC chit-chat, admin banners and
           personal showcase stubs. */}
       {activeView === 'commune' && communeEnabled && (
-        <div className={`box-border h-full min-h-full w-full ${railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
+        <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {communeContent}
         </div>
       )}
@@ -1119,20 +1130,26 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             • Collapsed (narrow screens / manual collapse button): the whole
               pill shrinks into a small glassmorphism circle in the top-left
               corner; clicking it re-expands the rail. */}
-        {railCollapsed && (
+        {!hideUtilityRail && railCollapsed && (
           <button
             type="button"
             onClick={onToggleRailCollapsed}
             title="Expand menu"
             aria-label="Expand menu"
             className="fixed left-3 top-3 z-40 flex size-14 animate-in items-center justify-center rounded-full border-[1.5px] border-foreground/15 bg-card/75 text-muted-foreground shadow-[inset_0_1.5px_0_rgba(255,255,255,0.22),inset_0_-1.5px_0_rgba(255,255,255,0.07),3px_3px_14px_-3px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150 transition-all duration-300 fade-in zoom-in-90 hover:scale-110 hover:text-foreground hover:shadow-[inset_0_1.5px_0_rgba(255,255,255,0.26),inset_0_-1.5px_0_rgba(255,255,255,0.09),5px_5px_20px_-4px_rgba(0,0,0,0.4)] active:scale-95"
-            style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}
+            style={{ left: externalNavigation ? 'calc(var(--quiet-nav-width, 0px) + 12px)' : undefined, fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}
           >
             <PanelLeftOpen className="size-5" />
           </button>
         )}
-        {!railCollapsed && (
-        <div className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]" style={{ fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif" }}>
+        {!hideUtilityRail && !railCollapsed && (
+        <div
+          className="group/rail fixed inset-y-3 left-3 z-40 w-16 origin-left animate-in fade-in duration-500 transition-transform duration-300 ease-out group-hover/rail:scale-[1.025]"
+          style={{
+            left: externalNavigation ? 'calc(var(--quiet-nav-width, 0px) + 12px)' : undefined,
+            fontFamily: "'Finlandica Text', var(--font-condensed), sans-serif",
+          }}
+        >
           {/* Glass background layer — carries all surface styling.
               Idle: subtle shadow only; hover (on the outer container, via
               group-hover/rail): a normal amount of shadow.
@@ -1150,7 +1167,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           <div className="relative z-10 flex h-full flex-col items-center pt-2 pb-4">
             {/* Work views — COMMUNE first, support tools next, Self Test last.
                 Restricted tools remain hidden until granted or unlocked. */}
-            <div className="relative flex flex-col gap-1">
+            {!externalNavigation && <div className="relative flex flex-col gap-1">
               <span
                 className="pointer-events-none absolute inset-x-0 z-0 rounded-full bg-primary shadow-[0_0_14px_color-mix(in_oklab,var(--primary)_50%,transparent)] transition-[top] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
                 style={{
@@ -1216,7 +1233,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
                   </button>
                 );
               })}
-            </div>
+            </div>}
 
             {/* Section divider */}
             <div className="my-2 h-px w-8 shrink-0 bg-foreground/10" aria-hidden="true" />
@@ -1344,7 +1361,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             mounted so e.g. the Product Lookup index is ready instantly.
             Offset to the right of the unified full-height rail (left-3 +
             w-16 = 76px right edge; 12px breathing gap). */}
-        <div className={`absolute top-4 z-30 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+        <div className={`quiet-canvas-tool-anchor absolute top-4 z-30 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
           {(() => {
             const gap = 16;
             let cursorY = 0;
@@ -1520,7 +1537,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setAppPhotosOpen(false)}
               aria-hidden="true"
             />
-            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
               </Suspense>
@@ -1537,7 +1554,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setQaOpen(false)}
               aria-hidden="true"
             />
-            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <QaPanel onClose={() => setQaOpen(false)} />
               </Suspense>
@@ -1554,7 +1571,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
               onClick={() => setManualsOpen(false)}
               aria-hidden="true"
             />
-            <div className={`fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
               <Suspense fallback={null}>
                 <ManualsPanel onClose={() => setManualsOpen(false)} />
               </Suspense>

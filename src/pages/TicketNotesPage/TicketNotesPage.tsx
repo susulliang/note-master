@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 // ---------------------------------------------------------------------------
 // Cloud-parse TLDR → Additional Notes helper
@@ -12,6 +13,19 @@ import { createPortal } from 'react-dom';
 const TLDR_LINE_PREFIX = 'Chinese Summary:';
 const CUSTOMER_CLOUD_TRANSCRIPTION_KEY = 'ecv.customerCloudTranscription';
 const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
+const WORKSPACE_PATHS: Record<WorkView, string> = {
+  commune: '/commune',
+  callNotes: '/notes',
+  caseTrak: '/cases',
+  dash: '/insights',
+  shifts: '/schedule',
+  selfTest: '/learn',
+};
+
+function workspaceFromPath(pathname: string): WorkView {
+  const entry = Object.entries(WORKSPACE_PATHS).find(([, path]) => path === pathname);
+  return entry ? entry[0] as WorkView : pathname === '/' ? 'commune' : 'callNotes';
+}
 
 function readOrCreateTicketNoteId(username: string | null): string {
   const key = `${GENERATED_TICKET_NOTE_ID_KEY}:${username || 'guest'}`;
@@ -90,7 +104,8 @@ import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
-import FlowchartCanvas from '@/components/FlowchartCanvas';
+import FlowchartCanvas, { type WorkView } from '@/components/FlowchartCanvas';
+import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import AuthPanel from '@/components/AuthPanel';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -701,6 +716,9 @@ function ExtensionPushConfirmPopup({
 }
 
 export default function TicketNotesPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [workView, setWorkView] = useState<WorkView>(() => workspaceFromPath(location.pathname));
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
     INITIAL_FORM_DATA
@@ -930,8 +948,6 @@ export default function TicketNotesPage() {
     []
   );
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  /** Signed-in agents land in COMMUNE; the rail then leads into work tools. */
-  const [workView, setWorkView] = useState<'callNotes' | 'selfTest' | 'commune' | 'caseTrak' | 'dash' | 'shifts'>('commune');
   // The Shifts roster workspace is HIDDEN by default — pressing Shift+S
   // reveals its rail pill and switches to it (kept out of the default UI;
   // it's an internal GZ-OPS roster, not part of the agent-facing flow).
@@ -949,6 +965,15 @@ export default function TicketNotesPage() {
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const authRequired = !authResolving && !authUser;
   const signedInUsername = authUser?.username ?? null;
+  const navigateToView = useCallback((view: WorkView) => {
+    setWorkView(view);
+    const path = WORKSPACE_PATHS[view];
+    if (location.pathname !== path) navigate(path);
+  }, [location.pathname, navigate]);
+  useEffect(() => {
+    const next = workspaceFromPath(location.pathname);
+    setWorkView((current) => current === next ? current : next);
+  }, [location.pathname]);
   const [kittyHelpOpen, setKittyHelpOpen] = useState(false);
   const [autoAskOnOpen, setAutoAskOnOpen] = useState(false);
   const [kittyModel, setKittyModel] = useState<AskModel>(readStoredAskModel);
@@ -967,8 +992,8 @@ export default function TicketNotesPage() {
       return;
     }
     setAuthPanelOpen(false);
-    setWorkView('commune');
-  }, [authResolving, signedInUsername]);
+    if (location.pathname === '/') navigateToView('commune');
+  }, [authResolving, location.pathname, navigateToView, signedInUsername]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1026,11 +1051,11 @@ export default function TicketNotesPage() {
       }
       e.preventDefault();
       setShiftsUnlocked(true);
-      setWorkView((prev) => (prev === 'shifts' ? prev : 'shifts'));
+      navigateToView('shifts');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [navigateToView]);
   // The Case Trak board and KPI Dashboard are HIDDEN by default — pressing
   // Shift+D toggles their rail pills on/off (power-user analytics views kept
   // out of the default agent flow). Locking while one is active returns to
@@ -1052,8 +1077,7 @@ export default function TicketNotesPage() {
       e.preventDefault();
       setAnalyticsUnlocked((unlocked) => {
         if (unlocked) {
-          // Lock: hide the Trak/Dash pills; leave any active analytics view.
-          setWorkView((prev) => (prev === 'caseTrak' || prev === 'dash' ? 'callNotes' : prev));
+          if (workView === 'caseTrak' || workView === 'dash') navigateToView('callNotes');
           return false;
         }
         return true;
@@ -1061,20 +1085,16 @@ export default function TicketNotesPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [navigateToView, workView]);
   // If the active work view loses its visibility grant, fall back to Notes.
   useEffect(() => {
     const trakVisible = analyticsUnlocked || !!authPrivileges?.trak;
     const dashVisible = analyticsUnlocked || !!authPrivileges?.dash;
     const rosterVisible = shiftsUnlocked || !!authPrivileges?.roster;
-    setWorkView((prev) => {
-      if (prev === 'caseTrak' && !trakVisible) return 'callNotes';
-      if (prev === 'dash' && !dashVisible) return 'callNotes';
-      if (prev === 'shifts' && !rosterVisible) return 'callNotes';
-      if (prev === 'commune' && !authUser && !authResolving) return 'callNotes'; // logged out
-      return prev;
-    });
-  }, [analyticsUnlocked, shiftsUnlocked, authPrivileges, authUser, authResolving]);
+    if (workView === 'caseTrak' && !trakVisible) navigateToView('callNotes');
+    if (workView === 'dash' && !dashVisible) navigateToView('callNotes');
+    if (workView === 'shifts' && !rosterVisible) navigateToView('callNotes');
+  }, [analyticsUnlocked, shiftsUnlocked, authPrivileges, workView, navigateToView]);
   /** "[OVER24]" report batches pushed by the extension (popup button
    *  "Import Over 24h Report Cases"). Accumulates across imports so the
    *  Case Trak board can merge every batch whenever it mounts. */
@@ -2287,10 +2307,25 @@ Additional information (if needed): ${additional}`;
   // metric re-renders of this page — only the portaled RailControls subtree
   // re-renders, exactly like the old standalone FloatingControls did.
   const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
+  const availableWorkspaces: WorkView[] = [
+    ...(authUser ? ['commune' as const] : []),
+    'callNotes',
+    ...(analyticsUnlocked || authPrivileges?.trak ? ['caseTrak' as const] : []),
+    ...(analyticsUnlocked || authPrivileges?.dash ? ['dash' as const] : []),
+    ...(shiftsUnlocked || authPrivileges?.roster ? ['shifts' as const] : []),
+    'selfTest',
+  ];
 
   return (
-    // h-full (not h-screen) so the viewport-filling layout stays correct
-    // when the old-people-mode zoom is active on <body>
+    <QuietWorkspaceShell
+      activeView={workView}
+      availableViews={availableWorkspaces}
+      onNavigate={navigateToView}
+      onOpenHelp={openKittyHelp}
+      onUtilitySlot={setRailControlsSlot}
+      username={authUser?.username}
+      nightMode={['midnight', 'zinc-dark', 'evening', 'amethyst'].includes(theme)}
+    >
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
         {/* Main canvas area */}
@@ -2463,7 +2498,8 @@ Additional information (if needed): ${additional}`;
               onIncrementCustomerAddressCount={() => setCustomerAddressCount((c) => c + 1)}
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
-              onViewChange={setWorkView}
+              externalNavigation
+              hideUtilityRail={workView !== 'callNotes'}
               caseTrakContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Case Trak…</div>}>
                   <CaseTrakBoard reportImports={caseReportImports} connected={extensionBridge.connected} />
@@ -2497,7 +2533,6 @@ Additional information (if needed): ${additional}`;
               analyticsEnabled={analyticsUnlocked}
               dashEnabled={analyticsUnlocked || !!authPrivileges?.dash}
               trakEnabled={analyticsUnlocked || !!authPrivileges?.trak}
-              railBottomSlotRef={setRailControlsSlot}
               railCollapsed={railCollapsed}
               onToggleRailCollapsed={toggleRailCollapsed}
               collapsedNodes={collapsedNodes}
@@ -2516,7 +2551,6 @@ Additional information (if needed): ${additional}`;
           <RailControls
             theme={theme}
             onCycleTheme={handleCycleTheme}
-            onCollapseRail={() => setRailCollapsed(true)}
             historyOpen={showHistory}
             onToggleHistory={handleToggleHistory}
             history={history}
@@ -2609,7 +2643,7 @@ Additional information (if needed): ${additional}`;
               .slice(-3)
           : [];
         return (
-      <div className="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="quiet-call-action-dock fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div
           className={cn(
             'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
@@ -3118,5 +3152,6 @@ Additional information (if needed): ${additional}`;
         </Suspense>
       )}
     </div>
+    </QuietWorkspaceShell>
   );
 }

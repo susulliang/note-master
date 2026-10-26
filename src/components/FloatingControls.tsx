@@ -206,8 +206,8 @@ export default function RailControls({
         )}
       </div>
 
-      {historyOpen && (
-        <div className="fixed left-[88px] top-1/2 z-50 -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
+        {historyOpen && (
+        <div className="quiet-utility-panel-anchor animate-in fade-in slide-in-from-left-2 duration-200">
           <HistoryPanel
             history={history}
             onDeleteHistory={onDeleteHistory}
@@ -223,7 +223,7 @@ export default function RailControls({
       {engineOpen && engine && parser && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setEngineOpen(false)} aria-hidden="true" />
-          <div className="fixed left-[88px] top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 animate-in fade-in slide-in-from-left-2 duration-200">
+          <div className="quiet-utility-panel-anchor animate-in fade-in slide-in-from-left-2 duration-200">
             <Suspense fallback={null}>
               <EngineSettingsPanel
                 engine={engine}

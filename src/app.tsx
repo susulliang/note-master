@@ -16,7 +16,9 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<TicketNotesPage />} />
+          {/* One persistent controller owns call capture and ticket state;
+              workspace URLs change the active surface without remounting it. */}
+          <Route path="*" element={<TicketNotesPage />} />
           {WhisperBenchPage && (
             <Route
               path="whisper-bench"
