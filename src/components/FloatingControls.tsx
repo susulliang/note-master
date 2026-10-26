@@ -126,7 +126,7 @@ export default function RailControls({
         <div className="fixed inset-0 z-40" onClick={onToggleHistory} aria-hidden="true" />
       )}
 
-      <div className="flex flex-col items-center gap-1 animate-in fade-in duration-700">
+      <div className="quiet-control-icons flex flex-col items-center gap-1 animate-in fade-in duration-700">
         <Button
           variant="ghost"
           size="icon"

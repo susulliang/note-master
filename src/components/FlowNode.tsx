@@ -174,6 +174,8 @@ export interface QuickTextGroup {
 }
 
 export interface FlowNodeProps {
+  /** Canvas nodes are draggable/absolute; inline nodes participate in document flow. */
+  layoutMode?: 'canvas' | 'inline';
   id: string;
   type: NodeType;
   label?: string;
@@ -579,6 +581,7 @@ function ComboboxField({
 }
 
 function FlowNodeComponent({
+  layoutMode = 'canvas',
   id,
   type,
   label,
@@ -1293,22 +1296,26 @@ function FlowNodeComponent({
     type === 'ticketTracker' ||
     type === 'sop' ||
     type === 'productLookup';
+  const inlineLayout = layoutMode === 'inline';
 
   return (
     <div
       ref={nodeRef}
       data-node-id={id}
       style={{
-        left: position.x,
-        top: position.y,
-        width,
+        position: inlineLayout ? 'relative' : undefined,
+        left: inlineLayout ? undefined : position.x,
+        top: inlineLayout ? undefined : position.y,
+        width: inlineLayout ? '100%' : width,
         // Bare mode (copilot drawer): fill the drawer body's full height
         // AND width so the embedded tool panel spans it end-to-end.
         ...(bare ? { width: '100%', height: '100%' } : {}),
         ...(zIndex !== undefined ? { zIndex } : {}),
       }}
       className={cn(
-        'absolute cursor-grab select-none transition-all duration-200 active:cursor-grabbing',
+        inlineLayout
+          ? 'relative w-full select-text transition-all duration-150'
+          : 'absolute cursor-grab select-none transition-all duration-200 active:cursor-grabbing',
         '[&_button]:cursor-pointer [&_input]:cursor-text [&_textarea]:cursor-text [&_input]:select-text [&_textarea]:select-text',
         // Bare mode (copilot drawer): no glass-box frame of its own — the
         // drawer shell provides the chrome and the tab names the tool, so
@@ -1354,7 +1361,7 @@ function FlowNodeComponent({
         // turns much frostier for readability
         quickPanelOpen && 'glass-expanded z-30'
       )}
-      onMouseDown={handleMouseDown}
+      onMouseDown={inlineLayout ? undefined : handleMouseDown}
     >
       {/* Parsed-field badge — which engine filled it, until it's proofread
           (yellow for the AI parser, blue for the provisional regex match) */}

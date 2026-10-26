@@ -386,7 +386,7 @@ export default function EngineSettingsPanel({
 
   return (
     <div
-      className="glass-panel custom-scrollbar max-h-[70vh] w-[min(440px,calc(100vw-24px))] overflow-y-auto rounded-xl p-3"
+      className="quiet-settings-panel glass-panel custom-scrollbar w-[min(440px,calc(100vw-24px))] overflow-y-auto rounded-xl p-3"
       role="dialog"
       aria-label="Settings"
     >

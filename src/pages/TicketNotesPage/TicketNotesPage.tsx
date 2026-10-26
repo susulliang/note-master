@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -63,6 +63,7 @@ function withTldrLine(notes: string, zh: string): string {
 
 import { Toaster, toast } from 'sonner';
 import {
+  ArrowUp,
   User,
   Phone,
   Mail,
@@ -87,6 +88,7 @@ import {
   Wand2,
   RotateCcw,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -104,7 +106,7 @@ import RailControls from '@/components/FloatingControls';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
-import FlowchartCanvas, { type WorkView } from '@/components/FlowchartCanvas';
+import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/components/FlowchartCanvas';
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import AuthPanel from '@/components/AuthPanel';
 import { useAuth } from '@/lib/auth-context';
@@ -117,7 +119,7 @@ import {
 } from '@/lib/auth-client';
 import { QA_CHECKLIST_TOTAL } from '@/data/qaCallChecklist';
 import type { CaseReportImportBatch } from '@/components/CaseTrakBoard';
-import QuickRepliesMenu from '@/components/QuickRepliesMenu';
+import QuickRepliesPopover from '@/components/QuickRepliesPopover';
 import QaChecklistMenu from '@/components/QaChecklistMenu';
 import CatAssistant from '@/components/CatAssistant';
 import { useCatAssistant } from '@/hooks/use-cat-assistant';
@@ -719,6 +721,8 @@ export default function TicketNotesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [workView, setWorkView] = useState<WorkView>(() => workspaceFromPath(location.pathname));
+  const [notesPresentation, setNotesPresentation] = useState<'structured' | 'flow'>('structured');
+  const [widgetRequest, setWidgetRequest] = useState<{ widget: ContextWidgetId; token: number }>();
   const [formData, setFormData] = useScopedState<Record<string, string | string[]>>(
     'ecovacs_ticket_form_data',
     INITIAL_FORM_DATA
@@ -970,15 +974,37 @@ export default function TicketNotesPage() {
     const path = WORKSPACE_PATHS[view];
     if (location.pathname !== path) navigate(path);
   }, [location.pathname, navigate]);
+  const openWorkspaceWidget = useCallback((widget: ContextWidgetId) => {
+    setWidgetRequest({ widget, token: Date.now() + Math.random() });
+  }, []);
   useEffect(() => {
     const next = workspaceFromPath(location.pathname);
     setWorkView((current) => current === next ? current : next);
   }, [location.pathname]);
   const [kittyHelpOpen, setKittyHelpOpen] = useState(false);
+  const [kittySpotlightOpen, setKittySpotlightOpen] = useState(false);
+  const [kittySpotlightQuery, setKittySpotlightQuery] = useState('');
+  const [kittyInitialQuestion, setKittyInitialQuestion] = useState('');
   const [autoAskOnOpen, setAutoAskOnOpen] = useState(false);
   const [kittyModel, setKittyModel] = useState<AskModel>(readStoredAskModel);
   const [kittyAskEvidence, setKittyAskEvidence] = useState<SupportEvidence[]>([]);
-  const openKittyHelp = useCallback(() => setKittyHelpOpen(true), []);
+  const openKittyHelp = useCallback(() => {
+    setKittySpotlightQuery('');
+    setKittyInitialQuestion('');
+    setAutoAskOnOpen(false);
+    setKittySpotlightOpen(true);
+  }, []);
+  const submitKittySpotlight = useCallback(() => {
+    const question = kittySpotlightQuery.trim();
+    setKittyInitialQuestion(question);
+    setAutoAskOnOpen(Boolean(question));
+    setKittySpotlightOpen(false);
+    setKittyHelpOpen(true);
+  }, [kittySpotlightQuery]);
+  const closeKittySpotlight = useCallback(() => {
+    setKittySpotlightOpen(false);
+    setKittySpotlightQuery('');
+  }, []);
   const consumeAutoAsk = useCallback(() => setAutoAskOnOpen(false), []);
   const changeKittyModel = useCallback((model: AskModel) => {
     setKittyModel(model);
@@ -1137,8 +1163,9 @@ export default function TicketNotesPage() {
    */
   const llmBasesRef = useRef<Record<string, string>>({});
 
-  // Apply theme to document via data-theme attribute
-  useEffect(() => {
+  // Apply the persisted theme before paint so the shell and native controls
+  // never briefly fall back to the default dark token set.
+  useLayoutEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
@@ -1896,6 +1923,9 @@ Additional information (if needed): ${additional}`;
     applyOutcome: call.applyParsedOutcome,
   });
   const runBothKittyWorkflows = useCallback(() => {
+    setKittySpotlightOpen(false);
+    setKittySpotlightQuery('');
+    setKittyInitialQuestion('');
     setKittyHelpOpen(true);
     setAutoAskOnOpen(true);
   }, []);
@@ -2322,9 +2352,10 @@ Additional information (if needed): ${additional}`;
       availableViews={availableWorkspaces}
       onNavigate={navigateToView}
       onOpenHelp={openKittyHelp}
+      onOpenWidget={openWorkspaceWidget}
       onUtilitySlot={setRailControlsSlot}
       username={authUser?.username}
-      nightMode={['midnight', 'zinc-dark', 'evening', 'amethyst'].includes(theme)}
+      hideDock={kittyHelpOpen}
     >
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
@@ -2499,7 +2530,11 @@ Additional information (if needed): ${additional}`;
               emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
               externalNavigation
-              hideUtilityRail={workView !== 'callNotes'}
+              hideUtilityRail
+              widgetRequest={widgetRequest}
+              notesPresentation={notesPresentation}
+              onNotesPresentationChange={setNotesPresentation}
+              callCapturing={call.isCapturing}
               caseTrakContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Case Trak…</div>}>
                   <CaseTrakBoard reportImports={caseReportImports} connected={extensionBridge.connected} />
@@ -2631,7 +2666,7 @@ Additional information (if needed): ${additional}`;
           "Generate Note" CTA, so agents never scroll to end a
           call. The old in-flow Hang Up node is gone — its function lives
           entirely here. */}
-      {workView === 'callNotes' && (() => {
+      {workView === 'callNotes' && !kittyHelpOpen && (() => {
         const capturing = call.isCapturing;
         // Live customer subtitle — the customer's last 3 utterances, newest
         // at the bottom, rendered like a scrolling caption strip. ("agent"
@@ -2646,15 +2681,15 @@ Additional information (if needed): ${additional}`;
       <div className="quiet-call-action-dock fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div
           className={cn(
-            'border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125',
+            'quiet-call-dock-surface',
             // Capturing (or editing the debug transcript): the pill grows
             // UPWARD into a taller card with the live customer subtitle
             // stacked above the controls. Width stays content-driven by the
             // controls row (never clipped), with a cap so the subtitle
             // truncates on narrow viewports.
             capturing || transcriptEditing
-              ? 'flex w-max max-w-[min(52rem,calc(100vw-1rem))] flex-col gap-2 rounded-3xl px-3 py-2.5'
-              : 'flex w-max max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-1.5 sm:gap-2 md:gap-3'
+              ? 'quiet-call-dock-surface--capturing flex w-max max-w-[min(52rem,calc(100vw-1rem))] flex-col gap-2 px-3 py-2.5'
+              : 'flex w-max max-w-[calc(100vw-1rem)] items-center gap-1.5 py-1.5 pl-1.5 pr-1.5 sm:gap-2 md:gap-3'
           )}
         >
           {/* DEBUG transcript editor — double-click the subtitle to open,
@@ -2752,7 +2787,7 @@ Additional information (if needed): ${additional}`;
 
           <div
             className={cn(
-              'flex max-w-full flex-wrap items-center justify-center gap-1 whitespace-nowrap sm:gap-1.5 md:flex-nowrap md:gap-3',
+              'flex max-w-full flex-wrap items-center justify-center gap-1 whitespace-nowrap sm:gap-1.5 md:flex-nowrap md:gap-1.5',
               capturing ? 'justify-center' : ''
             )}
           >
@@ -2764,11 +2799,8 @@ Additional information (if needed): ${additional}`;
             type="button"
             onClick={handleToggleCall}
             className={cn(
-              'relative flex items-center justify-center rounded-full transition-all duration-200 hover:scale-110 active:scale-90',
-              capturing ? 'size-11' : 'size-9',
-              call.isCapturing
-                ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25'
-                : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
+              'quiet-call-action-button',
+              call.isCapturing && 'quiet-call-action-button--recording'
             )}
             aria-label={call.isCapturing ? 'Stop call capture' : 'Capture call audio'}
             title={
@@ -2791,6 +2823,7 @@ Additional information (if needed): ${additional}`;
                 <span className="absolute size-11 animate-mic-pulse-ring rounded-full border border-red-500/40" />
               </span>
             )}
+            <span>{call.isCapturing ? 'Stop' : 'Capture'}</span>
           </button>
 
           {/* Customer audio source picker — Tauri desktop only. The Rust
@@ -2859,7 +2892,9 @@ Additional information (if needed): ${additional}`;
               idle, no capture needed). */}
           {!capturing && (
           <div
-            className="flex items-center gap-2"
+            className="flex items-center"
+            role="status"
+            aria-label={call.isCapturing || voice.isListening ? 'Call capture active' : 'Call capture idle'}
             title="Capture status — double-click to paste a transcript (debug)"
             onDoubleClick={() => {
               setTranscriptDraft(
@@ -2876,21 +2911,12 @@ Additional information (if needed): ${additional}`;
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/70" />
                   <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
                 </span>
-                <span className="hidden text-[10px] font-bold uppercase tracking-widest text-destructive md:inline">
-                  REC
-                </span>
               </>
             ) : (
-              <>
-                <span className="size-2.5 rounded-full bg-muted-foreground/40" />
-                <span className="hidden text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 md:inline">
-                  Idle
-                </span>
-              </>
+              <span className="size-2.5 rounded-full bg-muted-foreground/40" />
             )}
           </div>
           )}
-          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           {/* Fill Notes — same engine as the green "Parse" button in the
               Live Call Transcript panel: sends the full transcript window
               to the cloud parser and auto-fills the ticket fields. */}
@@ -2899,8 +2925,7 @@ Additional information (if needed): ${additional}`;
             onClick={() => void call.cloudParse('full')}
             disabled={call.isCloudParsing || call.transcript.length === 0}
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-success font-bold text-success-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--success)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 md:size-auto md:px-3.5 md:py-1.5 md:text-xs',
-              capturing && 'md:px-4 md:py-1.5 md:text-[13px]'
+              'quiet-call-action-button quiet-call-action-button--fill disabled:cursor-not-allowed disabled:opacity-50'
             )}
             aria-label={call.isCloudParsing ? 'Filling notes' : 'Fill notes'}
             title={
@@ -2914,24 +2939,14 @@ Additional information (if needed): ${additional}`;
             ) : (
               <Wand2 className="size-3.5" />
             )}
-            <span className="hidden md:inline">{call.isCloudParsing ? 'Filling…' : 'Fill Notes'}</span>
+            <span>{call.isCloudParsing ? 'Filling…' : 'Fill Notes'}</span>
           </button>
-          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
-          {/* QA checklist — yellow pill; shows the call-QA completion status
-              scored by the same AI parse that fills the notes. */}
-          <QaChecklistMenu
-            scores={call.qaScores}
-            scoring={call.isQaScoring}
-            summary={call.qaSummary}
-          />
-          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
           <button
             type="button"
             onClick={handleHangUp}
             disabled={hangUpRunning}
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-destructive font-bold text-destructive-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-[0_0_20px_color-mix(in_oklab,var(--destructive)_45%,transparent)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 md:size-auto md:px-3.5 md:py-1.5 md:text-xs',
-              capturing && 'md:px-4 md:py-1.5 md:text-[13px]'
+              'quiet-call-action-button quiet-call-action-button--generate disabled:cursor-not-allowed disabled:opacity-70'
             )}
             aria-label={hangUpRunning ? 'Generating note' : 'Generate note'}
             title="Generate and copy the ticket note. Active call capture will be ended."
@@ -2941,30 +2956,25 @@ Additional information (if needed): ${additional}`;
             ) : (
               <PhoneOff className="size-3.5" />
             )}
-            <span className="hidden md:inline">{hangUpRunning ? 'Generating…' : 'Generate Note'}</span>
+            <span>{hangUpRunning ? 'Generating…' : 'Generate note'}</span>
           </button>
-          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
-          <QuickRepliesMenu />
-
-          {/* Reset — the rightmost control on the call bar (moved here from
-              the left rail). Confirm dialog guards the destructive wipe;
-              hovering ramps up a red warning state so agents don't click it
-              by accident mid-call. */}
-          <div className="hidden h-5 w-px bg-foreground/10 md:block" aria-hidden="true" />
+          <QaChecklistMenu
+            scores={call.qaScores}
+            scoring={call.isQaScoring}
+            summary={call.qaSummary}
+            className="quiet-call-qa"
+          />
+          <QuickRepliesPopover className="quiet-call-action-button quiet-call-quick-replies" />
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className={cn(
-                  'group flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-200 active:scale-90',
-                  capturing ? 'size-10' : 'size-9',
-                  // Hover → red warning: destructive tint + glow + spin
-                  'hover:scale-110 hover:bg-destructive/15 hover:text-destructive hover:shadow-[0_0_18px_color-mix(in_oklab,var(--destructive)_55%,transparent)]'
-                )}
-                aria-label="Reset form"
-                title="Reset — clears all ticket data, captions and transcript (cannot be undone)"
+                className="quiet-call-action-button quiet-call-action-button--reset"
+                aria-label="Reset call"
+                title="Reset all ticket fields, captions and transcript"
               >
-                <RotateCcw className="size-[18px] transition-transform duration-300 group-hover:-rotate-360" />
+                <RotateCcw className="size-3.5" />
+                <span>Reset</span>
               </button>
             </AlertDialogTrigger>
             <AlertDialogContent className="glass-panel rounded-2xl">
@@ -3110,7 +3120,7 @@ Additional information (if needed): ${additional}`;
       )}
 
       {/* Keep the floating mascot out of the pixel-world scene. */}
-      {workView !== 'commune' && !kittyHelpOpen && (
+      {workView !== 'commune' && !kittyHelpOpen && !kittySpotlightOpen && (
         <CatAssistant
           catId={selectedCat}
           currentThought={cat.currentThought}
@@ -3126,13 +3136,66 @@ Additional information (if needed): ${additional}`;
           onAskOpen={openKittyHelp}
         />
       )}
+      {kittySpotlightOpen && !kittyHelpOpen && (
+        <>
+          <div
+            className="quiet-kitty-spotlight-backdrop"
+            onClick={closeKittySpotlight}
+            aria-hidden="true"
+          />
+          <form
+            role="search"
+            aria-label="Ask Kitty"
+            className="quiet-kitty-spotlight"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitKittySpotlight();
+            }}
+          >
+            <Search className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+            <input
+              autoFocus
+              type="text"
+              value={kittySpotlightQuery}
+              onChange={(event) => setKittySpotlightQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') closeKittySpotlight();
+              }}
+              maxLength={1000}
+              placeholder="Ask Kitty…"
+              aria-label="Search with Kitty"
+              className="min-w-0 flex-1 bg-transparent px-1 text-[15px] text-foreground outline-none placeholder:text-muted-foreground/70"
+            />
+            <button
+              type="submit"
+              className="quiet-kitty-spotlight-submit"
+              aria-label="Open Ask Kitty"
+              title="Enter to ask Kitty"
+            >
+              <ArrowUp className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={closeKittySpotlight}
+              className="quiet-kitty-spotlight-close"
+              aria-label="Close Ask Kitty search"
+              title="Close"
+            >
+              <X className="size-4" />
+            </button>
+          </form>
+        </>
+      )}
       {kittyHelpOpen && (
         <Suspense fallback={null}>
           <KittyHelpWorkspace
             catId={selectedCat}
-            callBarVisible={workView === 'callNotes'}
+            callBarVisible={workView === 'callNotes' && !kittyHelpOpen}
             callBarExpanded={call.isCapturing || transcriptEditing}
-            onClose={() => setKittyHelpOpen(false)}
+            onClose={() => {
+              setKittyHelpOpen(false);
+              setKittyInitialQuestion('');
+            }}
             model={kittyModel}
             onModelChange={changeKittyModel}
             notes={askNotes}
@@ -3144,6 +3207,7 @@ Additional information (if needed): ${additional}`;
             resolveError={kitty.error}
             result={kitty.result}
             onResolve={(question, runId, onStream) => { void kitty.start(question, runId, onStream); }}
+            initialQuestion={kittyInitialQuestion}
             autoAskOnOpen={autoAskOnOpen}
             onAutoAskConsumed={consumeAutoAsk}
             askEvidence={kittyAskEvidence}

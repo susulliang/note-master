@@ -18,7 +18,12 @@ export default function QaPanel({ onClose }: QaPanelProps) {
   const std: QaStandard = QA_STANDARDS[lang];
 
   return (
-    <div className="flex h-full w-[600px] max-w-[calc(100vw-7rem)] flex-col rounded-2xl border-[1.5px] border-foreground/10 bg-card/30 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-md backdrop-saturate-125">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={std.title}
+      className="quiet-widget-panel flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/10 bg-card/35 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-xl backdrop-saturate-150"
+    >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-foreground/10 px-4 py-3">
         <div className="flex items-center gap-2">

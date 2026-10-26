@@ -3,7 +3,17 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ErrorBoundary } from "react-error-boundary";
 import App from "./app";
+import { normalizeTheme } from "./lib/themes";
 import "./index.css";
+
+try {
+  const storedTheme = window.localStorage.getItem("ecovacs_ticket_theme");
+  if (storedTheme !== null) {
+    document.documentElement.setAttribute("data-theme", normalizeTheme(JSON.parse(storedTheme)));
+  }
+} catch {
+  document.documentElement.setAttribute("data-theme", "clay");
+}
 
 const CHUNK_RELOAD_KEY = "ecovacs_chunk_reload_at";
 window.addEventListener("vite:preloadError", (event) => {

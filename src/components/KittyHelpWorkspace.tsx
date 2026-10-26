@@ -27,6 +27,7 @@ interface KittyHelpWorkspaceProps {
   resolveError: string | null;
   result: KittyHelpResult | null;
   onResolve: (question: string, runId: string, onStream: (preview: string) => void) => void;
+  initialQuestion?: string;
   autoAskOnOpen: boolean;
   onAutoAskConsumed: () => void;
   askEvidence: SupportEvidence[];
@@ -118,6 +119,7 @@ export function KittyHelpWorkspace({
   resolveError,
   result,
   onResolve,
+  initialQuestion = '',
   autoAskOnOpen,
   onAutoAskConsumed,
   askEvidence,
@@ -245,6 +247,7 @@ export function KittyHelpWorkspace({
               resolveBusy={resolveBusy}
               resolveStage={resolveStage}
               resolveError={resolveError}
+              initialQuestion={initialQuestion}
               autoAskOnMount={autoAskOnOpen}
               onAutoAskConsumed={onAutoAskConsumed}
             />

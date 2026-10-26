@@ -66,7 +66,7 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
 
   const sortedOptions = useMemo(() => USERNAME_OPTIONS, []);
   const selectClass =
-    'glass-field w-full appearance-none rounded-xl px-4 py-3 text-base font-semibold text-foreground focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30';
+    'glass-field auth-form-field w-full appearance-none rounded-xl px-4 py-3 text-base font-semibold text-foreground focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30';
 
   return (
     <div
@@ -208,7 +208,7 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                   placeholder="••••••••"
-                  className="glass-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                  className="glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
                 />
               </label>
 
@@ -224,7 +224,7 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
                     onChange={(e) => setConfirm(e.target.value)}
                     autoComplete="new-password"
                     placeholder="••••••••"
-                    className="glass-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                    className="glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
                   />
                 </label>
               )}

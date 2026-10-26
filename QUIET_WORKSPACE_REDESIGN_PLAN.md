@@ -1,10 +1,30 @@
 # COMMUNE / Ecovacs Notes: Quiet Workspace
 
-Status: design proposal for approval. No application code has been changed.
+Status: Quiet Workspace implementation for the v0.7.7 release line.
+
+## Navigation Direction Update
+
+The original sidebar/header/mobile-dock proposal below is superseded by the
+single-orbit navigation requested during implementation. Do not add a persistent
+top navigation panel, left rail, or separate mobile dock.
+
+- One floating pill stays centered at the bottom: workspace icons on the left,
+  Kitty Help in the center, and support widgets on the right.
+- Every authorized workspace icon is visible to the left of Kitty, including
+  DASH when the account has its grant. All six support-tool icons stay visible
+  to the right; the pill scales them down rather than hiding them in overflow.
+- Support drawers expand above the pill and can be dismissed without changing
+  workspaces. Manuals and QA use centered dialogs. The call action dock sits at
+  the top, while global controls remain individual floating buttons top-right.
+- Structured Notes is the default Call Notes surface; Flow view remains
+  available. Quick Responses use a searchable template-and-preview panel, not
+  the previous radial fan.
+- The Kitty orb first opens a compact Spotlight-style glass prompt. Enter opens
+  the full Ask workspace and submits the typed question.
 
 ## 1. Context Reset
 
-The current application is a multi-tool support workspace, not just its original flowchart prototype. The local baseline is v0.7.6. Previous work established authenticated call capture/parsing, note generation and archive submission, real-time Commune, AI Search conversations, evidence, and customer email drafting.
+The current application is a multi-tool support workspace, not just its original flowchart prototype. The local baseline is v0.7.7. Previous work established authenticated call capture/parsing, note generation and archive submission, real-time Commune, AI Search conversations, evidence, and customer email drafting.
 
 This redesign replaces the presentation and navigation model, not those working business flows. The original AGENTS.md styling specification is historical; the new user-supplied visual reference directs this proposal.
 

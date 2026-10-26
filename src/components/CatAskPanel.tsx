@@ -201,6 +201,7 @@ export function CatAskPanel({
   resolveBusy = false,
   resolveStage,
   resolveError,
+  initialQuestion = '',
   autoAskOnMount = false,
   onAutoAskConsumed,
 }: {
@@ -224,13 +225,14 @@ export function CatAskPanel({
   resolveBusy?: boolean;
   resolveStage?: KittyStage | null;
   resolveError?: string | null;
+  initialQuestion?: string;
   autoAskOnMount?: boolean;
   onAutoAskConsumed?: () => void;
 }) {
   const storageKey = conversationStorageKey(agentName);
   const [conversation, setConversation] = useState<AskTurn[]>(() => readConversation(storageKey));
   const [loadedStorageKey, setLoadedStorageKey] = useState(storageKey);
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState(initialQuestion);
   const [loading, setLoading] = useState(false);
   const [searchingFromNotes, setSearchingFromNotes] = useState(false);
   const [loadingTurnId, setLoadingTurnId] = useState<string | null>(null);

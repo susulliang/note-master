@@ -1,6 +1,7 @@
 import { lazy, Suspense, memo, useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { CalendarDays, FilePen, GraduationCap, LayoutGrid, BarChart3, Image as ImageIcon, ClipboardCheck, BookOpen, Users, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import FlowNode, { type NodeType, type QuickTextGroup } from './FlowNode';
+import StructuredNotesWorkspace from './workspace/StructuredNotesWorkspace';
 import { NODE_CONNECTIONS, NODE_GROUPS, NODE_IDS, NODE_LAYOUT_ROWS } from '@/data/ticket';
 import type { AutoFillSource } from '@/lib/field-extraction';
 import { cn } from '@/lib/utils';
@@ -9,7 +10,7 @@ const AppPhotosPanel = lazy(() => import('@/components/AppPhotosPanel'));
 const QaPanel = lazy(() => import('@/components/QaPanel'));
 const ManualsPanel = lazy(() => import('@/components/ManualsPanel'));
 
-interface NodeConfig {
+export interface NodeConfig {
   id: string;
   type: NodeType;
   label?: string;
@@ -46,6 +47,8 @@ interface NodeConfig {
    *  link (`href`, opens in a new window) or an in-app action (`onClick`). */
   headerTag?: { label: string; href?: string; onClick?: () => void };
 }
+
+export type ContextWidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 'manuals';
 
 interface FlowchartCanvasProps {
   nodes: NodeConfig[];
@@ -133,6 +136,12 @@ interface FlowchartCanvasProps {
   externalNavigation?: boolean;
   /** Hide contextual canvas utilities while another workspace is active. */
   hideUtilityRail?: boolean;
+  /** Global bottom-pill request to open one of the existing context panels. */
+  widgetRequest?: { widget: ContextWidgetId; token: number };
+  /** Structured notes are the primary view; the canvas remains available on demand. */
+  notesPresentation?: 'structured' | 'flow';
+  onNotesPresentationChange?: (presentation: 'structured' | 'flow') => void;
+  callCapturing?: boolean;
   /** Progressive disclosure: node ids currently rendered collapsed to their
    *  one-line toggle (e.g. Shipping Address until an address is parsed or a
    *  replacement resolution is chosen). */
@@ -453,6 +462,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   onToggleRailCollapsed,
   externalNavigation = false,
   hideUtilityRail = false,
+  widgetRequest,
+  notesPresentation = 'flow',
+  onNotesPresentationChange,
+  callCapturing = false,
   collapsedNodes,
   onToggleNodeCollapsed,
 }: FlowchartCanvasProps) {
@@ -461,6 +474,9 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
    *  is collapsed into the corner circle so the canvas uses the full width. */
   const railReserved = railCollapsed || hideUtilityRail ? 0 : LEFT_RAIL_RESERVED;
   const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_WIDTH);
+  useEffect(() => {
+    canvasRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [activeView, notesPresentation]);
 
   // COMMUNE leads the signed-in workspace; support tools follow in workflow
   // order. Restricted work views still require their existing grants/unlocks.
@@ -521,6 +537,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   const [manualsOpen, setManualsOpen] = useState(false);
   // Mirror of drawerTab for stable closures (avoid stale deps).
   const drawerTabRef = useRef(drawerTab);
+  const handledWidgetRequestRef = useRef<number | null>(null);
   useEffect(() => {
     drawerTabRef.current = drawerTab;
   }, [drawerTab]);
@@ -537,6 +554,20 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     },
     [drawerOpen]
   );
+  useEffect(() => {
+    if (!widgetRequest || handledWidgetRequestRef.current === widgetRequest.token) return;
+    handledWidgetRequestRef.current = widgetRequest.token;
+    const drawerIds: Partial<Record<ContextWidgetId, string>> = {
+      tracker: NODE_IDS.TICKET_TRACKER,
+      guides: NODE_IDS.SOP_PANEL,
+      product: NODE_IDS.PRODUCT_LOOKUP,
+      transcript: NODE_IDS.TRANSCRIPT_PANEL,
+    };
+    const panelId = drawerIds[widgetRequest.widget];
+    if (panelId) openDrawerTab(panelId);
+    else if (widgetRequest.widget === 'qa') setQaOpen(true);
+    else if (widgetRequest.widget === 'manuals') setManualsOpen(true);
+  }, [openDrawerTab, widgetRequest?.token, widgetRequest?.widget]);
   const drawerTabMeta = useMemo(
     () =>
       ({
@@ -894,10 +925,40 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
           against the canvas's full height even when Call Notes' own
           content is absent (Case Trak only). The anchor is `min-h-full`
           so Call Notes' large canvasHeight still drives scroll. */}
-      <div className="relative h-full min-h-full">
+      <div className={cn(
+        'relative h-full min-h-full',
+        externalNavigation && activeView === 'callNotes' && notesPresentation === 'flow' && 'quiet-flow-canvas',
+      )}>
+      {activeView === 'callNotes' && notesPresentation === 'flow' && (
+        <div className="quiet-flow-view-toggle">
+          <button type="button" onClick={() => onNotesPresentationChange?.('structured')}>
+            <LayoutGrid className="size-4" />
+            Structured notes
+          </button>
+        </div>
+      )}
+      {activeView === 'callNotes' && notesPresentation === 'structured' && (
+        <StructuredNotesWorkspace
+          nodes={effectiveNodes}
+          formData={formData}
+          onFieldChange={onFieldChange}
+          activeNodeId={activeNodeId}
+          onNodeFocus={onNodeFocus}
+          onNodeBlur={onNodeBlur}
+          onOpenFlowView={() => onNotesPresentationChange?.('flow')}
+          parsedFields={parsedFields}
+          quickInsertHidden={quickInsertHidden}
+          customerAddressCount={customerAddressCount}
+          onIncrementCustomerAddressCount={onIncrementCustomerAddressCount}
+          emailGlow={emailGlow}
+          collapsedNodes={collapsedNodes}
+          onToggleNodeCollapsed={onToggleNodeCollapsed}
+          isCapturing={callCapturing}
+        />
+      )}
       {/* Call Notes canvas — rendered only in the Call Notes view so the
           Case Trak board can occupy its own separate canvas. */}
-      {activeView === 'callNotes' && (
+      {activeView === 'callNotes' && notesPresentation === 'flow' && (
       <div
         className="relative"
         style={{ width: canvasWidth, height: canvasHeight }}
@@ -1431,10 +1492,16 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             eagerly exactly like the old pull-tabs did. */}
         <div
           className={cn(
-            'fixed top-3 right-3 bottom-28 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/12 bg-card/55 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),inset_0_-1.5px_0_rgba(255,255,255,0.04),-6px_0_18px_-4px_rgba(0,0,0,0.32),-14px_0_36px_-10px_rgba(0,0,0,0.22)] backdrop-blur-sm backdrop-saturate-125 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
-            drawerOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.5rem)]'
+            externalNavigation
+              ? 'quiet-widget-tray'
+              : 'fixed top-3 right-3 bottom-28 z-40 flex flex-col overflow-hidden rounded-2xl border-[1.5px] border-foreground/12 bg-card/55 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),inset_0_-1.5px_0_rgba(255,255,255,0.04),-6px_0_18px_-4px_rgba(0,0,0,0.32),-14px_0_36px_-10px_rgba(0,0,0,0.22)] backdrop-blur-sm backdrop-saturate-125 transition-transform duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]',
+            externalNavigation
+              ? drawerOpen ? 'quiet-widget-tray--open' : 'quiet-widget-tray--closed'
+              : drawerOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.5rem)]'
           )}
-          style={{ width: 'min(720px, calc(100vw - 6rem))' }}
+          style={externalNavigation
+            ? { width: 'min(920px, calc(100vw - 24px))', height: 'min(72dvh, 760px)' }
+            : { width: 'min(720px, calc(100vw - 6rem))' }}
           aria-hidden={!drawerOpen}
         >
           {/* Drawer header — tab switcher + close */}
@@ -1533,11 +1600,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         {appPhotosOpen && (
           <>
             <div
-              className="fixed inset-0 z-40"
+              className={externalNavigation ? 'quiet-widget-scrim' : 'fixed inset-0 z-40'}
               onClick={() => setAppPhotosOpen(false)}
               aria-hidden="true"
             />
-            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={cn(
+              externalNavigation
+                ? 'quiet-widget-overlay'
+                : `quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`,
+            )}>
               <Suspense fallback={null}>
                 <AppPhotosPanel onClose={() => setAppPhotosOpen(false)} />
               </Suspense>
@@ -1550,11 +1621,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         {qaOpen && (
           <>
             <div
-              className="fixed inset-0 z-40"
+              className={externalNavigation ? 'quiet-widget-scrim' : 'fixed inset-0 z-40'}
               onClick={() => setQaOpen(false)}
               aria-hidden="true"
             />
-            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={cn(
+              externalNavigation
+                ? 'quiet-widget-overlay'
+                : `quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`,
+            )}>
               <Suspense fallback={null}>
                 <QaPanel onClose={() => setQaOpen(false)} />
               </Suspense>
@@ -1567,11 +1642,15 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
         {manualsOpen && (
           <>
             <div
-              className="fixed inset-0 z-40"
+              className={externalNavigation ? 'quiet-widget-scrim' : 'fixed inset-0 z-40'}
               onClick={() => setManualsOpen(false)}
               aria-hidden="true"
             />
-            <div className={`quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`}>
+            <div className={cn(
+              externalNavigation
+                ? 'quiet-widget-overlay'
+                : `quiet-canvas-tool-anchor fixed top-3 bottom-28 z-50 animate-in fade-in slide-in-from-left-2 duration-200 ${railCollapsed ? 'left-4' : 'left-[88px]'}`,
+            )}>
               <Suspense fallback={null}>
                 <ManualsPanel onClose={() => setManualsOpen(false)} />
               </Suspense>
