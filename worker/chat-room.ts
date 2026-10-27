@@ -202,6 +202,10 @@ export class ChatRoom extends DurableObject<Env> {
     this.broadcast({ type: 'room:title', roomId: this.roomId, title });
   }
 
+  async broadcastPinnedDocument(): Promise<void> {
+    this.broadcast({ type: 'pinned-document:changed', roomId: this.roomId });
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {

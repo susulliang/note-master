@@ -11,6 +11,8 @@ import {
   ListOrdered,
   MessageCircle,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Send,
@@ -19,7 +21,10 @@ import {
   Underline,
   Users,
   X,
+  FileSpreadsheet,
+  GitBranch,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -46,13 +51,20 @@ import {
   uploadChatPhoto,
   uploadChatSticker,
   fetchChatGlobalTitle,
+  fetchCollabDocuments,
+  fetchPinnedChatDocument,
+  pinChatDocument,
+  setChatDocumentPermission,
   updateChatRoomTitle,
+  unpinChatDocument,
   type ChatConversation,
   type ChatAvatarProfile,
   type ChatMessage,
   type ChatSocketTicket,
   type ChatSticker,
   type ChatUser,
+  type CollabDocument,
+  type PinnedCollabDocument,
 } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 
@@ -399,6 +411,7 @@ async function compressSticker(file: File): Promise<Blob> {
 }
 
 export default function ChatPage({ username, canManageChatTitles }: ChatPageProps) {
+  const navigate = useNavigate();
   const [activeRoom, setActiveRoom] = useState<ActiveRoom>({
     roomId: 'global',
     title: 'Ecovacs crew',
@@ -433,6 +446,14 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const [stickerName, setStickerName] = useState('');
   const [uploadingSticker, setUploadingSticker] = useState(false);
   const [avatarProfile, setAvatarProfile] = useState<ChatAvatarProfile | null>(null);
+  const [pinnedDocument, setPinnedDocument] = useState<PinnedCollabDocument | null>(null);
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+  const [collabDocuments, setCollabDocuments] = useState<CollabDocument[]>([]);
+  const [pinDocumentId, setPinDocumentId] = useState('');
+  const [permissionQuery, setPermissionQuery] = useState('');
+  const [permissionUsers, setPermissionUsers] = useState<ChatUser[]>([]);
+  const [loadingPin, setLoadingPin] = useState(false);
+  const [savingPin, setSavingPin] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingTicketRef = useRef<ChatSocketTicket | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -502,6 +523,43 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       .catch(() => undefined);
     return () => { alive = false; };
   }, []);
+
+  const refreshPinnedDocument = useCallback(async () => {
+    try {
+      setPinnedDocument(await fetchPinnedChatDocument(activeRoom.roomId));
+    } catch (error) {
+      setPinnedDocument(null);
+      toast.error(error instanceof Error ? error.message : 'Could not load the pinned document.');
+    }
+  }, [activeRoom.roomId]);
+
+  useEffect(() => {
+    setPinnedDocument(null);
+    void refreshPinnedDocument();
+  }, [refreshPinnedDocument]);
+
+  useEffect(() => {
+    if (!pinDialogOpen || !permissionQuery.trim() || !pinnedDocument || pinnedDocument.owner !== username) {
+      setPermissionUsers([]);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void findChatUsers(permissionQuery.trim())
+        .then((users) => {
+          if (active) setPermissionUsers(users.filter((person) => (
+            !pinnedDocument.members.some((member) => member.username.toLowerCase() === person.username.toLowerCase())
+          )));
+        })
+        .catch((error: unknown) => {
+          if (active) toast.error(error instanceof Error ? error.message : 'Could not search users.');
+        });
+    }, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [activeRoom.kind, permissionQuery, pinDialogOpen, pinnedDocument, username]);
 
   useEffect(() => {
     const onRoomTitle = (event: Event) => {
@@ -634,6 +692,13 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             )));
             return;
           }
+          if (
+            payload.type === 'pinned-document:changed' &&
+            payload.roomId === activeRoom.roomId
+          ) {
+            void refreshPinnedDocument();
+            return;
+          }
           if (payload.type === 'history:older' && Array.isArray(payload.messages)) {
             const beforeHeight = messageListRef.current?.scrollHeight ?? 0;
             const older = payload.messages as ChatMessage[];
@@ -708,7 +773,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) currentSocket.close(1000, 'Room changed');
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
-  }, [activeRoom.roomId, refreshConversations]);
+  }, [activeRoom.roomId, refreshConversations, refreshPinnedDocument]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -799,6 +864,71 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       toast.error(error instanceof Error ? error.message : 'Could not update the chat title.');
     }
   }, [activeRoom.kind, activeRoom.roomId, canManageChatTitles, titleDraft]);
+
+  const openPinDialog = useCallback(async () => {
+    setPinDialogOpen(true);
+    setLoadingPin(true);
+    setPermissionQuery('');
+    try {
+      const [documents, pin] = await Promise.all([
+        fetchCollabDocuments(),
+        fetchPinnedChatDocument(activeRoom.roomId),
+      ]);
+      setCollabDocuments(documents);
+      setPinnedDocument(pin);
+      setPinDocumentId(pin?.id ?? '');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load Collab Space documents.');
+    } finally {
+      setLoadingPin(false);
+    }
+  }, [activeRoom.roomId]);
+
+  const savePinnedDocument = useCallback(async () => {
+    const document = collabDocuments.find((item) => item.id === pinDocumentId);
+    if (!document || savingPin) return;
+    try {
+      setSavingPin(true);
+      const pin = await pinChatDocument(activeRoom.roomId, document.type, document.id);
+      setPinnedDocument(pin);
+      setPinDocumentId(pin.id);
+      toast.success('Document pinned · chat members can now view it.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not pin this document.');
+    } finally {
+      setSavingPin(false);
+    }
+  }, [activeRoom.roomId, collabDocuments, pinDocumentId, savingPin]);
+
+  const unpinDocument = useCallback(async () => {
+    try {
+      await unpinChatDocument(activeRoom.roomId);
+      setPinnedDocument(null);
+      setPinDocumentId('');
+      toast.success('Document unpinned.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not unpin this document.');
+    }
+  }, [activeRoom.roomId]);
+
+  const changeDocumentPermission = useCallback(async (
+    targetUsername: string,
+    permission: 'view' | 'edit',
+  ) => {
+    try {
+      const pin = await setChatDocumentPermission(activeRoom.roomId, targetUsername, permission);
+      setPinnedDocument(pin);
+      toast.success(`${targetUsername} can ${permission} this document.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update document access.');
+    }
+  }, [activeRoom.roomId]);
+
+  const grantDocumentEdit = useCallback(async (person: ChatUser) => {
+    await changeDocumentPermission(person.username, 'edit');
+    setPermissionQuery('');
+    setPermissionUsers([]);
+  }, [changeDocumentPermission]);
 
   const applyFormatting = useCallback((command: 'bold' | 'italic' | 'underline') => {
     const editor = editorRef.current;
@@ -945,6 +1075,12 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   );
 
   const visibleMessages = useMemo(() => messages, [messages]);
+  const selectedPinDocument = collabDocuments.find((document) => document.id === pinDocumentId);
+  const canUnpinCurrent = !!pinnedDocument && (
+    pinnedDocument.pinnedBy.toLowerCase() === username.toLowerCase() ||
+    pinnedDocument.owner.toLowerCase() === username.toLowerCase() ||
+    canManageChatTitles
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background/80 text-foreground">
@@ -1156,7 +1292,45 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                 Global
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => void openPinDialog()}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-card/55 px-2.5 text-[10px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground sm:px-3 sm:text-xs"
+              aria-label={pinnedDocument ? 'Manage pinned document' : 'Pin a document'}
+              title={pinnedDocument ? 'Manage pinned document' : 'Pin a document'}
+            >
+              <Pin className="size-3.5" />
+              <span className="hidden sm:inline">{pinnedDocument ? 'Pinned' : 'Pin doc'}</span>
+            </button>
           </div>
+
+          {pinnedDocument && (
+            <div className="flex shrink-0 items-center gap-3 border-b border-accent/15 bg-accent/[0.045] px-4 py-2.5 sm:px-6">
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
+                {pinnedDocument.type === 'sheet'
+                  ? <FileSpreadsheet className="size-4" />
+                  : <GitBranch className="size-4" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">{pinnedDocument.title}</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Pinned document · {pinnedDocument.permission === 'edit' ? 'you can edit' : 'view access'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent/12 px-2.5 text-[10px] font-semibold text-accent transition hover:bg-accent/20"
+              >Open document</button>
+              <button
+                type="button"
+                aria-label="Manage pinned document"
+                title="Manage pinned document"
+                onClick={() => void openPinDialog()}
+                className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              ><Pencil className="size-3.5" /></button>
+            </div>
+          )}
 
           <div
             ref={messageListRef}
@@ -1462,6 +1636,203 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           </div>
         </main>
       </div>
+
+      {pinDialogOpen && (
+        <div
+          className="fixed inset-0 z-[110] grid place-items-center bg-background/55 p-4 backdrop-blur-md"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPinDialogOpen(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pinned-document-title"
+            className="flex max-h-[min(720px,88dvh)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/92 shadow-2xl backdrop-blur-2xl"
+          >
+            <div className="flex items-center gap-3 border-b border-border/60 px-5 py-4">
+              <span className="grid size-9 place-items-center rounded-xl bg-accent/10 text-accent"><Pin className="size-4" /></span>
+              <div className="min-w-0 flex-1">
+                <h2 id="pinned-document-title" className="text-sm font-semibold">Chat document</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">One shared document is pinned in this conversation.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinDialogOpen(false)}
+                aria-label="Close document settings"
+                className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+              ><X className="size-4" /></button>
+            </div>
+
+            {loadingPin ? (
+              <div className="grid min-h-40 place-items-center text-xs text-muted-foreground">Loading Collab Space…</div>
+            ) : (
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+                {pinnedDocument && (
+                  <section className="rounded-xl border border-accent/20 bg-accent/[0.055] p-3">
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+                        {pinnedDocument.type === 'sheet'
+                          ? <FileSpreadsheet className="size-4" />
+                          : <GitBranch className="size-4" />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold">{pinnedDocument.title}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          You have {pinnedDocument.permission} access · {pinnedDocument.owner} owns this document
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
+                        className="rounded-lg bg-accent/12 px-2.5 py-2 text-[10px] font-semibold text-accent hover:bg-accent/20"
+                      >Open</button>
+                    </div>
+
+                    <div className="mt-4 border-t border-border/50 pt-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Chat access</p>
+                        {pinnedDocument.owner === username && (
+                          <span className="text-[9px] text-muted-foreground">View by default · choose edit when needed</span>
+                        )}
+                      </div>
+                      {pinnedDocument.owner === username ? (
+                        <>
+                          {activeRoom.kind === 'global' && (
+                            <div className="mb-2">
+                              <label className="relative block">
+                                <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                                <input
+                                  value={permissionQuery}
+                                  onChange={(event) => setPermissionQuery(event.target.value)}
+                                  placeholder="Find someone to grant edit access"
+                                  aria-label="Search users to grant edit access"
+                                  className="h-9 w-full rounded-lg border border-border bg-background/70 pl-9 pr-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                />
+                              </label>
+                              {permissionUsers.length > 0 && (
+                                <div className="mt-1 max-h-24 overflow-y-auto rounded-lg border border-border/65 bg-background/75 p-1">
+                                  {permissionUsers.map((person) => (
+                                    <button
+                                      key={person.username}
+                                      type="button"
+                                      onClick={() => void grantDocumentEdit(person)}
+                                      className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-[10px] hover:bg-muted"
+                                    ><span>{person.username}</span><span className="text-accent">Grant edit</span></button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="max-h-40 space-y-1 overflow-y-auto">
+                            {pinnedDocument.members.map((member) => (
+                              <div key={member.username} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+                                <span className="min-w-0 flex-1 truncate text-xs">{member.username}{member.owner ? ' · owner' : ''}</span>
+                                {member.owner ? (
+                                  <span className="text-[10px] text-accent">Edit</span>
+                                ) : (
+                                  <select
+                                    value={member.permission}
+                                    aria-label={`${member.username} document permission`}
+                                    onChange={(event) => void changeDocumentPermission(
+                                      member.username,
+                                      event.target.value === 'edit' ? 'edit' : 'view',
+                                    )}
+                                    className="h-7 rounded-md border border-border bg-background/80 px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  >
+                                    <option value="view">View</option>
+                                    <option value="edit">Edit</option>
+                                  </select>
+                                )}
+                              </div>
+                            ))}
+                            {pinnedDocument.members.length === 0 && (
+                              <p className="py-2 text-[10px] text-muted-foreground">
+                                Everyone in the global chat can view the pinned document.
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-[10px] leading-relaxed text-muted-foreground">
+                          Everyone in this chat has view access. The document owner can promote specific people to edit.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                <section>
+                  <label htmlFor="pin-collab-document" className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {pinnedDocument ? 'Replace pinned document' : 'Choose a document to pin'}
+                  </label>
+                  <select
+                    id="pin-collab-document"
+                    value={pinDocumentId}
+                    onChange={(event) => setPinDocumentId(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-border bg-background/75 px-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Select a Collab Space document…</option>
+                    {collabDocuments.filter((document) => document.permission === 'edit').map((document) => (
+                      <option key={`${document.type}:${document.id}`} value={document.id}>
+                        {document.type === 'sheet' ? 'Sheet' : 'Mind map'} · {document.title}
+                      </option>
+                    ))}
+                  </select>
+                  {collabDocuments.filter((document) => document.permission === 'edit').length === 0 && (
+                    <p className="mt-2 text-[10px] text-muted-foreground">
+                      You need edit access to pin a document. Create one or ask its owner to grant edit access.
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPinDialogOpen(false);
+                          navigate('/collab');
+                        }}
+                        className="ml-1 text-accent hover:underline"
+                      >Open Collab Space</button>
+                    </p>
+                  )}
+                  <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    Pinning automatically gives chat members view access. Editing stays limited to document collaborators you promote.
+                  </p>
+                </section>
+              </div>
+            )}
+
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 p-4">
+              <div>
+                {canUnpinCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => void unpinDocument()}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-[10px] font-medium text-destructive hover:bg-destructive/10"
+                  ><PinOff className="size-3.5" /> Unpin</button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPinDialogOpen(false)}
+                  className="h-9 rounded-lg border border-border/70 px-3 text-[10px] text-muted-foreground hover:bg-muted"
+                >Close</button>
+                <button
+                  type="button"
+                  disabled={
+                    !selectedPinDocument ||
+                    selectedPinDocument.permission !== 'edit' ||
+                    (!!pinnedDocument && !canUnpinCurrent && selectedPinDocument.id !== pinnedDocument.id) ||
+                    savingPin ||
+                    loadingPin
+                  }
+                  onClick={() => void savePinnedDocument()}
+                  className="h-9 rounded-lg bg-accent px-3 text-[10px] font-semibold text-accent-foreground disabled:opacity-45"
+                >{savingPin ? 'Pinning…' : pinnedDocument ? 'Pin selected' : 'Pin document'}</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {newChatOpen && (
         <div

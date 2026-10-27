@@ -11,7 +11,7 @@ import {
   GraduationCap,
   History,
   LayoutGrid,
-  Grid2X2,
+  Layers3,
   PackageSearch,
   LogIn,
   MessageCircle,
@@ -43,7 +43,7 @@ export type WidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 
 const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   commune: { label: 'Commune', icon: Users },
   chat: { label: 'Chat', icon: MessageCircle },
-  sheets: { label: 'Sheets', icon: Grid2X2 },
+  collab: { label: 'Collab Space', icon: Layers3 },
   callNotes: { label: 'Call Notes', icon: FilePenLine },
   caseTrak: { label: 'Cases', icon: LayoutGrid },
   dash: { label: 'DASH', icon: BarChart3 },
@@ -54,7 +54,7 @@ const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   login: { label: 'Login', icon: LogIn },
 };
 
-const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'sheets', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
+const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'collab', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
 const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }> = [
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },

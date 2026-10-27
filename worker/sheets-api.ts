@@ -1,3 +1,5 @@
+import { ensureCollabSchema, getCollabPermission } from './collab-access';
+
 interface SheetUser {
   username: string;
 }
@@ -92,21 +94,25 @@ async function listSheets(env: Env, username: string): Promise<Response> {
     SELECT s.id, s.title, s.owner, s.created_at, s.updated_at,
            COUNT(m_all.username) AS member_count
     FROM collaborative_sheets s
-    JOIN collaborative_sheet_members mine
-      ON mine.sheet_id = s.id AND mine.username = ? COLLATE NOCASE
-    JOIN collaborative_sheet_members m_all ON m_all.sheet_id = s.id
+    LEFT JOIN collaborative_sheet_members m_all ON m_all.sheet_id = s.id
     GROUP BY s.id
     ORDER BY s.updated_at DESC, s.title COLLATE NOCASE
-  `).bind(username).all<SheetRow>();
-  return sheetsJson({
-    sheets: (result.results ?? []).map((row) => ({
+  `).all<SheetRow>();
+  const sheets = await Promise.all((result.results ?? []).map(async (row) => {
+    const permission = await getCollabPermission(env, username, 'sheet', row.id);
+    if (!permission) return null;
+    return {
       id: row.id,
       title: row.title,
       owner: row.owner,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       memberCount: Number(row.member_count),
-    })),
+      permission,
+    };
+  }));
+  return sheetsJson({
+    sheets: sheets.filter((sheet): sheet is NonNullable<typeof sheet> => sheet !== null),
   });
 }
 
@@ -202,11 +208,14 @@ async function renameSheet(request: Request, env: Env, username: string): Promis
 async function issueSocketTicket(request: Request, env: Env, username: string): Promise<Response> {
   const payload = await parseJson(request);
   const sheetId = typeof payload?.sheetId === 'string' ? payload.sheetId : '';
-  if (!SHEET_ID_RE.test(sheetId) || !await isSheetMember(env, sheetId, username)) {
+  const permission = SHEET_ID_RE.test(sheetId)
+    ? await getCollabPermission(env, username, 'sheet', sheetId)
+    : null;
+  if (!permission) {
     return sheetsJson({ error: 'You do not have access to this sheet.' }, 403);
   }
-  const ticket = await env.SHEETS_ROOM.getByName(sheetId).createTicket(username);
-  return sheetsJson({ sheetId, ticket });
+  const ticket = await env.SHEETS_ROOM.getByName(sheetId).createTicket(username, permission);
+  return sheetsJson({ sheetId, ticket, permission });
 }
 
 export async function handleSheetsApi(
@@ -226,6 +235,7 @@ export async function handleSheetsApi(
     });
   }
   await ensureSheetsSchema(env);
+  await ensureCollabSchema(env);
   if (url.pathname === '/api/sheets' && request.method === 'GET') return listSheets(env, username);
   if (url.pathname === '/api/sheets' && request.method === 'POST') return createSheet(request, env, username);
   if (url.pathname === '/api/sheets/socket-ticket' && request.method === 'POST') {

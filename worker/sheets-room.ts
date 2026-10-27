@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { getCollabPermission } from './collab-access';
 
 export type SheetFill = 'none' | 'slate' | 'blue' | 'mint' | 'amber' | 'rose' | 'violet';
 export type SheetTextColor = 'auto' | 'blue' | 'green' | 'red' | 'violet';
@@ -21,11 +22,13 @@ export interface SheetCell {
 interface SheetTicket {
   ticket: string;
   username: string;
+  permission: 'view' | 'edit';
   expires_at: number;
 }
 
 interface SheetAttachment {
   username: string;
+  permission: 'view' | 'edit';
 }
 
 interface SheetDimensions {
@@ -99,9 +102,11 @@ export class SheetsRoom extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS sheet_socket_tickets (
           ticket TEXT PRIMARY KEY,
           username TEXT NOT NULL,
+          permission TEXT NOT NULL DEFAULT 'edit',
           expires_at INTEGER NOT NULL
         )
       `);
+      this.ensureColumn('sheet_socket_tickets', 'permission', "TEXT NOT NULL DEFAULT 'edit'");
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS sheet_settings (
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -134,14 +139,15 @@ export class SheetsRoom extends DurableObject<Env> {
     );
   }
 
-  async createTicket(username: string): Promise<string> {
+  async createTicket(username: string, permission: 'view' | 'edit' = 'edit'): Promise<string> {
     const now = Date.now();
     const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;
     this.ctx.storage.sql.exec('DELETE FROM sheet_socket_tickets WHERE expires_at < ?', now);
     this.ctx.storage.sql.exec(
-      'INSERT INTO sheet_socket_tickets (ticket, username, expires_at) VALUES (?, ?, ?)',
+      'INSERT INTO sheet_socket_tickets (ticket, username, permission, expires_at) VALUES (?, ?, ?, ?)',
       ticket,
       username,
+      permission,
       now + TICKET_TTL_MS,
     );
     return ticket;
@@ -149,6 +155,26 @@ export class SheetsRoom extends DurableObject<Env> {
 
   async broadcastTitle(title: string): Promise<void> {
     this.broadcast({ type: 'sheet:title', sheetId: this.ctx.id.name, title });
+  }
+
+  async revalidatePermissions(): Promise<void> {
+    const sheetId = this.ctx.id.name ?? '';
+    for (const ws of this.ctx.getWebSockets()) {
+      const user = this.readAttachment(ws);
+      if (!user?.username) {
+        ws.close(1008, 'Missing sheet identity');
+        continue;
+      }
+      const permission = await getCollabPermission(this.env, user.username, 'sheet', sheetId);
+      if (!permission) {
+        ws.close(1008, 'Sheet access revoked');
+        continue;
+      }
+      if (permission !== user.permission) {
+        ws.serializeAttachment({ ...user, permission });
+        send(ws, { type: 'access:changed', permission });
+      }
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -160,7 +186,7 @@ export class SheetsRoom extends DurableObject<Env> {
     if (!ticket || ticket.length > 100) return new Response('Invalid connection ticket', { status: 401 });
     const row = this.ctx.storage.sql
       .exec<SqlRow<SheetTicket>>(
-        'SELECT ticket, username, expires_at FROM sheet_socket_tickets WHERE ticket = ? AND expires_at >= ?',
+        'SELECT ticket, username, permission, expires_at FROM sheet_socket_tickets WHERE ticket = ? AND expires_at >= ?',
         ticket,
         Date.now(),
       )
@@ -172,7 +198,10 @@ export class SheetsRoom extends DurableObject<Env> {
     const client = pair[0];
     const server = pair[1];
     this.ctx.acceptWebSocket(server, [row.username]);
-    server.serializeAttachment({ username: row.username } satisfies SheetAttachment);
+    server.serializeAttachment({
+      username: row.username,
+      permission: row.permission === 'view' ? 'view' : 'edit',
+    } satisfies SheetAttachment);
     const dimensions = this.getDimensions();
     send(server, { type: 'sheet:ready', sheetId: this.ctx.id.name, ...dimensions });
     const cells = this.getCells();
@@ -202,6 +231,10 @@ export class SheetsRoom extends DurableObject<Env> {
     const user = this.readAttachment(ws);
     if (!user?.username) {
       ws.close(1008, 'Missing sheet identity');
+      return;
+    }
+    if (event.type !== 'heartbeat' && user.permission !== 'edit') {
+      send(ws, { type: 'error', message: 'You have view access to this sheet.' });
       return;
     }
 
@@ -513,6 +546,13 @@ export class SheetsRoom extends DurableObject<Env> {
           /* The socket has already closed. */
         }
       }
+    }
+  }
+
+  private ensureColumn(table: string, column: string, declaration: string): void {
+    const columns = this.ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray();
+    if (!columns.some((row) => row.name === column)) {
+      this.ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
     }
   }
 }

@@ -16,7 +16,7 @@ const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
 const WORKSPACE_PATHS: Record<WorkView, string> = {
   commune: '/commune',
   chat: '/chat',
-  sheets: '/sheets',
+  collab: '/collab',
   callNotes: '/notes',
   caseTrak: '/cases',
   dash: '/insights',
@@ -28,7 +28,8 @@ const WORKSPACE_PATHS: Record<WorkView, string> = {
 };
 
 function workspaceFromPath(pathname: string): WorkView {
-  const entry = Object.entries(WORKSPACE_PATHS).find(([, path]) => path === pathname);
+  const canonicalPath = pathname === '/sheets' ? '/collab' : pathname;
+  const entry = Object.entries(WORKSPACE_PATHS).find(([, path]) => path === canonicalPath);
   return entry ? entry[0] as WorkView : pathname === '/' ? 'commune' : 'callNotes';
 }
 
@@ -174,7 +175,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const AdminPage = lazy(() => import('@/pages/AdminPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const ChatPage = lazy(() => import('@/pages/ChatPage'));
-const SheetsPage = lazy(() => import('@/pages/SheetsPage'));
+const CollabSpacePage = lazy(() => import('@/pages/CollabSpacePage'));
 const KittyHelpWorkspace = lazy(() => import('@/components/KittyHelpWorkspace'));
 const GbuPopup = lazy(() => import('@/components/GbuPopup'));
 const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
@@ -2354,7 +2355,7 @@ Additional information (if needed): ${additional}`;
   // re-renders, exactly like the old standalone FloatingControls did.
   const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
   const availableWorkspaces: WorkView[] = [
-    ...(authUser ? ['commune' as const, 'chat' as const, 'sheets' as const] : []),
+    ...(authUser ? ['commune' as const, 'chat' as const, 'collab' as const] : []),
     'callNotes',
     ...(analyticsUnlocked || authPrivileges?.trak ? ['caseTrak' as const] : []),
     ...(analyticsUnlocked || authPrivileges?.dash ? ['dash' as const] : []),
@@ -2592,9 +2593,9 @@ Additional information (if needed): ${additional}`;
                   )}
                 </Suspense>
               }
-              sheetsContent={
-                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening collaborative sheets…</div>}>
-                  {authUser && <SheetsPage username={authUser.username} />}
+              collabContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening Collab Space…</div>}>
+                  {authUser && <CollabSpacePage username={authUser.username} />}
                 </Suspense>
               }
               settingsContent={

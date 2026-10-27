@@ -58,6 +58,7 @@ import './SheetsPage.css';
 
 interface SheetsPageProps {
   username: string;
+  initialDocumentId?: string;
 }
 
 interface SheetRange {
@@ -151,11 +152,12 @@ function formatCellForExport(cell: SheetCell): XLSX.CellObject {
   return { t: 's', v: cell.raw };
 }
 
-export default function SheetsPage({ username }: SheetsPageProps) {
+export default function SheetsPage({ username, initialDocumentId }: SheetsPageProps) {
   const [sheets, setSheets] = useState<CollaborativeSheet[]>([]);
   const [activeSheet, setActiveSheet] = useState<CollaborativeSheet | null>(null);
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
+  const [canEdit, setCanEdit] = useState(true);
   const [cells, setCells] = useState<SheetCellMap>({});
   const [rowCount, setRowCount] = useState(10);
   const [colCount, setColCount] = useState(10);
@@ -203,10 +205,17 @@ export default function SheetsPage({ username }: SheetsPageProps) {
   }, [reloadSheets]);
 
   useEffect(() => {
+    if (!initialDocumentId || activeSheet || loadingSheets) return;
+    const requested = sheets.find((sheet) => sheet.id === initialDocumentId);
+    if (requested) setActiveSheet(requested);
+  }, [activeSheet, initialDocumentId, loadingSheets, sheets]);
+
+  useEffect(() => {
     if (!activeSheet) return;
     let stopped = false;
     let currentSocket: WebSocket | null = null;
     setConnection('connecting');
+    setCanEdit(false);
     setSnapshotReady(false);
     setCells({});
     setSelected({ startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
@@ -216,6 +225,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
       try {
         const ticket = await requestSheetsSocketTicket(activeSheet.id);
         if (stopped) return;
+        setCanEdit(ticket.permission !== 'view');
         const socket = new WebSocket(sheetsSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
@@ -315,13 +325,23 @@ export default function SheetsPage({ username }: SheetsPageProps) {
             )));
             return;
           }
+          if (payload.type === 'access:changed') {
+            setConnectionAttempt((attempt) => attempt + 1);
+            return;
+          }
           if (payload.type === 'error' && typeof payload.message === 'string') toast.error(payload.message);
         };
         socket.onclose = () => {
-          if (!stopped) setConnection('offline');
+          if (!stopped) {
+            setConnection('offline');
+            setCanEdit(false);
+          }
         };
         socket.onerror = () => {
-          if (!stopped) setConnection('offline');
+          if (!stopped) {
+            setConnection('offline');
+            setCanEdit(false);
+          }
         };
       } catch (error) {
         if (!stopped) {
@@ -403,6 +423,10 @@ export default function SheetsPage({ username }: SheetsPageProps) {
   }, [editingCell]);
 
   const sendEvent = useCallback((payload: Record<string, unknown>) => {
+    if (payload.type !== 'heartbeat' && !canEdit) {
+      toast.error('You have view access to this sheet.');
+      return false;
+    }
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       toast.error('This sheet is not connected. Reconnect before editing.');
@@ -410,7 +434,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
     }
     socket.send(JSON.stringify(payload));
     return true;
-  }, []);
+  }, [canEdit]);
 
   const sendCells = useCallback((updates: SheetCell[]) => {
     if (!updates.length) return;
@@ -431,6 +455,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
   }, []);
 
   const beginEdit = useCallback((row: number, col: number, initial?: string) => {
+    if (!canEdit) return;
     const cell = getCell(cells, row, col);
     const key = cellKey(row, col);
     lastCommittedEditRef.current = null;
@@ -438,7 +463,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
     setEditDraft(initial ?? cell.raw);
     setEditingCell(key);
     setFormulaDraft(initial ?? cell.raw);
-  }, [cells]);
+  }, [canEdit, cells]);
 
   const commitEdit = useCallback((nextRaw = editDraft) => {
     if (!editingCell || lastCommittedEditRef.current === editingCell) return;
@@ -929,6 +954,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
           </div>
         </div>
         <div className="sheets-header-actions">
+          {!canEdit && <span className="sheets-readonly-badge">View only</span>}
           <span className="sheets-shared-label"><Users className="size-3.5" /> {columnCountLabel(activeSheet.memberCount)}</span>
           {activeSheet.owner === username && (
             <button type="button" className="sheets-secondary-button sheets-share-button" onClick={() => openDialog('share')}>
@@ -947,6 +973,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
           className={`sheets-tool-button ${activeStyle.bold ? 'is-active' : ''}`}
           aria-label="Bold"
           aria-pressed={activeStyle.bold}
+          disabled={!canEdit}
           onClick={() => applyStyle({ bold: !activeStyle.bold })}
         ><Bold className="size-4" /></button>
         <span className="sheets-toolbar-divider" />
@@ -959,6 +986,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
               className={`sheets-swatch sheets-swatch--${option.value} ${activeStyle.fill === option.value ? 'is-current' : ''}`}
               aria-label={option.label}
               title={option.label}
+              disabled={!canEdit}
               onClick={() => applyStyle({ fill: option.value })}
             />
           ))}
@@ -973,6 +1001,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
               className={`sheets-text-swatch sheets-text-swatch--${option.value} ${activeStyle.color === option.value ? 'is-current' : ''}`}
               aria-label={option.label}
               title={option.label}
+              disabled={!canEdit}
               onClick={() => applyStyle({ color: option.value })}
             ><span>A</span></button>
           ))}
@@ -990,6 +1019,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
               className={`sheets-tool-button ${activeStyle.align === alignment ? 'is-active' : ''}`}
               aria-label={`Align ${alignment}`}
               aria-pressed={activeStyle.align === alignment}
+              disabled={!canEdit}
               onClick={() => applyStyle({ align: alignment })}
             ><Icon className="size-4" /></button>
           ))}
@@ -1010,7 +1040,7 @@ export default function SheetsPage({ username }: SheetsPageProps) {
           aria-label={`Formula or value for ${activeAddress}`}
           value={selectedCellCount > 1 ? '' : formulaDraft}
           placeholder={selectedCellCount > 1 ? `${selectedCellCount} cells selected` : 'Enter a value or formula, e.g. =SUM(A1:A5)'}
-          disabled={!viewReady || selectedCellCount > 1}
+          disabled={!viewReady || !canEdit || selectedCellCount > 1}
           onChange={(event) => setFormulaDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -1100,10 +1130,10 @@ export default function SheetsPage({ username }: SheetsPageProps) {
       <footer className="sheets-status-bar">
         <div className="sheets-sheet-tab"><Grid2X2 className="size-3.5" /> {activeSheet.title}</div>
         <div className="sheets-status-actions">
-          <button type="button" onClick={() => changeStructure('row', 'insert', rowCount + 1)} disabled={rowCount >= 100}>
+          <button type="button" onClick={() => changeStructure('row', 'insert', rowCount + 1)} disabled={!canEdit || rowCount >= 100}>
             <Plus className="size-3.5" /><Rows3 className="size-3.5" /> Row
           </button>
-          <button type="button" onClick={() => changeStructure('column', 'insert', colCount + 1)} disabled={colCount >= 100}>
+          <button type="button" onClick={() => changeStructure('column', 'insert', colCount + 1)} disabled={!canEdit || colCount >= 100}>
             <Plus className="size-3.5" /><Columns3 className="size-3.5" /> Column
           </button>
           <span>{activeAddress}{selectedCellCount > 1 ? ` · ${selectedCellCount} cells` : ''}</span>
@@ -1123,27 +1153,27 @@ export default function SheetsPage({ username }: SheetsPageProps) {
           <button type="button" role="menuitem" onClick={() => { void copySelection(); setContextMenu(null); }}>
             <Clipboard className="size-4" /> Copy cells <kbd>⌘/Ctrl C</kbd>
           </button>
-          <button type="button" role="menuitem" onClick={() => { void pasteSelection(); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit} onClick={() => { void pasteSelection(); setContextMenu(null); }}>
             <span className="sheets-menu-icon">↳</span> Paste cells <kbd>⌘/Ctrl V</kbd>
           </button>
           <div className="sheets-context-divider" />
-          <button type="button" role="menuitem" disabled={rowCount >= 100} onClick={() => { changeStructure('row', 'insert', contextMenu.row); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit || rowCount >= 100} onClick={() => { changeStructure('row', 'insert', contextMenu.row); setContextMenu(null); }}>
             <Rows3 className="size-4" /> Insert row above
           </button>
-          <button type="button" role="menuitem" disabled={rowCount <= 1} onClick={() => { changeStructure('row', 'delete', contextMenu.row); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit || rowCount <= 1} onClick={() => { changeStructure('row', 'delete', contextMenu.row); setContextMenu(null); }}>
             <Rows3 className="size-4" /> Delete row
           </button>
-          <button type="button" role="menuitem" disabled={colCount >= 100} onClick={() => { changeStructure('column', 'insert', contextMenu.col); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit || colCount >= 100} onClick={() => { changeStructure('column', 'insert', contextMenu.col); setContextMenu(null); }}>
             <Columns3 className="size-4" /> Insert column left
           </button>
-          <button type="button" role="menuitem" disabled={colCount <= 1} onClick={() => { changeStructure('column', 'delete', contextMenu.col); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit || colCount <= 1} onClick={() => { changeStructure('column', 'delete', contextMenu.col); setContextMenu(null); }}>
             <Columns3 className="size-4" /> Delete column
           </button>
           <div className="sheets-context-divider" />
-          <button type="button" role="menuitem" onClick={() => { clearSelection(false); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit} onClick={() => { clearSelection(false); setContextMenu(null); }}>
             <X className="size-4" /> Clear contents
           </button>
-          <button type="button" role="menuitem" onClick={() => { clearSelection(true); setContextMenu(null); }}>
+          <button type="button" role="menuitem" disabled={!canEdit} onClick={() => { clearSelection(true); setContextMenu(null); }}>
             <X className="size-4" /> Clear contents and format
           </button>
         </div>

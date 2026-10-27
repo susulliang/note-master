@@ -45,6 +45,35 @@ export interface ChatSticker {
   scope: 'public' | 'private';
 }
 
+export type CollabDocumentType = 'sheet' | 'mindmap';
+export type CollabPermission = 'view' | 'edit';
+
+export interface CollabDocument {
+  id: string;
+  type: CollabDocumentType;
+  title: string;
+  owner: string;
+  createdAt: number;
+  updatedAt: number;
+  permission: CollabPermission;
+}
+
+export interface PinnedCollabDocument extends CollabDocument {
+  pinnedBy: string;
+  pinnedAt: number;
+  members: Array<{
+    username: string;
+    permission: CollabPermission;
+    owner: boolean;
+  }>;
+}
+
+export interface MindmapSocketTicket {
+  documentId: string;
+  ticket: string;
+  permission: CollabPermission;
+}
+
 export type ChatMediaKind = 'photo' | 'sticker';
 
 function endpoint(path: string): string {
@@ -78,6 +107,89 @@ export async function findChatUsers(query: string): Promise<ChatUser[]> {
 export async function fetchChatConversations(): Promise<ChatConversation[]> {
   const result = await requestJson<{ conversations?: ChatConversation[] }>('/api/chat/conversations');
   return result.conversations ?? [];
+}
+
+export async function fetchCollabDocuments(): Promise<CollabDocument[]> {
+  const result = await requestJson<{ documents?: CollabDocument[] }>('/api/collab/documents');
+  return result.documents ?? [];
+}
+
+export async function createCollabMindmap(title: string): Promise<CollabDocument> {
+  const result = await requestJson<{ document: CollabDocument }>('/api/collab/mindmaps', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  return result.document;
+}
+
+export async function requestMindmapSocketTicket(documentId: string): Promise<MindmapSocketTicket> {
+  return requestJson<MindmapSocketTicket>('/api/collab/mindmaps/socket-ticket', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ documentId }),
+  });
+}
+
+export function mindmapSocketUrl(ticket: MindmapSocketTicket): string {
+  const url = new URL(endpoint('/api/collab/mindmaps/socket'), window.location.href);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('mindmapId', ticket.documentId);
+  url.searchParams.set('ticket', ticket.ticket);
+  return url.toString();
+}
+
+export async function renameCollabMindmap(documentId: string, title: string): Promise<string> {
+  const result = await requestJson<{ title: string }>('/api/collab/mindmaps/rename', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ documentId, title }),
+  });
+  return result.title;
+}
+
+export async function fetchPinnedChatDocument(roomId: string): Promise<PinnedCollabDocument | null> {
+  const result = await requestJson<{ pin: PinnedCollabDocument | null }>(
+    `/api/chat/pinned-document?roomId=${encodeURIComponent(roomId)}`,
+  );
+  return result.pin ?? null;
+}
+
+export async function pinChatDocument(
+  roomId: string,
+  documentType: CollabDocumentType,
+  documentId: string,
+): Promise<PinnedCollabDocument> {
+  const result = await requestJson<{ pin: PinnedCollabDocument }>('/api/chat/pinned-document', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ roomId, documentType, documentId }),
+  });
+  return result.pin;
+}
+
+export async function unpinChatDocument(roomId: string): Promise<void> {
+  await requestJson<{ pin: null }>('/api/chat/pinned-document', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ roomId }),
+  });
+}
+
+export async function setChatDocumentPermission(
+  roomId: string,
+  username: string,
+  permission: CollabPermission,
+): Promise<PinnedCollabDocument> {
+  const result = await requestJson<{ pin: PinnedCollabDocument }>(
+    '/api/chat/pinned-document/permissions',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roomId, username, permission }),
+    },
+  );
+  return result.pin;
 }
 
 export async function fetchChatGlobalTitle(): Promise<string> {

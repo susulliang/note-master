@@ -362,6 +362,15 @@
   font-size: 10px;
 }
 
+.sheets-readonly-badge {
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 99px;
+  padding: 5px 9px;
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .sheets-toolbar {
   min-height: 48px;
   flex: 0 0 auto;

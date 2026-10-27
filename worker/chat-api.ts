@@ -1,3 +1,14 @@
+import { getChatRoomMembers, isChatRoomMember } from './chat-access';
+import {
+  ensureCollabSchema,
+  getCollabDocument,
+  getCollabPermission,
+  grantCollabPermission,
+  listPinnedDocumentPermissions,
+  type CollabDocumentType,
+  type CollabPermission,
+} from './collab-access';
+
 interface ChatUser {
   username: string;
   canManageChatTitles?: boolean;
@@ -171,18 +182,6 @@ async function registerConversation(
   ]);
 }
 
-async function isRoomMember(env: Env, username: string, roomId: string): Promise<boolean> {
-  if (roomId === 'global') return true;
-  const direct = await env.DB.prepare(
-    'SELECT 1 AS found FROM chat_conversations WHERE username = ? AND room_id = ? LIMIT 1',
-  ).bind(username, roomId).first<{ found: number }>();
-  if (direct) return true;
-  const group = await env.DB.prepare(
-    'SELECT 1 AS found FROM chat_group_members WHERE username = ? AND room_id = ? LIMIT 1',
-  ).bind(username, roomId).first<{ found: number }>();
-  return !!group;
-}
-
 async function getOrCreateProfile(env: Env, username: string): Promise<{ seed: number; rotation: number }> {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
   await env.DB.prepare(
@@ -324,6 +323,218 @@ async function handleRoomTitleUpdate(
   return chatJson({ roomId, title });
 }
 
+function isChatRoomId(roomId: string): boolean {
+  return roomId === 'global'
+    || /^dm-[0-9a-f]{64}$/.test(roomId)
+    || /^group-[0-9a-f-]{36}$/.test(roomId);
+}
+
+async function revalidateCollabDocument(
+  env: Env,
+  type: CollabDocumentType,
+  documentId: string,
+): Promise<void> {
+  try {
+    if (type === 'sheet') {
+      await env.SHEETS_ROOM.getByName(documentId).revalidatePermissions();
+    } else {
+      await env.MINDMAP_ROOM.getByName(documentId).revalidatePermissions();
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'collab_permission_revalidation_failed',
+      type,
+      documentId,
+      error: String(error),
+    }));
+  }
+}
+
+async function readSmallJson(request: Request): Promise<Record<string, unknown> | null> {
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_JSON_BODY_BYTES) return null;
+  try {
+    const payload: unknown = await request.json();
+    return payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function pinnedDocumentResponse(
+  env: Env,
+  user: ChatUser,
+  roomId: string,
+): Promise<Response> {
+  if (!isChatRoomId(roomId) || !await isChatRoomMember(env, user.username, roomId)) {
+    return chatJson({ error: 'You do not have access to this conversation.' }, 403);
+  }
+  const row = await env.DB.prepare(
+    `SELECT document_type, document_id, pinned_by, pinned_at
+     FROM chat_pinned_documents WHERE room_id = ?`,
+  ).bind(roomId).first<{
+    document_type: CollabDocumentType;
+    document_id: string;
+    pinned_by: string;
+    pinned_at: number;
+  }>();
+  if (!row) return chatJson({ pin: null });
+  const document = await getCollabDocument(env, row.document_type, row.document_id);
+  if (!document) return chatJson({ pin: null });
+  const permission = await getCollabPermission(env, user.username, document.type, document.id);
+  if (!permission) return chatJson({ error: 'You do not have access to the pinned document.' }, 403);
+  const members = await listPinnedDocumentPermissions(env, roomId, document, user.username);
+  return chatJson({
+    pin: {
+      ...document,
+      permission,
+      pinnedBy: row.pinned_by,
+      pinnedAt: row.pinned_at,
+      members,
+    },
+  });
+}
+
+async function handlePinDocument(
+  request: Request,
+  env: Env,
+  user: ChatUser,
+): Promise<Response> {
+  const payload = request.method === 'GET' ? null : await readSmallJson(request);
+  const roomId = request.method === 'GET'
+    ? new URL(request.url).searchParams.get('roomId') ?? ''
+    : typeof payload?.roomId === 'string' ? payload.roomId : '';
+  if (!roomId) {
+    return chatJson({ error: 'A chat room is required.' }, 400);
+  }
+  if (!isChatRoomId(roomId) || !await isChatRoomMember(env, user.username, roomId)) {
+    return chatJson({ error: 'You do not have access to this conversation.' }, 403);
+  }
+
+  if (request.method === 'GET') return pinnedDocumentResponse(env, user, roomId);
+
+  if (request.method === 'DELETE') {
+    const current = await env.DB.prepare(
+      `SELECT document_type, document_id, pinned_by FROM chat_pinned_documents WHERE room_id = ?`,
+    ).bind(roomId).first<{
+      document_type: CollabDocumentType;
+      document_id: string;
+      pinned_by: string;
+    }>();
+    if (!current) return chatJson({ pin: null });
+    const document = await getCollabDocument(env, current.document_type, current.document_id);
+    if (
+      current.pinned_by.toLowerCase() !== user.username.toLowerCase() &&
+      document?.owner.toLowerCase() !== user.username.toLowerCase() &&
+      !user.canManageChatTitles
+    ) return chatJson({ error: 'Only the person who pinned this document or its owner can unpin it.' }, 403);
+    await env.DB.prepare('DELETE FROM chat_pinned_documents WHERE room_id = ?').bind(roomId).run();
+    await revalidateCollabDocument(env, current.document_type, current.document_id);
+    await env.CHAT_ROOM.getByName(roomId).broadcastPinnedDocument();
+    return chatJson({ pin: null });
+  }
+
+  if (request.method !== 'POST') return chatJson({ error: 'Method not allowed.' }, 405);
+  const type = payload.documentType;
+  const id = typeof payload.documentId === 'string' ? payload.documentId : '';
+  if ((type !== 'sheet' && type !== 'mindmap') || !/^[0-9a-f-]{36}$/i.test(id)) {
+    return chatJson({ error: 'Choose a valid Collab Space document.' }, 400);
+  }
+  const document = await getCollabDocument(env, type, id);
+  if (!document) return chatJson({ error: 'That document no longer exists.' }, 404);
+  const permission = await getCollabPermission(env, user.username, type, id);
+  if (!permission) return chatJson({ error: 'You do not have access to that document.' }, 403);
+  if (permission !== 'edit') {
+    return chatJson({ error: 'You need edit access to pin or share this document.' }, 403);
+  }
+  const current = await env.DB.prepare(
+    'SELECT document_type, document_id, pinned_by FROM chat_pinned_documents WHERE room_id = ?',
+  ).bind(roomId).first<{
+    document_type: CollabDocumentType;
+    document_id: string;
+    pinned_by: string;
+  }>();
+  if (current?.document_type === type && current.document_id === id) {
+    return pinnedDocumentResponse(env, user, roomId);
+  }
+  if (current) {
+    const currentDocument = await getCollabDocument(env, current.document_type, current.document_id);
+    if (
+      current.pinned_by.toLowerCase() !== user.username.toLowerCase() &&
+      currentDocument?.owner.toLowerCase() !== user.username.toLowerCase() &&
+      !user.canManageChatTitles
+    ) return chatJson({ error: 'Only the person who pinned this document or its owner can replace it.' }, 403);
+  }
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO chat_pinned_documents (room_id, document_type, document_id, pinned_by, pinned_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(room_id) DO UPDATE SET document_type = excluded.document_type,
+       document_id = excluded.document_id, pinned_by = excluded.pinned_by, pinned_at = excluded.pinned_at`,
+  ).bind(roomId, type, id, user.username, now).run();
+  if (current) await revalidateCollabDocument(env, current.document_type, current.document_id);
+  await revalidateCollabDocument(env, type, id);
+  await env.CHAT_ROOM.getByName(roomId).broadcastPinnedDocument();
+  return pinnedDocumentResponse(env, user, roomId);
+}
+
+async function updatePinnedDocumentPermission(
+  request: Request,
+  env: Env,
+  user: ChatUser,
+): Promise<Response> {
+  const payload = await readSmallJson(request);
+  if (
+    !payload ||
+    typeof payload.roomId !== 'string' ||
+    typeof payload.username !== 'string' ||
+    (payload.permission !== 'view' && payload.permission !== 'edit')
+  ) return chatJson({ error: 'Choose a chat member and a view or edit permission.' }, 400);
+  const { roomId } = payload;
+  const targetUsername = payload.username.trim();
+  if (!isChatRoomId(roomId) || !await isChatRoomMember(env, user.username, roomId)) {
+    return chatJson({ error: 'You do not have access to this conversation.' }, 403);
+  }
+  if (roomId !== 'global') {
+    const roomMembers = await getChatRoomMembers(env, roomId);
+    if (!roomMembers.some((member) => member.toLowerCase() === targetUsername.toLowerCase())) {
+      return chatJson({ error: 'Choose someone who belongs to this chat.' }, 404);
+    }
+  } else {
+    const target = await env.DB.prepare(
+      'SELECT username FROM auth_users WHERE username = ? COLLATE NOCASE',
+    ).bind(targetUsername).first<{ username: string }>();
+    if (!target) return chatJson({ error: 'That registered user could not be found.' }, 404);
+  }
+  const pin = await env.DB.prepare(
+    `SELECT document_type, document_id FROM chat_pinned_documents WHERE room_id = ?`,
+  ).bind(roomId).first<{ document_type: CollabDocumentType; document_id: string }>();
+  if (!pin) return chatJson({ error: 'This chat has no pinned document.' }, 404);
+  const document = await getCollabDocument(env, pin.document_type, pin.document_id);
+  if (!document) return chatJson({ error: 'The pinned document no longer exists.' }, 404);
+  if (document.owner.toLowerCase() !== user.username.toLowerCase()) {
+    return chatJson({ error: 'Only the document owner can change access privileges.' }, 403);
+  }
+  if (document.owner.toLowerCase() === targetUsername.toLowerCase()) {
+    return chatJson({ error: 'The document owner always keeps edit access.' }, 400);
+  }
+  const target = await env.DB.prepare(
+    'SELECT username FROM auth_users WHERE username = ? COLLATE NOCASE',
+  ).bind(targetUsername).first<{ username: string }>();
+  if (!target) return chatJson({ error: 'That registered user could not be found.' }, 404);
+  await grantCollabPermission(
+    env,
+    document.type,
+    document.id,
+    target.username,
+    payload.permission as CollabPermission,
+  );
+  await revalidateCollabDocument(env, document.type, document.id);
+  await env.CHAT_ROOM.getByName(roomId).broadcastPinnedDocument();
+  return pinnedDocumentResponse(env, user, roomId);
+}
+
 async function handleCreateGroup(request: Request, env: Env, user: ChatUser): Promise<Response> {
   if (Number(request.headers.get('content-length') ?? 0) > MAX_JSON_BODY_BYTES) {
     return chatJson({ error: 'Request is too large.' }, 413);
@@ -407,7 +618,7 @@ async function handleSocketTicket(request: Request, env: Env, user: ChatUser): P
     (/^dm-[0-9a-f]{64}$/.test(payload.roomId) || /^group-[0-9a-f-]{36}$/.test(payload.roomId))
   ) {
     roomId = payload.roomId;
-    if (!await isRoomMember(env, user.username, roomId)) {
+    if (!await isChatRoomMember(env, user.username, roomId)) {
       return chatJson({ error: 'You do not have access to this conversation.' }, 403);
     }
   } else {
@@ -483,7 +694,7 @@ async function handleMediaUpload(
   const roomId = new URL(request.url).searchParams.get('roomId') ?? '';
   const requestedKind = request.headers.get('x-chat-media-kind') ?? 'photo';
   const mediaKind = requestedKind === 'sticker' ? 'sticker' : 'photo';
-  if (!roomId || !await isRoomMember(env, user.username, roomId)) {
+  if (!roomId || !await isChatRoomMember(env, user.username, roomId)) {
     return chatJson({ error: 'You do not have access to this chat.' }, 403);
   }
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/webp') {
@@ -527,7 +738,7 @@ async function handleMediaGet(
   const media = await env.DB.prepare(
     'SELECT id, room_id, object_key FROM chat_media WHERE id = ?',
   ).bind(id).first<ChatMediaRow>();
-  if (!media || !await isRoomMember(env, user.username, media.room_id)) {
+  if (!media || !await isChatRoomMember(env, user.username, media.room_id)) {
     return chatJson({ error: 'Photo not found.' }, 404);
   }
   const object = await env.CHAT_MEDIA_BUCKET.get(media.object_key);
@@ -653,6 +864,16 @@ export async function handleChatApi(
   }
   await ensureChatSchema(env);
 
+  if (
+    url.pathname === '/api/chat/pinned-document' ||
+    url.pathname === '/api/chat/pinned-document/permissions'
+  ) {
+    await ensureCollabSchema(env);
+    if (url.pathname.endsWith('/permissions') && request.method === 'POST') {
+      return updatePinnedDocumentPermission(request, env, user);
+    }
+    return handlePinDocument(request, env, user);
+  }
   if (url.pathname === '/api/chat/users' && request.method === 'GET') {
     return handleUsers(request, env, user);
   }

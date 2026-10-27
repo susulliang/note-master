@@ -8,6 +8,7 @@ export interface CollaborativeSheet {
   createdAt: number;
   updatedAt: number;
   memberCount: number;
+  permission?: 'view' | 'edit';
 }
 
 export interface SheetMember {
@@ -18,6 +19,7 @@ export interface SheetMember {
 export interface SheetsSocketTicket {
   sheetId: string;
   ticket: string;
+  permission: 'view' | 'edit';
 }
 
 function endpoint(path: string): string {

@@ -22,6 +22,7 @@ import {
 } from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
 import { handleChatApi } from './chat-api';
+import { handleCollabApi } from './collab-api';
 import { handleSheetsApi } from './sheets-api';
 import { handleAsk } from './ask';
 import {
@@ -42,6 +43,7 @@ export { RosterRoom } from './roster-room';
 export { ChatRoom } from './chat-room';
 export { ChatStickerPack } from './chat-sticker-pack';
 export { SheetsRoom } from './sheets-room';
+export { MindmapRoom } from './mindmap-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -3848,6 +3850,11 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleSheetsApi(request, env, user.username);
   }
+  if (path.startsWith('/api/collab/')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCollabApi(request, env, user.username);
+  }
   if (path === '/api/llm/models' && request.method === 'GET') return handleLlmModels(request, env);
   if (path === '/api/llm/chat' && request.method === 'POST') return handleLlmChat(request, env);
   if (path === '/api/call-transcription/socket-ticket' && request.method === 'POST') {
@@ -4455,6 +4462,17 @@ export default {
         return new Response('Sheet is temporarily unavailable', { status: 503 });
       }
     }
+    if (url.pathname === '/api/collab/mindmaps/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      const mindmapId = url.searchParams.get('mindmapId') ?? '';
+      if (!/^[0-9a-f-]{36}$/i.test(mindmapId)) return new Response('Invalid mind map', { status: 400 });
+      try {
+        return await env.MINDMAP_ROOM.getByName(mindmapId).fetch(request);
+      } catch {
+        return new Response('Mind map is temporarily unavailable', { status: 503 });
+      }
+    }
     if (url.pathname === '/api/call-transcription/socket') {
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
         return new Response('WebSocket upgrade required', { status: 426 });
@@ -4471,6 +4489,7 @@ export default {
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/chat/') ||
+      url.pathname.startsWith('/api/collab/') ||
       url.pathname === '/api/sheets' ||
       url.pathname.startsWith('/api/sheets/') ||
       url.pathname.startsWith('/api/pet') ||

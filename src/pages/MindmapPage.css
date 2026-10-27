@@ -1,0 +1,469 @@
+.mindmap-page {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px clamp(12px, 2vw, 28px) 72px;
+  color: var(--foreground);
+  font-family: var(--ui-font-family);
+}
+
+.mindmap-page *,
+.mindmap-page *::before,
+.mindmap-page *::after {
+  box-sizing: border-box;
+}
+
+.mindmap-list-header,
+.mindmap-work-header,
+.mindmap-heading,
+.mindmap-actions,
+.mindmap-title-form,
+.mindmap-footer {
+  display: flex;
+  align-items: center;
+}
+
+.mindmap-list-header,
+.mindmap-work-header {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mindmap-list-header {
+  padding: 10px 0 24px;
+}
+
+.mindmap-eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.mindmap-list-header h1,
+.mindmap-empty h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.03em;
+}
+
+.mindmap-primary,
+.mindmap-secondary,
+.mindmap-icon-button,
+.mindmap-title-form button {
+  display: inline-flex;
+  min-height: 35px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.mindmap-primary {
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.mindmap-primary:hover:not(:disabled),
+.mindmap-secondary:hover:not(:disabled),
+.mindmap-icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.mindmap-primary:disabled,
+.mindmap-secondary:disabled,
+.mindmap-icon-button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.mindmap-list {
+  display: grid;
+  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  gap: 12px;
+  overflow: auto;
+}
+
+.mindmap-list-card {
+  display: flex;
+  min-height: 80px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 14px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+
+.mindmap-list-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.mindmap-list-card > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 5px;
+}
+
+.mindmap-list-card strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mindmap-list-card small,
+.mindmap-date {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.mindmap-list-icon,
+.mindmap-empty-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--card));
+}
+
+.mindmap-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.mindmap-empty-icon {
+  width: 54px;
+  height: 54px;
+}
+
+.mindmap-empty p {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.mindmap-heading {
+  min-width: 0;
+  gap: 10px;
+}
+
+.mindmap-icon-button {
+  width: 35px;
+  min-width: 35px;
+  padding: 0;
+}
+
+.mindmap-title {
+  display: inline-flex;
+  max-width: min(46vw, 420px);
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 0;
+  padding: 5px 0;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mindmap-title > svg {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  opacity: .6;
+}
+
+.mindmap-title-form {
+  min-width: 0;
+  gap: 4px;
+}
+
+.mindmap-title-form input {
+  width: min(34vw, 250px);
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 9px;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.mindmap-title-form button {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.mindmap-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.mindmap-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mindmap-status--connected {
+  color: var(--primary);
+}
+
+.mindmap-status--connecting {
+  color: var(--accent);
+}
+
+.mindmap-status--offline {
+  color: #f85149;
+}
+
+.mindmap-actions {
+  gap: 7px;
+}
+
+.mindmap-permission {
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  border-radius: 99px;
+  padding: 5px 9px;
+  color: var(--primary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.mindmap-permission.is-view {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent);
+}
+
+.mindmap-delete {
+  color: #f85149;
+}
+
+.mindmap-hint {
+  flex: 0 0 auto;
+  padding: 8px 2px 11px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.mindmap-canvas-scroll {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent);
+  border-radius: 15px;
+  background-color: color-mix(in srgb, var(--card) 68%, var(--background));
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 16%, transparent) .7px, transparent .7px);
+  background-size: 19px 19px;
+}
+
+.mindmap-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.mindmap-links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.mindmap-links path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 52%, var(--border));
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.mindmap-node {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 33%, var(--border));
+  border-radius: 13px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--background) 30%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.mindmap-node.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 75%, var(--foreground));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 30px color-mix(in srgb, var(--background) 30%, transparent);
+}
+
+.mindmap-node--slate { border-left: 3px solid #8b949e; }
+.mindmap-node--blue { border-left: 3px solid #58a6ff; }
+.mindmap-node--mint { border-left: 3px solid #3fb950; }
+.mindmap-node--amber { border-left: 3px solid #d29922; }
+.mindmap-node--rose { border-left: 3px solid #f778ba; }
+.mindmap-node--violet { border-left: 3px solid #bc8cff; }
+
+.mindmap-node-grab {
+  display: flex;
+  width: 100%;
+  min-height: 68px;
+  align-items: flex-start;
+  gap: 9px;
+  border: 0;
+  padding: 6px;
+  color: var(--foreground);
+  background: transparent;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mindmap-node-grab:active { cursor: grabbing; }
+
+.mindmap-node-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.mindmap-node-label {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mindmap-node-editor {
+  position: absolute;
+  z-index: 4;
+  inset: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  padding: 6px;
+  background: var(--card);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--background) 45%, transparent);
+}
+
+.mindmap-node-editor textarea {
+  width: 100%;
+  min-height: 52px;
+  flex: 1;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+}
+
+.mindmap-node-editor > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.mindmap-node-editor button {
+  display: inline-grid;
+  min-width: 28px;
+  min-height: 26px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 7px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  font: inherit;
+  font-size: 10px;
+}
+
+.mindmap-loading,
+.mindmap-canvas-empty {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  transform: translate(-50%, -50%);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.mindmap-canvas-empty p { margin: 0; }
+
+.mindmap-footer {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  padding: 8px 2px 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.mindmap-page button:focus-visible,
+.mindmap-page input:focus-visible,
+.mindmap-page textarea:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 680px) {
+  .mindmap-page { padding: 10px 9px 84px; }
+  .mindmap-work-header { align-items: flex-start; flex-direction: column; }
+  .mindmap-actions { width: 100%; }
+  .mindmap-actions .mindmap-secondary,
+  .mindmap-actions .mindmap-primary { min-height: 32px; padding: 0 9px; font-size: 10px; }
+  .mindmap-permission { margin-right: auto; }
+  .mindmap-status { display: none; }
+  .mindmap-list-header h1 { font-size: 18px; }
+}

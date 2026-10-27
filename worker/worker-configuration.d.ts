@@ -14,11 +14,12 @@ interface __BaseEnv_Env {
 	CHAT_ROOM: DurableObjectNamespace<import("./index").ChatRoom>;
 	CHAT_STICKER_PACK: DurableObjectNamespace<import("./index").ChatStickerPack>;
 	SHEETS_ROOM: DurableObjectNamespace<import("./index").SheetsRoom>;
+        MINDMAP_ROOM: DurableObjectNamespace<import("./index").MindmapRoom>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./index");
-		durableNamespaces: "CommuneRoom" | "RosterRoom" | "ChatRoom" | "ChatStickerPack" | "SheetsRoom";
+        durableNamespaces: "CommuneRoom" | "RosterRoom" | "ChatRoom" | "ChatStickerPack" | "SheetsRoom" | "MindmapRoom";
 	}
 	interface Env extends __BaseEnv_Env {}
 }
