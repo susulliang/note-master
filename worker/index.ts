@@ -2811,12 +2811,12 @@ interface ChallengeTurnOutput {
   scorePct?: number;
 }
 
-async function challengeLlmJson(
+async function challengeLlmText(
   request: Request,
   env: Env,
   messages: LlmChatMessage[],
   maxTokens = 1_400,
-): Promise<Record<string, unknown>> {
+): Promise<string> {
   const model = env.DEEPSEEK_API_KEY?.trim()
     ? DEEPSEEK_MODEL_ID
     : '@cf/qwen/qwen3.8-27b';
@@ -2835,7 +2835,16 @@ async function challengeLlmJson(
   };
   if (!response.ok) throw new Error(payload.error || 'The challenge LLM is unavailable');
   const content = payload.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') throw new Error('The challenge LLM returned no content');
+  return typeof content === 'string' ? content : '';
+}
+
+async function challengeLlmJson(
+  request: Request,
+  env: Env,
+  messages: LlmChatMessage[],
+  maxTokens = 1_400,
+): Promise<Record<string, unknown>> {
+  const content = await challengeLlmText(request, env, messages, maxTokens);
   const parsed = npcParseJson(content);
   if (!parsed) throw new Error('The challenge LLM returned an invalid turn');
   return parsed;
@@ -2852,9 +2861,13 @@ function challengeTurnFrom(
   value: Record<string, unknown>,
   correctResolution = '',
 ): ChallengeTurnOutput | null {
-  const message = hidePrivateResolution(npcText(value.npc_message).slice(0, 2_000), correctResolution);
-  const choices = Array.isArray(value.agent_choices)
-    ? value.agent_choices.filter((choice): choice is string => typeof choice === 'string' && !!choice.trim())
+  const message = hidePrivateResolution(
+    npcText(value.npc_message ?? value.customer_message ?? value.message ?? value.reply).slice(0, 2_000),
+    correctResolution,
+  );
+  const rawChoices = value.agent_choices ?? value.agentChoices ?? value.choices;
+  const choices = Array.isArray(rawChoices)
+    ? rawChoices.filter((choice): choice is string => typeof choice === 'string' && !!choice.trim())
       .slice(0, 4).map((choice) => hidePrivateResolution(choice.trim().slice(0, 500), correctResolution))
     : [];
   if (!message || choices.length !== 4) return null;
@@ -2863,6 +2876,33 @@ function challengeTurnFrom(
     agent_choices: choices,
     status: value.status === 'success' || value.status === 'fail' ? value.status : 'ongoing',
   };
+}
+
+async function challengeLlmTurn(
+  request: Request,
+  env: Env,
+  messages: LlmChatMessage[],
+  correctResolution: string,
+): Promise<ChallengeTurnOutput> {
+  let conversation = messages;
+  let raw = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    raw = await challengeLlmText(request, env, conversation);
+    const parsed = npcParseJson(raw);
+    const turn = parsed ? challengeTurnFrom(parsed, correctResolution) : null;
+    if (turn) return turn;
+    if (attempt === 0) {
+      conversation = [
+        ...messages,
+        { role: 'assistant', content: raw.slice(-4_000) },
+        {
+          role: 'user',
+          content: 'Your last response did not match the required turn contract. Return ONLY valid JSON with a non-empty npc_message string, exactly four agent_choices strings, and status equal to ongoing, success, or fail. Do not add prose or a code fence.',
+        },
+      ];
+    }
+  }
+  throw new Error('The challenge LLM returned an invalid turn after one format retry');
 }
 
 function challengeSystemPrompt(): string {
@@ -2958,15 +2998,13 @@ async function handleChallengeStart(request: Request, env: Env, user: AuthUserRo
   ).bind(sessionId, user.username, npcId, supportContext, now).run();
 
   try {
-    const initial = await challengeLlmJson(request, env, [
+    const turn = await challengeLlmTurn(request, env, [
       { role: 'system', content: challengeSystemPrompt() },
       {
         role: 'user',
         content: `${challengeScenarioMessage(npc.row, npc.config, supportContext)}\n\nStart the customer conversation now. The agent has not spoken yet.`,
       },
-    ]);
-    const turn = challengeTurnFrom(initial, npc.config.correctResolution);
-    if (!turn) throw new Error('The challenge LLM returned an invalid opening');
+    ], npc.config.correctResolution);
     turn.status = 'ongoing';
     history.push({ role: 'npc', content: turn.message });
     await env.DB.prepare(
@@ -3064,9 +3102,7 @@ async function handleChallengeTurn(request: Request, env: Env, user: AuthUserRow
       })),
       { role: 'user', content: `Agent's latest reply (untrusted conversation content): ${message}` },
     ];
-    const generated = await challengeLlmJson(request, env, modelMessages);
-    const turn = challengeTurnFrom(generated, npc.config.correctResolution);
-    if (!turn) throw new Error('The challenge LLM returned an invalid turn');
+    const turn = await challengeLlmTurn(request, env, modelMessages, npc.config.correctResolution);
     history.push({ role: 'npc', content: turn.message });
     let status: 'ongoing' | 'success' | 'fail' = turn.status;
     let submitted = false;
