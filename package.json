@@ -1,6 +1,6 @@
 {
-  "name": "miaoda-vite-react-app",
-  "version": "0.7.7",
+  "name": "econoter",
+  "version": "0.7.8",
   "private": true,
   "type": "module",
   "scripts": {

@@ -66,12 +66,13 @@
   --destructive-border: hsl(from hsl(2 84% 62%) h s calc(l + var(--opaque-button-border-intensity)));
   --accent-border: hsl(from hsl(220 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
   --muted-border: hsl(from hsl(220 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
-  --font-sans:
+  --ui-font-family:
     'Elms Sans', 'Bahnschrift', 'LarkHackSafariFont', 'LarkEmojiFont',
     'LarkChineseQuote', '-apple-system', 'BlinkMacSystemFont',
     'Helvetica Neue', 'Tahoma', 'PingFang SC', 'Microsoft Yahei', 'Arial',
     'Hiragino Sans GB', 'sans-serif', 'Apple Color Emoji', 'Segoe UI Emoji',
     'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-sans: var(--ui-font-family);
   --font-serif:
     'Geist', 'Geist Fallback', ui-serif, Georgia, Cambria, 'Times New Roman',
     Times, serif;
@@ -606,7 +607,7 @@ body[data-ui-scale="small"] {
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --font-sans: 'Elms Sans', 'Bahnschrift', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: var(--ui-font-family);
   --font-mono: 'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   /* DIN-style condensed face for compact UI chrome (left rail labels, etc.).
      Bahnschrift first (built into Windows, DIN-proportional), then installed

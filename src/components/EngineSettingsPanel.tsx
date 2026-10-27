@@ -13,6 +13,12 @@ import KeywordAlertContent from '@/components/KeywordAlertContent';
 import StorePanel from '@/components/StorePanel';
 import CardCollectionPanel from '@/components/CardCollectionPanel';
 import { REMOTE_LLM_MODELS, type RemoteLlmModel } from '@/lib/llm-serving-client';
+import {
+  readUiFontPreference,
+  saveUiFontPreference,
+  UI_FONT_OPTIONS,
+  type UiFontId,
+} from '@/lib/ui-font';
 
 /** Shared prefers-reduced-motion media query (reactive). */
 function useReducedMotion(): boolean {
@@ -337,6 +343,7 @@ export default function EngineSettingsPanel({
   const { user: authUser, logout: authLogout, resolving: authResolving, setSpice: setAuthSpice } = useAuth();
   const [storeOpen, setStoreOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [uiFont, setUiFont] = useState<UiFontId>(readUiFontPreference);
 
   // Live parse window — what the NEXT parse will send (debounced 1s)
   const [windowTick, setWindowTick] = useState(0);
@@ -542,6 +549,28 @@ export default function EngineSettingsPanel({
               {collectionOpen && <CardCollectionPanel onClose={() => setCollectionOpen(false)} />}
             </>
           )}
+        </section>
+
+        <section aria-labelledby="global-font-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p id="global-font-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Global UI font
+            </p>
+            <span className="text-[9px] text-muted-foreground/70">Saved on this device</span>
+          </div>
+          <select
+            value={uiFont}
+            onChange={(event) => setUiFont(saveUiFontPreference(event.target.value))}
+            aria-label="Global UI font"
+            className="w-full rounded-md border border-border/60 bg-background/80 px-2 py-1.5 text-[11px] text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-accent/70"
+          >
+            {UI_FONT_OPTIONS.map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            Applies to the main interface, dialogs, and form fields.
+          </p>
         </section>
 
         <section aria-labelledby="cat-choice-label" className="rounded-lg border border-border/50 bg-background/35 p-2">

@@ -4,7 +4,10 @@ import { BrowserRouter } from "react-router-dom";
 import { ErrorBoundary } from "react-error-boundary";
 import App from "./app";
 import { normalizeTheme } from "./lib/themes";
+import { applyUiFont, readUiFontPreference } from "./lib/ui-font";
 import "./index.css";
+
+applyUiFont(readUiFontPreference());
 
 try {
   const storedTheme = window.localStorage.getItem("ecovacs_ticket_theme");
