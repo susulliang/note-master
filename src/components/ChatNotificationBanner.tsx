@@ -124,7 +124,7 @@ export default function ChatNotificationBanner({
         const ticket: ChatSocketTicket = await requestChatTicket({ roomId });
         if (stopped) return;
         for (const message of ticket.freshMessages ?? []) {
-          void upsertCachedChatMessage(roomId, message).catch(() => undefined);
+          void upsertCachedChatMessage(username, roomId, message).catch(() => undefined);
         }
         const socket = new WebSocket(chatSocketUrl(ticket));
         sockets.set(roomId, socket);
@@ -147,7 +147,7 @@ export default function ChatNotificationBanner({
               typeof payload.message === 'object'
             ) {
               const message = payload.message as ChatMessage;
-              void upsertCachedChatMessage(roomId, message).catch(() => undefined);
+              void upsertCachedChatMessage(username, roomId, message).catch(() => undefined);
               if (payload.type === 'message:created') showNotice(message, roomId);
             }
           } catch {

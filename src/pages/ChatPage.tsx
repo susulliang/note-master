@@ -28,16 +28,21 @@ import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from 'react';
 import { toast } from 'sonner';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
 import {
   loadChatRoomCache,
+  peekChatRoomCache,
   saveChatRoomCache,
   upsertCachedChatMessage,
   type ChatMessageCursor,
   type ChatRoomCache,
 } from '@/lib/chat-message-cache';
+import {
+  loadChatConversationCache,
+  saveChatConversationCache,
+} from '@/lib/chat-conversation-cache';
 import {
   authorizedChatMediaUrl,
   chatAuthHeaders,
@@ -67,6 +72,104 @@ import {
   type PinnedCollabDocument,
 } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
+import './ChatPage.css';
+
+const EmbeddedSheetsPage = lazy(() => import('@/pages/SheetsPage'));
+const EmbeddedMindmapPage = lazy(() => import('@/pages/MindmapPage'));
+
+const CHAT_HISTORY_WIDTH_KEY = 'econote_chat_history_width';
+const MIN_CHAT_HISTORY_WIDTH = 190;
+const MAX_CHAT_HISTORY_WIDTH = 380;
+const CHAT_PINNED_PANE_WIDTH_KEY = 'econote_chat_pinned_pane_width';
+const MIN_CHAT_PINNED_PANE_WIDTH = 35;
+const MAX_CHAT_PINNED_PANE_WIDTH = 65;
+
+function readChatHistoryWidth(): number {
+  try {
+    const stored = window.localStorage.getItem(CHAT_HISTORY_WIDTH_KEY);
+    if (!stored) return 232;
+    const value = Number(stored);
+    return Number.isFinite(value)
+      ? Math.max(MIN_CHAT_HISTORY_WIDTH, Math.min(MAX_CHAT_HISTORY_WIDTH, value))
+      : 232;
+  } catch {
+    return 232;
+  }
+}
+
+function readPinnedPaneWidth(): number {
+  try {
+    const stored = window.localStorage.getItem(CHAT_PINNED_PANE_WIDTH_KEY);
+    const value = stored === null ? 50 : Number(stored);
+    return Number.isFinite(value)
+      ? Math.max(MIN_CHAT_PINNED_PANE_WIDTH, Math.min(MAX_CHAT_PINNED_PANE_WIDTH, value))
+      : 50;
+  } catch {
+    return 50;
+  }
+}
+
+function PinnedDocumentPane({
+  document,
+  username,
+  widthPercent,
+  onOpen,
+}: {
+  document: PinnedCollabDocument;
+  username: string;
+  widthPercent: number;
+  onOpen: () => void;
+}) {
+  return (
+    <aside className="chat-pinned-document-pane" style={{ flex: `0 0 ${widthPercent}%` }}>
+      <div className="chat-pinned-document-heading">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
+          {document.type === 'sheet' ? <FileSpreadsheet className="size-4" /> : <GitBranch className="size-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">{document.title}</p>
+          <p className="text-[10px] text-muted-foreground">
+            Pinned · {document.permission === 'edit' ? 'Can edit' : 'View only'}
+          </p>
+        </div>
+        <button type="button" onClick={onOpen} className="chat-pinned-open-button">
+          Open full view
+        </button>
+      </div>
+      <div className="chat-pinned-document-editor">
+        <Suspense fallback={<div className="grid h-full place-items-center text-xs text-muted-foreground">Loading document…</div>}>
+          {document.type === 'sheet'
+            ? (
+              <EmbeddedSheetsPage
+                key={`sheet:${document.id}`}
+                username={username}
+                initialDocumentId={document.id}
+                initialDocument={{
+                  id: document.id,
+                  title: document.title,
+                  owner: document.owner,
+                  createdAt: document.createdAt,
+                  updatedAt: document.updatedAt,
+                  memberCount: document.members.length,
+                  permission: document.permission,
+                }}
+                embedded
+              />
+            )
+            : (
+              <EmbeddedMindmapPage
+                key={`mindmap:${document.id}`}
+                username={username}
+                initialDocumentId={document.id}
+                initialDocument={document}
+                embedded
+              />
+            )}
+        </Suspense>
+      </div>
+    </aside>
+  );
+}
 
 interface ChatPageProps {
   username: string;
@@ -420,8 +523,12 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => peekChatRoomCache(username, 'global')?.messages ?? [],
+  );
+  const [conversations, setConversations] = useState<ChatConversation[]>(
+    () => loadChatConversationCache(username),
+  );
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'offline'>('connecting');
   const [hasDraft, setHasDraft] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -434,7 +541,9 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const [linkLabel, setLinkLabel] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [mobileRoomOpen, setMobileRoomOpen] = useState(true);
-  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(
+    () => peekChatRoomCache(username, 'global')?.hasOlder ?? false,
+  );
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [newChatMode, setNewChatMode] = useState<'direct' | 'group'>('direct');
   const [groupName, setGroupName] = useState('');
@@ -464,12 +573,109 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const stickerInputRef = useRef<HTMLInputElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef<ChatMessageCursor | null>(null);
-  const hasOlderRef = useRef(false);
+  const chatLayoutRef = useRef<HTMLDivElement | null>(null);
+  const chatMainRef = useRef<HTMLElement | null>(null);
+  const chatRoomBodyRef = useRef<HTMLDivElement | null>(null);
+  const resizingHistoryRef = useRef(false);
+  const resizingPinnedPaneRef = useRef(false);
+  const [historyWidth, setHistoryWidth] = useState(readChatHistoryWidth);
+  const [canSplitPinnedDocument, setCanSplitPinnedDocument] = useState(false);
+  const [pinnedPaneWidth, setPinnedPaneWidth] = useState(readPinnedPaneWidth);
+  const pinnedPaneWidthRef = useRef(pinnedPaneWidth);
+  pinnedPaneWidthRef.current = pinnedPaneWidth;
+  const conversationCacheOwnerRef = useRef(username);
+  const cursorRef = useRef<ChatMessageCursor | null>(peekChatRoomCache(username, 'global')?.cursor ?? null);
+  const hasOlderRef = useRef(peekChatRoomCache(username, 'global')?.hasOlder ?? false);
   const loadingOlderRef = useRef(false);
   const isOwnMessage = useCallback((message: ChatMessage) => (
     message.source === 'chat' && message.username.toLowerCase() === username.toLowerCase()
   ), [username]);
+
+  const selectChatRoom = useCallback((room: ActiveRoom) => {
+    const cached = peekChatRoomCache(username, room.roomId);
+    setMessages(cached?.messages ?? []);
+    setHasOlderMessages(cached?.hasOlder ?? false);
+    hasOlderRef.current = cached?.hasOlder ?? false;
+    cursorRef.current = cached?.cursor ?? null;
+    setLoadingOlder(false);
+    loadingOlderRef.current = false;
+    setActiveRoom(room);
+    setMobileRoomOpen(true);
+  }, [username]);
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      if (!resizingHistoryRef.current || !chatLayoutRef.current) return;
+      const bounds = chatLayoutRef.current.getBoundingClientRect();
+      setHistoryWidth(Math.max(
+        MIN_CHAT_HISTORY_WIDTH,
+        Math.min(MAX_CHAT_HISTORY_WIDTH, event.clientX - bounds.left),
+      ));
+    };
+    const stop = () => {
+      if (!resizingHistoryRef.current) return;
+      resizingHistoryRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        window.localStorage.setItem(CHAT_HISTORY_WIDTH_KEY, String(historyWidth));
+      } catch {
+        /* Keep resizing usable when storage is unavailable. */
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [historyWidth]);
+
+  useEffect(() => {
+    const main = chatMainRef.current;
+    if (!main) return undefined;
+    const measure = () => setCanSplitPinnedDocument(main.clientWidth >= 1080);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      if (!resizingPinnedPaneRef.current || !chatRoomBodyRef.current) return;
+      const bounds = chatRoomBodyRef.current.getBoundingClientRect();
+      if (bounds.width <= 0) return;
+      const percent = ((event.clientX - bounds.left) / bounds.width) * 100;
+      setPinnedPaneWidth(Math.max(
+        MIN_CHAT_PINNED_PANE_WIDTH,
+        Math.min(MAX_CHAT_PINNED_PANE_WIDTH, percent),
+      ));
+    };
+    const stop = () => {
+      if (!resizingPinnedPaneRef.current) return;
+      resizingPinnedPaneRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        window.localStorage.setItem(CHAT_PINNED_PANE_WIDTH_KEY, String(pinnedPaneWidthRef.current));
+      } catch {
+        /* Keep the document splitter usable when storage is unavailable. */
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+  }, []);
 
   const setComposerMarkdown = useCallback((markdown: string) => {
     draftRef.current = markdown;
@@ -502,11 +708,21 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
 
   const refreshConversations = useCallback(async () => {
     try {
-      setConversations(await fetchChatConversations());
+      const next = await fetchChatConversations();
+      if (conversationCacheOwnerRef.current === username) setConversations(next);
     } catch {
       /* The active chat remains usable if the inbox index is unavailable. */
     }
-  }, []);
+  }, [username]);
+
+  useEffect(() => {
+    if (conversationCacheOwnerRef.current !== username) {
+      conversationCacheOwnerRef.current = username;
+      setConversations(loadChatConversationCache(username));
+      return;
+    }
+    saveChatConversationCache(username, conversations);
+  }, [conversations, username]);
 
   useEffect(() => {
     void refreshConversations();
@@ -613,17 +829,13 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     let stopped = false;
     let reconnectTimer = 0;
     let currentSocket: WebSocket | null = null;
-    let cacheInitialized = false;
+    let cacheInitialized = peekChatRoomCache(username, activeRoom.roomId)?.initialized ?? false;
     setConnection('connecting');
-    setMessages([]);
-    setHasOlderMessages(false);
-    hasOlderRef.current = false;
-    cursorRef.current = null;
     setLoadingOlder(false);
     loadingOlderRef.current = false;
 
     const persistRoomCache = (roomMessages: ChatMessage[], initialized = cacheInitialized) => {
-      void saveChatRoomCache({
+      void saveChatRoomCache(username, {
         roomId: activeRoom.roomId,
         messages: roomMessages,
         hasOlder: hasOlderRef.current,
@@ -640,7 +852,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
         else ticket = await requestChatTicket({ roomId: activeRoom.roomId });
         if (stopped) return;
         for (const message of ticket.freshMessages ?? []) {
-          void upsertCachedChatMessage(activeRoom.roomId, message).catch(() => undefined);
+          void upsertCachedChatMessage(username, activeRoom.roomId, message).catch(() => undefined);
           setMessages((current) => mergeMessage(current, message));
         }
         const socket = new WebSocket(chatSocketUrl(ticket));
@@ -650,6 +862,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           if (!stopped) setConnection('connected');
         };
         socket.onmessage = (event) => {
+          if (stopped) return;
           let payload: Record<string, unknown>;
           try {
             payload = JSON.parse(String(event.data)) as Record<string, unknown>;
@@ -657,7 +870,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             return;
           }
           if (payload.type === 'welcome') {
-            if (!cacheInitialized) socket.send(JSON.stringify({ type: 'history:latest' }));
+            socket.send(JSON.stringify({ type: 'history:latest' }));
             return;
           }
           if (payload.type === 'history:latest' && Array.isArray(payload.messages)) {
@@ -725,7 +938,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             const list = messageListRef.current;
             const shouldStick = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 180;
             setMessages((current) => mergeMessage(current, payload.message as ChatMessage));
-            void upsertCachedChatMessage(activeRoom.roomId, payload.message as ChatMessage).catch(() => undefined);
+            void upsertCachedChatMessage(username, activeRoom.roomId, payload.message as ChatMessage).catch(() => undefined);
             if (shouldStick) {
               requestAnimationFrame(() => messageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
             }
@@ -750,12 +963,13 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       }
     };
 
-    void loadChatRoomCache(activeRoom.roomId)
+    void connect();
+    void loadChatRoomCache(username, activeRoom.roomId)
       .catch(() => null)
       .then((cached) => {
         if (stopped) return;
         if (cached) {
-          setMessages(cached.messages);
+          setMessages((current) => cached.messages.reduce(mergeMessage, current));
           cacheInitialized = cached.initialized;
           hasOlderRef.current = cached.hasOlder;
           cursorRef.current = cached.cursor;
@@ -765,7 +979,6 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             if (list) list.scrollTop = list.scrollHeight;
           });
         }
-        void connect();
       });
     return () => {
       stopped = true;
@@ -773,7 +986,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) currentSocket.close(1000, 'Room changed');
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
-  }, [activeRoom.roomId, refreshConversations, refreshPinnedDocument]);
+  }, [activeRoom.roomId, refreshConversations, refreshPinnedDocument, username]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -813,22 +1026,28 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     try {
       const ticket = await requestChatTicket({ peerUsername });
       pendingTicketRef.current = ticket;
-      setActiveRoom({ roomId: ticket.roomId, title: peerUsername, kind: 'direct', peerUsername, memberCount: 2, peerAvatar });
+      selectChatRoom({
+        roomId: ticket.roomId,
+        title: peerUsername,
+        kind: 'direct',
+        peerUsername,
+        memberCount: 2,
+        peerAvatar,
+      });
       setNewChatOpen(false);
       setUserQuery('');
-      setMobileRoomOpen(true);
       await refreshConversations();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not start this chat.');
     }
-  }, [refreshConversations]);
+  }, [refreshConversations, selectChatRoom]);
 
   const createGroup = useCallback(async () => {
     if (!groupName.trim() || !selectedMembers.length || creatingGroup) return;
     try {
       setCreatingGroup(true);
       const group = await createChatGroup(groupName.trim(), selectedMembers);
-      setActiveRoom({
+      selectChatRoom({
         roomId: group.roomId,
         title: group.title,
         kind: 'group',
@@ -839,14 +1058,13 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       setGroupName('');
       setSelectedMembers([]);
       setUserQuery('');
-      setMobileRoomOpen(true);
       await refreshConversations();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create the group.');
     } finally {
       setCreatingGroup(false);
     }
-  }, [creatingGroup, groupName, refreshConversations, selectedMembers]);
+  }, [creatingGroup, groupName, refreshConversations, selectChatRoom, selectedMembers]);
 
   const saveRoomTitle = useCallback(async () => {
     const title = titleDraft.trim();
@@ -1084,11 +1302,11 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background/80 text-foreground">
-      <div className="flex min-h-0 flex-1">
+      <div ref={chatLayoutRef} className="chat-layout flex min-h-0 flex-1">
         <aside className={cn(
-          'w-full shrink-0 flex-col border-r border-border/70 bg-card/25 md:flex md:w-[286px] lg:w-[310px]',
+          'chat-conversation-sidebar w-full shrink-0 flex-col border-r border-border/70 bg-card/25 md:flex',
           mobileRoomOpen && 'hidden',
-        )}>
+        )} style={{ width: historyWidth }}>
           <div className="flex items-center justify-between px-4 pb-3 pt-5">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Conversations</p>
@@ -1111,10 +1329,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           <div className="space-y-1 overflow-y-auto px-2 pb-4">
             <button
               type="button"
-              onClick={() => {
-                setActiveRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
-                setMobileRoomOpen(true);
-              }}
+              onClick={() => selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' })}
               className={cn(
                 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 activeRoom.kind === 'global' && 'bg-accent/10 ring-1 ring-accent/20',
@@ -1138,7 +1353,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                   key={conversation.roomId}
                   type="button"
                   onClick={() => {
-                    setActiveRoom({
+                    selectChatRoom({
                       roomId: conversation.roomId,
                       title: conversation.title,
                       kind: conversation.kind,
@@ -1146,7 +1361,6 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                       memberCount: conversation.memberCount,
                       peerAvatar: conversation.peerAvatar,
                     });
-                    setMobileRoomOpen(true);
                   }}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -1201,7 +1415,38 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           </div>
         </aside>
 
-        <main className={cn('flex min-w-0 flex-1 flex-col', !mobileRoomOpen && 'hidden md:flex')}>
+        <div
+          className="chat-history-resizer hidden md:flex"
+          role="separator"
+          aria-label="Resize conversation history"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_CHAT_HISTORY_WIDTH}
+          aria-valuemax={MAX_CHAT_HISTORY_WIDTH}
+          aria-valuenow={historyWidth}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            resizingHistoryRef.current = true;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const change = event.key === 'ArrowLeft' ? -16 : 16;
+            setHistoryWidth((width) => {
+              const next = Math.max(MIN_CHAT_HISTORY_WIDTH, Math.min(MAX_CHAT_HISTORY_WIDTH, width + change));
+              try {
+                window.localStorage.setItem(CHAT_HISTORY_WIDTH_KEY, String(next));
+              } catch {
+                /* Keep keyboard resizing usable when storage is unavailable. */
+              }
+              return next;
+            });
+          }}
+        />
+
+        <main ref={chatMainRef} className={cn('flex min-w-0 flex-1 flex-col', !mobileRoomOpen && 'hidden md:flex')}>
           <div className="flex min-h-[66px] shrink-0 items-center gap-3 border-b border-border/60 px-4 sm:px-6">
             <button
               type="button"
@@ -1304,7 +1549,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             </button>
           </div>
 
-          {pinnedDocument && (
+          {pinnedDocument && !canSplitPinnedDocument && (
             <div className="flex shrink-0 items-center gap-3 border-b border-accent/15 bg-accent/[0.045] px-4 py-2.5 sm:px-6">
               <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
                 {pinnedDocument.type === 'sheet'
@@ -1332,6 +1577,52 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             </div>
           )}
 
+          <div
+            ref={chatRoomBodyRef}
+            className={cn('chat-room-body', canSplitPinnedDocument && pinnedDocument && 'chat-room-body--split')}
+          >
+            {canSplitPinnedDocument && pinnedDocument && (
+              <PinnedDocumentPane
+                document={pinnedDocument}
+                username={username}
+                widthPercent={pinnedPaneWidth}
+                onOpen={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
+              />
+            )}
+            {canSplitPinnedDocument && pinnedDocument && (
+              <div
+                className="chat-document-resizer"
+                role="separator"
+                aria-label="Resize pinned document and chat"
+                aria-orientation="vertical"
+                aria-valuemin={MIN_CHAT_PINNED_PANE_WIDTH}
+                aria-valuemax={MAX_CHAT_PINNED_PANE_WIDTH}
+                aria-valuenow={Math.round(pinnedPaneWidth)}
+                tabIndex={0}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  resizingPinnedPaneRef.current = true;
+                  document.body.style.cursor = 'col-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                  event.preventDefault();
+                  const delta = event.key === 'ArrowLeft' ? -2 : 2;
+                  const next = Math.max(
+                    MIN_CHAT_PINNED_PANE_WIDTH,
+                    Math.min(MAX_CHAT_PINNED_PANE_WIDTH, pinnedPaneWidth + delta),
+                  );
+                  setPinnedPaneWidth(next);
+                  try {
+                    window.localStorage.setItem(CHAT_PINNED_PANE_WIDTH_KEY, String(next));
+                  } catch {
+                    /* Keep keyboard resizing usable when storage is unavailable. */
+                  }
+                }}
+              />
+            )}
+            <section className="chat-message-pane">
           <div
             ref={messageListRef}
             className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-7"
@@ -1633,6 +1924,8 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                 </button>
               </div>
             </div>
+          </div>
+            </section>
           </div>
         </main>
       </div>

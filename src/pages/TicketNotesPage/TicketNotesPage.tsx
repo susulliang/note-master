@@ -2369,6 +2369,8 @@ Additional information (if needed): ${additional}`;
       availableViews={availableWorkspaces}
       onNavigate={navigateToView}
       onOpenHelp={openKittyHelp}
+      onOpenSettings={() => navigateToView('settings')}
+      settingsActive={workView === 'settings'}
       onOpenWidget={openWorkspaceWidget}
       historyOpen={showHistory}
       historyCount={history.length}
@@ -2707,8 +2709,6 @@ Additional information (if needed): ${additional}`;
             history={history}
             onDeleteHistory={handleDeleteHistory}
             onClearHistory={handleClearHistory}
-            onOpenSettings={() => navigateToView('settings')}
-            settingsActive={workView === 'settings'}
           />,
           railControlsSlot
         )}

@@ -13,6 +13,7 @@ export interface MindmapEdge {
   id: string;
   from: string;
   to: string;
+  label: string;
 }
 
 interface MindmapTicket {
@@ -86,6 +87,13 @@ export class MindmapRoom extends DurableObject<Env> {
           UNIQUE (from_id, to_id)
         )
       `);
+      try {
+        this.ctx.storage.sql.exec(
+          "ALTER TABLE mindmap_edges ADD COLUMN label TEXT NOT NULL DEFAULT ''",
+        );
+      } catch {
+        // Existing Durable Objects already have the label column.
+      }
     });
   }
 
@@ -248,7 +256,7 @@ export class MindmapRoom extends DurableObject<Env> {
       const id = crypto.randomUUID();
       try {
         this.ctx.storage.sql.exec(
-          'INSERT INTO mindmap_edges (id, from_id, to_id) VALUES (?, ?, ?)',
+          "INSERT INTO mindmap_edges (id, from_id, to_id, label) VALUES (?, ?, ?, '')",
           id,
           from,
           to,
@@ -256,7 +264,22 @@ export class MindmapRoom extends DurableObject<Env> {
       } catch {
         return;
       }
-      this.broadcast({ type: 'edge:created', edge: { id, from, to }, by: user.username });
+      this.broadcast({ type: 'edge:created', edge: { id, from, to, label: '' }, by: user.username });
+      this.updateTimestamp();
+      return;
+    }
+    if (event.type === 'edge:update') {
+      const id = typeof event.id === 'string' ? event.id : '';
+      const label = typeof event.label === 'string' ? event.label.trim().slice(0, 120) : null;
+      if (!NODE_ID_RE.test(id) || label === null) return;
+      const changed = this.ctx.storage.sql.exec(
+        'UPDATE mindmap_edges SET label = ? WHERE id = ?',
+        label,
+        id,
+      ).rowsWritten;
+      if (!changed) return;
+      const edge = this.getEdges().find((item) => item.id === id);
+      if (edge) this.broadcast({ type: 'edge:updated', edge, by: user.username });
       this.updateTimestamp();
       return;
     }
@@ -313,11 +336,11 @@ export class MindmapRoom extends DurableObject<Env> {
 
   private getEdges(): MindmapEdge[] {
     return this.ctx.storage.sql
-      .exec<{ id: string; from_id: string; to_id: string }>(
-        'SELECT id, from_id, to_id FROM mindmap_edges ORDER BY rowid',
+      .exec<{ id: string; from_id: string; to_id: string; label: string }>(
+        'SELECT id, from_id, to_id, label FROM mindmap_edges ORDER BY rowid',
       )
       .toArray()
-      .map((edge) => ({ id: edge.id, from: edge.from_id, to: edge.to_id }));
+      .map((edge) => ({ id: edge.id, from: edge.from_id, to: edge.to_id, label: edge.label ?? '' }));
   }
 
   private broadcast(event: MindmapEvent): void {

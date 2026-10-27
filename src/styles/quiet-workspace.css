@@ -1096,6 +1096,17 @@
   transform: translate(0, 0);
 }
 
+.quiet-dock-cluster--settings .quiet-dock-tooltip {
+  right: 0;
+  left: auto;
+  transform: translate(0, 4px);
+}
+
+.quiet-dock-cluster--settings .quiet-orbit-action:hover .quiet-dock-tooltip,
+.quiet-dock-cluster--settings .quiet-orbit-action:focus-visible .quiet-dock-tooltip {
+  transform: translate(0, 0);
+}
+
 .quiet-orbit-action:hover,
 .quiet-orbit-action--active {
   color: var(--qw-focus);
@@ -1394,6 +1405,7 @@
   }
 
   .quiet-orbit-dock {
+    --quiet-dock-action-size: clamp(14px, calc((100vw - 76px) / 17), 30px);
     bottom: calc(8px + env(safe-area-inset-bottom));
     width: calc(100vw - 8px);
     min-height: 44px;
@@ -1409,16 +1421,21 @@
 
   .quiet-dock-cluster {
     min-width: 0;
-    flex: 1 1 0;
-    justify-content: space-evenly;
+    flex: 0 0 auto;
+    justify-content: flex-start;
     gap: 0;
   }
 
   .quiet-orbit-action {
-    width: auto;
-    min-width: 0;
+    width: var(--quiet-dock-action-size);
+    min-width: var(--quiet-dock-action-size);
     height: 28px;
-    flex: 1 1 0;
+    flex: 0 0 var(--quiet-dock-action-size);
+  }
+
+  .quiet-dock-cluster svg {
+    width: min(16px, var(--quiet-dock-action-size));
+    height: min(16px, var(--quiet-dock-action-size));
   }
 
   .quiet-magic-ball {

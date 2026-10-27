@@ -48,7 +48,7 @@ export interface NodeConfig {
   headerTag?: { label: string; href?: string; onClick?: () => void };
 }
 
-export type ContextWidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 'manuals';
+export type ContextWidgetId = 'tracker' | 'guides' | 'product' | 'photos' | 'transcript' | 'qa' | 'manuals';
 
 interface FlowchartCanvasProps {
   nodes: NodeConfig[];
@@ -589,6 +589,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
     if (panelId) openDrawerTab(panelId);
     else if (widgetRequest.widget === 'qa') setQaOpen(true);
     else if (widgetRequest.widget === 'manuals') setManualsOpen(true);
+    else if (widgetRequest.widget === 'photos') {
+      setAppPhotosOpen((open) => !open);
+      setDrawerOpen(false);
+      setQaOpen(false);
+      setManualsOpen(false);
+    }
   }, [openDrawerTab, widgetRequest?.token, widgetRequest?.widget]);
   const drawerTabMeta = useMemo(
     () =>

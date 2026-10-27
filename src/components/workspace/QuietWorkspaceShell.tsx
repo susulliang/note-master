@@ -10,6 +10,7 @@ import {
   FilePenLine,
   GraduationCap,
   History,
+  Image,
   LayoutGrid,
   Layers3,
   PackageSearch,
@@ -28,6 +29,8 @@ interface QuietWorkspaceShellProps {
   availableViews: WorkView[];
   onNavigate: (view: WorkView) => void;
   onOpenHelp: () => void;
+  onOpenSettings: () => void;
+  settingsActive: boolean;
   onOpenWidget: (widget: WidgetId) => void;
   historyOpen: boolean;
   historyCount: number;
@@ -38,7 +41,7 @@ interface QuietWorkspaceShellProps {
   children: ReactNode;
 }
 
-export type WidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 'manuals';
+export type WidgetId = 'tracker' | 'guides' | 'product' | 'photos' | 'transcript' | 'qa' | 'manuals';
 
 const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   commune: { label: 'Commune', icon: Users },
@@ -59,6 +62,7 @@ const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },
   { id: 'product', label: 'Product lookup', icon: PackageSearch },
+  { id: 'photos', label: 'App Use Photos', icon: Image },
   { id: 'transcript', label: 'Live transcript', icon: AudioLines },
   { id: 'qa', label: 'QA review', icon: ClipboardCheck },
   { id: 'manuals', label: 'Product manuals', icon: BookMarked },
@@ -69,6 +73,8 @@ export function QuietWorkspaceShell({
   availableViews,
   onNavigate,
   onOpenHelp,
+  onOpenSettings,
+  settingsActive,
   onOpenWidget,
   historyOpen,
   historyCount,
@@ -152,6 +158,21 @@ export function QuietWorkspaceShell({
                 </span>
               )}
               <span className="quiet-dock-tooltip" aria-hidden="true">History</span>
+            </button>
+          </div>
+
+          <span className="quiet-dock-divider" aria-hidden="true" />
+
+          <div className="quiet-dock-cluster quiet-dock-cluster--settings" aria-label="Settings">
+            <button
+              type="button"
+              aria-label="Settings"
+              aria-current={settingsActive ? 'page' : undefined}
+              onClick={onOpenSettings}
+              className={cn('quiet-orbit-action', settingsActive && 'quiet-orbit-action--active')}
+            >
+              <Settings className="size-[18px]" strokeWidth={1.8} />
+              <span className="quiet-dock-tooltip" aria-hidden="true">Settings</span>
             </button>
           </div>
         </nav>

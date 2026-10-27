@@ -1,4 +1,4 @@
-import { PanelLeftClose, Settings } from 'lucide-react';
+import { PanelLeftClose } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HistoryPanel from '@/components/HistoryPanel';
 import type { NoteHistoryEntry } from '@/data/ticket';
@@ -10,8 +10,6 @@ interface RailControlsProps {
   history: NoteHistoryEntry[];
   onDeleteHistory: (id: string) => void;
   onClearHistory: () => void;
-  onOpenSettings: () => void;
-  settingsActive?: boolean;
   /** Collapse the left rail pill into its glass circle (hidden while
    *  collapsed — the rail is unmounted then). */
   onCollapseRail?: () => void;
@@ -23,8 +21,8 @@ const RAIL_BTN =
 
 /**
  * Vertical control stack docked at the BOTTOM of the left rail pill
- * (portaled in by the page). Settings now navigates to its own workspace;
- * appearance controls live on that page instead of crowding this stack.
+ * (portaled in by the page). Settings lives at the right end of the
+ * workspace dock; this stack is reserved for history and rail controls.
  */
 export default function RailControls({
   historyOpen,
@@ -32,8 +30,6 @@ export default function RailControls({
   history,
   onDeleteHistory,
   onClearHistory,
-  onOpenSettings,
-  settingsActive = false,
   onCollapseRail,
 }: RailControlsProps) {
   return (
@@ -44,19 +40,6 @@ export default function RailControls({
       )}
 
       <div className="quiet-control-icons flex flex-col items-center gap-1 animate-in fade-in duration-700">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenSettings}
-          className={cn(RAIL_BTN, settingsActive && 'bg-foreground/10 text-foreground')}
-          aria-label="Open Settings"
-          title="Settings"
-        >
-          <Settings className="size-[18px] transition-transform duration-500 hover:rotate-90" />
-        </Button>
-
-        <div className="my-0.5 h-px w-6 bg-foreground/10" aria-hidden="true" />
-
         {/* Collapse the rail into its glass circle (narrow screens /
             extra canvas room). Hidden while collapsed — the whole rail
             unmounts then. */}

@@ -988,6 +988,49 @@
   padding-top: 2px;
 }
 
+.sheets-page--embedded {
+  padding: 8px;
+}
+
+.sheets-page--embedded-loading {
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.sheets-page--embedded .sheets-workbook-header {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sheets-page--embedded .sheets-header-actions {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sheets-page--embedded .sheets-import-button,
+.sheets-page--embedded .sheets-export-button,
+.sheets-page--embedded .sheets-share-button {
+  min-height: 31px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.sheets-page--embedded .sheets-shared-label {
+  display: none;
+}
+
+.sheets-page--embedded .sheets-toolbar {
+  min-height: 42px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.sheets-page--embedded .sheets-grid-shell {
+  min-height: 0;
+}
+
 @media (max-width: 720px) {
   .sheets-page {
     padding: 13px 10px 92px;

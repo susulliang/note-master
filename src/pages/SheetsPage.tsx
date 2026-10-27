@@ -15,6 +15,7 @@ import {
   Rows3,
   Search,
   Share2,
+  Upload,
   Users,
   X,
 } from 'lucide-react';
@@ -30,6 +31,12 @@ import {
   type FormEvent,
 } from 'react';
 import { toast } from 'sonner';
+import {
+  loadCollabDirectoryCache,
+  loadSheetSnapshot,
+  saveCollabDirectoryCache,
+  saveSheetSnapshot,
+} from '@/lib/collab-document-cache';
 import {
   addSheetMembers,
   createCollaborativeSheet,
@@ -59,6 +66,8 @@ import './SheetsPage.css';
 interface SheetsPageProps {
   username: string;
   initialDocumentId?: string;
+  initialDocument?: CollaborativeSheet;
+  embedded?: boolean;
 }
 
 interface SheetRange {
@@ -152,9 +161,16 @@ function formatCellForExport(cell: SheetCell): XLSX.CellObject {
   return { t: 's', v: cell.raw };
 }
 
-export default function SheetsPage({ username, initialDocumentId }: SheetsPageProps) {
-  const [sheets, setSheets] = useState<CollaborativeSheet[]>([]);
-  const [activeSheet, setActiveSheet] = useState<CollaborativeSheet | null>(null);
+export default function SheetsPage({
+  username,
+  initialDocumentId,
+  initialDocument,
+  embedded = false,
+}: SheetsPageProps) {
+  const [sheets, setSheets] = useState<CollaborativeSheet[]>(
+    () => loadCollabDirectoryCache<CollaborativeSheet>(username, 'sheet'),
+  );
+  const [activeSheet, setActiveSheet] = useState<CollaborativeSheet | null>(initialDocument ?? null);
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [canEdit, setCanEdit] = useState(true);
@@ -162,6 +178,7 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   const [rowCount, setRowCount] = useState(10);
   const [colCount, setColCount] = useState(10);
   const [snapshotReady, setSnapshotReady] = useState(false);
+  const [snapshotSheetId, setSnapshotSheetId] = useState<string | null>(null);
   const [selected, setSelected] = useState<SheetRange>({
     startRow: 1, startCol: 1, endRow: 1, endCol: 1,
   });
@@ -179,11 +196,14 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   const [searchingUsers, setSearchingUsers] = useState(false);
   const [savingDialog, setSavingDialog] = useState(false);
   const [clipboardTsv, setClipboardTsv] = useState('');
+  const [importing, setImporting] = useState(false);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const formulaInputRef = useRef<HTMLInputElement | null>(null);
+  const directoryOwnerRef = useRef(username);
   const dragAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const lastCommittedEditRef = useRef<string | null>(null);
   const cancelEditOnBlurRef = useRef(false);
@@ -205,6 +225,19 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   }, [reloadSheets]);
 
   useEffect(() => {
+    if (directoryOwnerRef.current !== username) {
+      directoryOwnerRef.current = username;
+      setSheets(loadCollabDirectoryCache<CollaborativeSheet>(username, 'sheet'));
+      setActiveSheet(initialDocument ?? null);
+      setCells({});
+      setSnapshotReady(false);
+      setSnapshotSheetId(null);
+      return;
+    }
+    saveCollabDirectoryCache(username, 'sheet', sheets);
+  }, [initialDocument, sheets, username]);
+
+  useEffect(() => {
     if (!initialDocumentId || activeSheet || loadingSheets) return;
     const requested = sheets.find((sheet) => sheet.id === initialDocumentId);
     if (requested) setActiveSheet(requested);
@@ -214,18 +247,43 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
     if (!activeSheet) return;
     let stopped = false;
     let currentSocket: WebSocket | null = null;
+    let permissionConfirmed = false;
+    let serverSnapshotReceived = false;
+    let serverDimensions: { rows: number; cols: number } | null = null;
+    let serverSnapshotCells: SheetCellMap = {};
+    let pendingCache: Awaited<ReturnType<typeof loadSheetSnapshot>> = null;
     setConnection('connecting');
     setCanEdit(false);
     setSnapshotReady(false);
+    setSnapshotSheetId(null);
     setCells({});
     setSelected({ startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
     setEditingCell(null);
+
+    const applyCachedSnapshot = (cached: NonNullable<typeof pendingCache>) => {
+      if (stopped || serverSnapshotReceived) return;
+      setRowCount(serverDimensions?.rows ?? cached.rows);
+      setColCount(serverDimensions?.cols ?? cached.cols);
+      setCells(Object.fromEntries(cached.cells.map((cell) => [cellKey(cell.row, cell.col), cell])));
+      setSnapshotSheetId(activeSheet.id);
+      setSnapshotReady(true);
+    };
+    void loadSheetSnapshot(activeSheet.id).then((cached) => {
+      if (stopped || serverSnapshotReceived || !cached) return;
+      if (!permissionConfirmed) {
+        pendingCache = cached;
+        return;
+      }
+      applyCachedSnapshot(cached);
+    }).catch(() => undefined);
 
     const connect = async () => {
       try {
         const ticket = await requestSheetsSocketTicket(activeSheet.id);
         if (stopped) return;
+        permissionConfirmed = true;
         setCanEdit(ticket.permission !== 'view');
+        if (pendingCache) applyCachedSnapshot(pendingCache);
         const socket = new WebSocket(sheetsSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
@@ -240,19 +298,30 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
             return;
           }
           if (payload.type === 'sheet:ready') {
-            setRowCount(typeof payload.rows === 'number' ? payload.rows : 10);
-            setColCount(typeof payload.cols === 'number' ? payload.cols : 10);
-            setCells({});
-            setSnapshotReady(false);
+            serverDimensions = {
+              rows: typeof payload.rows === 'number' ? payload.rows : 10,
+              cols: typeof payload.cols === 'number' ? payload.cols : 10,
+            };
+            setRowCount(serverDimensions.rows);
+            setColCount(serverDimensions.cols);
             return;
           }
           if (payload.type === 'sheet:snapshot' && Array.isArray(payload.cells)) {
-            setCells((current) => {
-              const next = { ...current };
-              for (const value of payload.cells as SheetCell[]) next[cellKey(value.row, value.col)] = value;
-              return next;
-            });
-            if (payload.done === true) setSnapshotReady(true);
+            serverSnapshotReceived = true;
+            for (const value of payload.cells as SheetCell[]) {
+              serverSnapshotCells[cellKey(value.row, value.col)] = value;
+            }
+            if (payload.done === true) {
+              setCells({ ...serverSnapshotCells });
+              setSnapshotSheetId(activeSheet.id);
+              setSnapshotReady(true);
+            } else {
+              setCells((current) => {
+                const next = { ...current };
+                for (const value of payload.cells as SheetCell[]) next[cellKey(value.row, value.col)] = value;
+                return next;
+              });
+            }
             return;
           }
           if (payload.type === 'cells:updated' && Array.isArray(payload.cells)) {
@@ -357,6 +426,19 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
   }, [activeSheet?.id, connectionAttempt]);
+
+  useEffect(() => {
+    if (!activeSheet || !snapshotReady || snapshotSheetId !== activeSheet.id) return undefined;
+    const timer = window.setTimeout(() => {
+      void saveSheetSnapshot({
+        id: activeSheet.id,
+        rows: rowCount,
+        cols: colCount,
+        cells: Object.values(cells),
+      }).catch(() => undefined);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeSheet, cells, colCount, rowCount, snapshotReady, snapshotSheetId]);
 
   useEffect(() => {
     if (!dialogMode || dialogMode === 'rename') return;
@@ -559,6 +641,102 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
     XLSX.writeFile(workbook, filename);
     toast.success('Spreadsheet exported');
   }, [activeSheet?.title, cells, colCount, rowCount]);
+
+  const importWorkbook = useCallback(async (file?: File) => {
+    if (!file || !activeSheet) return;
+    if (!canEdit || connection !== 'connected' || !snapshotReady) {
+      toast.error('Connect with edit access before importing a file.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Choose a spreadsheet smaller than 10 MB.');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const isCsv = file.name.toLowerCase().endsWith('.csv');
+      const workbook = isCsv
+        ? XLSX.read(await file.text(), { type: 'string' })
+        : XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
+      const reference = worksheet?.['!ref'];
+      if (!worksheet || !reference) throw new Error('This file does not contain a worksheet with data.');
+
+      const sourceRange = XLSX.utils.decode_range(reference);
+      const importRows = sourceRange.e.r - sourceRange.s.r + 1;
+      const importCols = sourceRange.e.c - sourceRange.s.c + 1;
+      if (importRows < 1 || importCols < 1 || importRows > 100 || importCols > 100) {
+        throw new Error('Imports are limited to 100 rows × 100 columns.');
+      }
+
+      const start = normalizeRange(selectionRef.current);
+      const endRow = start.startRow + importRows - 1;
+      const endCol = start.startCol + importCols - 1;
+      if (endRow > 100 || endCol > 100) {
+        throw new Error('The imported range would exceed the sheet’s 100 × 100 limit. Select an earlier cell.');
+      }
+
+      const updates: SheetCell[] = [];
+      for (let rowOffset = 0; rowOffset < importRows; rowOffset += 1) {
+        for (let colOffset = 0; colOffset < importCols; colOffset += 1) {
+          const address = XLSX.utils.encode_cell({
+            r: sourceRange.s.r + rowOffset,
+            c: sourceRange.s.c + colOffset,
+          });
+          const sourceCell = worksheet[address] as XLSX.CellObject | undefined;
+          const raw = sourceCell?.f
+            ? `=${sourceCell.f}`
+            : sourceCell?.v == null
+              ? ''
+              : XLSX.utils.format_cell(sourceCell);
+          if (raw.length > 5_000) {
+            throw new Error(`Cell ${address} exceeds the 5,000-character limit.`);
+          }
+          const row = start.startRow + rowOffset;
+          const col = start.startCol + colOffset;
+          updates.push({ ...getCell(cells, row, col), raw });
+        }
+      }
+
+      for (let index = rowCount + 1; index <= endRow; index += 1) {
+        if (!sendEvent({ type: 'structure:change', dimension: 'row', action: 'insert', index })) {
+          throw new Error('Could not expand the sheet rows for this import.');
+        }
+      }
+      for (let index = colCount + 1; index <= endCol; index += 1) {
+        if (!sendEvent({ type: 'structure:change', dimension: 'column', action: 'insert', index })) {
+          throw new Error('Could not expand the sheet columns for this import.');
+        }
+      }
+
+      sendCells(updates);
+      const importedRange = {
+        startRow: start.startRow,
+        startCol: start.startCol,
+        endRow,
+        endCol,
+      };
+      setSelected(importedRange);
+      selectionRef.current = importedRange;
+      toast.success(`Imported ${importRows} × ${importCols} cells from ${file.name}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not import this spreadsheet.');
+    } finally {
+      setImporting(false);
+    }
+  }, [
+    activeSheet,
+    canEdit,
+    cells,
+    connection,
+    rowCount,
+    colCount,
+    sendCells,
+    sendEvent,
+    snapshotReady,
+  ]);
 
   const onGridKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target;
@@ -763,8 +941,15 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   };
 
   if (!activeSheet) {
+    if (embedded && initialDocumentId) {
+      return (
+        <section className="sheets-page sheets-page--embedded sheets-page--embedded-loading">
+          {loadingSheets ? 'Loading pinned sheet…' : 'This pinned sheet is unavailable.'}
+        </section>
+      );
+    }
     return (
-      <section className="sheets-page">
+      <section className={`sheets-page ${embedded ? 'sheets-page--embedded' : ''}`}>
         <header className="sheets-list-header">
           <div className="sheets-brand">
             <span className="sheets-brand-icon"><Grid2X2 className="size-5" /></span>
@@ -778,7 +963,7 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
           </button>
         </header>
 
-        {loadingSheets ? (
+        {loadingSheets && sheets.length === 0 ? (
           <div className="sheets-empty-state"><span className="sheets-spinner" />Loading your sheets…</div>
         ) : sheets.length ? (
           <div className="sheets-list">
@@ -920,7 +1105,7 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   }
 
   const activeStyle = getStyle(activeCell.style);
-  const viewReady = connection === 'connected' && snapshotReady;
+  const viewReady = snapshotReady && snapshotSheetId === activeSheet.id;
   const getRowLabel = (row: number) => row;
   const openContextAt = (event: ReactMouseEvent<HTMLDivElement>, row: number, col: number) => {
     event.preventDefault();
@@ -928,15 +1113,17 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
   };
 
   return (
-    <section className="sheets-page sheets-page--grid">
+    <section className={`sheets-page sheets-page--grid ${embedded ? 'sheets-page--embedded' : ''}`}>
       <header className="sheets-workbook-header">
         <div className="sheets-workbook-title">
-          <button type="button" className="sheets-icon-button" aria-label="Back to all sheets" onClick={() => {
-            setActiveSheet(null);
-            void reloadSheets();
-          }}>
-            <ArrowLeft className="size-4" />
-          </button>
+          {!embedded && (
+            <button type="button" className="sheets-icon-button" aria-label="Back to all sheets" onClick={() => {
+              setActiveSheet(null);
+              void reloadSheets();
+            }}>
+              <ArrowLeft className="size-4" />
+            </button>
+          )}
           <span className="sheets-brand-icon sheets-brand-icon--small"><Grid2X2 className="size-4" /></span>
           <div className="sheets-title-text">
             <button
@@ -961,6 +1148,28 @@ export default function SheetsPage({ username, initialDocumentId }: SheetsPagePr
               <Share2 className="size-4" /> Share
             </button>
           )}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            aria-label="Choose an XLSX or CSV file to import"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              void importWorkbook(file);
+            }}
+          />
+          <button
+            type="button"
+            className="sheets-secondary-button sheets-import-button"
+            disabled={!canEdit || !viewReady || importing}
+            title="Import the first worksheet at the selected cell"
+            onClick={() => importInputRef.current?.click()}
+          >
+            <Upload className="size-4" />
+            {importing ? 'Importing…' : 'Import'}
+          </button>
           <button type="button" className="sheets-primary-button sheets-export-button" onClick={exportXlsx}>
             <Download className="size-4" /> Export .xlsx
           </button>
