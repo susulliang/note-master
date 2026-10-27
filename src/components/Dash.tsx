@@ -27,6 +27,7 @@ import {
   Search,
   Trophy,
   Users,
+  Wrench,
   X,
 } from 'lucide-react';
 import { countMtdShifts, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
@@ -35,6 +36,7 @@ import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
 import { useResponseTimeReport } from '@/hooks/use-response-time-report';
 import { useDsatsReport } from '@/hooks/use-dsats-report';
+import { useCommonIssuesReport } from '@/hooks/use-common-issues-report';
 import { fetchDashboardData, type DsatsCase, type HistoricalAgent, type MoneyGoHighKpi, type MoneyGoHighReport, type OneTouchChannel, type ResponseTimeReport } from '@/lib/sf-reports';
 import {
   Dialog,
@@ -200,6 +202,7 @@ function useDashData() {
   const dailies = useDailiesReport();
   const response = useResponseTimeReport();
   const dsats = useDsatsReport();
+  const commonIssues = useCommonIssuesReport();
   const [moneyGoHigh, setMoneyGoHigh] = useState<
     | { status: 'loading' }
     | { status: 'error'; message: string }
@@ -247,12 +250,14 @@ function useDashData() {
     dailies.reload();
     response.reload();
     dsats.reload();
+    commonIssues.reload();
     setScorecardNonce((current) => current + 1);
   };
   const refreshing = csat.refreshing || touch.refreshing || dailies.refreshing || response.refreshing || dsats.refreshing
+    || commonIssues.refreshing
     || (scorecardNonce > 0 && moneyGoHigh.status === 'loading');
 
-  return { csat, touch, dailies, response, dsats, moneyGoHigh, agents, reload, refreshing };
+  return { csat, touch, dailies, response, dsats, commonIssues, moneyGoHigh, agents, reload, refreshing };
 }
 
 function ReportSources({
@@ -281,6 +286,11 @@ function ReportSources({
       label: 'DSAT MTD',
       ...loadInfo(data.dsats.state),
       report: data.dsats.state.status === 'ready' ? data.dsats.state.report : null,
+    },
+    {
+      label: 'Common issues',
+      ...loadInfo(data.commonIssues.state),
+      report: data.commonIssues.state.status === 'ready' ? data.commonIssues.state.report : null,
     },
     {
       label: 'Chat volume',
@@ -318,7 +328,7 @@ function ReportSources({
       report: response?.emailAvg ?? null,
     },
   ];
-  const unavailable = [data.csat.state, data.touch.state, data.dsats.state, data.dailies.state, data.response.state]
+  const unavailable = [data.csat.state, data.touch.state, data.dsats.state, data.commonIssues.state, data.dailies.state, data.response.state]
     .filter((state) => {
       const status = loadInfo(state).status;
       return status === 'error' || status === 'stale';
@@ -1119,6 +1129,120 @@ function DsatsWidget({
             })}
           </div>
           <p className="mt-3 shrink-0 text-[9px] text-muted-foreground">{report?.fileName}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const COMMON_ISSUES_VISIBLE_ISSUES = 10;
+
+/**
+ * Overview widget for the "common issues common models" export: open
+ * AMR-Repair cases this month, indexed by model then issue type. Left column
+ * ranks the models; the right column breaks the selected model down by issue.
+ */
+function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['commonIssues']['state'] }) {
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const report = state.status === 'ready' ? state.report : null;
+  const models = report?.models ?? [];
+
+  const active = useMemo(() => {
+    if (models.length === 0) return null;
+    return models.find((model) => model.model === selectedModel) ?? models[0]!;
+  }, [models, selectedModel]);
+
+  const topIssues = active ? active.issues.slice(0, COMMON_ISSUES_VISIBLE_ISSUES) : [];
+  const otherIssuesCount = active
+    ? active.issues.length - topIssues.length
+    : 0;
+  const otherIssuesCases = active
+    ? active.issues.slice(COMMON_ISSUES_VISIBLE_ISSUES).reduce((sum, item) => sum + item.count, 0)
+    : 0;
+  const maxModelTotal = models[0]?.total ?? 1;
+  const maxIssueCount = topIssues[0]?.count ?? 1;
+
+  return (
+    <section className={cn(PANEL, 'p-4 sm:p-5')}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Wrench className="size-4 text-amber-300" />
+            Common issues · Common models
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Open AMR-Repair cases MTD · indexed by model, then issue type</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-amber-200">
+          {report?.total ?? 0} cases
+        </span>
+      </div>
+      {report?.asOf && <p className="mt-1 text-[10px] text-muted-foreground">As of {report.asOf}</p>}
+
+      {state.status === 'loading' ? (
+        <div className="mt-4 flex min-h-[12rem] items-center justify-center text-sm text-muted-foreground">Loading common issues…</div>
+      ) : state.status === 'error' ? (
+        <div className="mt-4 flex min-h-[12rem] items-center justify-center px-4 text-center text-xs text-rose-300">{state.message}</div>
+      ) : !active ? (
+        <div className="mt-4 flex min-h-[12rem] items-center justify-center px-4 text-center text-xs text-muted-foreground">No open repair cases this month. 🎉</div>
+      ) : (
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
+          <div className="glass-panel rounded-lg p-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Models · {models.length}</p>
+            <div className="mt-2 max-h-[18rem] space-y-1 overflow-y-auto pr-1">
+              {models.map((model, index) => (
+                <button
+                  key={model.model}
+                  type="button"
+                  onClick={() => setSelectedModel(model.model)}
+                  aria-pressed={active.model === model.model}
+                  className={cn(
+                    'block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                    active.model === model.model ? 'bg-accent/15' : 'hover:bg-border/30',
+                  )}
+                >
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground" title={model.model}>{model.model}</span>
+                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-amber-300">{model.total}</span>
+                  </div>
+                  <div className="mt-0.5 ml-6 h-1 overflow-hidden rounded-full bg-border/40">
+                    <div
+                      className={cn('h-full rounded-full', active.model === model.model ? 'bg-accent' : 'bg-amber-400/60')}
+                      style={{ width: `${Math.max(3, (model.total / maxModelTotal) * 100)}%` }}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="glass-panel min-w-0 rounded-lg p-2.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="min-w-0 truncate text-xs font-semibold text-foreground" title={active.model}>{active.model}</p>
+              <p className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                {active.total} cases · {((active.total / Math.max(1, report?.total ?? active.total)) * 100).toFixed(1)}% of open cases · {active.issues.length} issue types
+              </p>
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {topIssues.map((item) => (
+                <div key={item.issue} className="min-w-0">
+                  <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span className="truncate text-foreground" title={item.issue}>{item.issue}</span>
+                    <span className="shrink-0 font-mono tabular-nums text-amber-300">{item.count}</span>
+                  </div>
+                  <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-border/40">
+                    <div className="h-full rounded-full bg-amber-400/80" style={{ width: `${(item.count / maxIssueCount) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+              {otherIssuesCount > 0 && (
+                <div className="flex items-baseline justify-between gap-2 pt-1 text-[10px] text-muted-foreground">
+                  <span>{otherIssuesCount} more issue types</span>
+                  <span className="font-mono tabular-nums">{otherIssuesCases} cases</span>
+                </div>
+              )}
+            </div>
+            <p className="mt-3 truncate text-[9px] text-muted-foreground" title={report?.fileName}>{report?.fileName}</p>
+          </div>
         </div>
       )}
     </section>
@@ -2209,6 +2333,7 @@ export default function Dash() {
             </div>
           </div>
           <CallPerformanceCard state={data.dailies.state} onExplore={() => { setView('explore'); setExplore('workload'); }} />
+          <CommonIssuesWidget state={data.commonIssues.state} />
           <TestScoreSubmissions state={testScores} />
           <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
             <AgentMatrix

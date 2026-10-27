@@ -10,6 +10,7 @@
  * script). This module only handles file discovery + download.
  */
 import {
+  parseCommonIssuesWorkbook,
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
   parseChatResponseTimeWorkbook,
@@ -19,6 +20,7 @@ import {
   parseHistoricalMetricsCsv,
   parseOneTouchWorkbook,
   type CallMetrics,
+  type CommonIssuesReport,
   type CountReport,
   type CountRow,
   type CsatAgentRow,
@@ -50,6 +52,7 @@ interface SfReportIndex {
 
 export {
   type CallMetrics,
+  type CommonIssuesReport,
   type CountReport,
   type CountRow,
   type CsatAgentRow,
@@ -177,6 +180,13 @@ export function pickEmailAvgResponseExport(files: SfReportFile[]): SfReportFile 
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
 }
 
+/** Newest common-issues-by-model *.xlsx export. */
+export function pickCommonIssuesExport(files: SfReportFile[]): SfReportFile | undefined {
+  return files
+    .filter((f) => /\.xlsx$/i.test(f.name) && /common[\s_-]*issues/i.test(f.name))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+}
+
 // ---------------------------------------------------------------------------
 // Fetchers (download + parse)
 // ---------------------------------------------------------------------------
@@ -222,6 +232,12 @@ export async function fetchDsatsReport(file: SfReportFile, signal?: AbortSignal)
   return parseDsatsWorkbook(await res.arrayBuffer(), file.name);
 }
 
+export async function fetchCommonIssuesReport(file: SfReportFile, signal?: AbortSignal): Promise<CommonIssuesReport> {
+  const res = await fetch(`${BASE}sf_reports/${encodeURIComponent(file.name)}`, { signal });
+  if (!res.ok) throw new Error(`Failed to download ${file.name}: HTTP ${res.status}`);
+  return parseCommonIssuesWorkbook(await res.arrayBuffer(), file.name);
+}
+
 export async function fetchChatResponseReport(file: SfReportFile, signal?: AbortSignal): Promise<ResponseTimeReport> {
   const res = await fetch(`${BASE}sf_reports/${encodeURIComponent(file.name)}`, { signal });
   if (!res.ok) throw new Error(`Failed to download ${file.name}: HTTP ${res.status}`);
@@ -263,6 +279,7 @@ export interface DashboardData {
   emailFirstResponse?: ResponseTimeReport;
   emailAvgResponse?: ResponseTimeReport;
   dsats?: DsatsReport;
+  commonIssues?: CommonIssuesReport;
   moneyGoHigh?: MoneyGoHighReport;
 }
 

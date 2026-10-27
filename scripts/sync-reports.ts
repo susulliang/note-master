@@ -17,6 +17,7 @@ import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   callMetricsFromHistorical,
+  parseCommonIssuesWorkbook,
   parseCountByOwnerWorkbook,
   parseCsatWorkbook,
   parseChatResponseTimeWorkbook,
@@ -216,8 +217,19 @@ if (emailAvgRtFile) {
   );
 } else console.warn('  EaRT  : no matching Email avg-response .xlsx found');
 
+// --- Common issues by model (open AMR-Repair cases, model → issue counts) ---
+const commonIssuesFile = pick(files, /common[\s_-]*issues/i);
+if (commonIssuesFile) {
+  const r = parseCommonIssuesWorkbook(readBuf(commonIssuesFile.name), commonIssuesFile.name);
+  out.commonIssues = r;
+  (out.sources as Record<string, string>).commonIssues = commonIssuesFile.name;
+  console.log(
+    `  CIss  <- ${commonIssuesFile.name} (${r.models.length} models, ${r.total} open cases)`,
+  );
+} else console.warn('  CIss  : no matching common-issues .xlsx found');
+
 if (process.env.REQUIRE_COMPLETE_DASHBOARD_DATA === '1') {
-  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse', 'dsats', 'moneyGoHigh'];
+  const required = ['csat', 'oneTouch', 'chat', 'email', 'call', 'historical', 'chatResponse', 'emailFirstResponse', 'emailAvgResponse', 'dsats', 'commonIssues', 'moneyGoHigh'];
   const missing = required.filter((key) => !(key in out));
   if (missing.length) {
     throw new Error(`Refusing to publish an incomplete dashboard snapshot. Missing: ${missing.join(', ')}`);

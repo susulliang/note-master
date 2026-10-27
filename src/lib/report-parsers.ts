@@ -711,3 +711,107 @@ export function parseEmailAvgResponseWorkbook(data: ArrayBuffer, fileName: strin
     countHeaderRe: /Record Count/i,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Common issues by model (open AMR-Repair cases, grouped SF export)
+// ---------------------------------------------------------------------------
+
+export interface CommonIssuesIssueCount {
+  issue: string;
+  count: number;
+}
+
+export interface CommonIssuesModelEntry {
+  model: string;
+  total: number;
+  /** Issue counts for this model, sorted by count descending. */
+  issues: CommonIssuesIssueCount[];
+}
+
+export interface CommonIssuesReport {
+  fileName: string;
+  asOf: string | null;
+  /** Total open cases across all models (cross-checked against the Total row). */
+  total: number;
+  /** Models sorted by case count descending. */
+  models: CommonIssuesModelEntry[];
+}
+
+/**
+ * Parses the "common issues common models" export: open AMR-Repair cases this
+ * month for the popular model series, aggregated as model → issue-type counts.
+ * Only counts are produced — no case owners, accounts, or subjects — so the
+ * output is safe for the publicly readable R2 snapshot.
+ *
+ * The export is a grouped Salesforce report: the model cell prints only on the
+ * first row of each model group and the issue cell only when the issue subgroup
+ * changes; "Subtotal"/"Total" count rows sit between groups. Case rows repeat
+ * the last seen model + issue, and only fully blank rows are padding.
+ */
+export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): CommonIssuesReport {
+  const { rows } = sheetRows(data, /common[\s_-]*issues/i);
+  const asOf = extractAsOf(rows);
+
+  const stripSortArrow = (c: unknown) => String(c ?? '').trim().replace(/\s*[↑↓].*$/, '');
+  const headerIdx = rows.findIndex(
+    (r) => r.some((c) => /^AMR Model No\.?$/i.test(stripSortArrow(c)))
+      && r.some((c) => /^Issue Type1 Second Classification$/i.test(stripSortArrow(c))),
+  );
+  if (headerIdx === -1) throw new Error(`Common-issues header row not found in ${fileName}`);
+  const header = rows[headerIdx]!.map(stripSortArrow);
+  const modelCol = header.findIndex((h) => /^AMR Model No\.?$/i.test(h));
+  const issueCol = header.findIndex((h) => /^Issue Type1 Second Classification$/i.test(h));
+  if (modelCol === -1 || issueCol === -1) throw new Error(`Common-issues columns not found in ${fileName}`);
+
+  const byModel = new Map<string, Map<string, number>>();
+  let currentModel = '';
+  let currentIssue = '';
+  let grandTotal: number | null = null;
+
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i] ?? [];
+    if (row.every((cell) => cell == null || String(cell).trim() === '')) continue;
+    const modelCell = String(row[modelCol] ?? '').trim();
+    const issueCell = String(row[issueCol] ?? '').trim();
+    if (/^total$/i.test(modelCell)) {
+      // Grand-total footer: read the count that follows the "Count" label so
+      // the parsed case rows can be cross-checked against the export itself.
+      const countIdx = row.findIndex((cell) => /^count$/i.test(String(cell ?? '').trim()));
+      if (countIdx !== -1) grandTotal = toNumber(row[countIdx + 1]);
+      continue;
+    }
+    if (/^(subtotal|total)$/i.test(modelCell) || /^subtotal$/i.test(issueCell)) continue;
+    if (modelCell) {
+      currentModel = modelCell;
+      currentIssue = issueCell; // reset on model change; may be blank (Unclassified)
+    } else if (issueCell) {
+      currentIssue = issueCell;
+    }
+    if (!currentModel) continue;
+    let issues = byModel.get(currentModel);
+    if (!issues) {
+      issues = new Map();
+      byModel.set(currentModel, issues);
+    }
+    const key = currentIssue || 'Unclassified';
+    issues.set(key, (issues.get(key) ?? 0) + 1);
+  }
+
+  if (byModel.size === 0) throw new Error(`No common-issues case rows found in ${fileName}`);
+  const models: CommonIssuesModelEntry[] = [...byModel.entries()]
+    .map(([model, issues]) => ({
+      model,
+      total: [...issues.values()].reduce((sum, count) => sum + count, 0),
+      issues: [...issues.entries()]
+        .map(([issue, count]) => ({ issue, count }))
+        .sort((a, b) => b.count - a.count || a.issue.localeCompare(b.issue)),
+    }))
+    .sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+  const total = models.reduce((sum, model) => sum + model.total, 0);
+  if (grandTotal !== null && grandTotal !== total) {
+    throw new Error(
+      `Common-issues parsed case count (${total}) does not match the export's Total row (${grandTotal})`,
+    );
+  }
+  return { fileName, asOf, total, models };
+}
