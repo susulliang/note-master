@@ -9,7 +9,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Mic, RefreshCw, Square, Star, Trash2, Trophy, Volume2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { awardChallenge, type ChallengeMessage, type ChallengeTurn } from '@/lib/auth-client';
+import {
+  awardChallenge,
+  sendChallengeNpcTurn,
+  startChallengeNpc,
+  submitTestAward,
+  type ChallengeMessage,
+  type ChallengeTurn as ApiChallengeTurn,
+} from '@/lib/auth-client';
 import { kittyChat, type ChatMsg } from '@/lib/kitty-help';
 import { useLocalTranscriber } from '@/hooks/use-local-transcriber';
 import { NPC_PERSONAS } from '@/data/npc-personas';
@@ -97,15 +104,24 @@ function StarRow({ stars }: { stars: number }) {
 interface ChallengePanelProps {
   /** Which persona to run — key into NPC_PERSONAS. */
   personaId: string;
+  npcName?: string;
   onSpiceChange: (spice: number) => void;
   onClose: () => void;
 }
 
-export default function ChallengePanel({ personaId, onSpiceChange, onClose }: ChallengePanelProps) {
-  const persona = NPC_PERSONAS[personaId] ?? NPC_PERSONAS.gb_poolius;
+type ChallengeTurn = ApiChallengeTurn & { stars?: number; scorePct?: number };
+
+export default function ChallengePanel({ personaId, npcName, onSpiceChange, onClose }: ChallengePanelProps) {
+  const builtInPersona = NPC_PERSONAS[personaId] ?? null;
+  const persona = builtInPersona ?? NPC_PERSONAS.gb_poolius;
+  const customNpc = !builtInPersona;
+  const displayName = builtInPersona?.name ?? npcName ?? 'Commune NPC';
+  const blurb = builtInPersona?.blurb ?? 'Use verified troubleshooting steps to find the correct resolution.';
   const [log, setLog] = useState<ChallengeMessage[]>([]);
   const [turn, setTurn] = useState<ChallengeTurn | null>(null);
   const [awarded, setAwarded] = useState<number | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [resultSubmitted, setResultSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,6 +254,23 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
     setBusy(true);
     setError(null);
     setAwarded(null);
+    setResultSubmitted(false);
+    if (customNpc) {
+      setSessionId(null);
+      setLog([]);
+      setTurn(null);
+      try {
+        const result = await startChallengeNpc(personaId);
+        setSessionId(result.sessionId);
+        setLog([{ role: 'npc', content: result.turn.message }]);
+        setTurn(result.turn);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not start this challenge');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const initial = persona.data.initial_output;
     setLog([{ role: 'npc', content: String(initial[persona.messageKey] ?? '') }]);
     setTurn({
@@ -247,7 +280,7 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
     });
     setBusy(false);
     speak();
-  }, [speak, persona]);
+  }, [speak, persona, personaId, customNpc]);
 
   useEffect(() => {
     void restart();
@@ -265,6 +298,32 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
     setError(null);
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
+    if (customNpc) {
+      try {
+        if (!sessionId) throw new Error('Challenge session expired. Restart this NPC challenge.');
+        const result = await sendChallengeNpcTurn(sessionId, choice);
+        setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: result.turn.message }]);
+        setTurn(result.turn);
+        setResultSubmitted(result.submitted);
+        if (result.submitted) {
+          try {
+            const award = await submitTestAward(`commune-npc:${personaId}`, result.turn.scorePct ?? 0);
+            if (award.spice > 0) {
+              setAwarded(award.awarded);
+              onSpiceChange(award.spice);
+            }
+          } catch {
+            // Score submission is already saved; test rewards are best-effort.
+          }
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'The challenge engine did not respond');
+        setLog(history);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const baseMessages: ChatMsg[] = [
         { role: 'system', content: persona.data.system_prompt.join('\n') },
@@ -311,15 +370,15 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`NPC Challenge — ${persona.name}`}
+        aria-label={`NPC Challenge — ${displayName}`}
         className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-md"
       >
         {/* header */}
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           <Trophy className="size-4 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
-            <h3 className="font-mono text-sm font-extrabold text-foreground">NPC Challenge — {persona.name}</h3>
-            <p className="text-[11px] text-muted-foreground">{persona.blurb}</p>
+            <h3 className="font-mono text-sm font-extrabold text-foreground">NPC Challenge — {displayName}</h3>
+            <p className="text-[11px] text-muted-foreground">{blurb}</p>
           </div>
           <span
             className={cn(
@@ -363,19 +422,19 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
                     : 'rounded-bl-sm border-border/60 bg-background/60 text-foreground'
                 )}
               >
-                {m.role === 'npc' && <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">{persona.name}</p>}
+                {m.role === 'npc' && <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">{displayName}</p>}
                 <span className={cn('leading-relaxed', m.role === 'npc' ? 'text-sm' : 'text-xs')}>{m.content}</span>
               </div>
             </div>
           ))}
           {busy && (
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> {persona.name} is thinking…
+              <Loader2 className="size-3.5 animate-spin" /> {displayName} is thinking…
             </div>
           )}
           {!busy && speaking && (
             <div className="flex items-center gap-2 text-[11px] font-semibold text-accent">
-              <Volume2 className="size-3.5 animate-pulse" /> {persona.name} is speaking
+              <Volume2 className="size-3.5 animate-pulse" /> {displayName} is speaking
               <span className="flex items-end gap-0.5" aria-hidden>
                 {[0, 1, 2].map((i) => (
                   <span
@@ -389,14 +448,23 @@ export default function ChallengePanel({ personaId, onSpiceChange, onClose }: Ch
           )}
           {awarded !== null && (
             <div className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
-              🌶 Call defused — GB is staying with us. +{awarded} spice awarded.
-              <StarRow stars={turn?.stars ?? 0} />
+              {customNpc
+                ? `Challenge score saved (${turn?.scorePct ?? 0}/100). +${awarded} spice awarded.`
+                : `Call defused — ${displayName} is staying with us. +${awarded} spice awarded.`}
+              {!customNpc && <StarRow stars={turn?.stars ?? 0} />}
+            </div>
+          )}
+          {customNpc && turn?.status === 'success' && (
+            <div className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
+              {resultSubmitted
+                ? `Correct resolution. Test submitted to the score database: ${turn.scorePct ?? 0}/100.`
+                : 'Correct resolution confirmed.'}
             </div>
           )}
           {turn?.status === 'fail' && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
-              GB hung up on you.
-              <StarRow stars={turn.stars ?? 0} />
+              {customNpc ? `${displayName} ended the conversation.` : `${displayName} hung up on you.`}
+              {!customNpc && <StarRow stars={turn.stars ?? 0} />}
             </div>
           )}
           {error && (

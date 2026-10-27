@@ -14,9 +14,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
+import { BookOpen, Bot, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import AdminChallengeNpcsTab from '@/components/AdminChallengeNpcsTab';
 import KnowledgeBaseTab from '@/components/KnowledgeBaseTab';
 import SavedTicketNotesTab from '@/components/SavedTicketNotesTab';
 import {
@@ -43,7 +44,7 @@ const PRIVILEGE_LABELS: { key: PrivilegeKey; label: string }[] = [
   { key: 'trak', label: 'TRAK' },
 ];
 
-type AdminTab = 'privileges' | 'store' | 'knowledge' | 'savedNotes';
+type AdminTab = 'privileges' | 'store' | 'knowledge' | 'savedNotes' | 'npcs';
 
 const TABS: { key: AdminTab; label: string; icon: typeof ShieldCheck }[] = [
   { key: 'privileges', label: 'Privileges', icon: UserCog },
@@ -102,8 +103,8 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
   const [tab, setTab] = useState<AdminTab>('privileges');
   const visibleTabs: { key: AdminTab; label: string; icon: typeof ShieldCheck }[] =
     user?.isSuperAdmin
-      ? [...TABS, { key: 'savedNotes', label: 'Saved Notes', icon: ClipboardList }]
-      : TABS;
+      ? [...TABS, { key: 'npcs', label: 'NPCs', icon: Bot }, { key: 'savedNotes', label: 'Saved Notes', icon: ClipboardList }]
+      : [...TABS, { key: 'npcs', label: 'NPCs', icon: Bot }];
 
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -296,6 +297,8 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                 ? 'D1 knowledge base · bundled blobs as fallback'
                 : tab === 'savedNotes'
                   ? 'Ticket QA archive · issue type + push time'
+                  : tab === 'npcs'
+                    ? 'Commune challenge characters · grounded role-play'
                 : tab === 'privileges'
                   ? users
                     ? `${users.length} account${users.length === 1 ? '' : 's'} · toggles apply instantly`
@@ -305,7 +308,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                     : 'Loading products…'}
             </p>
           </div>
-          {tab !== 'knowledge' && tab !== 'savedNotes' && (
+          {tab !== 'knowledge' && tab !== 'savedNotes' && tab !== 'npcs' && (
             <button
               type="button"
               onClick={() => (tab === 'privileges' ? void load() : void loadProducts())}
@@ -320,7 +323,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         </div>
 
         {/* Tabs */}
-        <div className="mb-3 flex shrink-0 items-center rounded-lg border border-border/60 bg-card/40 p-0.5" role="tablist">
+        <div className="mb-3 flex shrink-0 items-center overflow-x-auto rounded-lg border border-border/60 bg-card/40 p-0.5" role="tablist">
           {visibleTabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -329,7 +332,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               aria-selected={tab === key}
               onClick={() => setTab(key)}
               className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors',
+                'flex min-w-fit shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors sm:flex-1',
                 tab === key
                   ? 'bg-sky-400/20 text-sky-300'
                   : 'text-muted-foreground hover:text-foreground'
@@ -813,6 +816,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
 
         {/* ── Tab: Knowledge (D1 KB editor) ── */}
         {tab === 'knowledge' && <KnowledgeBaseTab />}
+        {tab === 'npcs' && <AdminChallengeNpcsTab />}
         {tab === 'savedNotes' && user?.isSuperAdmin && <SavedTicketNotesTab />}
 
         <p className="mt-3 shrink-0 text-center text-[10px] text-muted-foreground/70">

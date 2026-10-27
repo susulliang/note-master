@@ -45,6 +45,43 @@ export interface SavedTicketNoteInput {
   solved: boolean;
 }
 
+export const NPC_PERSONALITIES = [
+  'hard to describe real issue',
+  'emotional',
+  'confrontational',
+  'polite',
+  'logical',
+  'illogical',
+] as const;
+
+export interface ChallengeNpc {
+  id: string;
+  name: string;
+  modelNumber: string;
+  issueType: string;
+  personality: string[];
+  complaints: string;
+  possibleResolution: string;
+  correctResolution: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CommuneChallengeNpc {
+  id: string;
+  name: string;
+  modelNumber: string;
+  issueType: string;
+}
+
+export interface ChallengeNpcTurn {
+  message: string;
+  agent_choices: string[];
+  status: 'ongoing' | 'success' | 'fail';
+  scorePct?: number;
+}
+
 /** A card pulled from a TCG set (server-decided; image served from /assets/tcg). */
 export interface TcgCard {
   id: string;
@@ -558,6 +595,64 @@ export async function awardChallenge(personaId: string): Promise<{ awarded: numb
   return call<{ awarded: number; spice: number }>('/api/commune/challenge/award', {
     method: 'POST',
     body: JSON.stringify({ personaId }),
+    token,
+  });
+}
+
+export async function listCommuneChallengeNpcs(): Promise<CommuneChallengeNpc[]> {
+  const token = getStoredToken();
+  const out = await call<{ npcs: CommuneChallengeNpc[] }>('/api/commune/challenge/npcs', { token });
+  return out.npcs;
+}
+
+export async function startChallengeNpc(npcId: string): Promise<{
+  sessionId: string;
+  npcName: string;
+  turn: ChallengeNpcTurn;
+}> {
+  const token = getStoredToken();
+  return call('/api/commune/challenge/start', {
+    method: 'POST',
+    body: JSON.stringify({ npcId }),
+    token,
+  });
+}
+
+export async function sendChallengeNpcTurn(
+  sessionId: string,
+  message: string,
+): Promise<{ turn: ChallengeNpcTurn; submitted: boolean }> {
+  const token = getStoredToken();
+  return call('/api/commune/challenge/turn', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId, message }),
+    token,
+  });
+}
+
+export async function adminListChallengeNpcs(): Promise<ChallengeNpc[]> {
+  const token = getStoredToken();
+  const out = await call<{ npcs: ChallengeNpc[] }>('/api/admin/challenge-npcs', { token });
+  return out.npcs;
+}
+
+export async function adminSaveChallengeNpc(
+  npc: Pick<ChallengeNpc, 'id' | 'name' | 'modelNumber' | 'issueType' | 'personality' | 'complaints' | 'possibleResolution' | 'correctResolution' | 'enabled'>,
+): Promise<ChallengeNpc> {
+  const token = getStoredToken();
+  const out = await call<{ npc: ChallengeNpc }>('/api/admin/challenge-npcs', {
+    method: 'POST',
+    body: JSON.stringify(npc),
+    token,
+  });
+  return out.npc;
+}
+
+export async function adminDeleteChallengeNpc(id: string): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/admin/challenge-npcs/delete', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
     token,
   });
 }

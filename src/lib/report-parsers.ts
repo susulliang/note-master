@@ -722,7 +722,10 @@ export interface CommonIssuesIssueCount {
 }
 
 export interface CommonIssuesModelEntry {
+  /** Stable series group key ("DEEBOT T50 MAX"). */
   model: string;
+  /** Readable label from the group's most common variant, colors/condition stripped. */
+  label?: string;
   total: number;
   /** Issue counts for this model, sorted by count descending. */
   issues: CommonIssuesIssueCount[];
@@ -766,6 +769,30 @@ function commonIssuesSeriesGroup(raw: string): string {
   return `${brand} ${m[1]!.toUpperCase()}${m[2]}${(m[3] ?? '').toUpperCase()}${isMax ? ' MAX' : ''}`;
 }
 
+const COMMON_ISSUES_LABEL_NOISE = /^(black|white|gold|silver|gray|grey|blue|green|red|pink|purple|brown|beige|new|kit|renewed|con\.?)$/i;
+
+/**
+ * Builds the display label for a series group from its most common raw model,
+ * so "DEEBOT T50" reads as "DEEBOT T50 PRO OMNI" and its MAX sibling as
+ * "DEEBOT T50 MAX PRO". Trailing colors, condition tags ("Renewed … Con."),
+ * and NEW markers are stripped; quoted tokens end the cleanup.
+ */
+function commonIssuesGroupLabel(variants: Map<string, number>): string {
+  const entries = [...variants.entries()];
+  // Prefer a real product variant over condition/accessory ones ("Renewed …",
+  // "Care Kit") when picking the representative name.
+  const preferred = entries.filter(([name]) => !/(renewed|care kit)/i.test(name));
+  const pool = preferred.length > 0 ? preferred : entries;
+  const top = pool.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '';
+  const tokens = top.split(/\s+/);
+  while (tokens.length > 2) {
+    const last = tokens[tokens.length - 1]!;
+    if (/["“”]/.test(last) || COMMON_ISSUES_LABEL_NOISE.test(last)) tokens.pop();
+    else break;
+  }
+  return tokens.join(' ');
+}
+
 /**
  * Parses the "common issues common models" export: open AMR-Repair cases this
  * month for the popular model series, aggregated as series group → issue-type
@@ -793,7 +820,9 @@ export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): 
   if (modelCol === -1 || issueCol === -1) throw new Error(`Common-issues columns not found in ${fileName}`);
 
   const byModel = new Map<string, Map<string, number>>();
+  const variantsByGroup = new Map<string, Map<string, number>>();
   let currentGroup = '';
+  let currentVariant = '';
   let currentIssue = '';
   let grandTotal: number | null = null;
 
@@ -812,6 +841,7 @@ export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): 
     if (/^(subtotal|total)$/i.test(modelCell) || /^subtotal$/i.test(issueCell)) continue;
     if (modelCell) {
       currentGroup = commonIssuesSeriesGroup(modelCell);
+      currentVariant = modelCell;
       currentIssue = issueCell; // reset on model change; may be blank (Unclassified)
     } else if (issueCell) {
       currentIssue = issueCell;
@@ -821,15 +851,19 @@ export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): 
     if (!issues) {
       issues = new Map();
       byModel.set(currentGroup, issues);
+      variantsByGroup.set(currentGroup, new Map());
     }
     const key = currentIssue || 'Unclassified';
     issues.set(key, (issues.get(key) ?? 0) + 1);
+    const variants = variantsByGroup.get(currentGroup)!;
+    variants.set(currentVariant, (variants.get(currentVariant) ?? 0) + 1);
   }
 
   if (byModel.size === 0) throw new Error(`No common-issues case rows found in ${fileName}`);
   const models: CommonIssuesModelEntry[] = [...byModel.entries()]
     .map(([model, issues]) => ({
       model,
+      label: commonIssuesGroupLabel(variantsByGroup.get(model) ?? new Map()),
       total: [...issues.values()].reduce((sum, count) => sum + count, 0),
       issues: [...issues.entries()]
         .map(([issue, count]) => ({ issue, count }))

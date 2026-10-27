@@ -1161,6 +1161,7 @@ function renderIssuePieLabel(props: PieLabelRenderProps) {
 
 /** One donut: a model series' issue-type distribution (top slices + "Other"). */
 function ModelIssueDonut({ model }: { model: CommonIssuesReport['models'][number] }) {
+  const label = model.label ?? model.model;
   const top = model.issues.slice(0, COMMON_ISSUES_PIE_SLICES);
   const otherCount = model.issues.slice(COMMON_ISSUES_PIE_SLICES).reduce((sum, item) => sum + item.count, 0);
   const data = [
@@ -1169,7 +1170,7 @@ function ModelIssueDonut({ model }: { model: CommonIssuesReport['models'][number
   ];
   return (
     <div className="glass-panel min-w-0 rounded-lg p-2.5">
-      <p className="truncate text-center text-[11px] font-semibold text-foreground" title={model.model}>{model.model}</p>
+      <p className="truncate text-center text-[11px] font-semibold text-foreground" title={label}>{label}</p>
       <div className="relative mx-auto mt-1 h-[176px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -1205,14 +1206,54 @@ function ModelIssueDonut({ model }: { model: CommonIssuesReport['models'][number
   );
 }
 
+const COMMON_ISSUES_TOP_ISSUES = 10;
+
+/** Top issue types for the focused series, with share bars — mirrors the donut data as a list. */
+function CommonIssuesBreakdown({ model, reportTotal }: { model: CommonIssuesReport['models'][number]; reportTotal: number }) {
+  const label = model.label ?? model.model;
+  const top = model.issues.slice(0, COMMON_ISSUES_TOP_ISSUES);
+  const moreTypes = model.issues.length - top.length;
+  const moreCases = model.issues.slice(COMMON_ISSUES_TOP_ISSUES).reduce((sum, item) => sum + item.count, 0);
+  const maxCount = top[0]?.count ?? 1;
+  return (
+    <div className="glass-panel flex min-w-0 flex-col rounded-lg p-2.5">
+      <p className="min-w-0 truncate text-[11px] font-semibold text-foreground" title={label}>Top issues · {label}</p>
+      <p className="mt-0.5 shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground">
+        {model.total} cases · {((model.total / Math.max(1, reportTotal)) * 100).toFixed(1)}% of open · {model.issues.length} issue types
+      </p>
+      <div className="mt-2 max-h-[20rem] min-h-0 space-y-1.5 overflow-y-auto pr-1">
+        {top.map((item) => (
+          <div key={item.issue} className="min-w-0">
+            <div className="flex items-baseline justify-between gap-2 text-[10px]">
+              <span className="truncate text-foreground" title={item.issue}>{item.issue}</span>
+              <span className="shrink-0 font-mono tabular-nums text-amber-300">{item.count}</span>
+            </div>
+            <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-border/40">
+              <div className="h-full rounded-full bg-amber-400/80" style={{ width: `${(item.count / maxCount) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+        {moreTypes > 0 && (
+          <div className="flex items-baseline justify-between gap-2 pt-1 text-[9px] text-muted-foreground">
+            <span>{moreTypes} more issue types</span>
+            <span className="font-mono tabular-nums">{moreCases} cases</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Overview widget for the "common issues common models" export: open
  * AMR-Repair cases this month, indexed by model series group then issue type.
- * Left: ranked series list (click to pin). Right: up to three donut charts —
- * the top three series by default — breaking each series down by issue type.
+ * Left: ranked series list (click pins a donut and focuses the breakdown).
+ * Middle: up to three donut charts — the top three series by default. Right:
+ * top-issues list for the last-clicked series (default: the top one).
  */
 function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['commonIssues']['state'] }) {
   const [picked, setPicked] = useState<string[] | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
   const report = state.status === 'ready' ? state.report : null;
   const models = report?.models ?? [];
 
@@ -1225,9 +1266,14 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
     return models.slice(0, COMMON_ISSUES_CHARTS);
   }, [models, picked]);
 
-  // Click a series to pin its donut; picking a fourth replaces the oldest
-  // selection, clicking a pinned series unpins it (empty selection reverts
-  // to the default top three).
+  const active = useMemo(
+    () => models.find((model) => model.model === focus) ?? models[0] ?? null,
+    [models, focus],
+  );
+
+  // Click a series to pin its donut and focus the issues panel; picking a
+  // fourth replaces the oldest pin, clicking a pinned series unpins it
+  // (empty selection reverts to the default top three).
   const toggleModel = (name: string) => {
     setPicked((current) => {
       const base = current ?? models.slice(0, COMMON_ISSUES_CHARTS).map((model) => model.model);
@@ -1261,27 +1307,34 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
       ) : models.length === 0 ? (
         <div className="mt-4 flex min-h-[14rem] items-center justify-center px-4 text-center text-xs text-muted-foreground">No open repair cases this month. 🎉</div>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,17rem)]">
           <div className="glass-panel rounded-lg p-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Model series · {models.length}</p>
             <div className="mt-2 max-h-[20rem] space-y-1 overflow-y-auto pr-1">
               {models.map((model, index) => {
                 const pinIndex = charted.findIndex((entry) => entry.model === model.model);
+                const focused = active?.model === model.model;
                 return (
                   <button
                     key={model.model}
                     type="button"
-                    onClick={() => toggleModel(model.model)}
+                    onClick={() => { setFocus(model.model); toggleModel(model.model); }}
                     aria-pressed={pinIndex !== -1}
                     title={pinIndex !== -1 ? 'Pinned — click to unpin' : 'Pin this series as a donut chart'}
                     className={cn(
                       'block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
                       pinIndex !== -1 ? 'bg-accent/15 ring-1 ring-accent/40' : 'hover:bg-border/30',
+                      focused && pinIndex === -1 && 'bg-amber-500/10',
                     )}
                   >
                     <div className="flex items-baseline gap-1.5">
                       <span className="w-4 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
-                      <span className={cn('min-w-0 flex-1 truncate text-[11px] font-medium', pinIndex !== -1 ? 'text-accent' : 'text-foreground')} title={model.model}>{model.model}</span>
+                      <span
+                        className={cn('min-w-0 flex-1 truncate text-[11px] font-medium', pinIndex !== -1 ? 'text-accent' : focused ? 'text-amber-200' : 'text-foreground')}
+                        title={(model.label ?? model.model)}
+                      >
+                        {(model.label ?? model.model)}
+                      </span>
                       {pinIndex !== -1 && <span className="shrink-0 rounded bg-accent/20 px-1 font-mono text-[9px] leading-4 text-accent">{pinIndex + 1}</span>}
                       <span className="shrink-0 font-mono text-[10px] tabular-nums text-amber-300">{model.total}</span>
                     </div>
@@ -1302,17 +1355,16 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
                 Select up to {COMMON_ISSUES_CHARTS} model series on the left to chart their issue mix.
               </div>
             ) : (
-              <>
-                <div className={cn('grid grid-cols-1 gap-3', charted.length > 1 ? 'sm:grid-cols-2 xl:grid-cols-3' : 'sm:grid-cols-2')}>
-                  {charted.map((model) => <ModelIssueDonut key={model.model} model={model} />)}
-                </div>
-                <p className="mt-2 text-[9px] text-muted-foreground">
-                  Donuts show the top {COMMON_ISSUES_PIE_SLICES} issue types per series; the remainder is grouped as "Other". Click series on the left to pin up to {COMMON_ISSUES_CHARTS} charts.
-                </p>
-              </>
+              <div className={cn('grid grid-cols-1 gap-3', charted.length > 1 ? 'sm:grid-cols-2 2xl:grid-cols-3' : 'sm:grid-cols-2')}>
+                {charted.map((model) => <ModelIssueDonut key={model.model} model={model} />)}
+              </div>
             )}
+            <p className="mt-2 text-[9px] text-muted-foreground">
+              Donuts show the top {COMMON_ISSUES_PIE_SLICES} issue types per series; the remainder is grouped as "Other". Click series on the left to pin up to {COMMON_ISSUES_CHARTS} charts and focus the issues list.
+            </p>
             <p className="mt-1 truncate text-[9px] text-muted-foreground" title={report?.fileName}>{report?.fileName}</p>
           </div>
+          {active && <CommonIssuesBreakdown model={active} reportTotal={report?.total ?? active.total} />}
         </div>
       )}
     </section>

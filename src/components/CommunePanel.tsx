@@ -75,7 +75,9 @@ import {
   finishCommuneMiniGame,
   fireCommuneLaser,
   kickCommuneSoccerBall,
+  listCommuneChallengeNpcs,
   startCommuneMiniGame,
+  type CommuneChallengeNpc,
 } from '@/lib/auth-client';
 import { CAT_CHOICES, CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import { loadState, petStorageKey, stageFor } from '@/lib/cat-pet';
@@ -777,7 +779,15 @@ const AVATAR_SWATCHES = [
 
 /** Standing challenge NPCs — walk up and use the shared Talk action.
  *  Each runs its own persona (worker/npc/*.json, see npc-personas.ts). */
-const CHALLENGE_NPCS = [
+const CHALLENGE_NPCS: {
+  personaId: string;
+  name: string;
+  hue: number;
+  x: number;
+  y: number;
+  modelNumber?: string;
+  issueType?: string;
+}[] = [
   { personaId: 'gb_poolius', name: 'GB Poolius', hue: 0, x: 1200, y: 800 },
   { personaId: 'topus_hundrius', name: 'Topus Hundrius', hue: 45, x: 960, y: 800 },
 ];
@@ -1042,6 +1052,28 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   soccerBallRef.current = soccerBall;
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
+  const [communeChallengeProfiles, setCommuneChallengeProfiles] = useState<CommuneChallengeNpc[]>([]);
+  const challengeNpcs = useMemo(() => [
+    ...CHALLENGE_NPCS,
+    ...communeChallengeProfiles.map((npc, index) => ({
+      personaId: npc.id,
+      name: npc.name,
+      modelNumber: npc.modelNumber,
+      issueType: npc.issueType,
+      hue: hueOf(npc.name),
+      x: 1_400 + (index % 10) * 145,
+      y: 820 + Math.floor(index / 10) * 130,
+    })),
+  ], [communeChallengeProfiles]);
+  const challengeNpcsRef = useRef(challengeNpcs);
+  challengeNpcsRef.current = challengeNpcs;
+  useEffect(() => {
+    let current = true;
+    void listCommuneChallengeNpcs()
+      .then((npcs) => { if (current) setCommuneChallengeProfiles(npcs); })
+      .catch(() => { /* custom challenges remain hidden until the API reconnects */ });
+    return () => { current = false; };
+  }, []);
   const [banners, setBanners] = useState<Banner[]>([]);
   const [bannerTickerDismissed, setBannerTickerDismissed] = useState(false);
   const [bannerDraft, setBannerDraft] = useState('');
@@ -1258,8 +1290,31 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const npcsRef = useRef<Agent[]>([
     ...NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 })),
     // Challenge NPCs stand in place (no target/line timer).
-    ...CHALLENGE_NPCS.map((c) => ({ x: c.x, y: c.y, name: c.name, hue: c.hue, says: null, bobPhase: Math.random() * 10 })),
+    ...challengeNpcs.map((c) => ({ x: c.x, y: c.y, name: c.name, hue: c.hue, says: null, bobPhase: Math.random() * 10 })),
   ]);
+  useEffect(() => {
+    npcsRef.current = [
+      ...NPCS.map((npc) => ({
+        x: npc.home.x,
+        y: npc.home.y,
+        name: npc.name,
+        hue: npc.hue,
+        says: null,
+        target: { ...npc.home },
+        pauseUntil: 0,
+        nextLineAt: Date.now() + 4_000 + Math.random() * 6_000,
+        bobPhase: Math.random() * 10,
+      })),
+      ...challengeNpcs.map((npc) => ({
+        x: npc.x,
+        y: npc.y,
+        name: npc.name,
+        hue: npc.hue,
+        says: null,
+        bobPhase: Math.random() * 10,
+      })),
+    ];
+  }, [challengeNpcs]);
   const keysRef = useRef<Set<string>>(new Set());
   const clickTargetRef = useRef<{ x: number; y: number } | null>(null);
   const camRef = useRef({ x: 0, y: 0 });
@@ -2139,7 +2194,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           case 'stand':
             return !!sittingRef.current;
           case 'challenge': {
-            const npc = CHALLENGE_NPCS.find((item) => item.personaId === action.personaId);
+            const npc = challengeNpcsRef.current.find((item) => item.personaId === action.personaId);
             return !!npc && Math.hypot(player.x - npc.x, player.y - npc.y) < CHALLENGE_INTERACT_RANGE;
           }
           case 'message-agent': {
@@ -2775,12 +2830,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       /* Resolve keyboard and touch actions from the same nearby target list. */
       const focused = focusedNpcRef.current;
       const focusedChallenge = focused
-        ? CHALLENGE_NPCS.find((npc) => npc.personaId === focused.personaId) ?? null
+        ? challengeNpcsRef.current.find((npc) => npc.personaId === focused.personaId) ?? null
         : null;
       const focusedDistance = focusedChallenge
         ? Math.hypot(player.x - focusedChallenge.x, player.y - focusedChallenge.y)
         : Infinity;
-      const nearestChallenge = CHALLENGE_NPCS
+      const nearestChallenge = challengeNpcsRef.current
         .map((npc) => ({ npc, distance: Math.hypot(player.x - npc.x, player.y - npc.y) }))
         .filter(({ distance }) => distance < CHALLENGE_INTERACT_RANGE)
         .sort((a, b) => a.distance - b.distance)[0]?.npc ?? null;
@@ -3258,7 +3313,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
       return;
     }
-    const challengeNpc = CHALLENGE_NPCS.find(
+    const challengeNpc = challengeNpcsRef.current.find(
       (npc) => Math.hypot(wx - npc.x, wy - (npc.y - 30)) < CHALLENGE_HIT_RADIUS
     );
     if (challengeNpc) {
@@ -4060,7 +4115,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         <StorePanel spice={user?.spice ?? 0} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
       )}
       {panel === 'challenges' && (
-        <ChallengePanel personaId={challengePersona} onSpiceChange={setSpice} onClose={() => setPanel(null)} />
+        <ChallengePanel
+          personaId={challengePersona}
+          npcName={challengeNpcs.find((npc) => npc.personaId === challengePersona)?.name}
+          onSpiceChange={setSpice}
+          onClose={() => setPanel(null)}
+        />
       )}
       {panel && panel !== 'store' && panel !== 'challenges' && (
         <div
@@ -4370,7 +4430,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 </span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                {CHALLENGE_NPCS.map((npc, index) => (
+                {challengeNpcs.map((npc) => (
                   <button
                     key={npc.personaId}
                     type="button"
@@ -4381,12 +4441,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                     className="group flex min-h-24 items-center gap-3 rounded-xl border border-rose-400/25 bg-gradient-to-br from-rose-400/10 to-background/30 p-3 text-left transition hover:-translate-y-0.5 hover:border-rose-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
                   >
                     <span className="grid size-11 shrink-0 place-items-center rounded-full border border-rose-300/30 bg-rose-300/10 font-mono text-xs font-black text-rose-200">
-                      {index === 0 ? 'GB' : 'TH'}
+                      {npc.name.slice(0, 2).toUpperCase()}
                     </span>
                     <span>
                       <span className="block text-xs font-bold text-foreground">{npc.name}</span>
                       <span className="mt-1 block text-[10px] leading-relaxed text-muted-foreground">
-                        AI role-play · handle a tricky customer · earn spice
+                        {npc.modelNumber ? `${npc.modelNumber} · ${npc.issueType.replace('::', ' · ')}` : 'AI role-play · handle a tricky customer'}
                       </span>
                     </span>
                   </button>
