@@ -3,11 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   chatSocketUrl,
   fetchChatConversations,
+  fetchChatGlobalTitle,
   requestChatTicket,
   type ChatConversation,
   type ChatMessage,
   type ChatSocketTicket,
 } from '@/lib/chat-client';
+import { upsertCachedChatMessage } from '@/lib/chat-message-cache';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +38,7 @@ export default function ChatNotificationBanner({
   onOpenChat,
 }: ChatNotificationBannerProps) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [visible, setVisible] = useState(false);
   const noticeTimerRef = useRef<number | null>(null);
@@ -71,6 +74,22 @@ export default function ChatNotificationBanner({
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    fetchChatGlobalTitle()
+      .then((title) => { if (alive) setGlobalTitle(title); })
+      .catch(() => undefined);
+    const onRoomTitle = (event: Event) => {
+      const detail = (event as CustomEvent<{ roomId?: string; title?: string }>).detail;
+      if (detail?.roomId === 'global' && detail.title) setGlobalTitle(detail.title);
+    };
+    window.addEventListener('econote:chat-room-title', onRoomTitle);
+    return () => {
+      alive = false;
+      window.removeEventListener('econote:chat-room-title', onRoomTitle);
+    };
+  }, []);
+
+  useEffect(() => {
     let stopped = false;
     const sockets = new Map<string, WebSocket>();
     const retryTimers = new Set<number>();
@@ -88,7 +107,7 @@ export default function ChatNotificationBanner({
         if (oldest) seenIdsRef.current.delete(oldest);
       }
       const roomTitle = roomId === 'global'
-        ? 'Ecovacs crew'
+        ? globalTitle
         : conversationsRef.current.find((conversation) => conversation.roomId === roomId)?.title ?? 'Direct message';
       setNotice({ message, roomTitle });
       setVisible(true);
@@ -104,17 +123,32 @@ export default function ChatNotificationBanner({
       try {
         const ticket: ChatSocketTicket = await requestChatTicket({ roomId });
         if (stopped) return;
+        for (const message of ticket.freshMessages ?? []) {
+          void upsertCachedChatMessage(roomId, message).catch(() => undefined);
+        }
         const socket = new WebSocket(chatSocketUrl(ticket));
         sockets.set(roomId, socket);
         socket.onmessage = (event) => {
           try {
             const payload = JSON.parse(String(event.data)) as Record<string, unknown>;
             if (
-              payload.type === 'message:created' &&
+              payload.type === 'room:title' &&
+              typeof payload.roomId === 'string' &&
+              typeof payload.title === 'string'
+            ) {
+              window.dispatchEvent(new CustomEvent('econote:chat-room-title', {
+                detail: { roomId: payload.roomId, title: payload.title },
+              }));
+              return;
+            }
+            if (
+              (payload.type === 'message:created' || payload.type === 'message:updated') &&
               payload.message &&
               typeof payload.message === 'object'
             ) {
-              showNotice(payload.message as ChatMessage, roomId);
+              const message = payload.message as ChatMessage;
+              void upsertCachedChatMessage(roomId, message).catch(() => undefined);
+              if (payload.type === 'message:created') showNotice(message, roomId);
             }
           } catch {
             /* Ignore malformed events; the primary chat handles its own UI. */
@@ -148,7 +182,7 @@ export default function ChatNotificationBanner({
       sockets.forEach((socket) => socket.close(1000, 'Notification rooms changed'));
       sockets.clear();
     };
-  }, [roomKey, username]);
+  }, [globalTitle, roomKey, username]);
 
   if (!notice) return null;
   const { message } = notice;

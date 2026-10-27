@@ -98,6 +98,8 @@ interface FlowchartCanvasProps {
   onViewChange?: (view: WorkView) => void;
   /** Content rendered in the canvas area when activeView === 'caseTrak'. */
   caseTrakContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'sheets'. */
+  sheetsContent?: React.ReactNode;
   /** Content rendered in the canvas area when activeView === 'selfTest'
    *  (weekly news knowledge quizzes). */
   selfTestContent?: React.ReactNode;
@@ -159,6 +161,7 @@ export type WorkView =
   | 'selfTest'
   | 'commune'
   | 'chat'
+  | 'sheets'
   | 'caseTrak'
   | 'dash'
   | 'shifts'
@@ -467,6 +470,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   shiftsContent,
   communeContent,
   chatContent,
+  sheetsContent,
   settingsContent,
   adminContent,
   loginContent,
@@ -1199,6 +1203,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {activeView === 'chat' && (
         <div className="box-border h-full min-h-full w-full pl-0">
           {chatContent}
+        </div>
+      )}
+
+      {activeView === 'sheets' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {sheetsContent}
         </div>
       )}
 

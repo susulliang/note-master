@@ -1,4 +1,4 @@
-import { History, PanelLeftClose, Settings } from 'lucide-react';
+import { PanelLeftClose, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HistoryPanel from '@/components/HistoryPanel';
 import type { NoteHistoryEntry } from '@/data/ticket';
@@ -44,22 +44,6 @@ export default function RailControls({
       )}
 
       <div className="quiet-control-icons flex flex-col items-center gap-1 animate-in fade-in duration-700">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleHistory}
-          className={cn(RAIL_BTN, historyOpen && 'bg-foreground/10 text-foreground')}
-          aria-label="Toggle history"
-          title="History"
-        >
-          <History className="size-[18px]" />
-          {history.length > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-              {history.length > 99 ? '99+' : history.length}
-            </span>
-          )}
-        </Button>
-
         <Button
           variant="ghost"
           size="icon"

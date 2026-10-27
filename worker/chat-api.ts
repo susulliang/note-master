@@ -1,5 +1,6 @@
 interface ChatUser {
   username: string;
+  canManageChatTitles?: boolean;
 }
 
 interface NewsRow {
@@ -118,6 +119,24 @@ async function ensureChatSchema(env: Env): Promise<void> {
       PRIMARY KEY (sticker_id, owner, room_id, message_id)
     )
   `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS chat_news_sync (
+      room_id TEXT PRIMARY KEY,
+      revision TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS chat_global_settings (
+      room_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO chat_global_settings (room_id, title, updated_at)
+     VALUES ('global', 'Ecovacs crew', ?)`,
+  ).bind(Date.now()).run();
   await env.DB.prepare(`
     CREATE INDEX IF NOT EXISTS chat_group_members_user_idx
     ON chat_group_members (username, joined_at DESC)
@@ -261,6 +280,50 @@ async function handleConversations(env: Env, user: ChatUser): Promise<Response> 
   });
 }
 
+async function handleGlobalTitle(env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    'SELECT title FROM chat_global_settings WHERE room_id = ?',
+  ).bind('global').first<{ title: string }>();
+  return chatJson({ title: row?.title ?? 'Ecovacs crew' });
+}
+
+async function handleRoomTitleUpdate(
+  request: Request,
+  env: Env,
+  user: ChatUser,
+): Promise<Response> {
+  if (!user.canManageChatTitles) return chatJson({ error: 'Admin access is required.' }, 403);
+  if (Number(request.headers.get('content-length') ?? 0) > 2_048) {
+    return chatJson({ error: 'Request is too large.' }, 413);
+  }
+  let payload: { roomId?: unknown; title?: unknown };
+  try {
+    payload = await request.json() as typeof payload;
+  } catch {
+    return chatJson({ error: 'Invalid JSON body.' }, 400);
+  }
+  if (typeof payload.roomId !== 'string' || typeof payload.title !== 'string') {
+    return chatJson({ error: 'A chat room and title are required.' }, 400);
+  }
+  const title = payload.title.trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!title) return chatJson({ error: 'A title cannot be empty.' }, 400);
+  const roomId = payload.roomId;
+  if (roomId === 'global') {
+    await env.DB.prepare(
+      `UPDATE chat_global_settings SET title = ?, updated_at = ? WHERE room_id = 'global'`,
+    ).bind(title, Date.now()).run();
+  } else if (/^group-[0-9a-f-]{36}$/.test(roomId)) {
+    const result = await env.DB.prepare(
+      'UPDATE chat_groups SET name = ?, updated_at = ? WHERE room_id = ?',
+    ).bind(title, Date.now(), roomId).run();
+    if (!result.meta.changes) return chatJson({ error: 'Group chat not found.' }, 404);
+  } else {
+    return chatJson({ error: 'Only group and global chat titles can be changed.' }, 400);
+  }
+  await env.CHAT_ROOM.getByName(roomId).broadcastRoomTitle(title);
+  return chatJson({ roomId, title });
+}
+
 async function handleCreateGroup(request: Request, env: Env, user: ChatUser): Promise<Response> {
   if (Number(request.headers.get('content-length') ?? 0) > MAX_JSON_BODY_BYTES) {
     return chatJson({ error: 'Request is too large.' }, 413);
@@ -352,6 +415,7 @@ async function handleSocketTicket(request: Request, env: Env, user: ChatUser): P
   }
 
   const room = env.CHAT_ROOM.getByName(roomId);
+  let freshMessages: Array<unknown> = [];
   if (roomId === 'global') {
     await env.DB.prepare(`
       CREATE TABLE IF NOT EXISTS news_entries (
@@ -363,15 +427,28 @@ async function handleSocketTicket(request: Request, env: Env, user: ChatUser): P
         updated_at INTEGER NOT NULL DEFAULT 0
       )
     `).run();
-    const news = await env.DB.prepare(
-      `SELECT id, date, title, author, body, updated_at AS updatedAt
-       FROM news_entries ORDER BY date DESC, id DESC`,
-    ).all<NewsRow>();
-    await room.seedNews(news.results ?? []);
+    const stats = await env.DB.prepare(
+      'SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), 0) AS latest FROM news_entries',
+    ).first<{ count: number; latest: number }>();
+    const revision = `${stats?.count ?? 0}:${stats?.latest ?? 0}`;
+    const synced = await env.DB.prepare(
+      'SELECT revision FROM chat_news_sync WHERE room_id = ?',
+    ).bind('global').first<{ revision: string }>();
+    if (synced?.revision !== revision) {
+      const news = await env.DB.prepare(
+        `SELECT id, date, title, author, body, updated_at AS updatedAt
+         FROM news_entries ORDER BY date DESC, id DESC`,
+      ).all<NewsRow>();
+      freshMessages = await room.seedNews(news.results ?? []);
+      await env.DB.prepare(
+        `INSERT INTO chat_news_sync (room_id, revision, updated_at) VALUES ('global', ?, ?)
+         ON CONFLICT(room_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at`,
+      ).bind(revision, Date.now()).run();
+    }
   }
   const profile = await getOrCreateProfile(env, user.username);
   const ticket = await room.createTicket(user.username, profile);
-  return chatJson({ roomId, ticket });
+  return chatJson({ roomId, ticket, freshMessages });
 }
 
 async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint8Array | null> {
@@ -581,6 +658,12 @@ export async function handleChatApi(
   }
   if (url.pathname === '/api/chat/conversations' && request.method === 'GET') {
     return handleConversations(env, user);
+  }
+  if (url.pathname === '/api/chat/global-title' && request.method === 'GET') {
+    return handleGlobalTitle(env);
+  }
+  if (url.pathname === '/api/chat/admin/room-title' && request.method === 'POST') {
+    return handleRoomTitleUpdate(request, env, user);
   }
   if (url.pathname === '/api/chat/profile' && request.method === 'GET') {
     return handleProfileGet(env, user);

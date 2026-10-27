@@ -34,7 +34,8 @@
       { "name": "COMMUNE_ROOM", "class_name": "CommuneRoom" },
       { "name": "ROSTER_ROOM", "class_name": "RosterRoom" },
       { "name": "CHAT_ROOM", "class_name": "ChatRoom" },
-      { "name": "CHAT_STICKER_PACK", "class_name": "ChatStickerPack" }
+      { "name": "CHAT_STICKER_PACK", "class_name": "ChatStickerPack" },
+      { "name": "SHEETS_ROOM", "class_name": "SheetsRoom" }
     ]
   },
   "ai": {
@@ -51,7 +52,8 @@
     { "tag": "commune-room-v1", "new_sqlite_classes": ["CommuneRoom"] },
     { "tag": "roster-room-v1", "new_sqlite_classes": ["RosterRoom"] },
     { "tag": "chat-room-v1", "new_sqlite_classes": ["ChatRoom"] },
-    { "tag": "chat-sticker-pack-v1", "new_sqlite_classes": ["ChatStickerPack"] }
+    { "tag": "chat-sticker-pack-v1", "new_sqlite_classes": ["ChatStickerPack"] },
+    { "tag": "collaborative-sheets-v1", "new_sqlite_classes": ["SheetsRoom"] }
   ],
   "assets": {
     "directory": "./dist/client",

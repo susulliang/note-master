@@ -430,7 +430,9 @@ export default function EngineSettingsPanel({
         {/* Account / login status — always the first block in Settings */}
         <section aria-label="Account" className="rounded-lg border border-border/50 bg-background/35 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Account</p>
+            <p className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+              Account
+            </p>
             <span className="text-[10px] text-muted-foreground/70">Account and access</span>
           </div>
           {authResolving ? (
@@ -567,8 +569,8 @@ export default function EngineSettingsPanel({
 
         <section aria-labelledby="global-font-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p id="global-font-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Global UI font
+            <p id="global-font-label" className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+              Fonts
             </p>
             <span className="text-[9px] text-muted-foreground/70">Saved on this device</span>
           </div>
@@ -589,8 +591,8 @@ export default function EngineSettingsPanel({
 
         <section aria-labelledby="cat-choice-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p id="cat-choice-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Cat companion
+            <p id="cat-choice-label" className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+              Cat
             </p>
             <span className="text-[9px] text-muted-foreground/70">Pick your workspace cat</span>
           </div>
@@ -634,8 +636,8 @@ export default function EngineSettingsPanel({
           <section aria-labelledby="gridbox-settings-label" className="rounded-lg border border-border/50 bg-background/35 p-2">
             <div className="mb-1 flex items-center gap-1.5">
               <Boxes className="size-3 text-primary" />
-              <p id="gridbox-settings-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Canvas boxes
+              <p id="gridbox-settings-label" className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+                Canvas
               </p>
             </div>
             <div className="flex flex-col gap-0.5">
@@ -663,8 +665,8 @@ export default function EngineSettingsPanel({
             <div className="mb-1 flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <AlertTriangle className="size-3 text-amber-400" />
-                <p id="keyword-alert-settings-label" className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Keyword alerts
+                <p id="keyword-alert-settings-label" className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+                  Keywords
                 </p>
               </div>
               <span className="text-[8px] text-muted-foreground">
@@ -685,11 +687,19 @@ export default function EngineSettingsPanel({
           </section>
         )}
 
+        <section
+          aria-label="Engines"
+          className={cn(
+            pagePresentation && 'space-y-3 rounded-2xl border border-border/60 bg-card/35 p-4',
+          )}
+        >
+          {pagePresentation && <h2 className="text-sm font-semibold text-foreground">Engines</h2>}
+          <div className="space-y-3">
         {/* ---- Whisper engine ---- */}
         {engine.isSupported && (
           <div>
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Whisper (transcription)
+              Whisper
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
               <span
@@ -812,7 +822,7 @@ export default function EngineSettingsPanel({
           <div>
             <div className="mb-1 flex items-center justify-between gap-2">
               <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                AI parser status
+                LLM parser
               </p>
               <span
                 role="status"
@@ -1069,12 +1079,19 @@ export default function EngineSettingsPanel({
             )}
           </div>
         )}
+          </div>
+        </section>
 
         {/* ---- Parse debug ---- */}
-        <div>
+        <section
+          aria-label="Debug"
+          className={cn(
+            pagePresentation && 'rounded-2xl border border-border/60 bg-card/35 p-4',
+          )}
+        >
           <div className="mb-1 flex items-center gap-1.5">
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Parse debug
+            <p className={cn('text-[9px] font-semibold uppercase tracking-wider text-muted-foreground', pagePresentation && 'text-sm')}>
+              {pagePresentation ? 'Debug' : 'Parse debug'}
             </p>
             {parser?.enabled && parser.status === 'ready' && (
               <button
@@ -1167,7 +1184,7 @@ export default function EngineSettingsPanel({
               ) : null}
             </div>
           )}
-        </div>
+        </section>
       </div>
 
       {/* Floating window: raw reply JSON */}

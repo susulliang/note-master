@@ -16,6 +16,7 @@ const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
 const WORKSPACE_PATHS: Record<WorkView, string> = {
   commune: '/commune',
   chat: '/chat',
+  sheets: '/sheets',
   callNotes: '/notes',
   caseTrak: '/cases',
   dash: '/insights',
@@ -173,6 +174,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const AdminPage = lazy(() => import('@/pages/AdminPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const ChatPage = lazy(() => import('@/pages/ChatPage'));
+const SheetsPage = lazy(() => import('@/pages/SheetsPage'));
 const KittyHelpWorkspace = lazy(() => import('@/components/KittyHelpWorkspace'));
 const GbuPopup = lazy(() => import('@/components/GbuPopup'));
 const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
@@ -2352,7 +2354,7 @@ Additional information (if needed): ${additional}`;
   // re-renders, exactly like the old standalone FloatingControls did.
   const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
   const availableWorkspaces: WorkView[] = [
-    ...(authUser ? ['commune' as const, 'chat' as const] : []),
+    ...(authUser ? ['commune' as const, 'chat' as const, 'sheets' as const] : []),
     'callNotes',
     ...(analyticsUnlocked || authPrivileges?.trak ? ['caseTrak' as const] : []),
     ...(analyticsUnlocked || authPrivileges?.dash ? ['dash' as const] : []),
@@ -2367,6 +2369,9 @@ Additional information (if needed): ${additional}`;
       onNavigate={navigateToView}
       onOpenHelp={openKittyHelp}
       onOpenWidget={openWorkspaceWidget}
+      historyOpen={showHistory}
+      historyCount={history.length}
+      onToggleHistory={handleToggleHistory}
       onUtilitySlot={setRailControlsSlot}
       username={authUser?.username}
       hideDock={kittyHelpOpen || workView === 'login'}
@@ -2579,7 +2584,17 @@ Additional information (if needed): ${additional}`;
               }
               chatContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening chat…</div>}>
-                  {authUser && <ChatPage username={authUser.username} />}
+                  {authUser && (
+                    <ChatPage
+                      username={authUser.username}
+                      canManageChatTitles={authUser.canAccessAdmin}
+                    />
+                  )}
+                </Suspense>
+              }
+              sheetsContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening collaborative sheets…</div>}>
+                  {authUser && <SheetsPage username={authUser.username} />}
                 </Suspense>
               }
               settingsContent={

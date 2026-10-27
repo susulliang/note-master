@@ -9,7 +9,9 @@ import {
   Clock3,
   FilePenLine,
   GraduationCap,
+  History,
   LayoutGrid,
+  Grid2X2,
   PackageSearch,
   LogIn,
   MessageCircle,
@@ -27,6 +29,9 @@ interface QuietWorkspaceShellProps {
   onNavigate: (view: WorkView) => void;
   onOpenHelp: () => void;
   onOpenWidget: (widget: WidgetId) => void;
+  historyOpen: boolean;
+  historyCount: number;
+  onToggleHistory: () => void;
   onUtilitySlot: RefCallback<HTMLDivElement>;
   username?: string;
   hideDock?: boolean;
@@ -38,6 +43,7 @@ export type WidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 
 const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   commune: { label: 'Commune', icon: Users },
   chat: { label: 'Chat', icon: MessageCircle },
+  sheets: { label: 'Sheets', icon: Grid2X2 },
   callNotes: { label: 'Call Notes', icon: FilePenLine },
   caseTrak: { label: 'Cases', icon: LayoutGrid },
   dash: { label: 'DASH', icon: BarChart3 },
@@ -48,7 +54,7 @@ const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   login: { label: 'Login', icon: LogIn },
 };
 
-const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
+const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'sheets', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
 const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }> = [
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },
@@ -64,6 +70,9 @@ export function QuietWorkspaceShell({
   onNavigate,
   onOpenHelp,
   onOpenWidget,
+  historyOpen,
+  historyCount,
+  onToggleHistory,
   onUtilitySlot,
   username,
   hideDock = false,
@@ -126,6 +135,24 @@ export function QuietWorkspaceShell({
                   <span className="quiet-dock-tooltip" aria-hidden="true">{label}</span>
               </button>
             ))}
+          </div>
+
+          <div className="quiet-dock-cluster quiet-dock-cluster--widgets" aria-label="History">
+            <button
+              type="button"
+              aria-label="Toggle history"
+              aria-pressed={historyOpen}
+              onClick={onToggleHistory}
+              className={cn('quiet-orbit-action', historyOpen && 'quiet-orbit-action--active')}
+            >
+              <History className="size-[18px]" strokeWidth={1.8} />
+              {historyCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 grid min-h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[8px] font-bold leading-none text-primary-foreground">
+                  {historyCount > 99 ? '99+' : historyCount}
+                </span>
+              )}
+              <span className="quiet-dock-tooltip" aria-hidden="true">History</span>
+            </button>
           </div>
         </nav>
       )}

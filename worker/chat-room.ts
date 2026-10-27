@@ -139,11 +139,16 @@ export class ChatRoom extends DurableObject<Env> {
     return ticket;
   }
 
-  async seedNews(entries: ChatNewsEntry[]): Promise<void> {
+  async seedNews(entries: ChatNewsEntry[]): Promise<Array<ReturnType<typeof presentMessage>>> {
+    const changedMessages: Array<ReturnType<typeof presentMessage>> = [];
     for (const entry of entries) {
       const title = entry.title.trim();
       const author = entry.author.trim() || 'Ecovacs Support';
-      const markdown = `### ${title}\n\n${entry.body.trim()}\n\n*Posted ${entry.date} by ${author}*`;
+      const body = entry.body.trim().replace(
+        /(\]\()(?:(?:\.\.\/)|(?:\.\/))*assets\//g,
+        '$1/news/assets/',
+      );
+      const markdown = `### ${title}\n\n${body}\n\n*Posted ${entry.date} by ${author}*`;
       const createdAt = Date.parse(entry.date)
         || (Number.isFinite(entry.updatedAt) && entry.updatedAt > 0 ? entry.updatedAt : Date.now());
       const existing = this.ctx.storage.sql
@@ -163,7 +168,11 @@ export class ChatRoom extends DurableObject<Env> {
           const row = this.ctx.storage.sql
             .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE id = ?', existing.id)
             .toArray()[0];
-          if (row) this.broadcast({ type: 'message:updated', message: presentMessage(row) });
+          if (row) {
+            const message = presentMessage(row);
+            changedMessages.push(message);
+            this.broadcast({ type: 'message:updated', message });
+          }
         }
       } else {
         this.ctx.storage.sql.exec(
@@ -179,9 +188,18 @@ export class ChatRoom extends DurableObject<Env> {
         const row = this.ctx.storage.sql
           .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE source_id = ?', entry.id)
           .toArray()[0];
-        if (row) this.broadcast({ type: 'message:created', message: presentMessage(row) });
+        if (row) {
+          const message = presentMessage(row);
+          changedMessages.push(message);
+          this.broadcast({ type: 'message:created', message });
+        }
       }
     }
+    return changedMessages;
+  }
+
+  async broadcastRoomTitle(title: string): Promise<void> {
+    this.broadcast({ type: 'room:title', roomId: this.roomId, title });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -211,14 +229,7 @@ export class ChatRoom extends DurableObject<Env> {
       avatarSeed: row.avatar_seed,
       avatarRotation: row.avatar_rotation,
     } satisfies ChatAttachment);
-    const history = this.getMessages();
-    send(server, {
-      type: 'welcome',
-      roomId: this.roomId,
-      messages: history.messages,
-      hasOlder: history.hasOlder,
-      cursor: history.cursor,
-    });
+    send(server, { type: 'welcome', roomId: this.roomId });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -306,6 +317,16 @@ export class ChatRoom extends DurableObject<Env> {
         this.broadcast({ type: 'message:updated', message: presentMessage(row) });
         await this.updateInboxPreview(row.markdown, now);
       }
+      return;
+    }
+    if (event.type === 'history:latest') {
+      const page = this.getMessages();
+      send(ws, {
+        type: 'history:latest',
+        messages: page.messages,
+        hasOlder: page.hasOlder,
+        cursor: page.cursor,
+      });
       return;
     }
     if (event.type === 'history:older') {

@@ -22,6 +22,7 @@ import {
 } from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
 import { handleChatApi } from './chat-api';
+import { handleSheetsApi } from './sheets-api';
 import { handleAsk } from './ask';
 import {
   handleKbCreate,
@@ -40,6 +41,7 @@ export { CommuneRoom } from './commune-room';
 export { RosterRoom } from './roster-room';
 export { ChatRoom } from './chat-room';
 export { ChatStickerPack } from './chat-sticker-pack';
+export { SheetsRoom } from './sheets-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -3836,7 +3838,15 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path.startsWith('/api/chat/')) {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
-    return handleChatApi(request, env, user);
+    return handleChatApi(request, env, {
+      username: user.username,
+      canManageChatTitles: hasAdminAccess(user),
+    });
+  }
+  if (path === '/api/sheets' || path.startsWith('/api/sheets/')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleSheetsApi(request, env, user.username);
   }
   if (path === '/api/llm/models' && request.method === 'GET') return handleLlmModels(request, env);
   if (path === '/api/llm/chat' && request.method === 'POST') return handleLlmChat(request, env);
@@ -4434,6 +4444,17 @@ export default {
         return new Response('Chat room is temporarily unavailable', { status: 503 });
       }
     }
+    if (url.pathname === '/api/sheets/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      const sheetId = url.searchParams.get('sheetId') ?? '';
+      if (!/^[0-9a-f-]{36}$/i.test(sheetId)) return new Response('Invalid sheet', { status: 400 });
+      try {
+        return await env.SHEETS_ROOM.getByName(sheetId).fetch(request);
+      } catch {
+        return new Response('Sheet is temporarily unavailable', { status: 503 });
+      }
+    }
     if (url.pathname === '/api/call-transcription/socket') {
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
         return new Response('WebSocket upgrade required', { status: 426 });
@@ -4450,6 +4471,8 @@ export default {
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
       url.pathname.startsWith('/api/chat/') ||
+      url.pathname === '/api/sheets' ||
+      url.pathname.startsWith('/api/sheets/') ||
       url.pathname.startsWith('/api/pet') ||
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/cards') ||

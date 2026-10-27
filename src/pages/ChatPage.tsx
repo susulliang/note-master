@@ -27,6 +27,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttribut
 import { toast } from 'sonner';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
 import {
+  loadChatRoomCache,
+  saveChatRoomCache,
+  upsertCachedChatMessage,
+  type ChatMessageCursor,
+  type ChatRoomCache,
+} from '@/lib/chat-message-cache';
+import {
   authorizedChatMediaUrl,
   chatAuthHeaders,
   chatSocketUrl,
@@ -38,6 +45,8 @@ import {
   requestChatTicket,
   uploadChatPhoto,
   uploadChatSticker,
+  fetchChatGlobalTitle,
+  updateChatRoomTitle,
   type ChatConversation,
   type ChatAvatarProfile,
   type ChatMessage,
@@ -49,6 +58,7 @@ import { cn } from '@/lib/utils';
 
 interface ChatPageProps {
   username: string;
+  canManageChatTitles: boolean;
 }
 
 interface ActiveRoom {
@@ -58,11 +68,6 @@ interface ActiveRoom {
   peerUsername?: string;
   memberCount?: number;
   peerAvatar?: ChatAvatarProfile;
-}
-
-interface MessageCursor {
-  createdAt: number;
-  id: string;
 }
 
 interface MarkdownNode {
@@ -332,6 +337,13 @@ function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(timestamp);
 }
 
+function fixNewsImagePaths(markdown: string): string {
+  return markdown.replace(
+    /(!\[[^\]]*\]\()(?:(?:\.\.\/)|(?:\.\/))*assets\//g,
+    '$1/news/assets/',
+  );
+}
+
 function mergeMessage(current: ChatMessage[], next: ChatMessage): ChatMessage[] {
   const exists = current.some((message) => message.id === next.id);
   const merged = exists
@@ -386,12 +398,15 @@ async function compressSticker(file: File): Promise<Blob> {
   }
 }
 
-export default function ChatPage({ username }: ChatPageProps) {
+export default function ChatPage({ username, canManageChatTitles }: ChatPageProps) {
   const [activeRoom, setActiveRoom] = useState<ActiveRoom>({
     roomId: 'global',
     title: 'Ecovacs crew',
     kind: 'global',
   });
+  const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'offline'>('connecting');
@@ -428,7 +443,7 @@ export default function ChatPage({ username }: ChatPageProps) {
   const stickerInputRef = useRef<HTMLInputElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef<MessageCursor | null>(null);
+  const cursorRef = useRef<ChatMessageCursor | null>(null);
   const hasOlderRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const isOwnMessage = useCallback((message: ChatMessage) => (
@@ -478,6 +493,32 @@ export default function ChatPage({ username }: ChatPageProps) {
 
   useEffect(() => {
     let alive = true;
+    fetchChatGlobalTitle()
+      .then((title) => {
+        if (!alive) return;
+        setGlobalTitle(title);
+        setActiveRoom((room) => room.kind === 'global' ? { ...room, title } : room);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const onRoomTitle = (event: Event) => {
+      const detail = (event as CustomEvent<{ roomId?: string; title?: string }>).detail;
+      if (!detail?.roomId || !detail.title) return;
+      setActiveRoom((room) => room.roomId === detail.roomId ? { ...room, title: detail.title! } : room);
+      setConversations((current) => current.map((conversation) => (
+        conversation.roomId === detail.roomId ? { ...conversation, title: detail.title! } : conversation
+      )));
+      if (detail.roomId === 'global') setGlobalTitle(detail.title);
+    };
+    window.addEventListener('econote:chat-room-title', onRoomTitle);
+    return () => window.removeEventListener('econote:chat-room-title', onRoomTitle);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
     fetchChatProfile()
       .then((profile) => { if (alive) setAvatarProfile(profile); })
       .catch(() => undefined);
@@ -514,6 +555,7 @@ export default function ChatPage({ username }: ChatPageProps) {
     let stopped = false;
     let reconnectTimer = 0;
     let currentSocket: WebSocket | null = null;
+    let cacheInitialized = false;
     setConnection('connecting');
     setMessages([]);
     setHasOlderMessages(false);
@@ -522,12 +564,27 @@ export default function ChatPage({ username }: ChatPageProps) {
     setLoadingOlder(false);
     loadingOlderRef.current = false;
 
+    const persistRoomCache = (roomMessages: ChatMessage[], initialized = cacheInitialized) => {
+      void saveChatRoomCache({
+        roomId: activeRoom.roomId,
+        messages: roomMessages,
+        hasOlder: hasOlderRef.current,
+        cursor: cursorRef.current,
+        initialized,
+        updatedAt: Date.now(),
+      }).catch(() => undefined);
+    };
+
     const connect = async () => {
       try {
         let ticket = pendingTicketRef.current;
         if (ticket?.roomId === activeRoom.roomId) pendingTicketRef.current = null;
         else ticket = await requestChatTicket({ roomId: activeRoom.roomId });
         if (stopped) return;
+        for (const message of ticket.freshMessages ?? []) {
+          void upsertCachedChatMessage(activeRoom.roomId, message).catch(() => undefined);
+          setMessages((current) => mergeMessage(current, message));
+        }
         const socket = new WebSocket(chatSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
@@ -541,27 +598,55 @@ export default function ChatPage({ username }: ChatPageProps) {
           } catch {
             return;
           }
-          if (payload.type === 'welcome' && Array.isArray(payload.messages)) {
-            setMessages(payload.messages as ChatMessage[]);
-            const cursor = payload.cursor as MessageCursor | null;
-            cursorRef.current = cursor;
+          if (payload.type === 'welcome') {
+            if (!cacheInitialized) socket.send(JSON.stringify({ type: 'history:latest' }));
+            return;
+          }
+          if (payload.type === 'history:latest' && Array.isArray(payload.messages)) {
+            const latest = payload.messages as ChatMessage[];
+            cursorRef.current = (payload.cursor as ChatMessageCursor | null) ?? null;
             hasOlderRef.current = payload.hasOlder === true;
             setHasOlderMessages(hasOlderRef.current);
+            setLoadingOlder(false);
+            loadingOlderRef.current = false;
+            cacheInitialized = true;
+            setMessages((current) => {
+              const merged = latest.reduce(mergeMessage, current);
+              persistRoomCache(merged, true);
+              return merged;
+            });
             requestAnimationFrame(() => {
               const list = messageListRef.current;
               if (list) list.scrollTop = list.scrollHeight;
             });
             return;
           }
+          if (
+            payload.type === 'room:title' &&
+            typeof payload.roomId === 'string' &&
+            typeof payload.title === 'string'
+          ) {
+            const title = payload.title;
+            setActiveRoom((room) => room.roomId === payload.roomId ? { ...room, title } : room);
+            if (payload.roomId === 'global') setGlobalTitle(title);
+            setConversations((current) => current.map((conversation) => (
+              conversation.roomId === payload.roomId ? { ...conversation, title } : conversation
+            )));
+            return;
+          }
           if (payload.type === 'history:older' && Array.isArray(payload.messages)) {
             const beforeHeight = messageListRef.current?.scrollHeight ?? 0;
             const older = payload.messages as ChatMessage[];
-            setMessages((current) => [...older, ...current]);
-            cursorRef.current = (payload.cursor as MessageCursor | null) ?? cursorRef.current;
+            cursorRef.current = (payload.cursor as ChatMessageCursor | null) ?? cursorRef.current;
             hasOlderRef.current = payload.hasOlder === true;
             setHasOlderMessages(hasOlderRef.current);
             setLoadingOlder(false);
             loadingOlderRef.current = false;
+            setMessages((current) => {
+              const merged = older.reduce(mergeMessage, current);
+              persistRoomCache(merged);
+              return merged;
+            });
             requestAnimationFrame(() => {
               const list = messageListRef.current;
               if (list) list.scrollTop += list.scrollHeight - beforeHeight;
@@ -575,6 +660,7 @@ export default function ChatPage({ username }: ChatPageProps) {
             const list = messageListRef.current;
             const shouldStick = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 180;
             setMessages((current) => mergeMessage(current, payload.message as ChatMessage));
+            void upsertCachedChatMessage(activeRoom.roomId, payload.message as ChatMessage).catch(() => undefined);
             if (shouldStick) {
               requestAnimationFrame(() => messageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
             }
@@ -599,7 +685,23 @@ export default function ChatPage({ username }: ChatPageProps) {
       }
     };
 
-    void connect();
+    void loadChatRoomCache(activeRoom.roomId)
+      .catch(() => null)
+      .then((cached) => {
+        if (stopped) return;
+        if (cached) {
+          setMessages(cached.messages);
+          cacheInitialized = cached.initialized;
+          hasOlderRef.current = cached.hasOlder;
+          cursorRef.current = cached.cursor;
+          setHasOlderMessages(cached.hasOlder);
+          requestAnimationFrame(() => {
+            const list = messageListRef.current;
+            if (list) list.scrollTop = list.scrollHeight;
+          });
+        }
+        void connect();
+      });
     return () => {
       stopped = true;
       window.clearTimeout(reconnectTimer);
@@ -680,6 +782,23 @@ export default function ChatPage({ username }: ChatPageProps) {
       setCreatingGroup(false);
     }
   }, [creatingGroup, groupName, refreshConversations, selectedMembers]);
+
+  const saveRoomTitle = useCallback(async () => {
+    const title = titleDraft.trim();
+    if (!title || !canManageChatTitles) return;
+    try {
+      const savedTitle = await updateChatRoomTitle(activeRoom.roomId, title);
+      setActiveRoom((room) => room.roomId === activeRoom.roomId ? { ...room, title: savedTitle } : room);
+      setConversations((current) => current.map((conversation) => (
+        conversation.roomId === activeRoom.roomId ? { ...conversation, title: savedTitle } : conversation
+      )));
+      if (activeRoom.kind === 'global') setGlobalTitle(savedTitle);
+      setEditingTitle(false);
+      toast.success('Chat title updated.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update the chat title.');
+    }
+  }, [activeRoom.kind, activeRoom.roomId, canManageChatTitles, titleDraft]);
 
   const applyFormatting = useCallback((command: 'bold' | 'italic' | 'underline') => {
     const editor = editorRef.current;
@@ -857,7 +976,7 @@ export default function ChatPage({ username }: ChatPageProps) {
             <button
               type="button"
               onClick={() => {
-                setActiveRoom({ roomId: 'global', title: 'Ecovacs crew', kind: 'global' });
+                setActiveRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
                 setMobileRoomOpen(true);
               }}
               className={cn(
@@ -869,7 +988,7 @@ export default function ChatPage({ username }: ChatPageProps) {
                 <Globe2 className="size-[18px]" />
               </div>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">Ecovacs crew</span>
+                <span className="block truncate text-sm font-semibold">{globalTitle}</span>
                 <span className="mt-0.5 block truncate text-xs text-muted-foreground">Global group chat</span>
               </span>
               <Users className="size-4 shrink-0 text-muted-foreground/70" />
@@ -972,7 +1091,57 @@ export default function ChatPage({ username }: ChatPageProps) {
                   />}
             </div>
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-sm font-semibold">{activeRoom.title}</h2>
+              {editingTitle ? (
+                <form
+                  className="flex min-w-0 items-center gap-1.5"
+                  onSubmit={(event) => { event.preventDefault(); void saveRoomTitle(); }}
+                >
+                  <input
+                    autoFocus
+                    value={titleDraft}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    maxLength={60}
+                    aria-label="New chat title"
+                    className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background/80 px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setEditingTitle(false);
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    aria-label="Save chat title"
+                    className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent hover:bg-accent/25"
+                  >
+                    <Check className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Cancel title edit"
+                    onClick={() => setEditingTitle(false)}
+                    className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </form>
+              ) : (
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <h2 className="truncate text-sm font-semibold">{activeRoom.title}</h2>
+                  {canManageChatTitles && activeRoom.kind !== 'direct' && (
+                    <button
+                      type="button"
+                      aria-label="Edit chat title"
+                      title="Edit chat title"
+                      onClick={() => {
+                        setTitleDraft(activeRoom.title);
+                        setEditingTitle(true);
+                      }}
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               <p className="truncate text-xs text-muted-foreground">
                 {activeRoom.kind === 'global'
                   ? 'Everyone in the workspace'
@@ -981,7 +1150,7 @@ export default function ChatPage({ username }: ChatPageProps) {
                     : 'Private conversation'}
               </p>
             </div>
-            {activeRoom.kind === 'global' && (
+            {activeRoom.kind === 'global' && !editingTitle && (
               <div className="hidden items-center gap-1.5 rounded-full border border-border/70 bg-card/50 px-3 py-1.5 text-[11px] text-muted-foreground sm:flex">
                 <Users className="size-3.5" />
                 Global
@@ -1069,7 +1238,7 @@ export default function ChatPage({ username }: ChatPageProps) {
                             ? 'rounded-tr-md border-accent/15 bg-accent/[0.09]'
                             : 'rounded-tl-md border-border/70 bg-card/65',
                       )}>
-                        <MarkdownBody markdown={message.markdown} />
+                        <MarkdownBody markdown={news ? fixNewsImagePaths(message.markdown) : message.markdown} />
                         {message.updatedAt > message.createdAt + 1_000 && !news && (
                           <span className="mt-2 block text-right text-[9px] text-muted-foreground">edited</span>
                         )}
@@ -1098,8 +1267,8 @@ export default function ChatPage({ username }: ChatPageProps) {
           </div>
 
           <div className="shrink-0 border-t border-border/60 bg-background/75 p-3 sm:px-6 sm:pb-5 sm:pt-4">
-            <div className="mx-auto w-full max-w-[900px] overflow-hidden rounded-xl border border-border/70 bg-card/45 backdrop-blur-xl focus-within:border-accent/35">
-              <div className="flex min-h-8 flex-wrap items-center gap-0.5 border-b border-border/55 px-2 py-0.5">
+            <div className="relative mx-auto w-full">
+              <div className="flex min-h-8 flex-wrap items-center gap-0.5 border-b border-border/45 px-2 py-0.5">
                 {toolbarButton('Bold', <Bold className="size-3.5" />, () => applyFormatting('bold'))}
                 {toolbarButton('Italic', <Italic className="size-3.5" />, () => applyFormatting('italic'))}
                 {toolbarButton('Underline', <Underline className="size-3.5" />, () => applyFormatting('underline'))}
@@ -1235,9 +1404,9 @@ export default function ChatPage({ username }: ChatPageProps) {
                 </div>
               )}
 
-              <div className="relative w-full border-b border-border/45">
+              <div className="relative w-full">
                 {!hasDraft && (
-                  <span className="pointer-events-none absolute left-4 top-3 text-sm text-muted-foreground/75">
+                  <span className="pointer-events-none absolute left-4 top-4 text-sm text-muted-foreground/75">
                     {editingId ? 'Edit your message…' : `Message ${activeRoom.title}…`}
                   </span>
                 )}
@@ -1266,22 +1435,19 @@ export default function ChatPage({ username }: ChatPageProps) {
                   document.execCommand('insertText', false, plainText);
                   syncComposerMarkdown();
                 }}
-                className="chat-composer-editor min-h-[112px] max-h-[220px] w-full overflow-y-auto bg-transparent px-4 py-3 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
+                className="chat-composer-editor min-h-[164px] max-h-[320px] w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
               />
               </div>
-              <div className="flex items-center gap-2 px-3 py-2">
+              <div className="absolute bottom-5 right-5 z-10 flex items-center gap-2">
                 {editingId ? (
-                  <>
-                    <span className="flex-1 text-[10px] text-muted-foreground">Editing · saved as Markdown</span>
-                    <button
-                      type="button"
-                      onClick={() => { setComposerMarkdown(''); setEditingId(null); }}
-                      className="rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : <span className="flex-1 text-[10px] text-muted-foreground">WYSIWYG · saved as Markdown</span>}
+                  <button
+                    type="button"
+                    onClick={() => { setComposerMarkdown(''); setEditingId(null); }}
+                    className="h-8 rounded-lg border border-border/70 bg-card/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur-xl transition hover:bg-muted hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   disabled={!hasDraft || connection !== 'connected'}

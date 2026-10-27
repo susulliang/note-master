@@ -58,6 +58,10 @@ export default function SettingsPage({
         </header>
 
         <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+          <div className="w-full">
+            <h2 className="text-sm font-semibold text-foreground">Chat Avatar</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Your shared identity in direct and group chats.</p>
+          </div>
           <button
             type="button"
             onClick={rotateAvatar}
@@ -71,7 +75,7 @@ export default function SettingsPage({
               : <span className="size-8 animate-pulse rounded-lg bg-muted" />}
           </button>
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-accent">Your chat identity</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-accent">Profile</p>
             <h2 className="mt-1 text-sm font-semibold text-foreground">{user?.username ?? 'Your avatar'}</h2>
             <p className="mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
               Your 64 × 64 pixel avatar is randomized once and shown beside your name in chat. Click it to rotate; the change syncs to your account.
@@ -89,6 +93,10 @@ export default function SettingsPage({
         </section>
 
         <section className="grid gap-4 rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)] sm:p-5">
+          <div className="lg:col-span-2">
+            <h2 className="text-sm font-semibold text-foreground">Appearance</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Choose the visual style and reading scale for your workspace.</p>
+          </div>
           <div>
             <div className="mb-3">
               <h2 className="text-sm font-semibold text-foreground">Theme</h2>
@@ -167,13 +175,7 @@ export default function SettingsPage({
           </div>
         </section>
 
-        <section aria-label="Account, companion, audio, and engine settings">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Workspace controls</h2>
-              <p className="text-xs text-muted-foreground">Account, companion, capture, and AI engine preferences.</p>
-            </div>
-          </div>
+        <section aria-label="Account, fonts, cat, canvas, keywords, engines, and debug">
           <EngineSettingsPanel {...engineSettings} presentation="page" />
         </section>
       </div>

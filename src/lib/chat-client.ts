@@ -29,6 +29,7 @@ export interface ChatUser {
 export interface ChatSocketTicket {
   roomId: string;
   ticket: string;
+  freshMessages?: ChatMessage[];
 }
 
 export interface ChatAvatarProfile {
@@ -77,6 +78,20 @@ export async function findChatUsers(query: string): Promise<ChatUser[]> {
 export async function fetchChatConversations(): Promise<ChatConversation[]> {
   const result = await requestJson<{ conversations?: ChatConversation[] }>('/api/chat/conversations');
   return result.conversations ?? [];
+}
+
+export async function fetchChatGlobalTitle(): Promise<string> {
+  const result = await requestJson<{ title?: string }>('/api/chat/global-title');
+  return result.title || 'Ecovacs crew';
+}
+
+export async function updateChatRoomTitle(roomId: string, title: string): Promise<string> {
+  const result = await requestJson<{ title: string }>('/api/chat/admin/room-title', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ roomId, title }),
+  });
+  return result.title;
 }
 
 export async function fetchChatProfile(): Promise<ChatAvatarProfile> {
