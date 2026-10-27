@@ -82,6 +82,11 @@ export interface ChallengeNpcTurn {
   scorePct?: number;
 }
 
+export interface ChallengeNpcStreamCallbacks {
+  onProgress?: (label: string) => void;
+  onDelta?: (text: string) => void;
+}
+
 /** A card pulled from a TCG set (server-decided; image served from /assets/tcg). */
 export interface TcgCard {
   id: string;
@@ -118,6 +123,82 @@ export function getStoredToken(): string | null {
 /** Resolved API origin — shared by other API clients (e.g. roster-sync). */
 export function getApiBase(): string {
   return API_BASE;
+}
+
+async function challengeStream<T>(
+  path: string,
+  payload: unknown,
+  callbacks: ChallengeNpcStreamCallbacks = {},
+): Promise<T> {
+  const headers = new Headers({
+    accept: 'text/event-stream',
+    'content-type': 'application/json',
+  });
+  const token = getStoredToken();
+  if (token) headers.set('authorization', `Bearer ${token}`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error('Network error — is the challenge service reachable?');
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error || `Challenge request failed (${response.status})`);
+  }
+  if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+    return await response.json() as T;
+  }
+  if (!response.body) throw new Error('The challenge stream returned no response body');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: T | null = null;
+  let failure: string | null = null;
+
+  const consumeFrame = (frame: string) => {
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length) return;
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (event === 'progress' && typeof data.label === 'string') callbacks.onProgress?.(data.label);
+    if (event === 'delta' && typeof data.text === 'string') callbacks.onDelta?.(data.text);
+    if (event === 'done') result = data as T;
+    if (event === 'error') failure = typeof data.error === 'string' ? data.error : 'The challenge could not complete this turn';
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? '';
+      frames.forEach(consumeFrame);
+      if (failure) break;
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeFrame(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+  if (failure) throw new Error(failure);
+  if (result !== null) return result;
+  throw new Error('The challenge stream ended before a result was returned');
 }
 
 /** Issue a short-lived, single-use ticket for customer-audio transcription. */
@@ -605,29 +686,23 @@ export async function listCommuneChallengeNpcs(): Promise<CommuneChallengeNpc[]>
   return out.npcs;
 }
 
-export async function startChallengeNpc(npcId: string): Promise<{
+export async function startChallengeNpc(
+  npcId: string,
+  callbacks?: ChallengeNpcStreamCallbacks,
+): Promise<{
   sessionId: string;
   npcName: string;
   turn: ChallengeNpcTurn;
 }> {
-  const token = getStoredToken();
-  return call('/api/commune/challenge/start', {
-    method: 'POST',
-    body: JSON.stringify({ npcId }),
-    token,
-  });
+  return challengeStream('/api/commune/challenge/start', { npcId }, callbacks);
 }
 
 export async function sendChallengeNpcTurn(
   sessionId: string,
   message: string,
+  callbacks?: ChallengeNpcStreamCallbacks,
 ): Promise<{ turn: ChallengeNpcTurn; submitted: boolean }> {
-  const token = getStoredToken();
-  return call('/api/commune/challenge/turn', {
-    method: 'POST',
-    body: JSON.stringify({ sessionId, message }),
-    token,
-  });
+  return challengeStream('/api/commune/challenge/turn', { sessionId, message }, callbacks);
 }
 
 export async function adminListChallengeNpcs(): Promise<ChallengeNpc[]> {

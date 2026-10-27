@@ -1053,18 +1053,42 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   /** Which challenge NPC's chat the E-key opened. */
   const [challengePersona, setChallengePersona] = useState('gb_poolius');
   const [communeChallengeProfiles, setCommuneChallengeProfiles] = useState<CommuneChallengeNpc[]>([]);
-  const challengeNpcs = useMemo(() => [
-    ...CHALLENGE_NPCS,
-    ...communeChallengeProfiles.map((npc, index) => ({
-      personaId: npc.id,
-      name: npc.name,
-      modelNumber: npc.modelNumber,
-      issueType: npc.issueType,
-      hue: hueOf(npc.name),
-      x: 1_400 + (index % 10) * 145,
-      y: 820 + Math.floor(index / 10) * 130,
-    })),
-  ], [communeChallengeProfiles]);
+  const challengeNpcs = useMemo(() => {
+    const profiles = [
+      ...CHALLENGE_NPCS,
+      ...communeChallengeProfiles.map((npc) => ({
+        personaId: npc.id,
+        name: npc.name,
+        modelNumber: npc.modelNumber,
+        issueType: npc.issueType,
+        hue: hueOf(npc.name),
+        x: 0,
+        y: 0,
+      })),
+    ];
+    const placed: typeof profiles = [];
+    for (const npc of profiles) {
+      let position: { x: number; y: number } | null = null;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        const candidate = {
+          x: 100 + Math.random() * (WORLD_W - 200),
+          y: 160 + Math.random() * (WORLD_H - 280),
+        };
+        const clear = canOccupy(candidate.x, candidate.y, 38)
+          && placed.every((other) => Math.hypot(candidate.x - other.x, candidate.y - other.y) >= 190);
+        if (clear) {
+          position = candidate;
+          break;
+        }
+      }
+      position ??= {
+        x: 100 + Math.random() * (WORLD_W - 200),
+        y: 160 + Math.random() * (WORLD_H - 280),
+      };
+      placed.push({ ...npc, ...position });
+    }
+    return placed;
+  }, [communeChallengeProfiles]);
   const challengeNpcsRef = useRef(challengeNpcs);
   challengeNpcsRef.current = challengeNpcs;
   useEffect(() => {
@@ -2719,7 +2743,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const treasureRun = Math.random() < 0.22;
         const pool = treasureRun ? SERENDIPITIES.slice(4) : SERENDIPITIES.slice(0, 4);
         const surprise = pool[Math.floor(Math.random() * pool.length)];
-        const [x, y] = chooseSerendipitySpot(player.x, player.y);
+        const [x, y] = chooseSerendipitySpot(player.x, player.y, challengeNpcsRef.current);
         serendipityRef.current = {
           ...surprise,
           id: ++serendipitySequenceRef.current,
@@ -2742,7 +2766,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           if (Math.abs(duckIncident.x - duckIncident.anchorX) > 64) duckIncident.vx *= -1;
         }
       } else if (wallNow >= nextDuckIncidentAtRef.current) {
-        const [x, y] = chooseSerendipitySpot(player.x, player.y);
+        const [x, y] = chooseSerendipitySpot(player.x, player.y, challengeNpcsRef.current);
         duckIncidentRef.current = {
           id: ++duckIncidentSequenceRef.current,
           x,
@@ -5255,13 +5279,17 @@ function canOccupy(x: number, y: number, radius: number, ignoreCarId?: CommuneCa
   );
 }
 
-function chooseSerendipitySpot(originX: number, originY: number): [number, number] {
+function chooseSerendipitySpot(
+  originX: number,
+  originY: number,
+  challengeNpcs: readonly { x: number; y: number }[] = CHALLENGE_NPCS,
+): [number, number] {
   for (let attempt = 0; attempt < 24; attempt++) {
     const angle = Math.random() * Math.PI * 2;
     const distance = 120 + Math.random() * 190;
     const x = Math.round((originX + Math.cos(angle) * distance) / 4) * 4;
     const y = Math.round((originY + Math.sin(angle) * distance) / 4) * 4;
-    const nearChallenge = CHALLENGE_NPCS.some((npc) => Math.hypot(x - npc.x, y - npc.y) < 130);
+    const nearChallenge = challengeNpcs.some((npc) => Math.hypot(x - npc.x, y - npc.y) < 130);
     const nearProp = COMMUNE_PROPS.some((prop) => Math.hypot(x - prop.x, y - prop.y) < 115);
     const nearObject = WORLD_OBJECTS.some((object) => Math.hypot(x - object.x, y - object.y) < 100);
     if (canOccupy(x, y, 28) && !nearChallenge && !nearProp && !nearObject) return [x, y];

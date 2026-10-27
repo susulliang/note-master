@@ -15,6 +15,7 @@ import {
   startChallengeNpc,
   submitTestAward,
   type ChallengeMessage,
+  type ChallengeNpcStreamCallbacks,
   type ChallengeTurn as ApiChallengeTurn,
 } from '@/lib/auth-client';
 import { kittyChat, type ChatMsg } from '@/lib/kitty-help';
@@ -124,6 +125,8 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
   const [resultSubmitted, setResultSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [thinkingLabel, setThinkingLabel] = useState('');
+  const [streamingMessage, setStreamingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -255,18 +258,26 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
     setError(null);
     setAwarded(null);
     setResultSubmitted(false);
+    setThinkingLabel(customNpc ? 'Finding verified support guidance…' : '');
+    setStreamingMessage('');
     if (customNpc) {
       setSessionId(null);
       setLog([]);
       setTurn(null);
       try {
-        const result = await startChallengeNpc(personaId);
+        const callbacks: ChallengeNpcStreamCallbacks = {
+          onProgress: setThinkingLabel,
+          onDelta: setStreamingMessage,
+        };
+        const result = await startChallengeNpc(personaId, callbacks);
         setSessionId(result.sessionId);
         setLog([{ role: 'npc', content: result.turn.message }]);
         setTurn(result.turn);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Could not start this challenge');
       } finally {
+        setThinkingLabel('');
+        setStreamingMessage('');
         setBusy(false);
       }
       return;
@@ -278,6 +289,7 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
       agent_choices: Array.isArray(initial.agent_choices) ? initial.agent_choices.map(String) : [],
       status: 'ongoing',
     });
+    setThinkingLabel('');
     setBusy(false);
     speak();
   }, [speak, persona, personaId, customNpc]);
@@ -299,13 +311,19 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
     const history = [...log];
     setLog([...history, { role: 'agent', content: choice }]);
     if (customNpc) {
+      setThinkingLabel('The NPC is thinking…');
+      setStreamingMessage('');
       try {
         if (!sessionId) throw new Error('Challenge session expired. Restart this NPC challenge.');
-        const result = await sendChallengeNpcTurn(sessionId, choice);
+        const callbacks: ChallengeNpcStreamCallbacks = {
+          onProgress: setThinkingLabel,
+          onDelta: setStreamingMessage,
+        };
+        const result = await sendChallengeNpcTurn(sessionId, choice, callbacks);
         setLog([...history, { role: 'agent', content: choice }, { role: 'npc', content: result.turn.message }]);
         setTurn(result.turn);
         setResultSubmitted(result.submitted);
-        if (result.submitted) {
+        if (result.submitted && result.turn.status === 'success') {
           try {
             const award = await submitTestAward(`commune-npc:${personaId}`, result.turn.scorePct ?? 0);
             if (award.spice > 0) {
@@ -320,6 +338,8 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
         setError(cause instanceof Error ? cause.message : 'The challenge engine did not respond');
         setLog(history);
       } finally {
+        setThinkingLabel('');
+        setStreamingMessage('');
         setBusy(false);
       }
       return;
@@ -429,7 +449,15 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
           ))}
           {busy && (
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> {displayName} is thinking…
+              <Loader2 className="size-3.5 animate-spin" /> {thinkingLabel || `${displayName} is thinking…`}
+            </div>
+          )}
+          {customNpc && busy && streamingMessage && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] whitespace-pre-wrap rounded-xl rounded-bl-sm border border-border/60 bg-background/60 px-3 py-2 text-sm leading-relaxed text-foreground">
+                <p className="mb-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">{displayName}</p>
+                {streamingMessage}<span className="animate-pulse text-accent">▋</span>
+              </div>
             </div>
           )}
           {!busy && speaking && (
@@ -463,7 +491,11 @@ export default function ChallengePanel({ personaId, npcName, onSpiceChange, onCl
           )}
           {turn?.status === 'fail' && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
-              {customNpc ? `${displayName} ended the conversation.` : `${displayName} hung up on you.`}
+              {customNpc
+                ? resultSubmitted
+                  ? `${displayName} gave up. Challenge failed; score ${turn.scorePct ?? 0}/100 was saved.`
+                  : `${displayName} ended the conversation.`
+                : `${displayName} hung up on you.`}
               {!customNpc && <StarRow stars={turn.stars ?? 0} />}
             </div>
           )}
