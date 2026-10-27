@@ -738,10 +738,39 @@ export interface CommonIssuesReport {
 }
 
 /**
+ * Reduces a raw AMR model string to its series group label:
+ * - "MAX" right after the series number starts a separate group (DEEBOT T50 vs
+ *   DEEBOT T50 MAX); the PLUS variant ("T90 MAX PLUS OMNI …") stays inside the
+ *   MAX group.
+ * - An S suffix separates a series (DEEBOT X11S vs DEEBOT X11, T90S vs T90).
+ * - Everything after the group token — colors, CARE, NEW, OMNI, "Renewed …
+ *   Con." condition labels — is a variant suffix and does not split groups.
+ * - Bare T- and X-series names ("T90 MAX OMNI Black NEW") are DEEBOTs; GOAT
+ *   and YEEDI keep their brand prefix.
+ */
+function commonIssuesSeriesGroup(raw: string): string {
+  const name = raw.trim();
+  let brand = 'DEEBOT';
+  let rest = name;
+  const brandMatch = rest.match(/^(DEEBOT|GOAT|YEEDI)\s+/i);
+  if (brandMatch) {
+    brand = brandMatch[1]!.toUpperCase();
+    rest = rest.slice(brandMatch[0].length);
+  } else if (!/^[TX]\d/i.test(rest)) {
+    return name; // unknown brand without a bare T/X series — keep as-is
+  }
+  const m = rest.match(/^([TXOA])(\d{1,4})(S)?/i);
+  if (!m) return name;
+  const tail = rest.slice(m[0].length).trim();
+  const isMax = /^MAX(\s+PLUS)?\b/i.test(tail);
+  return `${brand} ${m[1]!.toUpperCase()}${m[2]}${(m[3] ?? '').toUpperCase()}${isMax ? ' MAX' : ''}`;
+}
+
+/**
  * Parses the "common issues common models" export: open AMR-Repair cases this
- * month for the popular model series, aggregated as model → issue-type counts.
- * Only counts are produced — no case owners, accounts, or subjects — so the
- * output is safe for the publicly readable R2 snapshot.
+ * month for the popular model series, aggregated as series group → issue-type
+ * counts. Only counts are produced — no case owners, accounts, or subjects —
+ * so the output is safe for the publicly readable R2 snapshot.
  *
  * The export is a grouped Salesforce report: the model cell prints only on the
  * first row of each model group and the issue cell only when the issue subgroup
@@ -764,7 +793,7 @@ export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): 
   if (modelCol === -1 || issueCol === -1) throw new Error(`Common-issues columns not found in ${fileName}`);
 
   const byModel = new Map<string, Map<string, number>>();
-  let currentModel = '';
+  let currentGroup = '';
   let currentIssue = '';
   let grandTotal: number | null = null;
 
@@ -782,16 +811,16 @@ export function parseCommonIssuesWorkbook(data: ArrayBuffer, fileName: string): 
     }
     if (/^(subtotal|total)$/i.test(modelCell) || /^subtotal$/i.test(issueCell)) continue;
     if (modelCell) {
-      currentModel = modelCell;
+      currentGroup = commonIssuesSeriesGroup(modelCell);
       currentIssue = issueCell; // reset on model change; may be blank (Unclassified)
     } else if (issueCell) {
       currentIssue = issueCell;
     }
-    if (!currentModel) continue;
-    let issues = byModel.get(currentModel);
+    if (!currentGroup) continue;
+    let issues = byModel.get(currentGroup);
     if (!issues) {
       issues = new Map();
-      byModel.set(currentModel, issues);
+      byModel.set(currentGroup, issues);
     }
     const key = currentIssue || 'Unclassified';
     issues.set(key, (issues.get(key) ?? 0) + 1);

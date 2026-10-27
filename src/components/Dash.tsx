@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid,
   Cell,
+  Pie,
+  PieChart,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
@@ -10,6 +12,7 @@ import {
   XAxis,
   YAxis,
   ZAxis,
+  type PieLabelRenderProps,
   type TooltipProps,
 } from 'recharts';
 import {
@@ -37,7 +40,7 @@ import { useDailiesReport } from '@/hooks/use-dailies-report';
 import { useResponseTimeReport } from '@/hooks/use-response-time-report';
 import { useDsatsReport } from '@/hooks/use-dsats-report';
 import { useCommonIssuesReport } from '@/hooks/use-common-issues-report';
-import { fetchDashboardData, type DsatsCase, type HistoricalAgent, type MoneyGoHighKpi, type MoneyGoHighReport, type OneTouchChannel, type ResponseTimeReport } from '@/lib/sf-reports';
+import { fetchDashboardData, type CommonIssuesReport, type DsatsCase, type HistoricalAgent, type MoneyGoHighKpi, type MoneyGoHighReport, type OneTouchChannel, type ResponseTimeReport } from '@/lib/sf-reports';
 import {
   Dialog,
   DialogContent,
@@ -1135,32 +1138,105 @@ function DsatsWidget({
   );
 }
 
-const COMMON_ISSUES_VISIBLE_ISSUES = 10;
+const COMMON_ISSUES_CHARTS = 3;
+const COMMON_ISSUES_PIE_SLICES = 6;
+
+/** Donut palette tuned for the GitHub-dark glass theme; "Other" slices stay neutral. */
+const ISSUE_PIE_COLORS = ['#58a6ff', '#3fb950', '#a371f7', '#f78166', '#39c5cf', '#d29922'];
+const ISSUE_PIE_OTHER_COLOR = '#6e7681';
+
+const shortenIssueLabel = (name: string, max = 20) => (name.length > max ? `${name.slice(0, max - 1)}…` : name);
+
+function renderIssuePieLabel(props: PieLabelRenderProps) {
+  const { x, y, textAnchor, name, percent } = props;
+  const value = Number(props.value ?? 0);
+  const pct = typeof percent === 'number' ? (percent * 100).toFixed(1) : '0.0';
+  const anchor = textAnchor === 'end' || textAnchor === 'middle' ? textAnchor : 'start';
+  return (
+    <text x={x} y={y} textAnchor={anchor} dominantBaseline="central" fontSize={9} className="fill-muted-foreground">
+      {`${shortenIssueLabel(String(name))} ${value} (${pct}%)`}
+    </text>
+  );
+}
+
+/** One donut: a model series' issue-type distribution (top slices + "Other"). */
+function ModelIssueDonut({ model }: { model: CommonIssuesReport['models'][number] }) {
+  const top = model.issues.slice(0, COMMON_ISSUES_PIE_SLICES);
+  const otherCount = model.issues.slice(COMMON_ISSUES_PIE_SLICES).reduce((sum, item) => sum + item.count, 0);
+  const data = [
+    ...top.map((item) => ({ name: item.issue, count: item.count })),
+    ...(otherCount > 0 ? [{ name: 'Other', count: otherCount }] : []),
+  ];
+  return (
+    <div className="glass-panel min-w-0 rounded-lg p-2.5">
+      <p className="truncate text-center text-[11px] font-semibold text-foreground" title={model.model}>{model.model}</p>
+      <div className="relative mx-auto mt-1 h-[176px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="count"
+              nameKey="name"
+              innerRadius="52%"
+              outerRadius="70%"
+              paddingAngle={1.5}
+              stroke="none"
+              isAnimationActive={false}
+              label={renderIssuePieLabel}
+              labelLine={{ stroke: 'hsl(215 12% 45%)', strokeWidth: 1 }}
+            >
+              {data.map((entry, index) => (
+                <Cell key={entry.name} fill={index < top.length ? ISSUE_PIE_COLORS[index % ISSUE_PIE_COLORS.length] : ISSUE_PIE_OTHER_COLOR} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="font-mono text-lg font-bold tabular-nums text-foreground">{model.total}</span>
+          <span className="text-[8px] uppercase tracking-wider text-muted-foreground">cases</span>
+        </div>
+      </div>
+      {model.issues[0] && (
+        <p className="mt-1 truncate text-center text-[9px] text-muted-foreground" title={model.issues[0].issue}>
+          Top: {model.issues[0].issue} ({model.issues[0].count})
+        </p>
+      )}
+    </div>
+  );
+}
 
 /**
  * Overview widget for the "common issues common models" export: open
- * AMR-Repair cases this month, indexed by model then issue type. Left column
- * ranks the models; the right column breaks the selected model down by issue.
+ * AMR-Repair cases this month, indexed by model series group then issue type.
+ * Left: ranked series list (click to pin). Right: up to three donut charts —
+ * the top three series by default — breaking each series down by issue type.
  */
 function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['commonIssues']['state'] }) {
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[] | null>(null);
   const report = state.status === 'ready' ? state.report : null;
   const models = report?.models ?? [];
 
-  const active = useMemo(() => {
-    if (models.length === 0) return null;
-    return models.find((model) => model.model === selectedModel) ?? models[0]!;
-  }, [models, selectedModel]);
+  const charted = useMemo(() => {
+    if (picked && picked.length > 0) {
+      return picked
+        .map((name) => models.find((model) => model.model === name))
+        .filter((model): model is CommonIssuesReport['models'][number] => Boolean(model));
+    }
+    return models.slice(0, COMMON_ISSUES_CHARTS);
+  }, [models, picked]);
 
-  const topIssues = active ? active.issues.slice(0, COMMON_ISSUES_VISIBLE_ISSUES) : [];
-  const otherIssuesCount = active
-    ? active.issues.length - topIssues.length
-    : 0;
-  const otherIssuesCases = active
-    ? active.issues.slice(COMMON_ISSUES_VISIBLE_ISSUES).reduce((sum, item) => sum + item.count, 0)
-    : 0;
+  // Click a series to pin its donut; picking a fourth replaces the oldest
+  // selection, clicking a pinned series unpins it (empty selection reverts
+  // to the default top three).
+  const toggleModel = (name: string) => {
+    setPicked((current) => {
+      const base = current ?? models.slice(0, COMMON_ISSUES_CHARTS).map((model) => model.model);
+      if (base.includes(name)) return base.filter((item) => item !== name);
+      return base.length >= COMMON_ISSUES_CHARTS ? [...base.slice(1), name] : [...base, name];
+    });
+  };
+
   const maxModelTotal = models[0]?.total ?? 1;
-  const maxIssueCount = topIssues[0]?.count ?? 1;
 
   return (
     <section className={cn(PANEL, 'p-4 sm:p-5')}>
@@ -1170,7 +1246,7 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
             <Wrench className="size-4 text-amber-300" />
             Common issues · Common models
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Open AMR-Repair cases MTD · indexed by model, then issue type</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Open AMR-Repair cases MTD · indexed by model series, then issue type</p>
         </div>
         <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-amber-200">
           {report?.total ?? 0} cases
@@ -1179,69 +1255,63 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
       {report?.asOf && <p className="mt-1 text-[10px] text-muted-foreground">As of {report.asOf}</p>}
 
       {state.status === 'loading' ? (
-        <div className="mt-4 flex min-h-[12rem] items-center justify-center text-sm text-muted-foreground">Loading common issues…</div>
+        <div className="mt-4 flex min-h-[14rem] items-center justify-center text-sm text-muted-foreground">Loading common issues…</div>
       ) : state.status === 'error' ? (
-        <div className="mt-4 flex min-h-[12rem] items-center justify-center px-4 text-center text-xs text-rose-300">{state.message}</div>
-      ) : !active ? (
-        <div className="mt-4 flex min-h-[12rem] items-center justify-center px-4 text-center text-xs text-muted-foreground">No open repair cases this month. 🎉</div>
+        <div className="mt-4 flex min-h-[14rem] items-center justify-center px-4 text-center text-xs text-rose-300">{state.message}</div>
+      ) : models.length === 0 ? (
+        <div className="mt-4 flex min-h-[14rem] items-center justify-center px-4 text-center text-xs text-muted-foreground">No open repair cases this month. 🎉</div>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
           <div className="glass-panel rounded-lg p-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Models · {models.length}</p>
-            <div className="mt-2 max-h-[18rem] space-y-1 overflow-y-auto pr-1">
-              {models.map((model, index) => (
-                <button
-                  key={model.model}
-                  type="button"
-                  onClick={() => setSelectedModel(model.model)}
-                  aria-pressed={active.model === model.model}
-                  className={cn(
-                    'block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
-                    active.model === model.model ? 'bg-accent/15' : 'hover:bg-border/30',
-                  )}
-                >
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground" title={model.model}>{model.model}</span>
-                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-amber-300">{model.total}</span>
-                  </div>
-                  <div className="mt-0.5 ml-6 h-1 overflow-hidden rounded-full bg-border/40">
-                    <div
-                      className={cn('h-full rounded-full', active.model === model.model ? 'bg-accent' : 'bg-amber-400/60')}
-                      style={{ width: `${Math.max(3, (model.total / maxModelTotal) * 100)}%` }}
-                    />
-                  </div>
-                </button>
-              ))}
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Model series · {models.length}</p>
+            <div className="mt-2 max-h-[20rem] space-y-1 overflow-y-auto pr-1">
+              {models.map((model, index) => {
+                const pinIndex = charted.findIndex((entry) => entry.model === model.model);
+                return (
+                  <button
+                    key={model.model}
+                    type="button"
+                    onClick={() => toggleModel(model.model)}
+                    aria-pressed={pinIndex !== -1}
+                    title={pinIndex !== -1 ? 'Pinned — click to unpin' : 'Pin this series as a donut chart'}
+                    className={cn(
+                      'block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                      pinIndex !== -1 ? 'bg-accent/15 ring-1 ring-accent/40' : 'hover:bg-border/30',
+                    )}
+                  >
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="w-4 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
+                      <span className={cn('min-w-0 flex-1 truncate text-[11px] font-medium', pinIndex !== -1 ? 'text-accent' : 'text-foreground')} title={model.model}>{model.model}</span>
+                      {pinIndex !== -1 && <span className="shrink-0 rounded bg-accent/20 px-1 font-mono text-[9px] leading-4 text-accent">{pinIndex + 1}</span>}
+                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-amber-300">{model.total}</span>
+                    </div>
+                    <div className="mt-0.5 ml-5 h-1 overflow-hidden rounded-full bg-border/40">
+                      <div
+                        className={cn('h-full rounded-full', pinIndex !== -1 ? 'bg-accent' : 'bg-amber-400/60')}
+                        style={{ width: `${Math.max(3, (model.total / maxModelTotal) * 100)}%` }}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <div className="glass-panel min-w-0 rounded-lg p-2.5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="min-w-0 truncate text-xs font-semibold text-foreground" title={active.model}>{active.model}</p>
-              <p className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                {active.total} cases · {((active.total / Math.max(1, report?.total ?? active.total)) * 100).toFixed(1)}% of open cases · {active.issues.length} issue types
-              </p>
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {topIssues.map((item) => (
-                <div key={item.issue} className="min-w-0">
-                  <div className="flex items-baseline justify-between gap-2 text-[11px]">
-                    <span className="truncate text-foreground" title={item.issue}>{item.issue}</span>
-                    <span className="shrink-0 font-mono tabular-nums text-amber-300">{item.count}</span>
-                  </div>
-                  <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-border/40">
-                    <div className="h-full rounded-full bg-amber-400/80" style={{ width: `${(item.count / maxIssueCount) * 100}%` }} />
-                  </div>
+          <div className="min-w-0">
+            {charted.length === 0 ? (
+              <div className="flex h-full min-h-[14rem] items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                Select up to {COMMON_ISSUES_CHARTS} model series on the left to chart their issue mix.
+              </div>
+            ) : (
+              <>
+                <div className={cn('grid grid-cols-1 gap-3', charted.length > 1 ? 'sm:grid-cols-2 xl:grid-cols-3' : 'sm:grid-cols-2')}>
+                  {charted.map((model) => <ModelIssueDonut key={model.model} model={model} />)}
                 </div>
-              ))}
-              {otherIssuesCount > 0 && (
-                <div className="flex items-baseline justify-between gap-2 pt-1 text-[10px] text-muted-foreground">
-                  <span>{otherIssuesCount} more issue types</span>
-                  <span className="font-mono tabular-nums">{otherIssuesCases} cases</span>
-                </div>
-              )}
-            </div>
-            <p className="mt-3 truncate text-[9px] text-muted-foreground" title={report?.fileName}>{report?.fileName}</p>
+                <p className="mt-2 text-[9px] text-muted-foreground">
+                  Donuts show the top {COMMON_ISSUES_PIE_SLICES} issue types per series; the remainder is grouped as "Other". Click series on the left to pin up to {COMMON_ISSUES_CHARTS} charts.
+                </p>
+              </>
+            )}
+            <p className="mt-1 truncate text-[9px] text-muted-foreground" title={report?.fileName}>{report?.fileName}</p>
           </div>
         </div>
       )}
