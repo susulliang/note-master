@@ -70,9 +70,22 @@ function colorForCode(code: string): string {
   return '#94a3b8';
 }
 
+function textColorForShift(hex: string): string {
+  const rgb = /^#([0-9a-f]{6})$/i.exec(hex)?.[1] ?? '94a3b8';
+  const linear = [0, 2, 4].map((offset) => {
+    const channel = parseInt(rgb.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  return luminance > 0.22 ? '#111827' : '#ffffff';
+}
+
 function hexAlpha(hex: string, alpha: string): string {
   return `${hex}${alpha}`;
 }
+
+type ShiftChange = { en: string; iso: string; code: string };
+type GridPoint = { row: number; col: number };
 
 /* ------------------------------- date helpers ------------------------------ */
 
@@ -364,6 +377,7 @@ export default function ShiftsWorkspace() {
   const { user: authUser } = useAuth();
   const [d1Status, setD1Status] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const d1MonthRef = useRef<Map<string, boolean>>(new Map());
+  const d1SyncQueueRef = useRef<Map<string, Promise<boolean>>>(new Map());
   const monthKey = `${year}-${String(month).padStart(2, '0')}`;
   const dim = daysInMonth(year, month);
   const dayList = useMemo(() => Array.from({ length: dim }, (_, i) => i + 1), [dim]);
@@ -402,30 +416,53 @@ export default function ShiftsWorkspace() {
     };
   }, [monthKey, authUser]);
 
-  const setShift = (en: string, iso: string, code: string) => {
-    setEdits((prev) => ({ ...prev, [`${en}|${iso}`]: code }));
+  const applyShiftChanges = (changes: ShiftChange[]) => {
+    if (changes.length === 0) return;
+    const updates = new Map(changes.map(({ en, iso, code }) => [`${en}|${iso}`, code]));
+    setEdits((prev) => ({ ...prev, ...Object.fromEntries(updates) }));
     if (!authUser?.canAccessAdmin || ROSTER.length === 0) return;
-    if (d1MonthRef.current.get(monthKey) === false) {
-      // First submit for this month → upload the entire table.
-      setD1Status('syncing');
-      const agents = ROSTER.map((a) => ({
-        en: a.en,
-        shifts: Object.fromEntries(
-          dayList.map((d) => {
-            const key = isoOf(year, month, d);
-            return [key, d === Number(iso.slice(-2)) && a.en === en ? code : edits[`${a.en}|${key}`] ?? a.shifts[key] ?? ''];
-          })
-        ),
-      }));
-      void pushRosterFull(monthKey, agents).then((ok) => {
-        if (ok) d1MonthRef.current.set(monthKey, true);
-        setD1Status(ok ? 'ok' : 'error');
-      });
-    } else {
-      setD1Status('syncing');
-      void pushRosterCell(monthKey, en, iso, code).then((ok) => setD1Status(ok ? 'ok' : 'error'));
-    }
+
+    // Serialize writes for a month so a first-time full snapshot cannot race
+    // with later cell updates from the same batch or a subsequent edit.
+    const previous = d1SyncQueueRef.current.get(monthKey) ?? Promise.resolve(true);
+    const queued = previous
+      .catch(() => false)
+      .then(async () => {
+        setD1Status('syncing');
+        if (d1MonthRef.current.get(monthKey) === false) {
+          const roster = ROSTER.map((a) => ({
+            en: a.en,
+            shifts: Object.fromEntries(
+              dayList.map((d) => {
+                const iso = isoOf(year, month, d);
+                const key = `${a.en}|${iso}`;
+                return [iso, updates.get(key) ?? edits[key] ?? d1Overlay[key] ?? a.shifts[iso] ?? ''];
+              })
+            ),
+          }));
+          const ok = await pushRosterFull(monthKey, roster);
+          if (ok) d1MonthRef.current.set(monthKey, true);
+          return ok;
+        }
+        const results = await Promise.all(
+          changes.map(({ en, iso, code }) => pushRosterCell(monthKey, en, iso, code))
+        );
+        return results.every(Boolean);
+      })
+      .then(
+        (ok) => {
+          setD1Status(ok ? 'ok' : 'error');
+          return ok;
+        },
+        () => {
+          setD1Status('error');
+          return false;
+        }
+      );
+    d1SyncQueueRef.current.set(monthKey, queued);
   };
+  const setShift = (en: string, iso: string, code: string) =>
+    applyShiftChanges([{ en, iso, code }]);
 
   /* ---------------- XLSX export ---------------- */
   const downloadXlsx = () => {
@@ -540,7 +577,7 @@ export default function ShiftsWorkspace() {
       ) : agent ? (
         <AgentMonthView agent={agent} year={year} month={month} shiftOf={shiftOf} setShift={setShift} />
       ) : (
-        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} setShift={setShift} agents={ROSTER} />
+        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} applyShiftChanges={applyShiftChanges} agents={ROSTER} />
       )}
     </div>
   );
@@ -589,16 +626,58 @@ function RosterGrid({
   month,
   dayList,
   shiftOf,
-  setShift,
+  applyShiftChanges,
   agents,
 }: {
   year: number;
   month: number;
   dayList: number[];
   shiftOf: (a: RosterAgent, iso: string) => string;
-  setShift: (en: string, iso: string, code: string) => void;
+  applyShiftChanges: (changes: ShiftChange[]) => void;
   agents: RosterAgent[];
 }) {
+  const [selection, setSelection] = useState<{ anchor: GridPoint; focus: GridPoint } | null>(null);
+  const selectingRef = useRef(false);
+  useEffect(() => {
+    const stopSelecting = () => {
+      selectingRef.current = false;
+    };
+    window.addEventListener('pointerup', stopSelecting);
+    window.addEventListener('pointercancel', stopSelecting);
+    return () => {
+      window.removeEventListener('pointerup', stopSelecting);
+      window.removeEventListener('pointercancel', stopSelecting);
+    };
+  }, []);
+
+  const selectedCells = useMemo(() => {
+    if (!selection) return [];
+    const minRow = Math.min(selection.anchor.row, selection.focus.row);
+    const maxRow = Math.max(selection.anchor.row, selection.focus.row);
+    const minCol = Math.min(selection.anchor.col, selection.focus.col);
+    const maxCol = Math.max(selection.anchor.col, selection.focus.col);
+    const cells: GridPoint[] = [];
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) cells.push({ row, col });
+    }
+    return cells;
+  }, [selection]);
+  const selectedKeys = useMemo(
+    () => new Set(selectedCells.map(({ row, col }) => `${row}:${col}`)),
+    [selectedCells]
+  );
+  const applySelectedShift = (code: string) => {
+    if (selectedCells.length === 0) return;
+    applyShiftChanges(
+      selectedCells.map(({ row, col }) => ({
+        en: agents[row].en,
+        iso: isoOf(year, month, dayList[col]),
+        code,
+      }))
+    );
+    setSelection(null);
+  };
+
   /** LIVE day totals — recomputed from the (locally edited) roster so the
    *  counter rows stay in sync with every change, like the sheet formulas. */
   const totals = useMemo(
@@ -702,6 +781,32 @@ function RosterGrid({
           onReset={resetBreaks}
         />
       )}
+      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-border/60 bg-card/50 px-2 py-1">
+        <span className="text-[10px] text-muted-foreground">
+          {selectedCells.length > 0
+            ? `${selectedCells.length} cell${selectedCells.length === 1 ? '' : 's'} selected`
+            : 'Drag across the grid to select cells'}
+        </span>
+        <select
+          aria-label="Apply shift to selected cells"
+          value=""
+          disabled={selectedCells.length === 0}
+          onChange={(e) => {
+            if (e.target.value) applySelectedShift(e.target.value === '__clear__' ? '' : e.target.value);
+          }}
+          className="ml-auto h-7 max-w-[190px] rounded-md border border-border bg-background px-2 text-[10px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+        >
+          <option value="" disabled>
+            {selectedCells.length > 0 ? 'Assign selected shifts…' : 'Select cells first…'}
+          </option>
+          <option value="__clear__">Clear shift</option>
+          {SHIFT_CATALOG.map((shift) => (
+            <option key={shift.code} value={shift.code}>
+              {shift.code} · {shift.time}
+            </option>
+          ))}
+        </select>
+      </div>
       <div ref={scrollRef} className="custom-scrollbar relative min-h-0 flex-1 overflow-auto rounded-xl border border-border/70 bg-card/40">
       <table className="w-full border-separate border-spacing-0 text-[10px]">
         <thead>
@@ -737,35 +842,61 @@ function RosterGrid({
           </tr>
         </thead>
         <tbody>
-          {agents.map((a) => (
+          {agents.map((a, rowIndex) => (
             <tr key={a.hr} className="group/row">
               <td
                 onClick={(e) => onAgentClick(a.en, e.currentTarget.closest('tr'))}
-                title="Click to pin this agent's row to the top (click again to restore)"
-                className="sticky left-0 z-10 cursor-pointer border-b border-r border-border/50 bg-card/90 px-2 py-1 backdrop-blur group-hover/row:bg-accent/10"
+                title={`${a.zh} · Click to pin this agent's row to the top (click again to restore)`}
+                className="sticky left-0 z-10 cursor-pointer whitespace-nowrap border-b border-r border-border/50 bg-card/90 px-2 py-0.5 backdrop-blur group-hover/row:bg-accent/10"
               >
-                <div className="flex items-baseline gap-1.5">
-                  <span className="truncate text-[11px] font-bold">{a.en}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="max-w-[150px] truncate text-[11px] font-bold">{a.en}</span>
                   <span className="shrink-0 rounded bg-primary/15 px-1 text-[8px] font-bold text-primary">
                     {a.skill}
                   </span>
                 </div>
-                <span className="text-[9px] text-muted-foreground">{a.zh}</span>
               </td>
-              {dayList.map((d) => {
+              {dayList.map((d, col) => {
                 const iso = isoOf(year, month, d);
                 const code = shiftOf(a, iso);
                 const weekend = [0, 6].includes(new Date(year, month - 1, d).getDay());
+                const point = { row: rowIndex, col };
+                const isSelected = selectedKeys.has(`${point.row}:${point.col}`);
+                const shiftColor = colorForCode(code);
                 return (
-                  <td key={d} className={cn('border-b border-border/30 p-[2px]', weekend && 'bg-white/[0.02]')}>
-                    {code ? (
-                      <ShiftCell
-                        code={code}
-                        onPick={(next) => setShift(a.en, iso, next)}
-                      />
-                    ) : (
-                      <div className="h-[22px]" />
-                    )}
+                  <td
+                    key={d}
+                    className="h-6 border-b border-border/30 p-0"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.preventDefault();
+                      selectingRef.current = true;
+                      setSelection({ anchor: point, focus: point });
+                    }}
+                    onPointerEnter={() => {
+                      if (selectingRef.current) {
+                        setSelection((current) =>
+                          current ? { ...current, focus: point } : { anchor: point, focus: point }
+                        );
+                      }
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`${a.en}, ${iso}: ${code || 'no shift'}`}
+                      aria-pressed={isSelected}
+                      title={`${a.en} · ${iso} · ${code || 'No shift'}`}
+                      className={cn(
+                        'flex h-6 w-full select-none items-center justify-center border-0 px-0.5 font-mono text-[9px] font-bold leading-none outline-none',
+                        !code && weekend && 'bg-white/[0.025]',
+                        isSelected && 'relative z-[1] ring-2 ring-inset ring-primary',
+                        'focus-visible:relative focus-visible:z-[2] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary'
+                      )}
+                      style={code ? { backgroundColor: shiftColor, color: textColorForShift(shiftColor) } : undefined}
+                      onDragStart={(e) => e.preventDefault()}
+                    >
+                      <span className="truncate">{code}</span>
+                    </button>
                   </td>
                 );
               })}
