@@ -21,6 +21,7 @@ import {
   type CommuneRoomLoadout,
 } from './commune-room';
 import { RosterRoom, type RosterCell } from './roster-room';
+import { handleChatApi } from './chat-api';
 import { handleAsk } from './ask';
 import {
   handleKbCreate,
@@ -37,6 +38,8 @@ import {
 
 export { CommuneRoom } from './commune-room';
 export { RosterRoom } from './roster-room';
+export { ChatRoom } from './chat-room';
+export { ChatStickerPack } from './chat-sticker-pack';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -3822,10 +3825,18 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (request.method === 'OPTIONS') {
     const preflight = new Response(null, { status: 204 });
     preflight.headers.set('access-control-allow-origin', '*');
-    preflight.headers.set('access-control-allow-headers', 'content-type, authorization');
+    preflight.headers.set(
+      'access-control-allow-headers',
+      'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
+    );
     preflight.headers.set('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
     preflight.headers.set('access-control-max-age', '86400');
     return preflight;
+  }
+  if (path.startsWith('/api/chat/')) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleChatApi(request, env, user);
   }
   if (path === '/api/llm/models' && request.method === 'GET') return handleLlmModels(request, env);
   if (path === '/api/llm/chat' && request.method === 'POST') return handleLlmChat(request, env);
@@ -4406,6 +4417,23 @@ export default {
         return new Response('Roster room is temporarily unavailable', { status: 503 });
       }
     }
+    if (url.pathname === '/api/chat/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      const roomId = url.searchParams.get('roomId') ?? '';
+      if (
+        roomId !== 'global' &&
+        !/^dm-[0-9a-f]{64}$/.test(roomId) &&
+        !/^group-[0-9a-f-]{36}$/.test(roomId)
+      ) {
+        return new Response('Invalid chat room', { status: 400 });
+      }
+      try {
+        return await env.CHAT_ROOM.getByName(roomId).fetch(request);
+      } catch {
+        return new Response('Chat room is temporarily unavailable', { status: 503 });
+      }
+    }
     if (url.pathname === '/api/call-transcription/socket') {
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
         return new Response('WebSocket upgrade required', { status: 426 });
@@ -4421,6 +4449,7 @@ export default {
       url.pathname === '/api/ticket-notes' ||
       url.pathname.startsWith('/api/admin/') ||
       url.pathname.startsWith('/api/roster') ||
+      url.pathname.startsWith('/api/chat/') ||
       url.pathname.startsWith('/api/pet') ||
       url.pathname.startsWith('/api/store') ||
       url.pathname.startsWith('/api/cards') ||

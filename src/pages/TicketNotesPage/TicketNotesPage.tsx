@@ -15,11 +15,15 @@ const CUSTOMER_CLOUD_TRANSCRIPTION_KEY = 'ecv.customerCloudTranscription';
 const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
 const WORKSPACE_PATHS: Record<WorkView, string> = {
   commune: '/commune',
+  chat: '/chat',
   callNotes: '/notes',
   caseTrak: '/cases',
   dash: '/insights',
   shifts: '/schedule',
   selfTest: '/learn',
+  settings: '/settings',
+  admin: '/admin',
+  login: '/login',
 };
 
 function workspaceFromPath(pathname: string): WorkView {
@@ -103,12 +107,12 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import RailControls from '@/components/FloatingControls';
+import ChatNotificationBanner from '@/components/ChatNotificationBanner';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/components/FlowchartCanvas';
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
-import AuthPanel from '@/components/AuthPanel';
 import { useAuth } from '@/lib/auth-context';
 import {
   getStoredToken,
@@ -143,7 +147,6 @@ import { useScopedState } from '@/hooks/use-scoped-state';
 import { CAT_SELECTION_STORAGE_KEY, normalizeCatId, type CatId } from '@/lib/cat-sprites';
 import {
   normalizeTheme,
-  nextTheme,
   getThemeMeta,
   NARROW_SCREEN_WIDTH,
   type ThemeId,
@@ -166,7 +169,10 @@ import type { NodeType, QuickTextGroup } from '@/components/FlowNode';
 import type { TemplateEntry } from '@/lib/amr-templates';
 
 const OutputModal = lazy(() => import('@/components/OutputModal'));
-const AdminPanel = lazy(() => import('@/components/AdminPanel'));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const AdminPage = lazy(() => import('@/pages/AdminPage'));
+const LoginPage = lazy(() => import('@/pages/LoginPage'));
+const ChatPage = lazy(() => import('@/pages/ChatPage'));
 const KittyHelpWorkspace = lazy(() => import('@/components/KittyHelpWorkspace'));
 const GbuPopup = lazy(() => import('@/components/GbuPopup'));
 const TemplatePanel = lazy(() => import('@/components/TemplatePanel'));
@@ -966,8 +972,6 @@ export default function TicketNotesPage() {
     resolving: authResolving,
     setSpice: setAuthSpice,
   } = useAuth();
-  const [authPanelOpen, setAuthPanelOpen] = useState(false);
-  const authRequired = !authResolving && !authUser;
   const signedInUsername = authUser?.username ?? null;
   const navigateToView = useCallback((view: WorkView) => {
     setWorkView(view);
@@ -1010,16 +1014,24 @@ export default function TicketNotesPage() {
     setKittyModel(model);
     storeAskModel(model);
   }, []);
-  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
     if (authResolving) return;
-    if (!signedInUsername) {
-      setAuthPanelOpen(true);
+    if (!authUser) {
+      if (location.pathname !== WORKSPACE_PATHS.login) {
+        navigate(WORKSPACE_PATHS.login, { replace: true });
+      }
       return;
     }
-    setAuthPanelOpen(false);
+    if (location.pathname === WORKSPACE_PATHS.login) {
+      navigate(WORKSPACE_PATHS.commune, { replace: true });
+      return;
+    }
+    if (location.pathname === WORKSPACE_PATHS.admin && !authUser.canAccessAdmin) {
+      navigate(WORKSPACE_PATHS.commune, { replace: true });
+      return;
+    }
     if (location.pathname === '/') navigateToView('commune');
-  }, [authResolving, location.pathname, navigateToView, signedInUsername]);
+  }, [authResolving, authUser, location.pathname, navigate, navigateToView, signedInUsername]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1055,13 +1067,15 @@ export default function TicketNotesPage() {
       }
       e.preventDefault();
       if (e.code === 'KeyR') {
-        setAuthPanelOpen((open) => authRequired || !open);
+        navigateToView(authUser ? 'settings' : 'login');
       }
-      else if (authUser?.canAccessAdmin) setAdminPanelOpen((open) => !open);
+      else if (authUser?.canAccessAdmin) {
+        navigateToView(location.pathname === WORKSPACE_PATHS.admin ? 'commune' : 'admin');
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authRequired, authUser?.canAccessAdmin]);
+  }, [authUser, location.pathname, navigateToView]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'KeyS' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1353,12 +1367,12 @@ export default function TicketNotesPage() {
     setPositions({});
   }, [setPositions]);
 
-  const handleCycleTheme = useCallback(() => {
-    setTheme(nextTheme(theme));
-  }, [theme, setTheme]);
+  const handleThemeChange = useCallback((nextThemeId: ThemeId) => {
+    setTheme(nextThemeId);
+  }, [setTheme]);
 
-  const handleToggleUiScale = useCallback(() => {
-    setUiScale((prev) => (prev === 'large' ? 'normal' : 'large'));
+  const handleUiScaleChange = useCallback((nextScale: UiScale) => {
+    setUiScale(nextScale);
   }, [setUiScale]);
 
   const handleToggleHistory = useCallback(() => {
@@ -2338,7 +2352,7 @@ Additional information (if needed): ${additional}`;
   // re-renders, exactly like the old standalone FloatingControls did.
   const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
   const availableWorkspaces: WorkView[] = [
-    ...(authUser ? ['commune' as const] : []),
+    ...(authUser ? ['commune' as const, 'chat' as const] : []),
     'callNotes',
     ...(analyticsUnlocked || authPrivileges?.trak ? ['caseTrak' as const] : []),
     ...(analyticsUnlocked || authPrivileges?.dash ? ['dash' as const] : []),
@@ -2355,7 +2369,7 @@ Additional information (if needed): ${additional}`;
       onOpenWidget={openWorkspaceWidget}
       onUtilitySlot={setRailControlsSlot}
       username={authUser?.username}
-      hideDock={kittyHelpOpen}
+      hideDock={kittyHelpOpen || workView === 'login'}
     >
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
@@ -2563,6 +2577,94 @@ Additional information (if needed): ${additional}`;
                   <CommunePanel onCatThought={cat.pushTip} onCatMoveTo={moveCatTo} />
                 </Suspense>
               }
+              chatContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening chat…</div>}>
+                  {authUser && <ChatPage username={authUser.username} />}
+                </Suspense>
+              }
+              settingsContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Settings…</div>}>
+                  <SettingsPage
+                    theme={theme}
+                    onThemeChange={handleThemeChange}
+                    uiScale={uiScale}
+                    onUiScaleChange={handleUiScaleChange}
+                    engine={{
+                      isSupported: localWhisper.isSupported,
+                      model: localWhisper.model,
+                      status: localWhisper.status,
+                      progress: localWhisper.progress,
+                      dtype: localWhisper.dtype,
+                      error: localWhisper.error,
+                      lastInferenceMs: localWhisper.lastInferenceMs,
+                      memStats: localWhisper.memStats,
+                      onSwitchModel: handleSwitchWhisperModel,
+                    }}
+                    parser={{
+                      enabled: llmParser.enabled,
+                      model: llmParser.model,
+                      models: llmParser.models,
+                      status: llmParser.status,
+                      progress: llmParser.progress,
+                      error: llmParser.error,
+                      isParsing: llmParser.isParsing,
+                      isParaphrasing: llmParser.isParaphrasing,
+                      lastParseMs: llmParser.lastParseMs,
+                      device: llmParser.device,
+                      dtype: llmParser.dtype,
+                      genProgress: llmParser.genProgress,
+                      memStats: llmParser.memStats,
+                      failedAttempts: llmParser.failedAttempts,
+                      window: llmParser.lastWindow,
+                      lastReply: llmParser.lastReply,
+                      lastStats: llmParser.lastStats,
+                      onLoadDevice: handleLoadLlmDevice,
+                      onToggleEnabled: handleToggleLlmEnabled,
+                      onSwitchModel: handleSwitchLlmModel,
+                      onLoad: handleLoadLlm,
+                    }}
+                    cloud={{
+                      isAvailable: cloudParser.isAvailable,
+                      availableModels: cloudParser.availableModels,
+                      selectedModel: cloudParser.selectedModel,
+                      modelLabel: cloudParser.modelLabel,
+                      onSelectModel: cloudParser.selectModel,
+                      error: cloudParser.error,
+                    }}
+                    selectedCat={selectedCat}
+                    onSelectCat={setStoredCatId}
+                    pet={catPet.pet}
+                    petCooldown={catPet.petCooldown}
+                    onPet={catPet.petCat}
+                    onToggleNap={catPet.toggleNap}
+                    transcript={call.transcript}
+                    isCapturing={call.isCapturing}
+                    isTranscribing={call.isTranscribing}
+                    customerCloudTranscription={customerCloudTranscription && !isTauri}
+                    customerCloudSupported={!isTauri}
+                    onToggleCustomerCloudTranscription={handleToggleCustomerCloudTranscription}
+                    onToggleCapture={handleToggleCall}
+                    gridboxVisibility={{
+                      toggles: gridboxVisibilityToggles,
+                      onToggle: handleToggleGridbox,
+                    }}
+                    keywordAlerts={keywordAlerts}
+                    keywordAlertSource={keywordAlertState.source}
+                    onOpenAuth={() => navigateToView('login')}
+                    onOpenAdmin={() => navigateToView('admin')}
+                  />
+                </Suspense>
+              }
+              adminContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Admin…</div>}>
+                  <AdminPage onClose={() => navigateToView('commune')} />
+                </Suspense>
+              }
+              loginContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading sign in…</div>}>
+                  <LoginPage onLoginComplete={() => navigateToView('commune')} />
+                </Suspense>
+              }
               communeEnabled={!!authUser}
               shiftsEnabled={shiftsUnlocked || !!authPrivileges?.roster}
               analyticsEnabled={analyticsUnlocked}
@@ -2581,81 +2683,16 @@ Additional information (if needed): ${additional}`;
           left rail pill (one unified floating menu; no separate floating
           toolbar). Rendered through a portal so capture-metric re-renders
           of this page never invalidate FlowchartCanvas's memoization. */}
-      {railControlsSlot &&
+      {railControlsSlot && workView !== 'login' &&
         createPortal(
           <RailControls
-            theme={theme}
-            onCycleTheme={handleCycleTheme}
             historyOpen={showHistory}
             onToggleHistory={handleToggleHistory}
             history={history}
             onDeleteHistory={handleDeleteHistory}
             onClearHistory={handleClearHistory}
-            uiScale={uiScale}
-            onToggleUiScale={handleToggleUiScale}
-            selectedCat={selectedCat}
-            onSelectCat={setStoredCatId}
-            pet={catPet.pet}
-            petCooldown={catPet.petCooldown}
-            onPet={catPet.petCat}
-            onToggleNap={catPet.toggleNap}
-            callCapturing={call.isCapturing}
-            onToggleCall={handleToggleCall}
-            customerCloudTranscription={customerCloudTranscription && !isTauri}
-            customerCloudSupported={!isTauri}
-            onToggleCustomerCloudTranscription={handleToggleCustomerCloudTranscription}
-            engine={{
-              isSupported: localWhisper.isSupported,
-              model: localWhisper.model,
-              status: localWhisper.status,
-              progress: localWhisper.progress,
-              dtype: localWhisper.dtype,
-              error: localWhisper.error,
-              lastInferenceMs: localWhisper.lastInferenceMs,
-              memStats: localWhisper.memStats,
-              onSwitchModel: handleSwitchWhisperModel,
-            }}
-            parser={{
-              enabled: llmParser.enabled,
-              model: llmParser.model,
-              models: llmParser.models,
-              status: llmParser.status,
-              progress: llmParser.progress,
-              error: llmParser.error,
-              isParsing: llmParser.isParsing,
-              isParaphrasing: llmParser.isParaphrasing,
-              lastParseMs: llmParser.lastParseMs,
-              device: llmParser.device,
-              dtype: llmParser.dtype,
-              genProgress: llmParser.genProgress,
-              memStats: llmParser.memStats,
-              failedAttempts: llmParser.failedAttempts,
-              window: llmParser.lastWindow,
-              lastReply: llmParser.lastReply,
-              lastStats: llmParser.lastStats,
-              onLoadDevice: handleLoadLlmDevice,
-              onToggleEnabled: handleToggleLlmEnabled,
-              onSwitchModel: handleSwitchLlmModel,
-              onLoad: handleLoadLlm,
-            }}
-            cloud={{
-              isAvailable: cloudParser.isAvailable,
-              availableModels: cloudParser.availableModels,
-              selectedModel: cloudParser.selectedModel,
-              modelLabel: cloudParser.modelLabel,
-              onSelectModel: cloudParser.selectModel,
-              error: cloudParser.error,
-            }}
-            transcript={call.transcript}
-            isTranscribing={call.isTranscribing}
-            gridboxVisibility={{
-              toggles: gridboxVisibilityToggles,
-              onToggle: handleToggleGridbox,
-            }}
-            keywordAlerts={keywordAlerts}
-            keywordAlertSource={keywordAlertState.source}
-            onOpenAuth={() => setAuthPanelOpen(true)}
-            onOpenAdmin={() => setAdminPanelOpen(true)}
+            onOpenSettings={() => navigateToView('settings')}
+            settingsActive={workView === 'settings'}
           />,
           railControlsSlot
         )}
@@ -3095,6 +3132,13 @@ Additional information (if needed): ${additional}`;
         }}
       />
 
+      {authUser && (
+        <ChatNotificationBanner
+          username={authUser.username}
+          onOpenChat={() => navigateToView('chat')}
+        />
+      )}
+
       {authResolving && (
         <div
           role="status"
@@ -3111,16 +3155,8 @@ Additional information (if needed): ${additional}`;
         </div>
       )}
 
-      {/* Required sign-in on entry; Shift+R opens the account panel afterwards. */}
-      {authPanelOpen && <AuthPanel required={authRequired} onClose={() => setAuthPanelOpen(false)} />}
-      {adminPanelOpen && authUser?.canAccessAdmin && (
-        <Suspense fallback={null}>
-          <AdminPanel onClose={() => setAdminPanelOpen(false)} />
-        </Suspense>
-      )}
-
       {/* Keep the floating mascot out of the pixel-world scene. */}
-      {workView !== 'commune' && !kittyHelpOpen && !kittySpotlightOpen && (
+      {!['commune', 'settings', 'admin', 'login'].includes(workView) && !kittyHelpOpen && !kittySpotlightOpen && (
         <CatAssistant
           catId={selectedCat}
           currentThought={cat.currentThought}

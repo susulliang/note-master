@@ -110,6 +110,10 @@ interface FlowchartCanvasProps {
   /** Content rendered in the canvas area when activeView === 'commune'
    *  (the agents' town square — visible to every logged-in user). */
   communeContent?: React.ReactNode;
+  chatContent?: React.ReactNode;
+  settingsContent?: React.ReactNode;
+  adminContent?: React.ReactNode;
+  loginContent?: React.ReactNode;
   /** Reveal the Commune work-view pill in the left rail (logged-in users). */
   communeEnabled?: boolean;
   /** Reveal the hidden Shifts work-view pill in the left rail. */
@@ -150,7 +154,17 @@ interface FlowchartCanvasProps {
 }
 
 /** Top-level work views switchable from the left-edge vertical tab pills. */
-export type WorkView = 'callNotes' | 'selfTest' | 'commune' | 'caseTrak' | 'dash' | 'shifts';
+export type WorkView =
+  | 'callNotes'
+  | 'selfTest'
+  | 'commune'
+  | 'chat'
+  | 'caseTrak'
+  | 'dash'
+  | 'shifts'
+  | 'settings'
+  | 'admin'
+  | 'login';
 
 // Layout constants (px) — compact spacing
 const CANVAS_MARGIN = 16;
@@ -452,6 +466,10 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   selfTestContent,
   shiftsContent,
   communeContent,
+  chatContent,
+  settingsContent,
+  adminContent,
+  loginContent,
   communeEnabled = false,
   shiftsEnabled = false,
   analyticsEnabled = false,
@@ -1175,6 +1193,30 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {activeView === 'commune' && communeEnabled && (
         <div className={`box-border h-full min-h-full w-full ${externalNavigation || railCollapsed ? 'pl-0' : 'pl-[92px]'}`}>
           {communeContent}
+        </div>
+      )}
+
+      {activeView === 'chat' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {chatContent}
+        </div>
+      )}
+
+      {activeView === 'settings' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {settingsContent}
+        </div>
+      )}
+
+      {activeView === 'admin' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {adminContent}
+        </div>
+      )}
+
+      {activeView === 'login' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {loginContent}
         </div>
       )}
 

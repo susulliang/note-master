@@ -11,6 +11,10 @@ import {
   GraduationCap,
   LayoutGrid,
   PackageSearch,
+  LogIn,
+  MessageCircle,
+  Settings,
+  ShieldCheck,
   Sparkles,
   Users,
 } from 'lucide-react';
@@ -33,14 +37,18 @@ export type WidgetId = 'tracker' | 'guides' | 'product' | 'transcript' | 'qa' | 
 
 const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   commune: { label: 'Commune', icon: Users },
+  chat: { label: 'Chat', icon: MessageCircle },
   callNotes: { label: 'Call Notes', icon: FilePenLine },
   caseTrak: { label: 'Cases', icon: LayoutGrid },
   dash: { label: 'DASH', icon: BarChart3 },
   shifts: { label: 'Schedule', icon: CalendarDays },
   selfTest: { label: 'Learn', icon: GraduationCap },
+  settings: { label: 'Settings', icon: Settings },
+  admin: { label: 'Admin', icon: ShieldCheck },
+  login: { label: 'Login', icon: LogIn },
 };
 
-const VIEW_ORDER: WorkView[] = ['commune', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
+const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
 const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }> = [
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },
@@ -82,13 +90,13 @@ export function QuietWorkspaceShell({
                 <button
                   key={view}
                   type="button"
-                  title={VIEW_META[view].label}
                   aria-label={VIEW_META[view].label}
                   aria-current={activeView === view ? 'page' : undefined}
                   onClick={() => onNavigate(view)}
                   className={cn('quiet-orbit-action', activeView === view && 'quiet-orbit-action--active')}
                 >
                   <Icon className="size-[18px]" strokeWidth={1.8} />
+                  <span className="quiet-dock-tooltip" aria-hidden="true">{VIEW_META[view].label}</span>
                 </button>
               );
             })}
@@ -96,9 +104,12 @@ export function QuietWorkspaceShell({
 
           <span className="quiet-dock-divider" aria-hidden="true" />
 
-          <button type="button" className="quiet-magic-ball" aria-label="Open Kitty Help" title="Ask Kitty" onClick={onOpenHelp}>
-            <span className="quiet-magic-ball-core"><Sparkles className="size-5" /></span>
-          </button>
+          <div className="quiet-magic-ball-anchor">
+            <button type="button" className="quiet-magic-ball" aria-label="Open Kitty Help" onClick={onOpenHelp}>
+              <span className="quiet-magic-ball-core"><Sparkles className="size-5" /></span>
+            </button>
+            <span className="quiet-dock-tooltip" aria-hidden="true">Ask Kitty</span>
+          </div>
 
           <span className="quiet-dock-divider" aria-hidden="true" />
 
@@ -107,12 +118,12 @@ export function QuietWorkspaceShell({
               <button
                 key={id}
                 type="button"
-                title={label}
                 aria-label={label}
                 onClick={() => onOpenWidget(id)}
                 className="quiet-orbit-action"
               >
                 <Icon className="size-[18px]" strokeWidth={1.8} />
+                  <span className="quiet-dock-tooltip" aria-hidden="true">{label}</span>
               </button>
             ))}
           </div>

@@ -34,9 +34,11 @@ const USERNAME_OPTIONS: string[] = (() => {
 interface AuthPanelProps {
   onClose: () => void;
   required?: boolean;
+  presentation?: 'modal' | 'page';
 }
 
-export default function AuthPanel({ onClose, required = false }: AuthPanelProps) {
+export default function AuthPanel({ onClose, required = false, presentation = 'modal' }: AuthPanelProps) {
+  const pagePresentation = presentation === 'page';
   const { user, login, register, logout } = useAuth();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -71,23 +73,52 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
   return (
     <div
       className={cn(
-        'fixed inset-0 z-[90] flex items-center justify-center backdrop-blur-sm',
-        required ? 'bg-background/95' : 'bg-black/40'
+        pagePresentation
+          ? 'grid min-h-full w-full place-items-center bg-background/20 p-4 sm:p-8'
+          : 'fixed inset-0 z-[90] flex items-center justify-center backdrop-blur-sm',
+        !pagePresentation && (required ? 'bg-background/95' : 'bg-black/40')
       )}
       onMouseDown={(e) => {
-        if (!required && e.target === e.currentTarget) onClose();
+        if (!pagePresentation && !required && e.target === e.currentTarget) onClose();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && !required) onClose();
+        if (!pagePresentation && e.key === 'Escape' && !required) onClose();
       }}
     >
       <div
-        role="dialog"
-        aria-modal="true"
+        role={pagePresentation ? 'main' : 'dialog'}
+        aria-modal={pagePresentation ? undefined : true}
         aria-label={required ? 'Agent sign in' : 'Authentication'}
-        className="glass-panel relative w-[min(420px,calc(100vw-32px))] rounded-2xl border-violet-400/30 p-6 shadow-2xl"
+        className={cn(
+          'glass-panel relative overflow-hidden shadow-2xl',
+          pagePresentation
+            ? 'grid w-full max-w-5xl rounded-3xl border-violet-400/25 bg-card/55 lg:min-h-[620px] lg:grid-cols-[1fr_0.9fr]'
+            : 'w-[min(420px,calc(100vw-32px))] rounded-2xl border-violet-400/30 p-6'
+        )}
       >
-        {!required && (
+        {pagePresentation && (
+          <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-border/50 bg-gradient-to-br from-violet-500/15 via-background/35 to-accent/10 p-8 lg:flex xl:p-11">
+            <div className="absolute -right-20 -top-20 size-72 rounded-full bg-violet-400/10 blur-3xl" aria-hidden />
+            <div className="relative">
+              <div className="mb-6 flex size-12 items-center justify-center rounded-2xl border border-violet-300/30 bg-violet-400/10">
+                <KeyRound className="size-6 text-violet-300" />
+              </div>
+              <p className="font-mono text-xs font-bold uppercase tracking-[0.22em] text-violet-200/80">Ecovacs Support</p>
+              <h1 className="mt-3 max-w-sm text-3xl font-bold leading-tight tracking-tight text-foreground xl:text-4xl">
+                Your support workspace, ready when you are.
+              </h1>
+              <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                Sign in to manage calls, collaborate in Commune, and reach the tools assigned to your account.
+              </p>
+            </div>
+            <div className="relative grid gap-2 text-xs text-muted-foreground">
+              <div className="rounded-xl border border-border/40 bg-background/35 px-3 py-2.5">Private agent workspace</div>
+              <div className="rounded-xl border border-border/40 bg-background/35 px-3 py-2.5">Your access follows your assigned role</div>
+            </div>
+          </aside>
+        )}
+        <div className={cn('relative', pagePresentation ? 'p-5 sm:p-8 lg:p-10' : '')}>
+        {!required && !pagePresentation && (
           <button
             type="button"
             onClick={onClose}
@@ -250,6 +281,7 @@ export default function AuthPanel({ onClose, required = false }: AuthPanelProps)
             </form>
           </>
         )}
+      </div>
       </div>
     </div>
   );

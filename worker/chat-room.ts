@@ -1,0 +1,454 @@
+import { DurableObject } from 'cloudflare:workers';
+
+interface ChatMessageRow {
+  id: string;
+  username: string;
+  markdown: string;
+  created_at: number;
+  updated_at: number;
+  source_id: string | null;
+  avatar_seed: number;
+  avatar_rotation: number;
+}
+
+interface TicketRow {
+  ticket: string;
+  username: string;
+  expires_at: number;
+  avatar_seed: number;
+  avatar_rotation: number;
+}
+
+interface ChatAttachment {
+  username: string;
+  avatarSeed: number;
+  avatarRotation: number;
+}
+
+interface ChatAvatarProfile {
+  seed: number;
+  rotation: number;
+}
+
+interface MessageCursor {
+  createdAt: number;
+  id: string;
+}
+
+interface ChatNewsEntry {
+  id: string;
+  date: string;
+  title: string;
+  author: string;
+  body: string;
+  updatedAt: number;
+}
+
+type ChatEvent = Record<string, unknown>;
+type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
+
+const TICKET_TTL_MS = 60_000;
+const MAX_SOCKET_MESSAGE_LENGTH = 32_768;
+const MAX_MARKDOWN_LENGTH = 20_000;
+const HISTORY_PAGE_SIZE = 50;
+
+function send(ws: WebSocket, event: ChatEvent): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify(event));
+  } catch {
+    try {
+      ws.close(1011, 'Unable to send chat update');
+    } catch {
+      /* The socket has already closed. */
+    }
+  }
+}
+
+function attachment(ws: WebSocket): ChatAttachment | null {
+  try {
+    return (ws.deserializeAttachment() as ChatAttachment | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function presentMessage(row: ChatMessageRow) {
+  return {
+    id: row.id,
+    username: row.username,
+    markdown: row.markdown,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    source: row.source_id ? 'news' : 'chat',
+    avatar: { seed: row.avatar_seed, rotation: row.avatar_rotation },
+  };
+}
+
+export class ChatRoom extends DurableObject<Env> {
+  private readonly roomId: string;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.roomId = ctx.id.name ?? '';
+    ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_ws_tickets (
+          ticket TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          avatar_seed INTEGER NOT NULL DEFAULT 0,
+          avatar_rotation INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          markdown TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          source_id TEXT UNIQUE,
+          avatar_seed INTEGER NOT NULL DEFAULT 0,
+          avatar_rotation INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      this.ctx.storage.sql.exec(
+        'CREATE INDEX IF NOT EXISTS chat_messages_created_idx ON chat_messages (created_at DESC, id DESC)',
+      );
+      this.ensureColumn('chat_ws_tickets', 'avatar_seed', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('chat_ws_tickets', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('chat_messages', 'avatar_seed', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('chat_messages', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
+    });
+  }
+
+  async createTicket(username: string, profile: ChatAvatarProfile): Promise<string> {
+    const now = Date.now();
+    const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+    this.ctx.storage.sql.exec('DELETE FROM chat_ws_tickets WHERE expires_at < ?', now);
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_ws_tickets
+       (ticket, username, expires_at, avatar_seed, avatar_rotation) VALUES (?, ?, ?, ?, ?)`,
+      ticket,
+      username,
+      now + TICKET_TTL_MS,
+      profile.seed,
+      profile.rotation,
+    );
+    return ticket;
+  }
+
+  async seedNews(entries: ChatNewsEntry[]): Promise<void> {
+    for (const entry of entries) {
+      const title = entry.title.trim();
+      const author = entry.author.trim() || 'Ecovacs Support';
+      const markdown = `### ${title}\n\n${entry.body.trim()}\n\n*Posted ${entry.date} by ${author}*`;
+      const createdAt = Date.parse(entry.date)
+        || (Number.isFinite(entry.updatedAt) && entry.updatedAt > 0 ? entry.updatedAt : Date.now());
+      const existing = this.ctx.storage.sql
+        .exec<{ id: string; markdown: string }>('SELECT id, markdown FROM chat_messages WHERE source_id = ?', entry.id)
+        .toArray()[0];
+      if (existing) {
+        const nextMarkdown = markdown.slice(0, MAX_MARKDOWN_LENGTH);
+        if (existing.markdown !== nextMarkdown) {
+          const updatedAt = Date.now();
+          this.ctx.storage.sql.exec(
+            'UPDATE chat_messages SET username = ?, markdown = ?, updated_at = ? WHERE source_id = ?',
+            author,
+            nextMarkdown,
+            updatedAt,
+            entry.id,
+          );
+          const row = this.ctx.storage.sql
+            .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE id = ?', existing.id)
+            .toArray()[0];
+          if (row) this.broadcast({ type: 'message:updated', message: presentMessage(row) });
+        }
+      } else {
+        this.ctx.storage.sql.exec(
+          `INSERT OR IGNORE INTO chat_messages (id, username, markdown, created_at, updated_at, source_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          crypto.randomUUID(),
+          author,
+          markdown.slice(0, MAX_MARKDOWN_LENGTH),
+          createdAt,
+          createdAt,
+          entry.id,
+        );
+        const row = this.ctx.storage.sql
+          .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE source_id = ?', entry.id)
+          .toArray()[0];
+        if (row) this.broadcast({ type: 'message:created', message: presentMessage(row) });
+      }
+    }
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
+      return new Response('WebSocket upgrade required', { status: 426 });
+    }
+    const ticket = url.searchParams.get('ticket');
+    if (!ticket || ticket.length > 100) return new Response('Invalid connection ticket', { status: 401 });
+    const row = this.ctx.storage.sql
+      .exec<SqlRow<TicketRow>>(
+        `SELECT ticket, username, expires_at, avatar_seed, avatar_rotation
+         FROM chat_ws_tickets WHERE ticket = ? AND expires_at >= ?`,
+        ticket,
+        Date.now(),
+      )
+      .toArray()[0];
+    if (!row) return new Response('Expired or invalid connection ticket', { status: 401 });
+    this.ctx.storage.sql.exec('DELETE FROM chat_ws_tickets WHERE ticket = ?', ticket);
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    this.ctx.acceptWebSocket(server, [row.username]);
+    server.serializeAttachment({
+      username: row.username,
+      avatarSeed: row.avatar_seed,
+      avatarRotation: row.avatar_rotation,
+    } satisfies ChatAttachment);
+    const history = this.getMessages();
+    send(server, {
+      type: 'welcome',
+      roomId: this.roomId,
+      messages: history.messages,
+      hasOlder: history.hasOlder,
+      cursor: history.cursor,
+    });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const raw = typeof message === 'string' ? message : new TextDecoder().decode(message);
+    if (raw.length > MAX_SOCKET_MESSAGE_LENGTH) {
+      ws.close(1009, 'Message too large');
+      return;
+    }
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const user = attachment(ws);
+    if (!user?.username) {
+      ws.close(1008, 'Missing chat identity');
+      return;
+    }
+    if (event.type === 'message:create') {
+      if (typeof event.markdown !== 'string') return;
+      const markdown = event.markdown.trim();
+      if (!markdown || markdown.length > MAX_MARKDOWN_LENGTH) {
+        send(ws, { type: 'error', message: 'Messages must be between 1 and 20,000 characters.' });
+        return;
+      }
+      const now = Date.now();
+      const row: ChatMessageRow = {
+        id: crypto.randomUUID(),
+        username: user.username,
+        markdown,
+        created_at: now,
+        updated_at: now,
+        source_id: null,
+        avatar_seed: user.avatarSeed,
+        avatar_rotation: user.avatarRotation,
+      };
+      this.ctx.storage.sql.exec(
+        `INSERT INTO chat_messages
+         (id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+        row.id,
+        row.username,
+        row.markdown,
+        row.created_at,
+        row.updated_at,
+        row.avatar_seed,
+        row.avatar_rotation,
+      );
+      await this.sharePrivateStickers(row.id, row.markdown, user.username);
+      const payload = { type: 'message:created', message: presentMessage(row) };
+      this.broadcast(payload);
+      await this.updateInboxPreview(markdown, now);
+      return;
+    }
+    if (event.type === 'message:edit') {
+      if (
+        typeof event.id !== 'string' ||
+        typeof event.markdown !== 'string' ||
+        !event.markdown.trim() ||
+        event.markdown.length > MAX_MARKDOWN_LENGTH
+      ) {
+        send(ws, { type: 'error', message: 'The edited message is empty or too long.' });
+        return;
+      }
+      const now = Date.now();
+      const changed = this.ctx.storage.sql.exec(
+        `UPDATE chat_messages SET markdown = ?, updated_at = ?
+         WHERE id = ? AND username = ? AND source_id IS NULL`,
+        event.markdown.trim(),
+        now,
+        event.id,
+        user.username,
+      ).rowsWritten;
+      if (!changed) {
+        send(ws, { type: 'error', message: 'Only your own messages can be edited.' });
+        return;
+      }
+      const row = this.ctx.storage.sql
+        .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE id = ?', event.id)
+        .toArray()[0];
+      if (row) {
+        await this.sharePrivateStickers(row.id, row.markdown, user.username);
+        this.broadcast({ type: 'message:updated', message: presentMessage(row) });
+        await this.updateInboxPreview(row.markdown, now);
+      }
+      return;
+    }
+    if (event.type === 'history:older') {
+      const rawCursor = event.cursor as Partial<MessageCursor> | null;
+      if (
+        !rawCursor ||
+        !Number.isSafeInteger(rawCursor.createdAt) ||
+        typeof rawCursor.id !== 'string' ||
+        rawCursor.id.length > 80
+      ) return;
+      const page = this.getMessages({
+        createdAt: rawCursor.createdAt as number,
+        id: rawCursor.id,
+      });
+      send(ws, {
+        type: 'history:older',
+        messages: page.messages,
+        hasOlder: page.hasOlder,
+        cursor: page.cursor,
+      });
+      return;
+    }
+    if (event.type === 'heartbeat') send(ws, { type: 'heartbeat_ack', at: Date.now() });
+  }
+
+  webSocketClose(ws: WebSocket): void {
+    try {
+      ws.close(1000, 'Connection closed');
+    } catch {
+      /* The socket is already closed. */
+    }
+  }
+
+  private getMessages(before?: MessageCursor) {
+    const rows = before
+      ? this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation
+         FROM chat_messages
+         WHERE created_at < ? OR (created_at = ? AND id < ?)
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+        before.createdAt,
+        before.createdAt,
+        before.id,
+        HISTORY_PAGE_SIZE + 1,
+      ).toArray()
+      : this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation
+         FROM chat_messages ORDER BY created_at DESC, id DESC LIMIT ?`,
+        HISTORY_PAGE_SIZE + 1,
+      ).toArray();
+    const hasOlder = rows.length > HISTORY_PAGE_SIZE;
+    const pageRows = rows.slice(0, HISTORY_PAGE_SIZE);
+    const oldest = pageRows.at(-1);
+    return {
+      messages: pageRows.reverse().map(presentMessage),
+      hasOlder,
+      cursor: oldest ? { createdAt: oldest.created_at, id: oldest.id } : null,
+    };
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray();
+    if (!columns.some((entry) => entry.name === column)) {
+      this.ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  }
+
+  private broadcast(event: ChatEvent): void {
+    const serialized = JSON.stringify(event);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      try {
+        ws.send(serialized);
+      } catch {
+        try {
+          ws.close(1011, 'Unable to broadcast chat update');
+        } catch {
+          /* The socket has already closed. */
+        }
+      }
+    }
+  }
+
+  private async updateInboxPreview(markdown: string, updatedAt: number): Promise<void> {
+    if (this.roomId === 'global') return;
+    try {
+      if (this.roomId.startsWith('group-')) {
+        await this.env.DB.prepare(
+          'UPDATE chat_groups SET last_message = ?, updated_at = ? WHERE room_id = ?',
+        )
+          .bind(markdown.slice(0, 180), updatedAt, this.roomId)
+          .run();
+      } else {
+        await this.env.DB.prepare(
+          'UPDATE chat_conversations SET last_message = ?, updated_at = ? WHERE room_id = ?',
+        )
+          .bind(markdown.slice(0, 180), updatedAt, this.roomId)
+          .run();
+      }
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'chat_inbox_index_update_failed',
+        roomId: this.roomId,
+        error: String(error),
+      }));
+    }
+  }
+
+  private async sharePrivateStickers(
+    messageId: string,
+    markdown: string,
+    username: string,
+    replace = false,
+  ): Promise<void> {
+    try {
+      const stickerIds = [...new Set(
+        Array.from(markdown.matchAll(/\/api\/chat\/stickers\/private\/([0-9a-f-]{36})/g), (match) => match[1]),
+      )];
+      if (stickerIds.length === 0 && !replace) return;
+      if (replace) {
+        await this.env.DB.prepare(
+          'DELETE FROM chat_sticker_shares WHERE room_id = ? AND message_id = ?',
+        ).bind(this.roomId, messageId).run();
+      }
+      if (stickerIds.length === 0) return;
+      const pack = this.env.CHAT_STICKER_PACK.getByName(
+        `private-${encodeURIComponent(username.toLowerCase())}`,
+      );
+      for (const stickerId of stickerIds) {
+        const sticker = await pack.getSticker(stickerId);
+        if (!sticker) continue;
+        await this.env.DB.prepare(
+          `INSERT OR IGNORE INTO chat_sticker_shares
+           (sticker_id, owner, room_id, message_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+        ).bind(stickerId, username, this.roomId, messageId, Date.now()).run();
+      }
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'chat_private_sticker_share_failed',
+        roomId: this.roomId,
+        messageId,
+        error: String(error),
+      }));
+    }
+  }
+}

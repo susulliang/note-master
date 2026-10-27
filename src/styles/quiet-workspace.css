@@ -1023,6 +1023,7 @@
 }
 
 .quiet-orbit-action {
+  position: relative;
   display: grid;
   width: 30px;
   height: 30px;
@@ -1032,6 +1033,67 @@
   border-radius: 50%;
   color: var(--qw-muted);
   transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.quiet-magic-ball-anchor {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.quiet-dock-tooltip {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--qw-line) 88%, transparent);
+  border-radius: 8px;
+  color: var(--qw-ink);
+  background: color-mix(in srgb, var(--qw-field) 91%, transparent);
+  box-shadow: 0 6px 18px rgb(22 38 48 / 17%);
+  backdrop-filter: blur(14px) saturate(1.2);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 0s linear 120ms;
+}
+
+.quiet-orbit-action:hover .quiet-dock-tooltip,
+.quiet-orbit-action:focus-visible .quiet-dock-tooltip,
+.quiet-magic-ball-anchor:hover .quiet-dock-tooltip,
+.quiet-magic-ball-anchor:focus-within .quiet-dock-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition-delay: 0s;
+}
+
+.quiet-dock-cluster--navigation .quiet-orbit-action:first-child .quiet-dock-tooltip {
+  left: 0;
+  transform: translate(0, 4px);
+}
+
+.quiet-dock-cluster--navigation .quiet-orbit-action:first-child:hover .quiet-dock-tooltip,
+.quiet-dock-cluster--navigation .quiet-orbit-action:first-child:focus-visible .quiet-dock-tooltip {
+  transform: translate(0, 0);
+}
+
+.quiet-dock-cluster--widgets .quiet-orbit-action:last-child .quiet-dock-tooltip {
+  right: 0;
+  left: auto;
+  transform: translate(0, 4px);
+}
+
+.quiet-dock-cluster--widgets .quiet-orbit-action:last-child:hover .quiet-dock-tooltip,
+.quiet-dock-cluster--widgets .quiet-orbit-action:last-child:focus-visible .quiet-dock-tooltip {
+  transform: translate(0, 0);
 }
 
 .quiet-orbit-action:hover,

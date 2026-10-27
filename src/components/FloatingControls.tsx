@@ -1,66 +1,17 @@
-import { lazy, Suspense, useState } from 'react';
-import { History, PanelLeftClose, Settings, Type } from 'lucide-react';
+import { History, PanelLeftClose, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HistoryPanel from '@/components/HistoryPanel';
-import type {
-  CloudState,
-  EngineState,
-  ParserState,
-} from '@/components/EngineSettingsPanel';
-import type { TranscriptEntry } from '@/hooks/use-call-capture';
-import { getThemeMeta, type ThemeId, type UiScale } from '@/lib/themes';
 import type { NoteHistoryEntry } from '@/data/ticket';
 import { cn } from '@/lib/utils';
-import type { CatId } from '@/lib/cat-sprites';
-import type { CatPetSnapshot } from '@/hooks/use-cat-pet';
-import type { KeywordAlert } from '@/lib/keyword-alerts';
-import type { KeywordAlertSource } from '@/hooks/use-keyword-alerts';
 
 interface RailControlsProps {
-  theme: ThemeId;
-  onCycleTheme: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
   history: NoteHistoryEntry[];
   onDeleteHistory: (id: string) => void;
   onClearHistory: () => void;
-  uiScale: UiScale;
-  onToggleUiScale: () => void;
-  /** CCP tab-audio + mic capture state — only used by the Settings
-   *  panel (the standalone mic rail button moved to the sticky bottom
-   *  call bar in v0.2.0). */
-  callCapturing?: boolean;
-  onToggleCall?: () => void;
-  customerCloudTranscription?: boolean;
-  customerCloudSupported?: boolean;
-  onToggleCustomerCloudTranscription?: (enabled: boolean) => void;
-  /** Settings panel (gear): cat selection plus whisper/LLM state and handlers */
-  engine?: EngineState;
-  parser?: ParserState;
-  selectedCat: CatId;
-  onSelectCat: (catId: CatId) => void;
-  /** Companion-system snapshot (forwarded to the Settings panel). */
-  pet?: CatPetSnapshot | null;
-  petCooldown?: boolean;
-  onPet?: () => void;
-  /** Manual nap toggle (forwarded to the Settings panel). */
-  onToggleNap?: () => void;
-  /** On-demand DeepSeek cloud parser state (the Cloud parse button) */
-  cloud?: CloudState;
-  transcript?: TranscriptEntry[];
-  isTranscribing?: boolean;
-  /** Gridbox visibility controls embedded in Settings. */
-  gridboxVisibility?: {
-    toggles: Array<{ id: string; label: string; visible: boolean }>;
-    onToggle: (id: string, nextVisible: boolean) => void;
-  };
-  /** D1-backed live-transcript keyword alerts shown in Settings. */
-  keywordAlerts?: KeywordAlert[];
-  keywordAlertSource?: KeywordAlertSource;
-  /** Opens the Shift+R auth panel (Settings → Account → Log in). */
-  onOpenAuth?: () => void;
-  /** Opens the Shift+A admin panel (Settings → Account → Admin badge). */
-  onOpenAdmin?: () => void;
+  onOpenSettings: () => void;
+  settingsActive?: boolean;
   /** Collapse the left rail pill into its glass circle (hidden while
    *  collapsed — the rail is unmounted then). */
   onCollapseRail?: () => void;
@@ -70,55 +21,21 @@ interface RailControlsProps {
 const RAIL_BTN =
   'relative size-10 rounded-full text-muted-foreground transition-all duration-200 hover:scale-110 hover:bg-foreground/5 hover:text-foreground active:scale-90';
 
-const EngineSettingsPanel = lazy(() => import('@/components/EngineSettingsPanel'));
-
 /**
  * Vertical control stack docked at the BOTTOM of the left rail pill
- * (portaled in by the page). Replaces the old draggable corner toolbar:
- * History / UI-scale / Settings / Theme.
- *
- * Panels (History, Settings) are viewport-fixed and slide in
- * from the rail's right edge — the rail's glass background is a sibling
- * layer, not an ancestor, so these `fixed` elements are never trapped by a
- * backdrop-filter containing block.
+ * (portaled in by the page). Settings now navigates to its own workspace;
+ * appearance controls live on that page instead of crowding this stack.
  */
 export default function RailControls({
-  theme,
-  onCycleTheme,
   historyOpen,
   onToggleHistory,
   history,
   onDeleteHistory,
   onClearHistory,
-  uiScale,
-  onToggleUiScale,
-  callCapturing,
-  onToggleCall,
-  customerCloudTranscription = false,
-  customerCloudSupported = true,
-  onToggleCustomerCloudTranscription,
-  engine,
-  parser,
-  selectedCat,
-  onSelectCat,
-  pet,
-  petCooldown,
-  onPet,
-  onToggleNap,
-  cloud,
-  transcript,
-  isTranscribing,
-  gridboxVisibility,
-  keywordAlerts,
-  keywordAlertSource,
-  onOpenAuth,
-  onOpenAdmin,
+  onOpenSettings,
+  settingsActive = false,
   onCollapseRail,
 }: RailControlsProps) {
-  const themeMeta = getThemeMeta(theme);
-  const ThemeIcon = themeMeta.icon;
-  const [engineOpen, setEngineOpen] = useState(false);
-
   return (
     <>
       {/* Click-outside catcher for the history panel */}
@@ -146,48 +63,15 @@ export default function RailControls({
         <Button
           variant="ghost"
           size="icon"
-          onClick={onToggleUiScale}
-          className={cn(RAIL_BTN, uiScale === 'large' && 'bg-primary/15 text-primary')}
-          aria-label="Toggle larger text"
-          title={uiScale === 'large' ? 'Larger text: on — click to turn off' : 'Larger text: off — click to turn on'}
+          onClick={onOpenSettings}
+          className={cn(RAIL_BTN, settingsActive && 'bg-foreground/10 text-foreground')}
+          aria-label="Open Settings"
+          title="Settings"
         >
-          <Type className="size-[18px]" />
+          <Settings className="size-[18px] transition-transform duration-500 hover:rotate-90" />
         </Button>
-
-        {/* Settings — the gear opens the Whisper/LLM/downloads/
-            resources/debug panel (like the History button opens history) */}
-        {engine && parser && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              setEngineOpen((v) => !v);
-            }}
-            className={cn(RAIL_BTN, engineOpen && 'bg-foreground/10 text-foreground')}
-            aria-label="Settings"
-            title="Settings — cat, Whisper & LLM models, downloads, resources, debug"
-          >
-            <Settings className="size-[18px] transition-transform duration-500 hover:rotate-90" />
-            {(engine.status === 'error' || parser.status === 'error') && (
-              <span className="absolute -right-0.5 -top-0.5 flex size-2.5">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-destructive" />
-              </span>
-            )}
-          </Button>
-        )}
 
         <div className="my-0.5 h-px w-6 bg-foreground/10" aria-hidden="true" />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onCycleTheme}
-          className={RAIL_BTN}
-          aria-label={`Switch theme (current: ${themeMeta.label})`}
-          title={`Theme: ${themeMeta.label} — click to cycle`}
-        >
-          <ThemeIcon className="size-[18px] transition-transform duration-300 hover:scale-110" />
-        </Button>
 
         {/* Collapse the rail into its glass circle (narrow screens /
             extra canvas room). Hidden while collapsed — the whole rail
@@ -206,7 +90,7 @@ export default function RailControls({
         )}
       </div>
 
-        {historyOpen && (
+      {historyOpen && (
         <div className="quiet-utility-panel-anchor animate-in fade-in slide-in-from-left-2 duration-200">
           <HistoryPanel
             history={history}
@@ -215,45 +99,6 @@ export default function RailControls({
             onClose={onToggleHistory}
           />
         </div>
-      )}
-
-      {/* Settings panel — opens from the gear, sliding in from the
-          rail's right edge; vertically centered. The click-outside catcher
-          sits UNDER the panel (z-40 vs z-50). */}
-      {engineOpen && engine && parser && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setEngineOpen(false)} aria-hidden="true" />
-          <div className="quiet-utility-panel-anchor animate-in fade-in slide-in-from-left-2 duration-200">
-            <Suspense fallback={null}>
-              <EngineSettingsPanel
-                engine={engine}
-                selectedCat={selectedCat}
-                onSelectCat={onSelectCat}
-                pet={pet}
-                petCooldown={petCooldown}
-                onPet={onPet}
-                onToggleNap={onToggleNap}
-                parser={parser}
-                cloud={cloud}
-                transcript={transcript ?? []}
-                isCapturing={!!callCapturing}
-                isTranscribing={!!isTranscribing}
-                customerCloudTranscription={customerCloudTranscription}
-                customerCloudSupported={customerCloudSupported}
-                onToggleCustomerCloudTranscription={(enabled) =>
-                  onToggleCustomerCloudTranscription?.(enabled)
-                }
-                onToggleCapture={() => onToggleCall?.()}
-                onClose={() => setEngineOpen(false)}
-                gridboxVisibility={gridboxVisibility}
-                keywordAlerts={keywordAlerts}
-                keywordAlertSource={keywordAlertSource}
-                onOpenAuth={onOpenAuth}
-                onOpenAdmin={onOpenAdmin}
-              />
-            </Suspense>
-          </div>
-        </>
       )}
     </>
   );

@@ -106,7 +106,8 @@ export interface CloudState {
   error: string | null;
 }
 
-interface EngineSettingsPanelProps {
+export interface EngineSettingsPanelProps {
+  presentation?: 'panel' | 'page';
   engine: EngineState;
   selectedCat: CatId;
   onSelectCat: (catId: CatId) => void;
@@ -122,7 +123,7 @@ interface EngineSettingsPanelProps {
   customerCloudSupported: boolean;
   onToggleCustomerCloudTranscription: (enabled: boolean) => void;
   onToggleCapture: () => void;
-  onClose: () => void;
+  onClose?: () => void;
   gridboxVisibility?: {
     toggles: Array<{ id: string; label: string; visible: boolean }>;
     onToggle: (id: string, nextVisible: boolean) => void;
@@ -289,6 +290,7 @@ export default function EngineSettingsPanel({
   customerCloudSupported,
   onToggleCustomerCloudTranscription,
   onToggleCapture,
+  presentation = 'panel',
   onClose,
   gridboxVisibility,
   keywordAlerts,
@@ -381,6 +383,7 @@ export default function EngineSettingsPanel({
       return raw;
     }
   }, [parser?.lastReply]);
+  const pagePresentation = presentation === 'page';
 
   const copyJson = () => {
     const text = parser?.lastReply ?? '';
@@ -393,31 +396,42 @@ export default function EngineSettingsPanel({
 
   return (
     <div
-      className="quiet-settings-panel glass-panel custom-scrollbar w-[min(440px,calc(100vw-24px))] overflow-y-auto rounded-xl p-3"
-      role="dialog"
+      className={cn(
+        pagePresentation
+          ? 'min-w-0'
+          : 'quiet-settings-panel glass-panel custom-scrollbar w-[min(440px,calc(100vw-24px))] overflow-y-auto rounded-xl p-3'
+      )}
+      role={pagePresentation ? undefined : 'dialog'}
       aria-label="Settings"
     >
       {/* Header */}
-      <div className="mb-2 flex items-center gap-2">
-        <p className="flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Settings
-        </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-          aria-label="Close"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
+      {!pagePresentation && (
+        <div className="mb-2 flex items-center gap-2">
+          <p className="flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Settings
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
 
-      <div className="space-y-2">
+      <div className={cn(
+        'gap-4',
+        pagePresentation
+          ? 'grid grid-cols-1 xl:grid-cols-2 [&>section]:rounded-2xl [&>section]:border-border/60 [&>section]:bg-card/35 [&>section]:p-4'
+          : 'space-y-2'
+      )}>
         {/* Account / login status — always the first block in Settings */}
         <section aria-label="Account" className="rounded-lg border border-border/50 bg-background/35 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Account</p>
-            <span className="text-[9px] text-muted-foreground/70">Shift+R opens the auth panel</span>
+            <span className="text-[10px] text-muted-foreground/70">Account and access</span>
           </div>
           {authResolving ? (
             <p className="flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground">
@@ -497,13 +511,13 @@ export default function EngineSettingsPanel({
             <div className="flex items-center justify-between gap-2 px-1 py-1">
               <p className="text-xs text-muted-foreground">
                 Not logged in — press{' '}
-                <kbd className="rounded border border-border/60 bg-muted/60 px-1 font-mono text-[10px]">Shift+R</kbd> or
+                <kbd className="rounded border border-border/60 bg-muted/60 px-1 font-mono text-[10px]">Settings</kbd> or
               </p>
               <button
                 type="button"
                 onClick={onOpenAuth}
                 className="flex shrink-0 items-center gap-1 rounded-lg border border-violet-400/50 bg-violet-500/80 px-2.5 py-1.5 text-[11px] font-bold text-white transition-all hover:brightness-110"
-                title="Log in or register (Shift+R)"
+                title="Open the login page"
               >
                 <LogIn className="size-3.5" /> Log in
               </button>

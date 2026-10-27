@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, Bot, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Bot, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import AdminChallengeNpcsTab from '@/components/AdminChallengeNpcsTab';
@@ -32,7 +32,8 @@ import {
 } from '@/lib/auth-client';
 
 interface AdminPanelProps {
-  onClose: () => void;
+  onClose?: () => void;
+  presentation?: 'modal' | 'page';
 }
 
 type PrivilegeKey = 'dash' | 'roster' | 'trak';
@@ -96,7 +97,8 @@ async function fileToProductImage(file: File): Promise<string> {
   }
 }
 
-export default function AdminPanel({ onClose }: AdminPanelProps) {
+export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPanelProps) {
+  const pagePresentation = presentation === 'page';
   const { user, refresh: refreshSelf } = useAuth();
   const canAccessAdmin = user?.canAccessAdmin ?? false;
   const canManageStore = user?.canManageStore ?? false;
@@ -262,36 +264,54 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-background/50 p-2 backdrop-blur-md sm:p-4"
+      className={pagePresentation
+        ? 'custom-scrollbar h-full w-full overflow-y-auto bg-background/20 px-4 py-5 sm:px-6 sm:py-7 lg:px-9'
+        : 'fixed inset-0 z-[90] flex items-center justify-center bg-background/50 p-2 backdrop-blur-md sm:p-4'}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (!pagePresentation && e.target === e.currentTarget) onClose?.();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        if (!pagePresentation && e.key === 'Escape') onClose?.();
       }}
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Admin panel"
-        className="glass-panel relative flex h-[min(1100px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col rounded-2xl p-4 sm:h-[min(1100px,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(1600px,calc(100vw-2rem))] sm:p-6"
+        role={pagePresentation ? 'main' : 'dialog'}
+        aria-modal={pagePresentation ? undefined : true}
+        aria-label={pagePresentation ? 'Admin workspace' : 'Admin panel'}
+        className={pagePresentation
+          ? 'glass-panel relative mx-auto flex min-h-full w-full max-w-[1600px] flex-col rounded-2xl p-4 sm:p-6 lg:p-8'
+          : 'glass-panel relative flex h-[min(1100px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col rounded-2xl p-4 sm:h-[min(1100px,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(1600px,calc(100vw-2rem))] sm:p-6'}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-          aria-label="Close"
-        >
-          <X className="size-4" />
-        </button>
+        {!pagePresentation && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-3 top-3 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="size-4" />
+          </button>
+        )}
 
         {/* Header */}
         <div className="mb-3 flex items-center gap-3">
+          {pagePresentation && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border/60 bg-background/50 px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Back to Commune"
+            >
+              <ArrowLeft className="size-4" /> <span className="hidden sm:inline">Commune</span>
+            </button>
+          )}
           <div className="glass-panel flex size-11 items-center justify-center rounded-xl border-sky-400/40 bg-sky-400/10">
             <ShieldCheck className="size-6 text-sky-300" />
           </div>
           <div className="flex-1">
-            <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">Admin Panel</h2>
+            <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">
+              {pagePresentation ? 'Admin workspace' : 'Admin Panel'}
+            </h2>
             <p className="text-xs text-muted-foreground">
               {tab === 'knowledge'
                 ? 'D1 knowledge base · bundled blobs as fallback'
@@ -820,7 +840,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         {tab === 'savedNotes' && user?.isSuperAdmin && <SavedTicketNotesTab />}
 
         <p className="mt-3 shrink-0 text-center text-[10px] text-muted-foreground/70">
-          Shift+A toggles this panel
+          {pagePresentation ? 'Changes are saved to the shared workspace.' : 'Shift+A toggles this panel'}
         </p>
       </div>
     </div>
