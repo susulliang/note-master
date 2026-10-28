@@ -2,6 +2,9 @@ import {
   ArrowLeft,
   Bold,
   Check,
+  ClipboardPaste,
+  Copy,
+  Forward,
   Group,
   Globe2,
   ImagePlus,
@@ -16,11 +19,14 @@ import {
   Plus,
   Search,
   Send,
+  Reply,
+  Sparkles,
   Sticker,
   Table2,
   Underline,
   Users,
   X,
+  Zap,
   FileSpreadsheet,
   GitBranch,
 } from 'lucide-react';
@@ -72,6 +78,7 @@ import {
   type PinnedCollabDocument,
 } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
+import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 import './ChatPage.css';
 
 const EmbeddedSheetsPage = lazy(() => import('@/pages/SheetsPage'));
@@ -83,6 +90,13 @@ const MAX_CHAT_HISTORY_WIDTH = 380;
 const CHAT_PINNED_PANE_WIDTH_KEY = 'econote_chat_pinned_pane_width';
 const MIN_CHAT_PINNED_PANE_WIDTH = 35;
 const MAX_CHAT_PINNED_PANE_WIDTH = 65;
+const COMMON_EMOJIS = [
+  '😀', '😃', '😄', '😁', '😆', '😂', '🤣', '😊', '🙂', '🙃',
+  '😉', '😍', '🥰', '😘', '😋', '😜', '🤪', '😎', '🥳', '😏',
+  '😔', '😇', '😢', '😭', '😤', '😡', '🤔', '🤗', '🫡', '🙏',
+  '👏', '👍', '👎', '👌', '✌️', '🤝', '💪', '❤️', '🧡', '💛',
+  '💚', '💙', '💜', '💔', '💯', '🔥', '🎉', '✨', '🚀', '😴',
+];
 
 function readChatHistoryWidth(): number {
   try {
@@ -185,6 +199,13 @@ interface ActiveRoom {
   peerAvatar?: ChatAvatarProfile;
 }
 
+interface MessageContextMenuState {
+  x: number;
+  y: number;
+  message: ChatMessage;
+  forwarding: boolean;
+}
+
 interface MarkdownNode {
   type: string;
   value?: string;
@@ -267,7 +288,8 @@ function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElem
       loading="lazy"
       className={cn(
         'my-2 max-w-full rounded-xl border border-border/70 object-contain',
-        isSticker ? 'max-h-36 max-w-36' : 'max-h-72',
+        isSticker ? 'max-h-36 max-w-36 border-0' : 'max-h-72',
+        props.className,
       )}
     />
   );
@@ -293,6 +315,50 @@ function MarkdownBody({ markdown }: { markdown: string }) {
   );
 }
 
+function extractLinkPreviews(markdown: string): Array<{ href: string; label: string }> {
+  const links: Array<{ href: string; label: string }> = [];
+  const pattern = /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>)\]]+)/gi;
+  for (const match of markdown.matchAll(pattern)) {
+    const href = (match[2] ?? match[3] ?? '').replace(/[.,!?;:]+$/, '');
+    try {
+      const parsed = new URL(href);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+      if (!links.some((link) => link.href === parsed.href)) {
+        links.push({ href: parsed.href, label: match[1]?.trim() || parsed.hostname });
+      }
+    } catch {
+      continue;
+    }
+    if (links.length === 2) break;
+  }
+  return links;
+}
+
+function LinkPreviewCards({ markdown }: { markdown: string }) {
+  const links = extractLinkPreviews(markdown);
+  if (!links.length) return null;
+  return (
+    <div className="chat-link-previews">
+      {links.map(({ href, label }) => {
+        const parsed = new URL(href);
+        return (
+          <a
+            key={href}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="chat-link-preview"
+          >
+            <span className="chat-link-preview-domain">{parsed.hostname}</span>
+            <span className="chat-link-preview-title">{label}</span>
+            <span className="chat-link-preview-url">{parsed.pathname === '/' ? href : `${parsed.pathname}${parsed.search}`}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function markdownToEditorHtml(markdown: string): string {
   if (!markdown.trim()) return '';
   return renderToStaticMarkup(
@@ -314,7 +380,7 @@ function escapeHtml(value: string): string {
 }
 
 function inlineMarkdown(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return escapeMarkdownText(node.textContent ?? '');
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const element = node as HTMLElement;
   const children = Array.from(element.childNodes).map(inlineMarkdown).join('');
@@ -356,7 +422,7 @@ function inlineMarkdown(node: Node): string {
 
 function editorHtmlToMarkdown(editor: HTMLElement): string {
   const serialize = (node: Node): string => {
-    if (node.nodeType === Node.TEXT_NODE) return escapeMarkdownText(node.textContent ?? '');
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
     const element = node as HTMLElement;
     const tag = element.tagName.toLowerCase();
@@ -467,6 +533,14 @@ function mergeMessage(current: ChatMessage[], next: ChatMessage): ChatMessage[] 
   return merged.sort((a, b) => a.createdAt - b.createdAt);
 }
 
+function quoteMessage(message: ChatMessage): string {
+  const maxQuotedLength = 16_000;
+  const original = message.markdown.trim();
+  const shortened = original.length > maxQuotedLength;
+  const quoted = original.slice(0, maxQuotedLength).split(/\r?\n/).map((line) => `> ${line}`).join('\n');
+  return `> ${message.username} wrote:\n${quoted}${shortened ? '\n> [Quoted message shortened]' : ''}`;
+}
+
 async function compressPhoto(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
   if (file.size > 24 * 1024 * 1024) throw new Error('Choose a photo smaller than 24 MB to compress.');
@@ -495,6 +569,7 @@ async function compressPhoto(file: File): Promise<Blob> {
 
 async function compressSticker(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  if (file.size > 24 * 1024 * 1024) throw new Error('Choose an image smaller than 24 MB.');
   const bitmap = await createImageBitmap(file);
   try {
     const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
@@ -554,6 +629,9 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const [stickers, setStickers] = useState<ChatSticker[]>([]);
   const [stickerName, setStickerName] = useState('');
   const [uploadingSticker, setUploadingSticker] = useState(false);
+  const [photoDropActive, setPhotoDropActive] = useState(false);
+  const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
+  const [shakeMessage, setShakeMessage] = useState<{ id: string; shakeId: string } | null>(null);
   const [avatarProfile, setAvatarProfile] = useState<ChatAvatarProfile | null>(null);
   const [pinnedDocument, setPinnedDocument] = useState<PinnedCollabDocument | null>(null);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
@@ -599,6 +677,8 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     cursorRef.current = cached?.cursor ?? null;
     setLoadingOlder(false);
     loadingOlderRef.current = false;
+    setMessageContextMenu(null);
+    setShakeMessage(null);
     setActiveRoom(room);
     setMobileRoomOpen(true);
   }, [username]);
@@ -644,6 +724,31 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     observer.observe(main);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!messageContextMenu) return undefined;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-chat-message-menu]')) return;
+      setMessageContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMessageContextMenu(null);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress, true);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [messageContextMenu]);
+
+  useEffect(() => {
+    if (!shakeMessage) return undefined;
+    const timer = window.setTimeout(() => {
+      setShakeMessage((current) => current?.shakeId === shakeMessage.shakeId ? null : current);
+    }, 6_200);
+    return () => window.clearTimeout(timer);
+  }, [shakeMessage]);
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -700,6 +805,39 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     draftRef.current = markdown;
     setHasDraft(Boolean(markdown.trim()));
   }, [setComposerMarkdown]);
+
+  const focusComposerAtEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  }, []);
+
+  const insertComposerText = useCallback((text: string) => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    const selectionInEditor = !!editor && !!selection?.anchorNode &&
+      editor.contains(selection.anchorNode) && !!selection?.focusNode &&
+      editor.contains(selection.focusNode);
+    if (selectionInEditor && editor) {
+      editor.focus();
+      document.execCommand('insertText', false, text);
+      syncComposerMarkdown();
+      return;
+    }
+    const current = draftRef.current;
+    const next = `${current}${current.trim() ? '\n\n' : ''}${text}`;
+    if (next.length > 20_000) toast.error('Messages are limited to 20,000 characters; added text was shortened.');
+    setComposerMarkdown(next.slice(0, 20_000));
+    focusComposerAtEnd();
+  }, [focusComposerAtEnd, setComposerMarkdown, syncComposerMarkdown]);
 
   useEffect(() => () => {
     editorObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -828,11 +966,26 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   useEffect(() => {
     let stopped = false;
     let reconnectTimer = 0;
+    let socketConnectTimer = 0;
+    let stableConnectionTimer = 0;
+    let reconnectAttempt = 0;
     let currentSocket: WebSocket | null = null;
+    let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
+    let ticketController: AbortController | null = null;
     let cacheInitialized = peekChatRoomCache(username, activeRoom.roomId)?.initialized ?? false;
     setConnection('connecting');
     setLoadingOlder(false);
     loadingOlderRef.current = false;
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      setConnection('offline');
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, getWebSocketReconnectDelay(reconnectAttempt));
+      reconnectAttempt += 1;
+    };
 
     const persistRoomCache = (roomMessages: ChatMessage[], initialized = cacheInitialized) => {
       void saveChatRoomCache(username, {
@@ -846,10 +999,22 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     };
 
     const connect = async () => {
+      if (stopped) return;
+      setConnection('connecting');
       try {
         let ticket = pendingTicketRef.current;
         if (ticket?.roomId === activeRoom.roomId) pendingTicketRef.current = null;
-        else ticket = await requestChatTicket({ roomId: activeRoom.roomId });
+        else {
+          const controller = new AbortController();
+          ticketController = controller;
+          const timeout = window.setTimeout(() => controller.abort(), 15_000);
+          try {
+            ticket = await requestChatTicket({ roomId: activeRoom.roomId }, controller.signal);
+          } finally {
+            window.clearTimeout(timeout);
+            if (ticketController === controller) ticketController = null;
+          }
+        }
         if (stopped) return;
         for (const message of ticket.freshMessages ?? []) {
           void upsertCachedChatMessage(username, activeRoom.roomId, message).catch(() => undefined);
@@ -858,8 +1023,32 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
         const socket = new WebSocket(chatSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
+        socketConnectTimer = window.setTimeout(() => {
+          if (socket.readyState !== WebSocket.CONNECTING) return;
+          try {
+            socket.close();
+          } catch {
+            /* The socket may already be closing. */
+          }
+          scheduleReconnect();
+        }, 15_000);
         socket.onopen = () => {
-          if (!stopped) setConnection('connected');
+          if (stopped) return;
+          window.clearTimeout(socketConnectTimer);
+          setConnection('connected');
+          stableConnectionTimer = window.setTimeout(() => {
+            reconnectAttempt = 0;
+          }, 30_000);
+          heartbeat = startWebSocketHeartbeat(socket, () => {
+            if (socketRef.current !== socket) return;
+            setConnection('offline');
+            try {
+              socket.close(4000, 'Heartbeat timeout');
+            } catch {
+              /* The socket may already be closing. */
+            }
+            scheduleReconnect();
+          });
         };
         socket.onmessage = (event) => {
           if (stopped) return;
@@ -867,6 +1056,10 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           try {
             payload = JSON.parse(String(event.data)) as Record<string, unknown>;
           } catch {
+            return;
+          }
+          if (payload.type === 'heartbeat_ack') {
+            heartbeat?.acknowledge();
             return;
           }
           if (payload.type === 'welcome') {
@@ -932,6 +1125,19 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             return;
           }
           if (
+            payload.type === 'message:shake' &&
+            typeof payload.id === 'string' &&
+            typeof payload.shakeId === 'string'
+          ) {
+            setShakeMessage({ id: payload.id, shakeId: payload.shakeId });
+            requestAnimationFrame(() => {
+              messageListRef.current
+                ?.querySelector<HTMLElement>(`[data-chat-message-id="${payload.id as string}"]`)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+            return;
+          }
+          if (
             (payload.type === 'message:created' || payload.type === 'message:updated') &&
             payload.message && typeof payload.message === 'object'
           ) {
@@ -948,21 +1154,40 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           if (payload.type === 'error' && typeof payload.message === 'string') toast.error(payload.message);
         };
         socket.onerror = () => {
-          if (!stopped) setConnection('offline');
-        };
-        socket.onclose = () => {
-          if (socketRef.current === socket) socketRef.current = null;
           if (stopped) return;
           setConnection('offline');
-          reconnectTimer = window.setTimeout(() => { void connect(); }, 1400);
+          try {
+            socket.close();
+          } catch {
+            /* The socket may already be closing. */
+          }
+          scheduleReconnect();
+        };
+        socket.onclose = () => {
+          window.clearTimeout(socketConnectTimer);
+          heartbeat?.stop();
+          heartbeat = null;
+          window.clearTimeout(stableConnectionTimer);
+          if (socketRef.current === socket) socketRef.current = null;
+          scheduleReconnect();
         };
       } catch {
-        if (stopped) return;
-        setConnection('offline');
-        reconnectTimer = window.setTimeout(() => { void connect(); }, 5000);
+        scheduleReconnect();
       }
     };
 
+    const handleOnline = () => {
+      if (ticketController) return;
+      if (
+        currentSocket &&
+        (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)
+      ) return;
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = 0;
+      reconnectAttempt = 0;
+      void connect();
+    };
+    window.addEventListener('online', handleOnline);
     void connect();
     void loadChatRoomCache(username, activeRoom.roomId)
       .catch(() => null)
@@ -983,6 +1208,11 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     return () => {
       stopped = true;
       window.clearTimeout(reconnectTimer);
+      window.clearTimeout(socketConnectTimer);
+      window.clearTimeout(stableConnectionTimer);
+      window.removeEventListener('online', handleOnline);
+      ticketController?.abort();
+      heartbeat?.stop();
       if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) currentSocket.close(1000, 'Room changed');
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
@@ -1221,17 +1451,25 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     setLinkEditorOpen((open) => !open);
   };
 
-  const handlePhoto = useCallback(async (file: File | undefined) => {
-    if (!file) return;
+  const handlePhotoFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    if (!imageFiles.length) {
+      if (files.length) toast.error('Drop image files to attach them to chat.');
+      return;
+    }
     const roomId = activeRoom.roomId;
     try {
       setSending(true);
-      const compressed = await compressPhoto(file);
-      const mediaUrl = await uploadChatPhoto(roomId, compressed);
-      const insertion = `![Photo](${mediaUrl})`;
-      const current = draftRef.current;
-      setComposerMarkdown(`${current}${current.trim() ? '\n\n' : ''}${insertion}`);
-      toast.success(`Photo ready · ${(compressed.size / 1024).toFixed(0)} KB WebP`);
+      let totalBytes = 0;
+      for (const file of imageFiles) {
+        const compressed = await compressPhoto(file);
+        const mediaUrl = await uploadChatPhoto(roomId, compressed);
+        const current = draftRef.current;
+        const insertion = `![${escapeMarkdownText(file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Photo')}](${mediaUrl})`;
+        setComposerMarkdown(`${current}${current.trim() ? '\n\n' : ''}${insertion}`);
+        totalBytes += compressed.size;
+      }
+      toast.success(`${imageFiles.length} photo${imageFiles.length === 1 ? '' : 's'} ready · ${(totalBytes / 1024).toFixed(0)} KB WebP`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not add this photo.');
     } finally {
@@ -1239,6 +1477,10 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       if (photoInputRef.current) photoInputRef.current.value = '';
     }
   }, [activeRoom.roomId, setComposerMarkdown]);
+
+  const handlePhoto = useCallback((file?: File) => {
+    if (file) void handlePhotoFiles([file]);
+  }, [handlePhotoFiles]);
 
   const handleStickerFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -1286,11 +1528,104 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
       disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="grid size-7 place-items-center rounded-md text-muted-foreground transition hover:scale-105 hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-45"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:scale-105 hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-45"
     >
       {icon}
     </button>
   );
+
+  const insertEmoji = useCallback((emoji: string) => {
+    insertComposerText(emoji);
+  }, [insertComposerText]);
+
+  const replyToMessage = useCallback((message: ChatMessage) => {
+    setEditingId(null);
+    const current = draftRef.current;
+    const reply = `${current}${current.trim() ? '\n\n' : ''}${quoteMessage(message)}\n\n`;
+    if (reply.length > 20_000) toast.error('Messages are limited to 20,000 characters; the quote was shortened.');
+    setComposerMarkdown(reply.slice(0, 20_000));
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const responseLine = document.createElement('p');
+      responseLine.appendChild(document.createElement('br'));
+      editor.appendChild(responseLine);
+      editor.focus();
+      const range = document.createRange();
+      range.selectNodeContents(responseLine);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    setMessageContextMenu(null);
+  }, [setComposerMarkdown]);
+
+  const copyMessage = useCallback(async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.markdown);
+      toast.success('Message copied.');
+    } catch {
+      toast.error('Clipboard access is unavailable.');
+    }
+    setMessageContextMenu(null);
+  }, []);
+
+  const pasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) toast.info('Clipboard is empty.');
+      else insertComposerText(text);
+    } catch {
+      toast.error('Clipboard access is unavailable.');
+    }
+    setMessageContextMenu(null);
+  }, [insertComposerText]);
+
+  const toggleMessageGlow = useCallback((message: ChatMessage) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to chat before changing message effects.');
+      setMessageContextMenu(null);
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: 'message:glow',
+      id: message.id,
+      glowing: message.glowing !== true,
+    }));
+    setMessageContextMenu(null);
+  }, []);
+
+  const shakeThisMessage = useCallback((message: ChatMessage) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to chat before shaking a message.');
+      setMessageContextMenu(null);
+      return;
+    }
+    socket.send(JSON.stringify({ type: 'message:shake', id: message.id }));
+    setMessageContextMenu(null);
+  }, []);
+
+  const forwardTargets = useMemo<ActiveRoom[]>(() => [
+    { roomId: 'global', title: globalTitle, kind: 'global' },
+    ...conversations.map((conversation) => ({
+      roomId: conversation.roomId,
+      title: conversation.title,
+      kind: conversation.kind,
+      peerUsername: conversation.peerUsername,
+      memberCount: conversation.memberCount,
+      peerAvatar: conversation.peerAvatar,
+    })),
+  ], [conversations, globalTitle]);
+
+  const forwardMessageToRoom = useCallback((message: ChatMessage, room: ActiveRoom) => {
+    selectChatRoom(room);
+    setEditingId(null);
+    insertComposerText(`Forwarded message:\n\n${quoteMessage(message)}`);
+    setMessageContextMenu(null);
+  }, [insertComposerText, selectChatRoom]);
 
   const visibleMessages = useMemo(() => messages, [messages]);
   const selectedPinDocument = collabDocuments.find((document) => document.id === pinDocumentId);
@@ -1309,7 +1644,21 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
         )} style={{ width: historyWidth }}>
           <div className="flex items-center justify-between px-4 pb-3 pt-5">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Conversations</p>
+              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <span
+                  aria-label={`Chat connection ${connection}`}
+                  title={`Chat connection ${connection}`}
+                  className={cn(
+                    'size-1.5 shrink-0 rounded-full',
+                    connection === 'connected'
+                      ? 'bg-green-500 shadow-[0_0_7px_rgb(34_197_94_/_0.65)]'
+                      : connection === 'connecting'
+                        ? 'bg-amber-400 shadow-[0_0_7px_rgb(251_191_36_/_0.55)]'
+                        : 'bg-red-500 shadow-[0_0_7px_rgb(239_68_68_/_0.55)]',
+                  )}
+                />
+                Conversations
+              </p>
               <p className="mt-1 text-sm font-medium text-foreground/90">Your workspace</p>
             </div>
             <button
@@ -1667,10 +2016,26 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                 const previous = visibleMessages[index - 1];
                 const grouped = previous?.username === message.username && message.createdAt - previous.createdAt < 5 * 60_000;
                 const news = message.source === 'news';
+                const renderedMarkdown = news ? fixNewsImagePaths(message.markdown) : message.markdown;
+                const stickerOnly = /^!\[sticker:[\s\S]*\]\(\/api\/chat\/stickers\/(?:public|private)\/[^)\s]+\)$/i
+                  .test(message.markdown.trim());
+                const shaking = shakeMessage?.id === message.id;
                 return (
                   <article
                     key={message.id}
+                    data-chat-message-id={message.id}
                     className={cn('group flex gap-3', mine && !news && 'flex-row-reverse')}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const menuWidth = 248;
+                      const menuHeight = 420;
+                      setMessageContextMenu({
+                        x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+                        y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+                        message,
+                        forwarding: false,
+                      });
+                    }}
                   >
                     {!grouped ? (
                       <div className={cn(
@@ -1695,15 +2060,22 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                           <time className="text-[10px] text-muted-foreground">{formatTime(message.createdAt)}</time>
                         </div>
                       )}
-                      <div className={cn(
-                        'relative rounded-2xl border px-4 py-3 shadow-sm',
-                        news
+                      <div
+                        key={shaking ? `${message.id}:${shakeMessage?.shakeId}` : message.id}
+                        className={cn(
+                        stickerOnly
+                          ? 'relative'
+                          : 'relative rounded-2xl border px-4 py-3 shadow-sm',
+                        message.glowing && 'chat-message-glow',
+                        shaking && 'chat-message-shake',
+                        !stickerOnly && (news
                           ? 'border-primary/15 bg-primary/[0.045]'
                           : mine
                             ? 'rounded-tr-md border-accent/15 bg-accent/[0.09]'
-                            : 'rounded-tl-md border-border/70 bg-card/65',
+                            : 'rounded-tl-md border-border/70 bg-card/65'),
                       )}>
-                        <MarkdownBody markdown={news ? fixNewsImagePaths(message.markdown) : message.markdown} />
+                        <MarkdownBody markdown={renderedMarkdown} />
+                        {!stickerOnly && <LinkPreviewCards markdown={renderedMarkdown} />}
                         {message.updatedAt > message.createdAt + 1_000 && !news && (
                           <span className="mt-2 block text-right text-[9px] text-muted-foreground">edited</span>
                         )}
@@ -1733,7 +2105,35 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
 
           <div className="shrink-0 border-t border-border/60 bg-background/75 p-3 sm:px-6 sm:pb-5 sm:pt-4">
             <div className="relative mx-auto w-full">
-              <div className="flex min-h-8 flex-wrap items-center gap-0.5 border-b border-border/45 px-2 py-0.5">
+              <div
+                role="toolbar"
+                aria-label="Message formatting and emoji"
+                className="flex min-h-8 flex-nowrap items-center gap-0.5 overflow-hidden border-b border-border/45 px-2 py-0.5"
+              >
+                <div
+                  className="chat-emoji-strip"
+                  role="group"
+                  aria-label="Common emojis"
+                  onWheel={(event) => {
+                    if (event.deltaY === 0) return;
+                    event.preventDefault();
+                    event.currentTarget.scrollLeft += event.deltaY;
+                  }}
+                >
+                  {COMMON_EMOJIS.map((emoji, index) => (
+                    <button
+                      key={`${emoji}-${index}`}
+                      type="button"
+                      title={`Insert ${emoji}`}
+                      aria-label={`Insert ${emoji}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => insertEmoji(emoji)}
+                      className="chat-emoji-button"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
                 {toolbarButton('Bold', <Bold className="size-3.5" />, () => applyFormatting('bold'))}
                 {toolbarButton('Italic', <Italic className="size-3.5" />, () => applyFormatting('italic'))}
                 {toolbarButton('Underline', <Underline className="size-3.5" />, () => applyFormatting('underline'))}
@@ -1753,8 +2153,9 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                   ref={photoInputRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   className="hidden"
-                  onChange={(event) => void handlePhoto(event.target.files?.[0])}
+                  onChange={(event) => void handlePhotoFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
 
@@ -1795,7 +2196,7 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 text-[10px] font-medium text-accent hover:bg-accent/20 disabled:opacity-50"
                     >
                       <Plus className="size-3.5" />
-                      {uploadingSticker ? 'Saving…' : 'Add PNG'}
+                      {uploadingSticker ? 'Saving…' : 'Add image'}
                     </button>
                     <input
                       ref={stickerInputRef}
@@ -1818,12 +2219,13 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                         <SecureChatImage
                           src={`/api/chat/stickers/${sticker.scope}/${sticker.id}`}
                           alt={sticker.name}
+                          className="chat-sticker-grid-image"
                         />
                       </button>
                     ))}
                     {stickers.filter((sticker) => sticker.scope === stickerScope).length === 0 && (
                       <p className="py-2 text-[10px] text-muted-foreground">
-                        No stickers here yet. Add one as a 256 × 256 PNG.
+                        No stickers here yet. Add any image; it will be converted to PNG and scaled to fit 256 × 256.
                       </p>
                     )}
                   </div>
@@ -1885,7 +2287,14 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                 spellCheck
                 onInput={syncComposerMarkdown}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
+                  if (event.key === 'Enter' && event.shiftKey) {
+                    event.preventDefault();
+                    document.execCommand('insertLineBreak');
+                    syncComposerMarkdown();
+                  } else if (
+                    event.key === 'Enter' &&
+                    !event.nativeEvent.isComposing
+                  ) {
                     event.preventDefault();
                     sendMessage();
                   }
@@ -1900,8 +2309,31 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                   document.execCommand('insertText', false, plainText);
                   syncComposerMarkdown();
                 }}
-                className="chat-composer-editor min-h-[164px] max-h-[320px] w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  setPhotoDropActive(true);
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                  setPhotoDropActive(false);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setPhotoDropActive(false);
+                  void handlePhotoFiles(Array.from(event.dataTransfer.files));
+                }}
+                className={cn(
+                  'chat-composer-editor min-h-[164px] max-h-[320px] w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6',
+                  photoDropActive && 'chat-composer-editor--drop-active',
+                )}
               />
+                {photoDropActive && (
+                  <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-accent/10 text-sm font-medium text-accent">
+                    Drop photos to attach
+                  </div>
+                )}
               </div>
               <div className="absolute bottom-5 right-5 z-10 flex items-center gap-2">
                 {editingId ? (
@@ -1929,6 +2361,123 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
           </div>
         </main>
       </div>
+
+      {messageContextMenu && (
+        <section
+          data-chat-message-menu
+          role="menu"
+          aria-label={`Actions for message from ${messageContextMenu.message.username}`}
+          onContextMenu={(event) => event.preventDefault()}
+          className="fixed z-[130] flex w-[248px] max-h-[min(75dvh,440px)] flex-col overflow-y-auto rounded-xl border border-border/80 bg-card/95 p-1.5 text-foreground shadow-2xl backdrop-blur-2xl"
+          style={{ left: messageContextMenu.x, top: messageContextMenu.y }}
+        >
+          {messageContextMenu.forwarding ? (
+            <>
+              <div className="flex items-center gap-2 border-b border-border/60 px-2 pb-2 pt-1">
+                <button
+                  type="button"
+                  aria-label="Back to message actions"
+                  title="Back"
+                  onClick={() => setMessageContextMenu((current) => current
+                    ? { ...current, forwarding: false }
+                    : null)}
+                  className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <ArrowLeft className="size-3.5" />
+                </button>
+                <span className="text-xs font-semibold">Forward to</span>
+              </div>
+              <div className="max-h-72 overflow-y-auto py-1">
+                {forwardTargets.map((room) => (
+                  <button
+                    key={room.roomId}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => forwardMessageToRoom(messageContextMenu.message, room)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+                  >
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-border/70 bg-background/70 text-accent">
+                      {room.kind === 'global'
+                        ? <Globe2 className="size-3.5" />
+                        : room.kind === 'group'
+                          ? <Group className="size-3.5" />
+                          : <MessageCircle className="size-3.5" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{room.title}</span>
+                    {room.roomId === activeRoom.roomId && (
+                      <span className="text-[9px] text-muted-foreground">Current</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => replyToMessage(messageContextMenu.message)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                <Reply className="size-3.5 text-muted-foreground" />
+                Reply with quote
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void copyMessage(messageContextMenu.message)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                <Copy className="size-3.5 text-muted-foreground" />
+                Copy message
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void pasteFromClipboard()}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                <ClipboardPaste className="size-3.5 text-muted-foreground" />
+                Paste from clipboard
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => setMessageContextMenu((current) => current
+                  ? { ...current, forwarding: true }
+                  : null)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                <Forward className="size-3.5 text-muted-foreground" />
+                Forward to…
+              </button>
+              {messageContextMenu.message.source !== 'news' && (
+                <>
+                  <div role="separator" className="my-1 border-t border-border/60" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => toggleMessageGlow(messageContextMenu.message)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+                  >
+                    <Sparkles className="size-3.5 text-amber-400" />
+                    {messageContextMenu.message.glowing ? 'Unglow this message' : 'Glow this message'}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => shakeThisMessage(messageContextMenu.message)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+                  >
+                    <Zap className="size-3.5 text-amber-400" />
+                    Shake this message
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {pinDialogOpen && (
         <div

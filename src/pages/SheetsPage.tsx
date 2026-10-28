@@ -61,6 +61,7 @@ import {
   type SheetTextColor,
 } from '@/lib/sheets-types';
 import { displayFormulaValue, evaluateSheetCell } from '@/lib/sheet-formulas';
+import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 import './SheetsPage.css';
 
 interface SheetsPageProps {
@@ -252,6 +253,12 @@ export default function SheetsPage({
     let serverDimensions: { rows: number; cols: number } | null = null;
     let serverSnapshotCells: SheetCellMap = {};
     let pendingCache: Awaited<ReturnType<typeof loadSheetSnapshot>> = null;
+    let reconnectTimer = 0;
+    let socketConnectTimer = 0;
+    let stableConnectionTimer = 0;
+    let reconnectAttempt = 0;
+    let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
+    let ticketController: AbortController | null = null;
     setConnection('connecting');
     setCanEdit(false);
     setSnapshotReady(false);
@@ -268,6 +275,16 @@ export default function SheetsPage({
       setSnapshotSheetId(activeSheet.id);
       setSnapshotReady(true);
     };
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      setConnection('offline');
+      setCanEdit(false);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, getWebSocketReconnectDelay(reconnectAttempt));
+      reconnectAttempt += 1;
+    };
     void loadSheetSnapshot(activeSheet.id).then((cached) => {
       if (stopped || serverSnapshotReceived || !cached) return;
       if (!permissionConfirmed) {
@@ -278,23 +295,67 @@ export default function SheetsPage({
     }).catch(() => undefined);
 
     const connect = async () => {
+      if (stopped) return;
+      setConnection('connecting');
       try {
-        const ticket = await requestSheetsSocketTicket(activeSheet.id);
+        serverSnapshotReceived = false;
+        serverDimensions = null;
+        serverSnapshotCells = {};
+        const controller = new AbortController();
+        ticketController = controller;
+        const ticketTimeout = window.setTimeout(() => controller.abort(), 15_000);
+        let ticket: Awaited<ReturnType<typeof requestSheetsSocketTicket>>;
+        try {
+          ticket = await requestSheetsSocketTicket(activeSheet.id, controller.signal);
+        } finally {
+          window.clearTimeout(ticketTimeout);
+          if (ticketController === controller) ticketController = null;
+        }
         if (stopped) return;
         permissionConfirmed = true;
         setCanEdit(ticket.permission !== 'view');
-        if (pendingCache) applyCachedSnapshot(pendingCache);
+        if (pendingCache) {
+          applyCachedSnapshot(pendingCache);
+          pendingCache = null;
+        }
         const socket = new WebSocket(sheetsSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
+        socketConnectTimer = window.setTimeout(() => {
+          if (socket.readyState !== WebSocket.CONNECTING) return;
+          try {
+            socket.close();
+          } catch {
+            /* The socket may already be closing. */
+          }
+          scheduleReconnect();
+        }, 15_000);
         socket.onopen = () => {
-          if (!stopped) setConnection('connected');
+          if (stopped) return;
+          window.clearTimeout(socketConnectTimer);
+          setConnection('connected');
+          stableConnectionTimer = window.setTimeout(() => {
+            reconnectAttempt = 0;
+          }, 30_000);
+          heartbeat = startWebSocketHeartbeat(socket, () => {
+            if (socketRef.current !== socket) return;
+            try {
+              socket.close(4000, 'Heartbeat timeout');
+            } catch {
+              /* The socket may already be closing. */
+            }
+            scheduleReconnect();
+          });
         };
         socket.onmessage = (event) => {
           let payload: Record<string, unknown>;
           try {
             payload = JSON.parse(String(event.data)) as Record<string, unknown>;
           } catch {
+            return;
+          }
+          if (payload.type === 'heartbeat_ack') {
+            heartbeat?.acknowledge();
             return;
           }
           if (payload.type === 'sheet:ready') {
@@ -401,27 +462,50 @@ export default function SheetsPage({
           if (payload.type === 'error' && typeof payload.message === 'string') toast.error(payload.message);
         };
         socket.onclose = () => {
-          if (!stopped) {
-            setConnection('offline');
-            setCanEdit(false);
-          }
+          window.clearTimeout(socketConnectTimer);
+          heartbeat?.stop();
+          heartbeat = null;
+          window.clearTimeout(stableConnectionTimer);
+          if (socketRef.current === socket) socketRef.current = null;
+          scheduleReconnect();
         };
         socket.onerror = () => {
-          if (!stopped) {
-            setConnection('offline');
-            setCanEdit(false);
-          }
-        };
-      } catch (error) {
-        if (!stopped) {
+          if (stopped) return;
           setConnection('offline');
-          toast.error(error instanceof Error ? error.message : 'Could not connect to this sheet.');
-        }
+          setCanEdit(false);
+          try {
+            socket.close();
+          } catch {
+            /* The socket may already be closing. */
+          }
+          scheduleReconnect();
+        };
+      } catch {
+        if (stopped) return;
+        scheduleReconnect();
       }
     };
+    const handleOnline = () => {
+      if (ticketController) return;
+      if (
+        currentSocket &&
+        (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)
+      ) return;
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = 0;
+      reconnectAttempt = 0;
+      void connect();
+    };
+    window.addEventListener('online', handleOnline);
     void connect();
     return () => {
       stopped = true;
+      window.clearTimeout(reconnectTimer);
+      window.clearTimeout(socketConnectTimer);
+      window.clearTimeout(stableConnectionTimer);
+      window.removeEventListener('online', handleOnline);
+      ticketController?.abort();
+      heartbeat?.stop();
       currentSocket?.close();
       if (socketRef.current === currentSocket) socketRef.current = null;
     };

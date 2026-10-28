@@ -88,11 +88,15 @@ export async function renameCollaborativeSheet(id: string, title: string): Promi
   return result.title;
 }
 
-export async function requestSheetsSocketTicket(sheetId: string): Promise<SheetsSocketTicket> {
+export async function requestSheetsSocketTicket(
+  sheetId: string,
+  signal?: AbortSignal,
+): Promise<SheetsSocketTicket> {
   return requestJson<SheetsSocketTicket>('/api/sheets/socket-ticket', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sheetId }),
+    signal,
   });
 }
 

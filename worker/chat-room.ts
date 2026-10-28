@@ -9,6 +9,7 @@ interface ChatMessageRow {
   source_id: string | null;
   avatar_seed: number;
   avatar_rotation: number;
+  glowing: number;
 }
 
 interface TicketRow {
@@ -82,6 +83,7 @@ function presentMessage(row: ChatMessageRow) {
     updatedAt: row.updated_at,
     source: row.source_id ? 'news' : 'chat',
     avatar: { seed: row.avatar_seed, rotation: row.avatar_rotation },
+    glowing: row.glowing === 1,
   };
 }
 
@@ -120,6 +122,7 @@ export class ChatRoom extends DurableObject<Env> {
       this.ensureColumn('chat_ws_tickets', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'avatar_seed', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('chat_messages', 'glowing', 'INTEGER NOT NULL DEFAULT 0');
     });
   }
 
@@ -271,6 +274,7 @@ export class ChatRoom extends DurableObject<Env> {
         source_id: null,
         avatar_seed: user.avatarSeed,
         avatar_rotation: user.avatarRotation,
+        glowing: 0,
       };
       this.ctx.storage.sql.exec(
         `INSERT INTO chat_messages
@@ -323,6 +327,34 @@ export class ChatRoom extends DurableObject<Env> {
       }
       return;
     }
+    if (event.type === 'message:glow') {
+      if (typeof event.id !== 'string' || typeof event.glowing !== 'boolean') return;
+      const changed = this.ctx.storage.sql.exec(
+        'UPDATE chat_messages SET glowing = ? WHERE id = ? AND source_id IS NULL',
+        event.glowing ? 1 : 0,
+        event.id,
+      ).rowsWritten;
+      if (changed) {
+        const row = this.ctx.storage.sql
+          .exec<SqlRow<ChatMessageRow>>('SELECT * FROM chat_messages WHERE id = ?', event.id)
+          .toArray()[0];
+        if (row) this.broadcast({ type: 'message:updated', message: presentMessage(row) });
+      }
+      return;
+    }
+    if (event.type === 'message:shake') {
+      if (typeof event.id !== 'string') return;
+      const row = this.ctx.storage.sql
+        .exec<{ id: string; source_id: string | null }>(
+          'SELECT id, source_id FROM chat_messages WHERE id = ?',
+          event.id,
+        )
+        .toArray()[0];
+      if (row && !row.source_id) {
+        this.broadcast({ type: 'message:shake', id: row.id, shakeId: crypto.randomUUID() });
+      }
+      return;
+    }
     if (event.type === 'history:latest') {
       const page = this.getMessages();
       send(ws, {
@@ -367,7 +399,7 @@ export class ChatRoom extends DurableObject<Env> {
   private getMessages(before?: MessageCursor) {
     const rows = before
       ? this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
-        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation
+        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, glowing
          FROM chat_messages
          WHERE created_at < ? OR (created_at = ? AND id < ?)
          ORDER BY created_at DESC, id DESC LIMIT ?`,
@@ -377,7 +409,7 @@ export class ChatRoom extends DurableObject<Env> {
         HISTORY_PAGE_SIZE + 1,
       ).toArray()
       : this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
-        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation
+        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, glowing
          FROM chat_messages ORDER BY created_at DESC, id DESC LIMIT ?`,
         HISTORY_PAGE_SIZE + 1,
       ).toArray();

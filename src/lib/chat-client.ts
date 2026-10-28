@@ -8,6 +8,7 @@ export interface ChatMessage {
   updatedAt: number;
   source: 'chat' | 'news';
   avatar: ChatAvatarProfile;
+  glowing?: boolean;
 }
 
 export interface ChatConversation {
@@ -123,11 +124,15 @@ export async function createCollabMindmap(title: string): Promise<CollabDocument
   return result.document;
 }
 
-export async function requestMindmapSocketTicket(documentId: string): Promise<MindmapSocketTicket> {
+export async function requestMindmapSocketTicket(
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<MindmapSocketTicket> {
   return requestJson<MindmapSocketTicket>('/api/collab/mindmaps/socket-ticket', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ documentId }),
+    signal,
   });
 }
 
@@ -232,11 +237,12 @@ export async function createChatGroup(
 export async function requestChatTicket(payload: {
   roomId?: string;
   peerUsername?: string;
-}): Promise<ChatSocketTicket> {
+}, signal?: AbortSignal): Promise<ChatSocketTicket> {
   return requestJson<ChatSocketTicket>('/api/chat/socket-ticket', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
