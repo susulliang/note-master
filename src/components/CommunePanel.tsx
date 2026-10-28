@@ -5125,7 +5125,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 <h3 className="flex items-center gap-2 font-['Schoolbell'] text-lg font-bold">
                   {selected.isSuperAdmin ? (
                     <span className="border border-[#b78a36] bg-[#f0d17c] px-1.5 py-0.5 font-mono text-[9px] font-extrabold tracking-wide text-[#493719]">
-                      SUPER ADMIN
+                      DEV
                     </span>
                   ) : selected.isAdmin && !selected.isManagement ? (
                     <span className="text-[#f0d17c]">★</span>

@@ -38,6 +38,8 @@ interface CatAssistantProps {
   onKittyHelp?: () => void;
   /** Long-press the cat → open Kitty Help in Ask Knowledge mode. */
   onAskOpen?: () => void;
+  /** Render the mascot as a pet-only companion on the sign-in screen. */
+  askEnabled?: boolean;
   /** Live stage of the Kitty Help routine — rendered as a persistent
    *  violet bubble above the cat while non-null. */
   kittyStage?: { label: string; detail?: string } | null;
@@ -59,6 +61,7 @@ export function CatAssistant({
   moveRequest,
   onKittyHelp,
   onAskOpen,
+  askEnabled = true,
   kittyStage,
   pet,
   onPet,
@@ -249,7 +252,7 @@ export function CatAssistant({
       // turns into a drag or ends before the 500ms elapse.
       askFiredRef.current = false;
       window.clearTimeout(askTimerRef.current);
-      if (onAskOpen) {
+      if (askEnabled && onAskOpen) {
         askTimerRef.current = window.setTimeout(() => {
           if (pointerDownRef.current && !gestureDragRef.current) {
             askFiredRef.current = true;
@@ -263,7 +266,7 @@ export function CatAssistant({
         // Pointer capture may be unavailable after a browser cancellation.
       }
     },
-    [visiblePosition.x, visiblePosition.y, onAskOpen]
+    [askEnabled, visiblePosition.x, visiblePosition.y, onAskOpen]
   );
 
   const onPointerMove = useCallback(
@@ -381,12 +384,12 @@ export function CatAssistant({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={() => {
-          if (!dragging) onKittyHelp?.();
+          if (askEnabled && !dragging) onKittyHelp?.();
         }}
         onKeyDown={onPetKey}
         role="button"
         tabIndex={0}
-        aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet, long-press or Shift+C to ask, double-click for Kitty Help`}
+        aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet${askEnabled ? ', long-press or Shift+C to ask, double-click for Kitty Help' : ''}`}
         className={cn(
           'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-2xl',
           dragging && 'cursor-grabbing',

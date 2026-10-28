@@ -67,14 +67,18 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
   };
 
   const sortedOptions = useMemo(() => USERNAME_OPTIONS, []);
-  const selectClass =
-    'glass-field auth-form-field w-full appearance-none rounded-xl px-4 py-3 text-base font-semibold text-foreground focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30';
+  const selectClass = cn(
+    'glass-field auth-form-field w-full appearance-none rounded-xl px-4 py-3 text-base font-semibold text-foreground focus:outline-none focus:ring-2',
+    pagePresentation
+      ? 'border-white/10 bg-white/[0.04] focus:border-teal-300 focus:ring-teal-300/20'
+      : 'focus:border-violet-400 focus:ring-violet-400/30',
+  );
 
   return (
     <div
       className={cn(
         pagePresentation
-          ? 'grid min-h-full w-full place-items-center bg-background/20 p-4 sm:p-8'
+          ? 'auth-page relative grid min-h-full w-full place-items-center overflow-hidden bg-[radial-gradient(ellipse_at_15%_20%,rgba(20,184,166,0.16),transparent_38%),radial-gradient(ellipse_at_85%_80%,rgba(59,130,246,0.13),transparent_42%),linear-gradient(145deg,#080d14,#101a25_55%,#0b1119)] p-4 sm:p-8'
           : 'fixed inset-0 z-[90] flex items-center justify-center backdrop-blur-sm',
         !pagePresentation && (required ? 'bg-background/95' : 'bg-black/40')
       )}
@@ -85,39 +89,58 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
         if (!pagePresentation && e.key === 'Escape' && !required) onClose();
       }}
     >
+      {pagePresentation && (
+        <>
+          <div className="pointer-events-none absolute left-[12%] top-[12%] size-72 rounded-full bg-teal-400/10 blur-3xl" aria-hidden />
+          <div className="pointer-events-none absolute bottom-[8%] right-[8%] size-80 rounded-full bg-blue-400/10 blur-3xl" aria-hidden />
+        </>
+      )}
       <div
         role={pagePresentation ? 'main' : 'dialog'}
         aria-modal={pagePresentation ? undefined : true}
         aria-label={required ? 'Agent sign in' : 'Authentication'}
         className={cn(
-          'glass-panel relative overflow-hidden shadow-2xl',
+          'glass-panel relative z-10 overflow-hidden shadow-2xl',
           pagePresentation
-            ? 'grid w-full max-w-5xl rounded-3xl border-violet-400/25 bg-card/55 lg:min-h-[620px] lg:grid-cols-[1fr_0.9fr]'
+            ? 'grid w-full max-w-6xl rounded-[28px] border-white/10 bg-[#0b121c]/85 shadow-[0_32px_100px_rgba(0,0,0,0.48)] backdrop-blur-2xl lg:min-h-[660px] lg:grid-cols-[1.05fr_0.95fr]'
             : 'w-[min(420px,calc(100vw-32px))] rounded-2xl border-violet-400/30 p-6'
         )}
       >
         {pagePresentation && (
-          <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-border/50 bg-gradient-to-br from-violet-500/15 via-background/35 to-accent/10 p-8 lg:flex xl:p-11">
-            <div className="absolute -right-20 -top-20 size-72 rounded-full bg-violet-400/10 blur-3xl" aria-hidden />
+          <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-white/10 bg-[linear-gradient(145deg,rgba(18,36,46,0.9),rgba(12,20,31,0.62)_60%,rgba(15,28,42,0.8))] p-8 lg:flex xl:p-12">
+            <div className="absolute -right-20 -top-20 size-72 rounded-full bg-teal-300/10 blur-3xl" aria-hidden />
+            <div className="absolute -bottom-24 -left-16 size-72 rounded-full bg-blue-400/10 blur-3xl" aria-hidden />
             <div className="relative">
-              <div className="mb-6 flex size-12 items-center justify-center rounded-2xl border border-violet-300/30 bg-violet-400/10">
-                <KeyRound className="size-6 text-violet-300" />
+              <div className="mb-8 flex size-14 items-center justify-center rounded-[20px] border border-teal-200/20 bg-teal-300/10 shadow-[0_0_42px_rgba(45,212,191,0.1)]">
+                <KeyRound className="size-6 text-teal-200" />
               </div>
-              <p className="font-mono text-xs font-bold uppercase tracking-[0.22em] text-violet-200/80">Ecovacs Support</p>
-              <h1 className="mt-3 max-w-sm text-3xl font-bold leading-tight tracking-tight text-foreground xl:text-4xl">
-                Your support workspace, ready when you are.
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.28em] text-teal-100/65">ECONOTE / AGENT WORKSPACE</p>
+              <h1 className="mt-5 max-w-md text-4xl font-semibold leading-[1.08] tracking-tight text-white xl:text-5xl">
+                Econote, <span className="text-teal-200">notey note.</span>
               </h1>
-              <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                Sign in to manage calls, collaborate in Commune, and reach the tools assigned to your account.
+              <p className="mt-5 max-w-sm text-sm leading-7 text-slate-300/80">
+                A calmer place to capture customer details, work through a call, and stay in sync with your team.
               </p>
             </div>
-            <div className="relative grid gap-2 text-xs text-muted-foreground">
-              <div className="rounded-xl border border-border/40 bg-background/35 px-3 py-2.5">Private agent workspace</div>
-              <div className="rounded-xl border border-border/40 bg-background/35 px-3 py-2.5">Your access follows your assigned role</div>
+            <div className="relative grid max-w-md gap-2.5">
+              {[
+                ['01', 'Call notes', 'Keep every detail in the flow'],
+                ['02', 'Team chat', 'Pick up conversations together'],
+                ['03', 'Collab space', 'Stay close to shared work'],
+              ].map(([number, title, description]) => (
+                <div key={number} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] px-3.5 py-3">
+                  <span className="font-mono text-[10px] text-teal-200/60">{number}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold text-slate-100/90">{title}</span>
+                    <span className="mt-0.5 block text-[10px] text-slate-400">{description}</span>
+                  </span>
+                  <span className="size-1.5 rounded-full bg-teal-300/70 shadow-[0_0_10px_rgba(94,234,212,0.55)]" />
+                </div>
+              ))}
             </div>
           </aside>
         )}
-        <div className={cn('relative', pagePresentation ? 'p-5 sm:p-8 lg:p-10' : '')}>
+        <div className={cn('relative', pagePresentation ? 'p-5 sm:p-8 lg:p-10 xl:p-12' : '')}>
         {!required && !pagePresentation && (
           <button
             type="button"
@@ -130,16 +153,35 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
         )}
 
         {/* Header */}
-        <div className="mb-4 flex items-center gap-3">
-          <div className="glass-panel flex size-11 items-center justify-center rounded-xl border-violet-400/40 bg-violet-400/10">
-            <KeyRound className="size-6 text-violet-300" />
-          </div>
-          <div>
-            <h2 className="font-mono text-xl font-extrabold tracking-tight text-foreground">
-              {required ? 'Agent sign in' : 'Authentication'}
+        <div className={cn('mb-6 flex items-center gap-3', pagePresentation && 'mb-8')}>
+          {!pagePresentation && (
+            <div className="glass-panel flex size-11 items-center justify-center rounded-xl border-violet-400/40 bg-violet-400/10">
+              <KeyRound className="size-6 text-violet-300" />
+            </div>
+          )}
+          <div className="min-w-0">
+            {pagePresentation && (
+              <p className="mb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-teal-200/70">
+                ECONOTE · SECURE WORKSPACE
+              </p>
+            )}
+            {pagePresentation && (
+              <p className="mb-1 text-xs font-semibold text-teal-100/80 lg:hidden">
+                Econote, notey note.
+              </p>
+            )}
+            <h2 className={cn(
+              'font-mono text-xl font-extrabold tracking-tight text-foreground',
+              pagePresentation && 'text-2xl sm:text-3xl',
+            )}>
+              {pagePresentation
+                ? tab === 'login' ? 'Welcome back.' : 'Create your account.'
+                : required ? 'Agent sign in' : 'Authentication'}
             </h2>
-            <p className="text-xs text-muted-foreground">
-              {required ? 'Sign in to enter the support workspace' : 'Accounts are stored server-side (D1)'}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {pagePresentation
+                ? tab === 'login' ? 'Sign in and get back to the conversation.' : 'Set up your Econote workspace access.'
+                : required ? 'Sign in to enter the support workspace' : 'Accounts are stored server-side (D1)'}
             </p>
           </div>
         </div>
@@ -160,7 +202,7 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
                   .filter(Boolean)
                   .join(' · ') || 'none granted'}
                 {user.isSuperAdmin
-                  ? ' · Super Admin'
+                  ? ' · Dev'
                   : user.isAdmin
                     ? ' · Admin'
                     : user.isManagement
@@ -201,7 +243,9 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
                   className={cn(
                     'flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-bold transition-colors',
                     tab === id
-                      ? 'bg-violet-500/80 text-white shadow-sm'
+                      ? pagePresentation
+                        ? 'bg-teal-300/15 text-teal-100 shadow-sm ring-1 ring-teal-200/20'
+                        : 'bg-violet-500/80 text-white shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
@@ -239,7 +283,12 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                   placeholder="••••••••"
-                  className="glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                  className={cn(
+                    'glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2',
+                    pagePresentation
+                      ? 'border-white/10 bg-white/[0.04] focus:border-teal-300 focus:ring-teal-300/20'
+                      : 'focus:border-violet-400 focus:ring-violet-400/30',
+                  )}
                 />
               </label>
 
@@ -255,7 +304,12 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
                     onChange={(e) => setConfirm(e.target.value)}
                     autoComplete="new-password"
                     placeholder="••••••••"
-                    className="glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                    className={cn(
+                      'glass-field auth-form-field w-full rounded-xl px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2',
+                      pagePresentation
+                        ? 'border-white/10 bg-white/[0.04] focus:border-teal-300 focus:ring-teal-300/20'
+                        : 'focus:border-violet-400 focus:ring-violet-400/30',
+                    )}
                   />
                 </label>
               )}
@@ -273,7 +327,9 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
                   'glass-btn w-full rounded-xl px-4 py-3 font-mono text-base font-extrabold uppercase tracking-wide transition-all duration-200',
                   busy || !username || !password || (tab === 'register' && !confirm)
                     ? 'cursor-not-allowed border-border/60 bg-muted/60 text-muted-foreground'
-                    : 'glass-chip border-violet-400/50 bg-violet-500/80 text-white shadow-[0_0_18px_-10px_rgba(167,139,250,0.7)] hover:brightness-110 active:scale-[0.99]'
+                    : pagePresentation
+                      ? 'glass-chip border-teal-200/25 bg-teal-300/15 text-teal-50 shadow-[0_0_28px_-14px_rgba(45,212,191,0.65)] hover:bg-teal-300/25 active:scale-[0.99]'
+                      : 'glass-chip border-violet-400/50 bg-violet-500/80 text-white shadow-[0_0_18px_-10px_rgba(167,139,250,0.7)] hover:brightness-110 active:scale-[0.99]'
                 )}
               >
                 {busy ? 'Working…' : tab === 'login' ? 'Log in ▶' : 'Register ✓'}

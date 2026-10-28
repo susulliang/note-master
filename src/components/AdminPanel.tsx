@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Bot, ClipboardList, ImagePlus, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Bot, ClipboardList, ImagePlus, KeyRound, Loader2, Pencil, Plus, RefreshCw, ShieldCheck, ShoppingBag, Trash2, UserCog, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import AdminChallengeNpcsTab from '@/components/AdminChallengeNpcsTab';
@@ -25,6 +25,7 @@ import {
   adminDeleteUser,
   adminListStore,
   adminListUsers,
+  adminResetUserPassword,
   adminSaveStoreProduct,
   adminSetPrivileges,
   type AdminUserRow,
@@ -110,6 +111,7 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
 
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -189,6 +191,22 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
       setConfirmDelete(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setBusyName(null);
+    }
+  };
+
+  const resetUserPassword = async (row: AdminUserRow) => {
+    if (!user?.isSuperAdmin || busyName) return;
+    if (!window.confirm(`Reset ${row.username}'s password to the default 12345678? Their other sessions will be signed out.`)) return;
+    setBusyName(row.username);
+    setError(null);
+    setNotice(null);
+    try {
+      const defaultPassword = await adminResetUserPassword(row.username);
+      setNotice(`${row.username}'s password was reset to ${defaultPassword}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset account password');
     } finally {
       setBusyName(null);
     }
@@ -368,6 +386,11 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
             {error}
           </p>
         )}
+        {notice && (
+          <p role="status" className="mb-3 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200">
+            {notice}
+          </p>
+        )}
 
         {/* ── Tab: Privileges ── */}
         {tab === 'privileges' && (
@@ -404,11 +427,11 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
                       'size-4 shrink-0',
                       row.isSuperAdmin ? 'text-amber-300' : row.isAdmin ? 'text-sky-300' : row.isManagement ? 'text-violet-300' : 'text-muted-foreground'
                     )} />
-                    <p className="flex-1 truncate text-sm font-extrabold text-foreground">
+                    <p className="min-w-0 flex-1 truncate text-sm font-extrabold text-foreground">
                       {row.username}
                       {row.isSuperAdmin && (
                         <span className="ml-2 rounded bg-amber-400/20 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wider text-amber-300">
-                          Super Admin
+                          Dev
                         </span>
                       )}
                       {row.isAdmin && !row.isSuperAdmin && (
@@ -426,6 +449,18 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
                       )}
                       <span className="ml-1.5 text-[10px] font-bold tabular-nums text-amber-400">🌶️ {row.spice}</span>
                     </p>
+                    {user?.isSuperAdmin && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void resetUserPassword(row)}
+                        aria-label={`Reset ${row.username}'s password to 12345678`}
+                        title="Reset password to default 12345678"
+                        className="grid size-7 shrink-0 place-items-center rounded-lg border border-amber-400/25 bg-amber-400/[0.06] text-amber-300 transition hover:border-amber-300/50 hover:bg-amber-400/15 disabled:cursor-wait disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+                      </button>
+                    )}
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -442,7 +477,7 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
                               ? 'border-violet-400/50 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
                               : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/70'
                           )}
-                          title={row.isAdmin ? 'The Super Admin must demote this user before Management can be assigned' : `${row.isManagement ? 'Remove' : 'Grant'} Management role`}
+                          title={row.isAdmin ? 'Dev must demote this user before Management can be assigned' : `${row.isManagement ? 'Remove' : 'Grant'} Management role`}
                         >
                           Management {row.isManagement ? '✓' : '✕'}
                         </button>
@@ -465,7 +500,7 @@ export default function AdminPanel({ onClose, presentation = 'modal' }: AdminPan
                         )}
                         {row.isSuperAdmin && (
                           <span className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-200">
-                            Root role locked
+                            Dev role locked
                           </span>
                         )}
                       </>

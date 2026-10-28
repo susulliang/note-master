@@ -818,6 +818,40 @@ async function handleAuthLogin(request: Request, env: Env): Promise<Response> {
   return authJson({ token, user: authPublicUser(fresh ?? user) });
 }
 
+async function handleAuthPasswordChange(request: Request, env: Env): Promise<Response> {
+  const user = await authBearerUser(request, env);
+  if (!user) return authJson({ error: 'Not authenticated' }, 401);
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: { newPassword?: unknown; confirmPassword?: unknown };
+  try {
+    payload = await request.json() as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  if (typeof payload.newPassword !== 'string' || payload.newPassword.length < AUTH_MIN_PASSWORD_LEN) {
+    return authJson({ error: `Password must be at least ${AUTH_MIN_PASSWORD_LEN} characters` }, 400);
+  }
+  if (payload.newPassword !== payload.confirmPassword) {
+    return authJson({ error: 'Passwords do not match' }, 400);
+  }
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await authHashPassword(payload.newPassword, salt);
+  const updated = await env.DB.prepare(
+    'UPDATE auth_users SET hash = ?, updated_at = ? WHERE username = ? COLLATE NOCASE',
+  ).bind(hash, Date.now(), user.username).run();
+  if (!updated.meta.changes) return authJson({ error: 'Account not found' }, 404);
+
+  const token = /^Bearer\s+(.+)$/i.exec(request.headers.get('authorization') ?? '')?.[1] ?? '';
+  if (token) {
+    await env.DB.prepare(
+      'DELETE FROM auth_sessions WHERE username = ? COLLATE NOCASE AND token != ?',
+    ).bind(user.username, token).run();
+  }
+  return authJson({ ok: true });
+}
+
 async function handleAdminUsers(_request: Request, env: Env): Promise<Response> {
   const result = await env.DB.prepare(
     `SELECT username, is_admin, is_management, is_super_admin,
@@ -940,6 +974,51 @@ async function handleAdminDelete(request: Request, env: Env): Promise<Response> 
   const del = await env.DB.prepare('DELETE FROM auth_users WHERE username = ?1 COLLATE NOCASE').bind(username).run();
   if (!del.meta.changes) return authJson({ error: 'User not found' }, 404);
   return authJson({ ok: true });
+}
+
+async function handleAdminPasswordReset(
+  request: Request,
+  env: Env,
+  actor: AuthUserRow,
+): Promise<Response> {
+  if (!isSuperAdminUser(actor)) {
+    return authJson({ error: 'Only Dev can reset account passwords.' }, 403);
+  }
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (contentLength > 4_096) return authJson({ error: 'Request is too large' }, 413);
+  let payload: LoginPayload;
+  try {
+    payload = (await request.json()) as LoginPayload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const username = authNormalizeName(payload.username);
+  if (!username) return authJson({ error: 'Invalid username' }, 400);
+  const target = await env.DB.prepare(
+    'SELECT username FROM auth_users WHERE username = ?1 COLLATE NOCASE',
+  ).bind(username).first<{ username: string }>();
+  if (!target) return authJson({ error: 'User not found' }, 404);
+
+  const defaultPassword = '12345678';
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await authHashPassword(defaultPassword, salt);
+  const now = Date.now();
+  await env.DB.prepare(
+    'UPDATE auth_users SET hash = ?, updated_at = ? WHERE username = ? COLLATE NOCASE',
+  ).bind(hash, now, target.username).run();
+
+  const bearer = request.headers.get('authorization') ?? '';
+  const actorToken = /^Bearer\s+(.+)$/i.exec(bearer)?.[1] ?? '';
+  if (actor.username.toLowerCase() === target.username.toLowerCase() && actorToken) {
+    await env.DB.prepare(
+      'DELETE FROM auth_sessions WHERE username = ? COLLATE NOCASE AND token != ?',
+    ).bind(target.username, actorToken).run();
+  } else {
+    await env.DB.prepare(
+      'DELETE FROM auth_sessions WHERE username = ? COLLATE NOCASE',
+    ).bind(target.username).run();
+  }
+  return authJson({ username: target.username, defaultPassword });
 }
 
 /* ------------------------------ spice & store ------------------------------ */
@@ -3833,7 +3912,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
       'access-control-allow-headers',
       'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
     );
-    preflight.headers.set('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
+    preflight.headers.set('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
     preflight.headers.set('access-control-max-age', '86400');
     return preflight;
   }
@@ -3884,6 +3963,9 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return authJson({ user: authPublicUser(user) });
+  }
+  if (path === '/api/auth/password/change' && request.method === 'POST') {
+    return handleAuthPasswordChange(request, env);
   }
 
   // Roster read — any logged-in user (writes are admin-only, below).
@@ -4115,6 +4197,9 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
   if (path === '/api/admin/users' && request.method === 'GET') return handleAdminUsers(request, env);
   if (path === '/api/admin/privileges' && request.method === 'POST') return handleAdminPrivileges(request, env, admin);
   if (path === '/api/admin/delete' && request.method === 'POST') return handleAdminDelete(request, env);
+  if (path === '/api/admin/password-reset' && request.method === 'POST') {
+    return handleAdminPasswordReset(request, env, admin);
+  }
   if (path === '/api/admin/store' && request.method === 'GET') return handleStoreGet(env, true);
   if (path === '/api/admin/store' && request.method === 'POST') {
     if (!canManageStore(admin)) return authJson({ error: 'Only Admins can change Store items' }, 403);

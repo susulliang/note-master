@@ -1,4 +1,6 @@
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   Bold,
   Check,
@@ -12,7 +14,9 @@ import {
   Link2,
   List,
   ListOrdered,
+  Maximize2,
   MessageCircle,
+  Minimize2,
   Pencil,
   Pin,
   PinOff,
@@ -90,6 +94,10 @@ const MAX_CHAT_HISTORY_WIDTH = 380;
 const CHAT_PINNED_PANE_WIDTH_KEY = 'econote_chat_pinned_pane_width';
 const MIN_CHAT_PINNED_PANE_WIDTH = 35;
 const MAX_CHAT_PINNED_PANE_WIDTH = 65;
+const CHAT_LIST_PREFS_KEY = 'econote_chat_list_preferences';
+const COMPOSER_HEIGHT_KEY = 'econote_chat_composer_height';
+const MIN_COMPOSER_HEIGHT = 120;
+const MAX_COMPOSER_HEIGHT = 360;
 const COMMON_EMOJIS = [
   '😀', '😃', '😄', '😁', '😆', '😂', '🤣', '😊', '🙂', '🙃',
   '😉', '😍', '🥰', '😘', '😋', '😜', '🤪', '😎', '🥳', '😏',
@@ -127,29 +135,13 @@ function PinnedDocumentPane({
   document,
   username,
   widthPercent,
-  onOpen,
 }: {
   document: PinnedCollabDocument;
   username: string;
   widthPercent: number;
-  onOpen: () => void;
 }) {
   return (
     <aside className="chat-pinned-document-pane" style={{ flex: `0 0 ${widthPercent}%` }}>
-      <div className="chat-pinned-document-heading">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
-          {document.type === 'sheet' ? <FileSpreadsheet className="size-4" /> : <GitBranch className="size-4" />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-semibold">{document.title}</p>
-          <p className="text-[10px] text-muted-foreground">
-            Pinned · {document.permission === 'edit' ? 'Can edit' : 'View only'}
-          </p>
-        </div>
-        <button type="button" onClick={onOpen} className="chat-pinned-open-button">
-          Open full view
-        </button>
-      </div>
       <div className="chat-pinned-document-editor">
         <Suspense fallback={<div className="grid h-full place-items-center text-xs text-muted-foreground">Loading document…</div>}>
           {document.type === 'sheet'
@@ -188,6 +180,8 @@ function PinnedDocumentPane({
 interface ChatPageProps {
   username: string;
   canManageChatTitles: boolean;
+  notificationRoomId?: string | null;
+  onNotificationRoomHandled?: (roomId: string) => void;
 }
 
 interface ActiveRoom {
@@ -204,6 +198,53 @@ interface MessageContextMenuState {
   y: number;
   message: ChatMessage;
   forwarding: boolean;
+}
+
+interface ChatListPreferences {
+  archivedRoomIds: string[];
+  pinnedRoomIds: string[];
+  density: 'compact' | 'comfortable';
+}
+
+interface ConversationContextMenuState {
+  x: number;
+  y: number;
+  roomId: string;
+}
+
+function readChatListPreferences(username: string): ChatListPreferences {
+  const defaults: ChatListPreferences = {
+    archivedRoomIds: [],
+    pinnedRoomIds: [],
+    density: 'comfortable',
+  };
+  try {
+    const raw = window.localStorage.getItem(`${CHAT_LIST_PREFS_KEY}:${username.toLowerCase()}`);
+    if (!raw) return defaults;
+    const value = JSON.parse(raw) as Partial<ChatListPreferences>;
+    return {
+      archivedRoomIds: Array.isArray(value.archivedRoomIds)
+        ? value.archivedRoomIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      pinnedRoomIds: Array.isArray(value.pinnedRoomIds)
+        ? value.pinnedRoomIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      density: value.density === 'compact' ? 'compact' : 'comfortable',
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function readComposerHeight(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(COMPOSER_HEIGHT_KEY));
+    return Number.isFinite(stored)
+      ? Math.max(MIN_COMPOSER_HEIGHT, Math.min(MAX_COMPOSER_HEIGHT, stored))
+      : 164;
+  } catch {
+    return 164;
+  }
 }
 
 interface MarkdownNode {
@@ -588,7 +629,12 @@ async function compressSticker(file: File): Promise<Blob> {
   }
 }
 
-export default function ChatPage({ username, canManageChatTitles }: ChatPageProps) {
+export default function ChatPage({
+  username,
+  canManageChatTitles,
+  notificationRoomId = null,
+  onNotificationRoomHandled,
+}: ChatPageProps) {
   const navigate = useNavigate();
   const [activeRoom, setActiveRoom] = useState<ActiveRoom>({
     roomId: 'global',
@@ -631,6 +677,12 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const [uploadingSticker, setUploadingSticker] = useState(false);
   const [photoDropActive, setPhotoDropActive] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
+  const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
+  const [chatListPreferences, setChatListPreferences] = useState<ChatListPreferences>(
+    () => readChatListPreferences(username),
+  );
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(readComposerHeight);
   const [shakeMessage, setShakeMessage] = useState<{ id: string; shakeId: string } | null>(null);
   const [avatarProfile, setAvatarProfile] = useState<ChatAvatarProfile | null>(null);
   const [pinnedDocument, setPinnedDocument] = useState<PinnedCollabDocument | null>(null);
@@ -656,6 +708,8 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
   const chatRoomBodyRef = useRef<HTMLDivElement | null>(null);
   const resizingHistoryRef = useRef(false);
   const resizingPinnedPaneRef = useRef(false);
+  const resizingComposerRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const chatListOwnerRef = useRef(username.toLowerCase());
   const [historyWidth, setHistoryWidth] = useState(readChatHistoryWidth);
   const [canSplitPinnedDocument, setCanSplitPinnedDocument] = useState(false);
   const [pinnedPaneWidth, setPinnedPaneWidth] = useState(readPinnedPaneWidth);
@@ -678,10 +732,140 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     setLoadingOlder(false);
     loadingOlderRef.current = false;
     setMessageContextMenu(null);
+    setConversationContextMenu(null);
     setShakeMessage(null);
+    setChatListPreferences((current) => current.archivedRoomIds.includes(room.roomId)
+      ? { ...current, archivedRoomIds: current.archivedRoomIds.filter((id) => id !== room.roomId) }
+      : current);
     setActiveRoom(room);
     setMobileRoomOpen(true);
   }, [username]);
+
+  useEffect(() => {
+    if (!('Notification' in window) || Notification.permission !== 'default') return;
+    void Notification.requestPermission().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('econote:chat-active-room', {
+      detail: { roomId: activeRoom.roomId },
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('econote:chat-active-room', {
+        detail: { roomId: null },
+      }));
+    };
+  }, [activeRoom.roomId]);
+
+  useEffect(() => {
+    if (!notificationRoomId) return undefined;
+    let alive = true;
+    const openRoom = (items: ChatConversation[]) => {
+      if (!alive) return;
+      const conversation = items.find((item) => item.roomId === notificationRoomId);
+      if (conversation) {
+        selectChatRoom({
+          roomId: conversation.roomId,
+          title: conversation.title,
+          kind: conversation.kind,
+          peerUsername: conversation.peerUsername,
+          memberCount: conversation.memberCount,
+          peerAvatar: conversation.peerAvatar,
+        });
+      } else if (notificationRoomId === 'global') {
+        selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
+      } else {
+        selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
+      }
+      onNotificationRoomHandled?.(notificationRoomId);
+    };
+    const cached = conversations.find((item) => item.roomId === notificationRoomId);
+    if (cached || notificationRoomId === 'global') {
+      openRoom(conversations);
+    } else {
+      void fetchChatConversations()
+        .then((items) => {
+          if (!alive) return;
+          setConversations(items);
+          openRoom(items);
+        })
+        .catch(() => {
+          if (alive) openRoom(conversations);
+        });
+    }
+    return () => { alive = false; };
+  }, [
+    conversations,
+    globalTitle,
+    notificationRoomId,
+    onNotificationRoomHandled,
+    selectChatRoom,
+  ]);
+
+  useEffect(() => {
+    const owner = username.toLowerCase();
+    if (chatListOwnerRef.current !== owner) {
+      chatListOwnerRef.current = owner;
+      setChatListPreferences(readChatListPreferences(username));
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        `${CHAT_LIST_PREFS_KEY}:${owner}`,
+        JSON.stringify(chatListPreferences),
+      );
+    } catch {
+      /* Keep chat-list controls usable when storage is unavailable. */
+    }
+  }, [chatListPreferences, username]);
+
+  useEffect(() => {
+    if (!conversationContextMenu) return undefined;
+    const closeMenu = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-chat-list-menu]')) return;
+      setConversationContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConversationContextMenu(null);
+    };
+    document.addEventListener('pointerdown', closeMenu, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu, true);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [conversationContextMenu]);
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      if (!resizingComposerRef.current) return;
+      setComposerHeight(Math.max(
+        MIN_COMPOSER_HEIGHT,
+        Math.min(MAX_COMPOSER_HEIGHT, resizingComposerRef.current.startHeight + resizingComposerRef.current.startY - event.clientY),
+      ));
+    };
+    const stop = () => {
+      if (!resizingComposerRef.current) return;
+      resizingComposerRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        window.localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerHeight));
+      } catch {
+        /* Keep the composer resizer usable when storage is unavailable. */
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [composerHeight]);
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -1634,6 +1818,132 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
     pinnedDocument.owner.toLowerCase() === username.toLowerCase() ||
     canManageChatTitles
   );
+  const archivedRoomIds = useMemo(
+    () => new Set(chatListPreferences.archivedRoomIds),
+    [chatListPreferences.archivedRoomIds],
+  );
+  const pinnedRoomOrder = useMemo(
+    () => new Map(chatListPreferences.pinnedRoomIds.map((id, index) => [id, index])),
+    [chatListPreferences.pinnedRoomIds],
+  );
+  const activeConversations = useMemo(
+    () => conversations
+      .filter((conversation) => !archivedRoomIds.has(conversation.roomId))
+      .sort((a, b) => (
+        (pinnedRoomOrder.get(a.roomId) ?? Number.MAX_SAFE_INTEGER) -
+          (pinnedRoomOrder.get(b.roomId) ?? Number.MAX_SAFE_INTEGER) ||
+        b.updatedAt - a.updatedAt
+      )),
+    [archivedRoomIds, conversations, pinnedRoomOrder],
+  );
+  const archivedConversations = useMemo(
+    () => conversations
+      .filter((conversation) => archivedRoomIds.has(conversation.roomId))
+      .sort((a, b) => b.updatedAt - a.updatedAt),
+    [archivedRoomIds, conversations],
+  );
+
+  const toggleConversationPin = useCallback((roomId: string) => {
+    setChatListPreferences((current) => ({
+      ...current,
+      pinnedRoomIds: current.pinnedRoomIds.includes(roomId)
+        ? current.pinnedRoomIds.filter((id) => id !== roomId)
+        : [roomId, ...current.pinnedRoomIds],
+    }));
+    setConversationContextMenu(null);
+  }, []);
+
+  const toggleConversationArchive = useCallback((roomId: string) => {
+    setChatListPreferences((current) => ({
+      ...current,
+      archivedRoomIds: current.archivedRoomIds.includes(roomId)
+        ? current.archivedRoomIds.filter((id) => id !== roomId)
+        : [...current.archivedRoomIds, roomId],
+      pinnedRoomIds: current.archivedRoomIds.includes(roomId)
+        ? current.pinnedRoomIds
+        : current.pinnedRoomIds.filter((id) => id !== roomId),
+    }));
+    setConversationContextMenu(null);
+  }, []);
+
+  const openConversation = useCallback((conversation: ChatConversation) => {
+    selectChatRoom({
+      roomId: conversation.roomId,
+      title: conversation.title,
+      kind: conversation.kind,
+      peerUsername: conversation.peerUsername,
+      memberCount: conversation.memberCount,
+      peerAvatar: conversation.peerAvatar,
+    });
+  }, [selectChatRoom]);
+
+  const renderConversationRow = (conversation: ChatConversation, archived = false) => {
+    const selected = activeRoom.roomId === conversation.roomId;
+    const directPeer = conversation.peerUsername;
+    const pinned = pinnedRoomOrder.has(conversation.roomId);
+    return (
+      <button
+        key={conversation.roomId}
+        type="button"
+        onClick={() => openConversation(conversation)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const menuWidth = 220;
+          const menuHeight = 250;
+          setConversationContextMenu({
+            x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+            roomId: conversation.roomId,
+          });
+        }}
+        className={cn(
+          'chat-conversation-row flex w-full items-center gap-3 rounded-xl text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          chatListPreferences.density === 'compact' ? 'chat-conversation-row--compact px-2.5 py-2' : 'px-3 py-3',
+          selected && 'bg-accent/10 ring-1 ring-accent/20',
+          archived && 'opacity-75',
+        )}
+        title="Right-click for chat options"
+      >
+        {conversation.kind === 'group'
+          ? (
+            <div className={cn(
+              'grid shrink-0 place-items-center rounded-xl border border-border/70 bg-background/70 text-accent',
+              chatListPreferences.density === 'compact' ? 'size-8' : 'size-10',
+            )}>
+              <Group className="size-4" />
+            </div>
+          )
+          : (
+            <PixelHumanoidAvatar
+              seed={conversation.peerAvatar?.seed ?? avatarSeed(directPeer ?? conversation.title)}
+              rotation={conversation.peerAvatar?.rotation ?? 0}
+              size={chatListPreferences.density === 'compact' ? 32 : 40}
+              className="shrink-0 rounded-full border border-border/70 bg-background/70"
+            />
+          )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{conversation.title}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            {conversation.lastMessage || (conversation.kind === 'group'
+              ? `${conversation.memberCount} members`
+              : 'Start a conversation')}
+          </span>
+        </span>
+        {pinned && <Pin className="size-3.5 shrink-0 text-accent" />}
+        {conversation.kind === 'group' && (
+          <span className="shrink-0 text-[10px] text-muted-foreground">{conversation.memberCount}</span>
+        )}
+      </button>
+    );
+  };
+  const contextConversation = conversations.find(
+    (conversation) => conversation.roomId === conversationContextMenu?.roomId,
+  );
+  const contextConversationArchived = !!conversationContextMenu &&
+    archivedRoomIds.has(conversationContextMenu.roomId);
+  const contextConversationPinned = !!conversationContextMenu &&
+    pinnedRoomOrder.has(conversationContextMenu.roomId);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background/80 text-foreground">
@@ -1679,12 +1989,27 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             <button
               type="button"
               onClick={() => selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' })}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                const menuWidth = 220;
+                const menuHeight = 250;
+                setConversationContextMenu({
+                  x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+                  y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+                  roomId: 'global',
+                });
+              }}
               className={cn(
-                'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'chat-conversation-row flex w-full items-center gap-3 rounded-xl text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                chatListPreferences.density === 'compact' ? 'chat-conversation-row--compact px-2.5 py-2' : 'px-3 py-3',
                 activeRoom.kind === 'global' && 'bg-accent/10 ring-1 ring-accent/20',
               )}
+              title="Right-click for chat options"
             >
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
+              <div className={cn(
+                'grid shrink-0 place-items-center rounded-xl bg-accent/10 text-accent',
+                chatListPreferences.density === 'compact' ? 'size-8' : 'size-10',
+              )}>
                 <Globe2 className="size-[18px]" />
               </div>
               <span className="min-w-0 flex-1">
@@ -1694,50 +2019,24 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
               <Users className="size-4 shrink-0 text-muted-foreground/70" />
             </button>
 
-            {conversations.map((conversation) => {
-              const selected = activeRoom.roomId === conversation.roomId;
-              const directPeer = conversation.peerUsername;
-              return (
+            {activeConversations.map((conversation) => renderConversationRow(conversation))}
+            {archivedConversations.length > 0 && (
+              <section className="pt-2">
                 <button
-                  key={conversation.roomId}
                   type="button"
-                  onClick={() => {
-                    selectChatRoom({
-                      roomId: conversation.roomId,
-                      title: conversation.title,
-                      kind: conversation.kind,
-                      peerUsername: directPeer,
-                      memberCount: conversation.memberCount,
-                      peerAvatar: conversation.peerAvatar,
-                    });
-                  }}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    selected && 'bg-accent/10 ring-1 ring-accent/20',
-                  )}
+                  aria-expanded={archivedExpanded}
+                  onClick={() => setArchivedExpanded((expanded) => !expanded)}
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
                 >
-                  {conversation.kind === 'group'
-                    ? <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-border/70 bg-background/70 text-accent"><Group className="size-4" /></div>
-                    : <PixelHumanoidAvatar
-                      seed={conversation.peerAvatar?.seed ?? avatarSeed(directPeer ?? conversation.title)}
-                      rotation={conversation.peerAvatar?.rotation ?? 0}
-                      size={40}
-                      className="shrink-0 rounded-full border border-border/70 bg-background/70"
-                    />}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{conversation.title}</span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                      {conversation.lastMessage || (conversation.kind === 'group'
-                        ? `${conversation.memberCount} members`
-                        : 'Start a conversation')}
-                    </span>
+                  <span className="flex items-center gap-2">
+                    <Archive className="size-3.5" />
+                    Archived
                   </span>
-                  {conversation.kind === 'group' && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground">{conversation.memberCount}</span>
-                  )}
+                  <span>{archivedConversations.length}</span>
                 </button>
-              );
-            })}
+                {archivedExpanded && archivedConversations.map((conversation) => renderConversationRow(conversation, true))}
+              </section>
+            )}
           </div>
 
           <div className="mt-auto flex items-center gap-3 border-t border-border/60 px-4 py-3">
@@ -1872,13 +2171,34 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                   )}
                 </div>
               )}
-              <p className="truncate text-xs text-muted-foreground">
-                {activeRoom.kind === 'global'
-                  ? 'Everyone in the workspace'
-                  : activeRoom.kind === 'group'
-                    ? `Group · ${activeRoom.memberCount ?? 0} members`
-                    : 'Private conversation'}
-              </p>
+              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+                <span className="shrink-0">
+                  {activeRoom.kind === 'global'
+                    ? 'Everyone in the workspace'
+                    : activeRoom.kind === 'group'
+                      ? `Group · ${activeRoom.memberCount ?? 0} members`
+                      : 'Private conversation'}
+                </span>
+                {pinnedDocument && (
+                  <>
+                    <span className="shrink-0 opacity-50">·</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
+                      title={`${pinnedDocument.permission === 'edit' ? 'Can edit' : 'View only'} · Open ${pinnedDocument.title}`}
+                      className="inline-flex min-w-0 items-center gap-1 rounded-md px-1 text-accent transition hover:bg-accent/10"
+                    >
+                      {pinnedDocument.type === 'sheet'
+                        ? <FileSpreadsheet className="size-3 shrink-0" />
+                        : <GitBranch className="size-3 shrink-0" />}
+                      <span className="truncate">{pinnedDocument.title}</span>
+                      <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+                        {pinnedDocument.permission === 'edit' ? 'Edit' : 'View'}
+                      </span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             {activeRoom.kind === 'global' && !editingTitle && (
               <div className="hidden items-center gap-1.5 rounded-full border border-border/70 bg-card/50 px-3 py-1.5 text-[11px] text-muted-foreground sm:flex">
@@ -1898,34 +2218,6 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             </button>
           </div>
 
-          {pinnedDocument && !canSplitPinnedDocument && (
-            <div className="flex shrink-0 items-center gap-3 border-b border-accent/15 bg-accent/[0.045] px-4 py-2.5 sm:px-6">
-              <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
-                {pinnedDocument.type === 'sheet'
-                  ? <FileSpreadsheet className="size-4" />
-                  : <GitBranch className="size-4" />}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold">{pinnedDocument.title}</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Pinned document · {pinnedDocument.permission === 'edit' ? 'you can edit' : 'view access'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent/12 px-2.5 text-[10px] font-semibold text-accent transition hover:bg-accent/20"
-              >Open document</button>
-              <button
-                type="button"
-                aria-label="Manage pinned document"
-                title="Manage pinned document"
-                onClick={() => void openPinDialog()}
-                className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              ><Pencil className="size-3.5" /></button>
-            </div>
-          )}
-
           <div
             ref={chatRoomBodyRef}
             className={cn('chat-room-body', canSplitPinnedDocument && pinnedDocument && 'chat-room-body--split')}
@@ -1935,7 +2227,6 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                 document={pinnedDocument}
                 username={username}
                 widthPercent={pinnedPaneWidth}
-                onOpen={() => navigate(`/collab?type=${pinnedDocument.type}&document=${encodeURIComponent(pinnedDocument.id)}`)}
               />
             )}
             {canSplitPinnedDocument && pinnedDocument && (
@@ -2103,7 +2394,43 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-border/60 bg-background/75 p-3 sm:px-6 sm:pb-5 sm:pt-4">
+          <div className="chat-composer-panel relative shrink-0 border-t border-border/60 bg-background/75 p-3 sm:px-6 sm:pb-5 sm:pt-4">
+            <div
+              className="chat-composer-resizer"
+              role="separator"
+              aria-label="Resize message editor"
+              aria-orientation="horizontal"
+              aria-valuemin={MIN_COMPOSER_HEIGHT}
+              aria-valuemax={MAX_COMPOSER_HEIGHT}
+              aria-valuenow={composerHeight}
+              tabIndex={0}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                resizingComposerRef.current = {
+                  startY: event.clientY,
+                  startHeight: composerHeight,
+                };
+                document.body.style.cursor = 'row-resize';
+                document.body.style.userSelect = 'none';
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                event.preventDefault();
+                const delta = event.key === 'ArrowUp' ? 16 : -16;
+                setComposerHeight((height) => {
+                  const next = Math.max(
+                    MIN_COMPOSER_HEIGHT,
+                    Math.min(MAX_COMPOSER_HEIGHT, height + delta),
+                  );
+                  try {
+                    window.localStorage.setItem(COMPOSER_HEIGHT_KEY, String(next));
+                  } catch {
+                    /* Keep keyboard resizing usable when storage is unavailable. */
+                  }
+                  return next;
+                });
+              }}
+            />
             <div className="relative mx-auto w-full">
               <div
                 role="toolbar"
@@ -2325,9 +2652,10 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
                   void handlePhotoFiles(Array.from(event.dataTransfer.files));
                 }}
                 className={cn(
-                  'chat-composer-editor min-h-[164px] max-h-[320px] w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6',
+                  'chat-composer-editor min-h-0 max-h-none w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6',
                   photoDropActive && 'chat-composer-editor--drop-active',
                 )}
+                style={{ height: composerHeight }}
               />
                 {photoDropActive && (
                   <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-accent/10 text-sm font-medium text-accent">
@@ -2476,6 +2804,62 @@ export default function ChatPage({ username, canManageChatTitles }: ChatPageProp
               )}
             </>
           )}
+        </section>
+      )}
+
+      {conversationContextMenu && (
+        <section
+          data-chat-list-menu
+          role="menu"
+          aria-label={`Options for ${contextConversation?.title ?? globalTitle}`}
+          onContextMenu={(event) => event.preventDefault()}
+          className="fixed z-[130] flex w-[220px] flex-col overflow-hidden rounded-xl border border-border/80 bg-card/95 p-1.5 text-foreground shadow-2xl backdrop-blur-2xl"
+          style={{ left: conversationContextMenu.x, top: conversationContextMenu.y }}
+        >
+          {conversationContextMenu.roomId !== 'global' && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => toggleConversationPin(conversationContextMenu.roomId)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                {contextConversationPinned
+                  ? <PinOff className="size-3.5 text-muted-foreground" />
+                  : <Pin className="size-3.5 text-muted-foreground" />}
+                {contextConversationPinned ? 'Unpin from top' : 'Pin chat to top'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => toggleConversationArchive(conversationContextMenu.roomId)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                {contextConversationArchived
+                  ? <ArchiveRestore className="size-3.5 text-muted-foreground" />
+                  : <Archive className="size-3.5 text-muted-foreground" />}
+                {contextConversationArchived ? 'Restore chat' : 'Archive chat'}
+              </button>
+            </>
+          )}
+          <div role="separator" className="my-1 border-t border-border/60" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setChatListPreferences((current) => ({
+                ...current,
+                density: current.density === 'compact' ? 'comfortable' : 'compact',
+              }));
+              setConversationContextMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+          >
+            {chatListPreferences.density === 'compact'
+              ? <Maximize2 className="size-3.5 text-muted-foreground" />
+              : <Minimize2 className="size-3.5 text-muted-foreground" />}
+            {chatListPreferences.density === 'compact' ? 'Comfortable view' : 'Compact view'}
+          </button>
         </section>
       )}
 

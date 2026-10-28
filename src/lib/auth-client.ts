@@ -283,6 +283,16 @@ export async function me(): Promise<AuthUser> {
   return out.user;
 }
 
+export async function changeAccountPassword(newPassword: string, confirmPassword: string): Promise<void> {
+  const token = getStoredToken();
+  if (!token) throw new Error('No session');
+  await call('/api/auth/password/change', {
+    method: 'POST',
+    body: JSON.stringify({ newPassword, confirmPassword }),
+    token,
+  });
+}
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 export interface AdminUserRow extends AuthUser {
@@ -312,6 +322,16 @@ export async function adminSetPrivileges(
 export async function adminDeleteUser(username: string): Promise<void> {
   const token = getStoredToken();
   await call('/api/admin/delete', { method: 'POST', body: JSON.stringify({ username }), token });
+}
+
+export async function adminResetUserPassword(username: string): Promise<string> {
+  const token = getStoredToken();
+  const out = await call<{ username: string; defaultPassword: string }>('/api/admin/password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+    token,
+  });
+  return out.defaultPassword;
 }
 
 // ── Spice & store ────────────────────────────────────────────────────────────

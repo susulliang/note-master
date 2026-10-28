@@ -48,7 +48,7 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   /** Fixed-position anchor (viewport coords) for the portaled dropdown. */
-  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
 
   // Measure the button and convert to a fixed-position anchor whenever the
   // dropdown opens (or the viewport resizes while open).
@@ -56,7 +56,14 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
     if (!open) return undefined;
     const measure = () => {
       const r = btnRef.current?.getBoundingClientRect();
-      if (r) setAnchor({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top });
+      if (r) {
+        const top = r.bottom + 8;
+        setAnchor({
+          left: Math.max(172, Math.min(window.innerWidth - 172, r.left + r.width / 2)),
+          top,
+          maxHeight: Math.max(100, Math.min(window.innerHeight * 0.6, window.innerHeight - top - 12)),
+        });
+      }
     };
     measure();
     window.addEventListener('resize', measure);
@@ -128,9 +135,12 @@ export default function QaChecklistMenu({ scores, scoring, summary, className }:
               'fixed z-[70] w-[340px] -translate-x-1/2 transition-[opacity,transform] duration-200',
               open ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1.5 opacity-0'
             )}
-            style={{ left: anchor.left, bottom: anchor.bottom + 8 }}
+            style={{ left: anchor.left, top: anchor.top }}
           >
-        <div className="max-h-[min(60vh,30rem)] overflow-y-auto rounded-2xl border-[1.5px] border-foreground/10 bg-card/75 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-xl backdrop-saturate-150">
+        <div
+          className="overflow-y-auto rounded-2xl border-[1.5px] border-foreground/10 bg-card/75 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.12),0_8px_24px_-6px_rgba(0,0,0,0.24)] backdrop-blur-xl backdrop-saturate-150"
+          style={{ maxHeight: anchor.maxHeight }}
+        >
           {/* Header + overall bar */}
           <div className="sticky top-0 z-10 border-b border-foreground/10 bg-card/85 px-3 py-2 backdrop-blur-xl">
             <div className="mb-1.5 flex items-center justify-between">

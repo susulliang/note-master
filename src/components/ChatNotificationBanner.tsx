@@ -15,12 +15,14 @@ import { cn } from '@/lib/utils';
 
 interface ChatNotificationBannerProps {
   username: string;
-  onOpenChat: () => void;
+  isChatOpen: boolean;
+  onOpenChat: (roomId: string) => void;
 }
 
 interface Notice {
   message: ChatMessage;
   roomTitle: string;
+  roomId: string;
 }
 
 function preview(markdown: string): string {
@@ -35,17 +37,25 @@ function preview(markdown: string): string {
 
 export default function ChatNotificationBanner({
   username,
+  isChatOpen,
   onOpenChat,
 }: ChatNotificationBannerProps) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [visible, setVisible] = useState(false);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
   const removeTimerRef = useRef<number | null>(null);
   const seenIdsRef = useRef(new Set<string>());
   const conversationsRef = useRef<ChatConversation[]>([]);
+  const activeRoomIdRef = useRef<string | null>(activeRoomId);
+  const isChatOpenRef = useRef(isChatOpen);
+  const onOpenChatRef = useRef(onOpenChat);
   conversationsRef.current = conversations;
+  activeRoomIdRef.current = activeRoomId;
+  isChatOpenRef.current = isChatOpen;
+  onOpenChatRef.current = onOpenChat;
   const roomKey = useMemo(
     () => JSON.stringify(['global', ...conversations.map((conversation) => conversation.roomId)]),
     [conversations],
@@ -71,6 +81,15 @@ export default function ChatNotificationBanner({
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
     };
+  }, []);
+
+  useEffect(() => {
+    const onActiveRoom = (event: Event) => {
+      const detail = (event as CustomEvent<{ roomId?: string | null }>).detail;
+      setActiveRoomId(typeof detail?.roomId === 'string' ? detail.roomId : null);
+    };
+    window.addEventListener('econote:chat-active-room', onActiveRoom);
+    return () => window.removeEventListener('econote:chat-active-room', onActiveRoom);
   }, []);
 
   useEffect(() => {
@@ -109,7 +128,13 @@ export default function ChatNotificationBanner({
       const roomTitle = roomId === 'global'
         ? globalTitle
         : conversationsRef.current.find((conversation) => conversation.roomId === roomId)?.title ?? 'Direct message';
-      setNotice({ message, roomTitle });
+      const isFocusedRoom = isChatOpenRef.current &&
+        activeRoomIdRef.current === roomId &&
+        document.hasFocus() &&
+        !document.hidden;
+      if (isFocusedRoom) return;
+
+      setNotice({ message, roomTitle, roomId });
       setVisible(true);
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
       if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
@@ -117,6 +142,28 @@ export default function ChatNotificationBanner({
         setVisible(false);
         removeTimerRef.current = window.setTimeout(() => setNotice(null), 250);
       }, 4_500);
+
+      if (
+        'Notification' in window &&
+        Notification.permission === 'granted' &&
+        (
+          document.hidden ||
+          !document.hasFocus() ||
+          !isChatOpenRef.current ||
+          activeRoomIdRef.current !== roomId
+        )
+      ) {
+        const notification = new Notification(roomTitle, {
+          body: `${message.username}: ${preview(message.markdown) || 'Sent a message'}`,
+          icon: '/favicon.ico',
+          tag: `chat-${roomId}-${message.id}`,
+        });
+        notification.onclick = () => {
+          window.focus();
+          onOpenChatRef.current(roomId);
+          notification.close();
+        };
+      }
     };
 
     const connect = async (roomId: string) => {
@@ -195,7 +242,7 @@ export default function ChatNotificationBanner({
     >
       <button
         type="button"
-        onClick={onOpenChat}
+        onClick={() => onOpenChat(notice.roomId)}
         className="flex w-full items-center gap-3 rounded-2xl border border-border/80 bg-card/90 p-3 text-left shadow-[0_16px_50px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={`New message from ${message.username}`}
       >

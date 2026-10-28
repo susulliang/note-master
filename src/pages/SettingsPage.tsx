@@ -1,9 +1,10 @@
-import { Check, Monitor, RotateCw, Settings, Type } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Check, KeyRound, Monitor, RotateCw, Settings, Type } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import EngineSettingsPanel, { type EngineSettingsPanelProps } from '@/components/EngineSettingsPanel';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
 import { useAuth } from '@/lib/auth-context';
+import { changeAccountPassword } from '@/lib/auth-client';
 import { fetchChatProfile, updateChatAvatarRotation, type ChatAvatarProfile } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 import { THEMES, type ThemeId, type UiScale } from '@/lib/themes';
@@ -24,6 +25,9 @@ export default function SettingsPage({
 }: SettingsPageProps) {
   const { user } = useAuth();
   const [avatar, setAvatar] = useState<ChatAvatarProfile | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordBusy, setPasswordBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -40,6 +44,30 @@ export default function SettingsPage({
     updateChatAvatarRotation(rotation).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'Could not save avatar rotation.');
     });
+  };
+
+  const submitPasswordChange = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (passwordBusy) return;
+    if (newPassword.length < 8) {
+      toast.error('Your new password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('The new passwords do not match.');
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await changeAccountPassword(newPassword, confirmNewPassword);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      toast.success('Password updated. Other sessions have been signed out.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not change your password.');
+    } finally {
+      setPasswordBusy(false);
+    }
   };
 
   return (
@@ -90,6 +118,63 @@ export default function SettingsPage({
             <RotateCw className="size-3.5" />
             Rotate
           </button>
+        </section>
+
+        <section className="rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+          <div className="mb-4 flex items-start gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
+              <KeyRound className="size-4" />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Change password</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Set a new password while signed in. Your current password is not required.
+              </p>
+            </div>
+          </div>
+          <form onSubmit={(event) => void submitPasswordChange(event)} className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                New password
+              </span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={256}
+                required
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="glass-field h-11 w-full rounded-xl border border-border/60 bg-background/65 px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Confirm new password
+              </span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={256}
+                required
+                value={confirmNewPassword}
+                onChange={(event) => setConfirmNewPassword(event.target.value)}
+                className="glass-field h-11 w-full rounded-xl border border-border/60 bg-background/65 px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+              />
+            </label>
+            <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
+              <p className="text-[10px] text-muted-foreground">At least 8 characters. Other active sessions will be signed out.</p>
+              <button
+                type="submit"
+                disabled={passwordBusy || !newPassword || !confirmNewPassword}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-xs font-semibold text-accent-foreground transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <KeyRound className="size-3.5" />
+                {passwordBusy ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
+          </form>
         </section>
 
         <section className="grid gap-4 rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)] sm:p-5">

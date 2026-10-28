@@ -475,7 +475,7 @@ export default function EngineSettingsPanel({
                         )}
                         title="Open the admin panel (Shift+A)"
                       >
-                        {authUser.isSuperAdmin ? 'Super Admin' : authUser.isManagement ? 'Management' : 'Admin'}
+                        {authUser.isSuperAdmin ? 'Dev' : authUser.isManagement ? 'Management' : 'Admin'}
                       </button>
                     ) : (
                       <span className={cn(
@@ -486,7 +486,7 @@ export default function EngineSettingsPanel({
                             ? 'bg-violet-400/20 text-violet-300'
                             : 'bg-sky-400/20 text-sky-300'
                       )}>
-                        {authUser.isSuperAdmin ? 'Super Admin' : authUser.isManagement ? 'Management' : 'Admin'}
+                        {authUser.isSuperAdmin ? 'Dev' : authUser.isManagement ? 'Management' : 'Admin'}
                       </span>
                     ))}
                 </p>

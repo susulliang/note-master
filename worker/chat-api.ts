@@ -65,7 +65,7 @@ function chatJson(data: unknown, status = 200): Response {
     'access-control-allow-headers',
     'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
   );
-  response.headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
+  response.headers.set('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
   return response;
 }
 
@@ -858,7 +858,7 @@ export async function handleChatApi(
       headers: {
         'access-control-allow-origin': '*',
         'access-control-allow-headers': 'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
-        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
       },
     });
   }

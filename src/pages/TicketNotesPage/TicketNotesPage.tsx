@@ -981,6 +981,14 @@ export default function TicketNotesPage() {
     const path = WORKSPACE_PATHS[view];
     if (location.pathname !== path) navigate(path);
   }, [location.pathname, navigate]);
+  const [notificationRoomId, setNotificationRoomId] = useState<string | null>(null);
+  const openChatNotification = useCallback((roomId: string) => {
+    setNotificationRoomId(roomId);
+    navigateToView('chat');
+  }, [navigateToView]);
+  const clearNotificationRoom = useCallback((roomId: string) => {
+    setNotificationRoomId((current) => current === roomId ? null : current);
+  }, []);
   const openWorkspaceWidget = useCallback((widget: ContextWidgetId) => {
     setWidgetRequest({ widget, token: Date.now() + Math.random() });
   }, []);
@@ -2591,6 +2599,8 @@ Additional information (if needed): ${additional}`;
                     <ChatPage
                       username={authUser.username}
                       canManageChatTitles={authUser.canAccessAdmin}
+                      notificationRoomId={notificationRoomId}
+                      onNotificationRoomHandled={clearNotificationRoom}
                     />
                   )}
                 </Suspense>
@@ -3151,7 +3161,8 @@ Additional information (if needed): ${additional}`;
       {authUser && (
         <ChatNotificationBanner
           username={authUser.username}
-          onOpenChat={() => navigateToView('chat')}
+                  isChatOpen={workView === 'chat'}
+                  onOpenChat={openChatNotification}
         />
       )}
 
@@ -3172,20 +3183,21 @@ Additional information (if needed): ${additional}`;
       )}
 
       {/* Keep the floating mascot out of the pixel-world scene. */}
-      {!['commune', 'settings', 'admin', 'login'].includes(workView) && !kittyHelpOpen && !kittySpotlightOpen && (
+      {!['commune', 'settings', 'admin'].includes(workView) && !kittyHelpOpen && !kittySpotlightOpen && (
         <CatAssistant
           catId={selectedCat}
           currentThought={cat.currentThought}
-          isCapturing={call.isCapturing}
-          isThinking={cat.isThinking || kitty.busy}
+          isCapturing={workView === 'login' ? false : call.isCapturing}
+          isThinking={workView === 'login' ? false : cat.isThinking || kitty.busy}
           onDismiss={cat.dismiss}
           moveRequest={catMoveRequest}
-          onKittyHelp={runBothKittyWorkflows}
+          onKittyHelp={workView === 'login' ? undefined : runBothKittyWorkflows}
+          askEnabled={workView !== 'login'}
           kittyStage={kitty.stage}
           pet={catPet.pet}
-          onPet={catPet.petCat}
+          onPet={workView === 'login' ? undefined : catPet.petCat}
           petCooldown={catPet.petCooldown}
-          onAskOpen={openKittyHelp}
+          onAskOpen={workView === 'login' ? undefined : openKittyHelp}
         />
       )}
       {kittySpotlightOpen && !kittyHelpOpen && (

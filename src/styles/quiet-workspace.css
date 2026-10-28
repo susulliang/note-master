@@ -858,6 +858,12 @@
   background: var(--input) !important;
 }
 
+.quiet-shell .auth-page .auth-form-field {
+  border-color: rgb(255 255 255 / 12%) !important;
+  color: #f1f5f9 !important;
+  background: rgb(255 255 255 / 5%) !important;
+}
+
 .quiet-utility-panel-anchor {
   top: 60px !important;
   right: 14px !important;
