@@ -697,10 +697,340 @@
   font-weight: 700;
 }
 
+.chat-poll-composer {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 14px;
+  margin: 0 12px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 16px;
+  padding: 14px;
+  background:
+    radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 48%),
+    color-mix(in srgb, var(--card) 88%, transparent);
+  box-shadow: 0 14px 42px color-mix(in srgb, var(--background) 28%, transparent);
+  backdrop-filter: blur(18px);
+  animation: chat-poll-pop 180ms ease-out both;
+}
+
+.chat-poll-composer > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-poll-composer-icon,
+.chat-poll-card-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 10px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+}
+
+.chat-poll-composer > header strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.chat-poll-composer > header span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.chat-poll-composer > header > button,
+.chat-poll-composer-options label > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-poll-composer > header > button:hover,
+.chat-poll-composer-options label > button:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.chat-poll-composer form,
+.chat-poll-composer form > label {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-poll-composer form {
+  gap: 12px;
+}
+
+.chat-poll-composer form > label > span,
+.chat-poll-composer-options label > span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.chat-poll-composer input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 10px;
+  padding: 0 11px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+  font: inherit;
+  font-size: 11px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.chat-poll-composer input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.chat-poll-composer input::placeholder {
+  color: var(--muted-foreground);
+  opacity: .72;
+}
+
+.chat-poll-composer-options {
+  display: grid;
+  gap: 7px;
+}
+
+.chat-poll-composer-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-poll-composer-options label > span {
+  width: 16px;
+  text-align: center;
+}
+
+.chat-poll-composer-options label > button {
+  width: 28px;
+  height: 28px;
+}
+
+.chat-poll-composer form > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-poll-composer form > footer button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 10px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 76%, transparent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: transform 140ms ease, background-color 140ms ease, opacity 140ms ease;
+}
+
+.chat-poll-composer form > footer button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--foreground) 8%, var(--card));
+}
+
+.chat-poll-composer form > footer button:last-child {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  font-weight: 700;
+}
+
+.chat-poll-composer form > footer button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.chat-poll-card {
+  width: min(100%, 420px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 27%, var(--border));
+  border-radius: 15px;
+  padding: 12px;
+  background:
+    radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 52%),
+    color-mix(in srgb, var(--background) 78%, var(--card));
+  box-shadow: inset 0 1px color-mix(in srgb, white 4%, transparent);
+}
+
+.chat-poll-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-poll-card-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+
+.chat-poll-card-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.chat-poll-card-votes {
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-poll-card h3 {
+  margin: 11px 0;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.chat-poll-options {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-poll-option {
+  --poll-color: var(--accent);
+  position: relative;
+  display: grid;
+  min-height: 43px;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--poll-color) 24%, var(--border));
+  border-radius: 10px;
+  padding: 7px 9px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--poll-color) 4%, var(--card));
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.chat-poll-option--1 { --poll-color: #d2a8ff; }
+.chat-poll-option--2 { --poll-color: #3fb950; }
+.chat-poll-option--3 { --poll-color: #f0883e; }
+.chat-poll-option--4 { --poll-color: #f778ba; }
+
+.chat-poll-option:not(:disabled):hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--poll-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--poll-color) 8%, var(--card));
+}
+
+.chat-poll-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-poll-option.is-selected {
+  border-color: color-mix(in srgb, var(--poll-color) 58%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--poll-color) 16%, transparent);
+}
+
+.chat-poll-option.is-winner {
+  border-color: color-mix(in srgb, #3fb950 58%, var(--border));
+  --poll-color: #3fb950;
+}
+
+.chat-poll-option:disabled {
+  cursor: default;
+}
+
+.chat-poll-option-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+}
+
+.chat-poll-option-label > span:last-child {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-poll-meter {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.chat-poll-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--poll-color);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--poll-color) 55%, transparent);
+  transition: width 320ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.chat-poll-card-footer {
+  margin-top: 9px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+@keyframes chat-poll-pop {
+  from { opacity: 0; transform: translateY(5px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @media (max-width: 767px) {
   .chat-conversation-sidebar {
     width: 100% !important;
     max-width: none;
     min-width: 0;
+  }
+
+  .chat-poll-composer {
+    margin-inline: 7px;
+    padding: 11px;
   }
 }

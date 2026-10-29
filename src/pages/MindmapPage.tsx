@@ -7,6 +7,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import {
   useCallback,
   useEffect,
@@ -103,6 +104,7 @@ export default function MindmapPage({
   const [edges, setEdges] = useState<MindmapEdge[]>([]);
   const [permission, setPermission] = useState<CollabPermission>('view');
   const [connection, setConnection] = useState<MapConnection>('connecting');
+  const [presence, setPresence] = useState<CollaboratorPresence[]>([]);
   const [snapshotReady, setSnapshotReady] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -114,9 +116,36 @@ export default function MindmapPage({
   const [contextMenu, setContextMenu] = useState<MindmapContextMenu | null>(null);
   const [cacheReadyMapId, setCacheReadyMapId] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const typingActiveRef = useRef(false);
+  const typingRefreshAtRef = useRef(0);
+  const typingTimerRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const directoryOwnerRef = useRef(username);
+
+  const stopTypingPresence = useCallback(() => {
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+    const socket = socketRef.current;
+    if (typingActiveRef.current && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: false }));
+    }
+    typingActiveRef.current = false;
+    typingRefreshAtRef.current = 0;
+  }, []);
+
+  const refreshTypingPresence = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (!typingActiveRef.current || now - typingRefreshAtRef.current >= 1_800) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: true }));
+      typingActiveRef.current = true;
+      typingRefreshAtRef.current = now;
+    }
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(stopTypingPresence, 2_400);
+  }, [stopTypingPresence]);
 
   const refreshMaps = useCallback(async () => {
     try {
@@ -169,6 +198,7 @@ export default function MindmapPage({
     let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
     let ticketController: AbortController | null = null;
     setConnection('connecting');
+    setPresence([]);
     setPermission('view');
     setSnapshotReady(false);
     setCacheReadyMapId(null);
@@ -258,6 +288,10 @@ export default function MindmapPage({
           } catch {
             return;
           }
+          if (payload.type === 'presence:update' && Array.isArray(payload.participants)) {
+            setPresence(payload.participants as CollaboratorPresence[]);
+            return;
+          }
           if (payload.type === 'heartbeat_ack') {
             heartbeat?.acknowledge();
             return;
@@ -332,6 +366,7 @@ export default function MindmapPage({
           window.clearTimeout(socketConnectTimer);
           heartbeat?.stop();
           heartbeat = null;
+          setPresence([]);
           window.clearTimeout(stableConnectionTimer);
           if (socketRef.current === socket) socketRef.current = null;
           scheduleReconnect();
@@ -362,10 +397,11 @@ export default function MindmapPage({
       window.removeEventListener('online', handleOnline);
       ticketController?.abort();
       heartbeat?.stop();
+      stopTypingPresence();
       currentSocket?.close(1000, 'Mind map changed');
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
-  }, [activeMap?.id, connectionAttempt]);
+  }, [activeMap?.id, connectionAttempt, stopTypingPresence]);
 
   useEffect(() => {
     if (!activeMap || cacheReadyMapId !== activeMap.id || !snapshotReady) return undefined;
@@ -407,6 +443,7 @@ export default function MindmapPage({
   }, [send]);
 
   const commitNodeDraft = useCallback((node: MindmapNode, text: string) => {
+    stopTypingPresence();
     const nextText = text.trim();
     if (!nextText) {
       setNodeDraft(node.text);
@@ -417,7 +454,7 @@ export default function MindmapPage({
     saveNode(updated);
     setNodes((current) => current.map((item) => item.id === node.id ? updated : item));
     setEditingNodeId((current) => current === node.id ? null : current);
-  }, [saveNode]);
+  }, [saveNode, stopTypingPresence]);
 
   const addNode = useCallback((asChild: boolean) => {
     if (!activeMap || permission !== 'edit') return;
@@ -638,6 +675,7 @@ export default function MindmapPage({
           <span className={`mindmap-status mindmap-status--${connection}`}>
             <i />{connection === 'connected' ? 'Live' : connection === 'connecting' ? 'Connecting' : 'Offline'}
           </span>
+          <CollabPresenceStack members={presence} viewer={username} />
         </div>
         <div className="mindmap-actions">
           <span className={permission === 'edit' ? 'mindmap-permission' : 'mindmap-permission is-view'}>
@@ -738,7 +776,10 @@ export default function MindmapPage({
                     autoFocus
                     maxLength={2_000}
                     value={nodeDraft}
-                    onChange={(event) => setNodeDraft(event.target.value)}
+                    onChange={(event) => {
+                      refreshTypingPresence();
+                      setNodeDraft(event.target.value);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                         event.preventDefault();

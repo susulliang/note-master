@@ -12,6 +12,20 @@ export interface ChatMessage {
   parentId?: string | null;
   threadCount?: number;
   mentions?: string[];
+  contentType?: 'markdown' | 'poll' | 'poll_result';
+  pollId?: string | null;
+  poll?: ChatPoll;
+}
+
+export interface ChatPoll {
+  id: string;
+  question: string;
+  options: string[];
+  voteCounts: number[];
+  myVote: number | null;
+  closesAt: number;
+  closedAt: number | null;
+  closed: boolean;
 }
 
 export interface ChatConversation {

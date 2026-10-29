@@ -29,6 +29,8 @@ interface SheetTicket {
 interface SheetAttachment {
   username: string;
   permission: 'view' | 'edit';
+  lastSeenAt: number;
+  typingUntil: number;
 }
 
 interface SheetDimensions {
@@ -44,6 +46,8 @@ const MAX_ROWS = 100;
 const MAX_COLS = 100;
 const MAX_CELL_LENGTH = 5_000;
 const SNAPSHOT_CHUNK_SIZE = 250;
+const PRESENCE_TTL_MS = 45_000;
+const TYPING_TTL_MS = 4_000;
 const FILLS = new Set<SheetFill>(['none', 'slate', 'blue', 'mint', 'amber', 'rose', 'violet']);
 const TEXT_COLORS = new Set<SheetTextColor>(['auto', 'blue', 'green', 'red', 'violet']);
 const ALIGNMENTS = new Set<SheetAlignment>(['left', 'center', 'right']);
@@ -213,6 +217,8 @@ export class SheetsRoom extends DurableObject<Env> {
     server.serializeAttachment({
       username: row.username,
       permission: row.permission === 'view' ? 'view' : 'edit',
+      lastSeenAt: Date.now(),
+      typingUntil: 0,
     } satisfies SheetAttachment);
     const dimensions = this.getDimensions();
     send(server, { type: 'sheet:ready', sheetId: this.ctx.id.name, ...dimensions });
@@ -225,6 +231,7 @@ export class SheetsRoom extends DurableObject<Env> {
       });
     }
     if (cells.length === 0) send(server, { type: 'sheet:snapshot', cells: [], done: true });
+    this.broadcastPresence();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -245,7 +252,30 @@ export class SheetsRoom extends DurableObject<Env> {
       ws.close(1008, 'Missing sheet identity');
       return;
     }
-    if (event.type !== 'heartbeat' && user.permission !== 'edit') {
+    if (event.type === 'heartbeat') {
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: user.typingUntil > now ? user.typingUntil : 0,
+      } satisfies SheetAttachment);
+      send(ws, { type: 'heartbeat_ack', at: now });
+      this.broadcastPresence();
+      return;
+    }
+    if (event.type === 'presence:typing') {
+      if (event.active !== true && event.active !== false) return;
+      if (event.active && user.permission !== 'edit') return;
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: event.active ? now + TYPING_TTL_MS : 0,
+      } satisfies SheetAttachment);
+      this.broadcastPresence();
+      return;
+    }
+    if (user.permission !== 'edit') {
       send(ws, { type: 'error', message: 'You have view access to this sheet.' });
       return;
     }
@@ -337,7 +367,6 @@ export class SheetsRoom extends DurableObject<Env> {
       return;
     }
 
-    if (event.type === 'heartbeat') send(ws, { type: 'heartbeat_ack', at: Date.now() });
   }
 
   webSocketClose(ws: WebSocket): void {
@@ -346,6 +375,7 @@ export class SheetsRoom extends DurableObject<Env> {
     } catch {
       /* The socket is already closed. */
     }
+    this.broadcastPresence();
   }
 
   private getDimensions(): SheetDimensions {
@@ -530,6 +560,25 @@ export class SheetsRoom extends DurableObject<Env> {
     } catch {
       return null;
     }
+  }
+
+  private broadcastPresence(): void {
+    const now = Date.now();
+    const participants = new Map<string, { username: string; typing: boolean }>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const user = this.readAttachment(ws);
+      if (!user?.username) continue;
+      const lastSeenAt = Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : now;
+      if (now - lastSeenAt > PRESENCE_TTL_MS) continue;
+      const key = user.username.toLowerCase();
+      const previous = participants.get(key);
+      participants.set(key, {
+        username: user.username,
+        typing: (user.typingUntil ?? 0) > now || previous?.typing === true,
+      });
+    }
+    this.broadcast({ type: 'presence:update', participants: [...participants.values()] });
   }
 
   private updateSheetTimestamp(updatedAt: number): void {

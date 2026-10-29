@@ -26,6 +26,8 @@ interface MindmapTicket {
 interface MindmapAttachment {
   username: string;
   permission: 'view' | 'edit';
+  lastSeenAt: number;
+  typingUntil: number;
 }
 
 type MindmapEvent = Record<string, unknown>;
@@ -34,6 +36,8 @@ type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
 const TICKET_TTL_MS = 60_000;
 const MAX_NODES = 500;
 const MAX_TEXT_LENGTH = 2_000;
+const PRESENCE_TTL_MS = 45_000;
+const TYPING_TTL_MS = 4_000;
 const NODE_COLORS = new Set(['slate', 'blue', 'mint', 'amber', 'rose', 'violet']);
 const NODE_ID_RE = /^[0-9a-f-]{36}$/i;
 
@@ -185,9 +189,15 @@ export class MindmapRoom extends DurableObject<Env> {
     const client = pair[0];
     const server = pair[1];
     this.ctx.acceptWebSocket(server, [row.username]);
-    server.serializeAttachment({ username: row.username, permission: row.permission } satisfies MindmapAttachment);
+    server.serializeAttachment({
+      username: row.username,
+      permission: row.permission,
+      lastSeenAt: Date.now(),
+      typingUntil: 0,
+    } satisfies MindmapAttachment);
     send(server, { type: 'mindmap:ready', mindmapId: this.ctx.id.name, permission: row.permission });
     send(server, { type: 'mindmap:snapshot', nodes: this.getNodes(), edges: this.getEdges() });
+    this.broadcastPresence();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -209,7 +219,26 @@ export class MindmapRoom extends DurableObject<Env> {
       return;
     }
     if (event.type === 'heartbeat') {
-      send(ws, { type: 'heartbeat_ack', at: Date.now() });
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: user.typingUntil > now ? user.typingUntil : 0,
+      } satisfies MindmapAttachment);
+      send(ws, { type: 'heartbeat_ack', at: now });
+      this.broadcastPresence();
+      return;
+    }
+    if (event.type === 'presence:typing') {
+      if (event.active !== true && event.active !== false) return;
+      if (event.active && user.permission !== 'edit') return;
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: event.active ? now + TYPING_TTL_MS : 0,
+      } satisfies MindmapAttachment);
+      this.broadcastPresence();
       return;
     }
     if (user.permission !== 'edit') {
@@ -312,6 +341,7 @@ export class MindmapRoom extends DurableObject<Env> {
     } catch {
       /* The socket is already closed. */
     }
+    this.broadcastPresence();
   }
 
   private normalizeNode(value: unknown): MindmapNode | null {
@@ -353,6 +383,25 @@ export class MindmapRoom extends DurableObject<Env> {
       )
       .toArray()
       .map((edge) => ({ id: edge.id, from: edge.from_id, to: edge.to_id, label: edge.label ?? '' }));
+  }
+
+  private broadcastPresence(): void {
+    const now = Date.now();
+    const participants = new Map<string, { username: string; typing: boolean }>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const user = attachment(ws);
+      if (!user?.username) continue;
+      const lastSeenAt = Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : now;
+      if (now - lastSeenAt > PRESENCE_TTL_MS) continue;
+      const key = user.username.toLowerCase();
+      const previous = participants.get(key);
+      participants.set(key, {
+        username: user.username,
+        typing: (user.typingUntil ?? 0) > now || previous?.typing === true,
+      });
+    }
+    this.broadcast({ type: 'presence:update', participants: [...participants.values()] });
   }
 
   private broadcast(event: MindmapEvent): void {

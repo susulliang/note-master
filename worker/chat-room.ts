@@ -13,6 +13,8 @@ interface ChatMessageRow {
   parent_id?: string | null;
   mentions_json?: string;
   thread_count?: number;
+  content_type?: string;
+  poll_id?: string | null;
 }
 
 interface TicketRow {
@@ -27,6 +29,35 @@ interface ChatAttachment {
   username: string;
   avatarSeed: number;
   avatarRotation: number;
+  lastSeenAt: number;
+  typingUntil: number;
+}
+
+interface ChatPollRow {
+  poll_id: string;
+  message_id: string;
+  question: string;
+  options_json: string;
+  created_by: string;
+  closes_at: number;
+  closed_at: number | null;
+  my_vote?: number | null;
+}
+
+interface ChatPollVoteRow {
+  poll_id: string;
+  option_index: number;
+}
+
+interface ChatPollSnapshot {
+  id: string;
+  question: string;
+  options: string[];
+  voteCounts: number[];
+  myVote: number | null;
+  closesAt: number;
+  closedAt: number | null;
+  closed: boolean;
 }
 
 interface ChatAvatarProfile {
@@ -55,6 +86,9 @@ const TICKET_TTL_MS = 60_000;
 const MAX_SOCKET_MESSAGE_LENGTH = 32_768;
 const MAX_MARKDOWN_LENGTH = 20_000;
 const HISTORY_PAGE_SIZE = 50;
+const PRESENCE_TTL_MS = 45_000;
+const TYPING_TTL_MS = 4_000;
+const POLL_TTL_MS = 24 * 60 * 60 * 1000;
 
 function send(ws: WebSocket, event: ChatEvent): void {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -89,6 +123,8 @@ function presentMessage(row: ChatMessageRow) {
     glowing: row.glowing === 1,
     parentId: row.parent_id ?? null,
     threadCount: Number(row.thread_count ?? 0),
+    contentType: row.content_type === 'poll' || row.content_type === 'poll_result' ? row.content_type : 'markdown',
+    pollId: row.poll_id ?? null,
     mentions: (() => {
       try {
         const value: unknown = JSON.parse(row.mentions_json ?? '[]');
@@ -138,9 +174,40 @@ export class ChatRoom extends DurableObject<Env> {
       this.ensureColumn('chat_messages', 'glowing', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'parent_id', 'TEXT');
       this.ensureColumn('chat_messages', 'mentions_json', "TEXT NOT NULL DEFAULT '[]'");
+      this.ensureColumn('chat_messages', 'content_type', "TEXT NOT NULL DEFAULT 'markdown'");
+      this.ensureColumn('chat_messages', 'poll_id', 'TEXT');
       this.ctx.storage.sql.exec(
         'CREATE INDEX IF NOT EXISTS chat_messages_parent_idx ON chat_messages (parent_id, created_at, id)',
       );
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_polls (
+          poll_id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL UNIQUE,
+          question TEXT NOT NULL,
+          options_json TEXT NOT NULL,
+          created_by TEXT NOT NULL,
+          closes_at INTEGER NOT NULL,
+          closed_at INTEGER
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_poll_votes (
+          poll_id TEXT NOT NULL,
+          username TEXT NOT NULL,
+          option_index INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (poll_id, username)
+        )
+      `);
+      this.ctx.storage.sql.exec(
+        'CREATE INDEX IF NOT EXISTS chat_poll_votes_poll_idx ON chat_poll_votes (poll_id, option_index)',
+      );
+      this.ctx.storage.sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_poll_result_idx
+        ON chat_messages (poll_id)
+        WHERE content_type = 'poll_result' AND poll_id IS NOT NULL
+      `);
     });
   }
 
@@ -269,8 +336,11 @@ export class ChatRoom extends DurableObject<Env> {
       username: row.username,
       avatarSeed: row.avatar_seed,
       avatarRotation: row.avatar_rotation,
+      lastSeenAt: Date.now(),
+      typingUntil: 0,
     } satisfies ChatAttachment);
     send(server, { type: 'welcome', roomId: this.roomId });
+    this.broadcastPresence();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -289,6 +359,36 @@ export class ChatRoom extends DurableObject<Env> {
     const user = attachment(ws);
     if (!user?.username) {
       ws.close(1008, 'Missing chat identity');
+      return;
+    }
+    if (event.type === 'heartbeat') {
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: user.typingUntil > now ? user.typingUntil : 0,
+      } satisfies ChatAttachment);
+      send(ws, { type: 'heartbeat_ack', at: now });
+      this.broadcastPresence();
+      return;
+    }
+    if (event.type === 'presence:typing') {
+      const now = Date.now();
+      ws.serializeAttachment({
+        ...user,
+        lastSeenAt: now,
+        typingUntil: event.active === true ? now + TYPING_TTL_MS : 0,
+      } satisfies ChatAttachment);
+      this.broadcastPresence();
+      return;
+    }
+    if (this.roomId.startsWith('drive-presence-')) return;
+    if (event.type === 'poll:create') {
+      await this.createPoll(ws, user, event);
+      return;
+    }
+    if (event.type === 'poll:vote') {
+      await this.votePoll(ws, user, event);
       return;
     }
     if (event.type === 'message:create') {
@@ -417,7 +517,7 @@ export class ChatRoom extends DurableObject<Env> {
       return;
     }
     if (event.type === 'history:latest') {
-      const page = this.getMessages();
+      const page = await this.getMessages(user.username);
       send(ws, {
         type: 'history:latest',
         messages: page.messages,
@@ -431,7 +531,7 @@ export class ChatRoom extends DurableObject<Env> {
       if (!/^[0-9a-f-]{36}$/i.test(parentId)) return;
       const parent = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT id, username, markdown, created_at, updated_at, source_id,
-                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json,
+                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id,
                 (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = chat_messages.id) AS thread_count
          FROM chat_messages WHERE id = ? AND parent_id IS NULL`,
         parentId,
@@ -439,15 +539,22 @@ export class ChatRoom extends DurableObject<Env> {
       if (!parent) return;
       const replies = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT id, username, markdown, created_at, updated_at, source_id,
-                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json,
+                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id,
                 0 AS thread_count
          FROM chat_messages WHERE parent_id = ? ORDER BY created_at, id`,
         parentId,
       ).toArray();
+      const parentMessage = presentMessage(parent);
+      const parentPoll = parent.poll_id ? this.getPollSnapshot(parent.poll_id, user.username) : null;
+      const replyMessages = replies.map((row) => {
+        const message = presentMessage(row);
+        const poll = row.poll_id ? this.getPollSnapshot(row.poll_id, user.username) : null;
+        return poll ? { ...message, poll } : message;
+      });
       send(ws, {
         type: 'thread:messages',
-        parent: presentMessage(parent),
-        messages: replies.map(presentMessage),
+        parent: parentPoll ? { ...parentMessage, poll: parentPoll } : parentMessage,
+        messages: replyMessages,
       });
       return;
     }
@@ -459,7 +566,7 @@ export class ChatRoom extends DurableObject<Env> {
         typeof rawCursor.id !== 'string' ||
         rawCursor.id.length > 80
       ) return;
-      const page = this.getMessages({
+      const page = await this.getMessages(user.username, {
         createdAt: rawCursor.createdAt as number,
         id: rawCursor.id,
       });
@@ -471,7 +578,6 @@ export class ChatRoom extends DurableObject<Env> {
       });
       return;
     }
-    if (event.type === 'heartbeat') send(ws, { type: 'heartbeat_ack', at: Date.now() });
   }
 
   webSocketClose(ws: WebSocket): void {
@@ -480,13 +586,278 @@ export class ChatRoom extends DurableObject<Env> {
     } catch {
       /* The socket is already closed. */
     }
+    this.broadcastPresence();
   }
 
-  private getMessages(before?: MessageCursor) {
+  async alarm(): Promise<void> {
+    await this.closeExpiredPolls();
+    await this.scheduleNextPollAlarm();
+  }
+
+  private broadcastPresence(): void {
+    const now = Date.now();
+    const activeUsers = new Map<string, {
+      username: string;
+      seed: number;
+      rotation: number;
+      typing: boolean;
+    }>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const user = attachment(ws);
+      if (!user?.username) continue;
+      const lastSeenAt = Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : now;
+      if (now - lastSeenAt > PRESENCE_TTL_MS) continue;
+      const key = user.username.toLowerCase();
+      const previous = activeUsers.get(key);
+      activeUsers.set(key, {
+        username: user.username,
+        seed: user.avatarSeed,
+        rotation: user.avatarRotation,
+        typing: (user.typingUntil ?? 0) > now || previous?.typing === true,
+      });
+    }
+    this.broadcast({ type: 'presence:update', participants: [...activeUsers.values()] });
+  }
+
+  private async createPoll(
+    ws: WebSocket,
+    user: ChatAttachment,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const question = typeof event.question === 'string'
+      ? event.question.trim().replace(/\s+/g, ' ').slice(0, 240)
+      : '';
+    const rawOptions = Array.isArray(event.options) ? event.options : [];
+    const options = rawOptions
+      .filter((option): option is string => typeof option === 'string')
+      .map((option) => option.trim().replace(/\s+/g, ' ').slice(0, 80))
+      .filter(Boolean);
+    const uniqueOptions = [...new Map(options.map((option) => [option.toLowerCase(), option])).values()];
+    if (!question || uniqueOptions.length < 2 || uniqueOptions.length > 6) {
+      send(ws, { type: 'error', message: 'Polls need a question and 2–6 different options.' });
+      return;
+    }
+
+    const now = Date.now();
+    const pollId = crypto.randomUUID();
+    const messageId = crypto.randomUUID();
+    const closesAt = now + POLL_TTL_MS;
+    const row: ChatMessageRow = {
+      id: messageId,
+      username: user.username,
+      markdown: question,
+      created_at: now,
+      updated_at: now,
+      source_id: null,
+      avatar_seed: user.avatarSeed,
+      avatar_rotation: user.avatarRotation,
+      glowing: 0,
+      parent_id: null,
+      mentions_json: '[]',
+      content_type: 'poll',
+      poll_id: pollId,
+    };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_messages
+       (id, username, markdown, created_at, updated_at, source_id, avatar_seed,
+        avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, '[]', 'poll', ?)`,
+      messageId,
+      user.username,
+      question,
+      now,
+      now,
+      user.avatarSeed,
+      user.avatarRotation,
+      pollId,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_polls
+       (poll_id, message_id, question, options_json, created_by, closes_at, closed_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      pollId,
+      messageId,
+      question,
+      JSON.stringify(uniqueOptions),
+      user.username,
+      closesAt,
+    );
+    const poll = this.getPollSnapshot(pollId, user.username);
+    this.broadcast({ type: 'message:created', message: { ...presentMessage(row), poll } });
+    await this.updateInboxPreview(`Poll: ${question}`, now);
+    await this.scheduleNextPollAlarm();
+  }
+
+  private async votePoll(
+    ws: WebSocket,
+    user: ChatAttachment,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const pollId = typeof event.pollId === 'string' ? event.pollId : '';
+    const optionIndex = Number(event.optionIndex);
+    if (!/^[0-9a-f-]{36}$/i.test(pollId) || !Number.isInteger(optionIndex)) return;
+    const poll = this.ctx.storage.sql.exec<ChatPollRow>(
+      'SELECT * FROM chat_polls WHERE poll_id = ?',
+      pollId,
+    ).toArray()[0];
+    if (!poll) return;
+    if (poll.closed_at !== null || poll.closes_at <= Date.now()) {
+      await this.closePoll(pollId);
+      send(ws, { type: 'error', message: 'This poll is closed.' });
+      return;
+    }
+    let options: string[];
+    try {
+      options = JSON.parse(poll.options_json) as string[];
+    } catch {
+      return;
+    }
+    if (optionIndex < 0 || optionIndex >= options.length) return;
+    const now = Date.now();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_poll_votes (poll_id, username, option_index, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(poll_id, username) DO UPDATE SET
+         option_index = excluded.option_index, updated_at = excluded.updated_at`,
+      pollId,
+      user.username,
+      optionIndex,
+      now,
+      now,
+    );
+    this.broadcastPollUpdate(pollId);
+  }
+
+  private getPollSnapshot(pollId: string, username?: string): ChatPollSnapshot | null {
+    const poll = this.ctx.storage.sql.exec<ChatPollRow>(
+      'SELECT * FROM chat_polls WHERE poll_id = ?',
+      pollId,
+    ).toArray()[0];
+    if (!poll) return null;
+    let options: string[];
+    try {
+      const parsed: unknown = JSON.parse(poll.options_json);
+      options = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      options = [];
+    }
+    const counts = Array.from({ length: options.length }, () => 0);
+    const voteRows = this.ctx.storage.sql.exec<{ option_index: number; count: number }>(
+      `SELECT option_index, COUNT(*) AS count FROM chat_poll_votes
+       WHERE poll_id = ? GROUP BY option_index`,
+      pollId,
+    ).toArray();
+    for (const row of voteRows) {
+      if (row.option_index >= 0 && row.option_index < counts.length) counts[row.option_index] = Number(row.count);
+    }
+    const myVote = username
+      ? this.ctx.storage.sql.exec<{ option_index: number }>(
+        'SELECT option_index FROM chat_poll_votes WHERE poll_id = ? AND username = ? COLLATE NOCASE',
+        pollId,
+        username,
+      ).toArray()[0]?.option_index ?? null
+      : null;
+    return {
+      id: poll.poll_id,
+      question: poll.question,
+      options,
+      voteCounts: counts,
+      myVote,
+      closesAt: poll.closes_at,
+      closedAt: poll.closed_at,
+      closed: poll.closed_at !== null || poll.closes_at <= Date.now(),
+    };
+  }
+
+  private broadcastPollUpdate(pollId: string): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const user = attachment(ws);
+      if (!user?.username) continue;
+      const poll = this.getPollSnapshot(pollId, user.username);
+      if (poll) send(ws, { type: 'poll:update', poll });
+    }
+  }
+
+  private async closePoll(pollId: string): Promise<void> {
+    const poll = this.ctx.storage.sql.exec<ChatPollRow>(
+      'SELECT * FROM chat_polls WHERE poll_id = ?',
+      pollId,
+    ).toArray()[0];
+    if (!poll || poll.closed_at !== null) return;
+    const now = Date.now();
+    const changed = this.ctx.storage.sql.exec(
+      'UPDATE chat_polls SET closed_at = ? WHERE poll_id = ? AND closed_at IS NULL',
+      now,
+      pollId,
+    ).rowsWritten;
+    if (!changed) return;
+    const source = this.ctx.storage.sql.exec<{
+      username: string;
+      avatar_seed: number;
+      avatar_rotation: number;
+    }>(
+      'SELECT username, avatar_seed, avatar_rotation FROM chat_messages WHERE id = ?',
+      poll.message_id,
+    ).toArray()[0];
+    if (source) {
+      const resultId = crypto.randomUUID();
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_messages
+         (id, username, markdown, created_at, updated_at, source_id, avatar_seed,
+          avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, '[]', 'poll_result', ?)`,
+        resultId,
+        source.username,
+        `Poll results: ${poll.question}`,
+        now,
+        now,
+        source.avatar_seed,
+        source.avatar_rotation,
+        pollId,
+      );
+      const result = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT *, 0 AS thread_count FROM chat_messages
+         WHERE content_type = 'poll_result' AND poll_id = ?`,
+        pollId,
+      ).toArray()[0];
+      const snapshot = this.getPollSnapshot(pollId);
+      if (result && snapshot) {
+        this.broadcast({ type: 'message:created', message: { ...presentMessage(result), poll: snapshot } });
+      }
+      await this.updateInboxPreview(`Poll results: ${poll.question}`, now);
+    }
+    this.broadcastPollUpdate(pollId);
+  }
+
+  private async closeExpiredPolls(): Promise<void> {
+    const now = Date.now();
+    const due = this.ctx.storage.sql.exec<{ poll_id: string }>(
+      'SELECT poll_id FROM chat_polls WHERE closed_at IS NULL AND closes_at <= ?',
+      now,
+    ).toArray();
+    for (const row of due) await this.closePoll(row.poll_id);
+  }
+
+  private async scheduleNextPollAlarm(): Promise<void> {
+    const row = this.ctx.storage.sql.exec<{ next_close: number | null }>(
+      'SELECT MIN(closes_at) AS next_close FROM chat_polls WHERE closed_at IS NULL',
+    ).toArray()[0];
+    if (row?.next_close == null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + 1_000, row.next_close));
+    }
+  }
+
+  private async getMessages(username: string, before?: MessageCursor) {
+    await this.closeExpiredPolls();
     const rows = before
       ? this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT m.id, m.username, m.markdown, m.created_at, m.updated_at, m.source_id,
                 m.avatar_seed, m.avatar_rotation, m.glowing, m.parent_id, m.mentions_json,
+                m.content_type, m.poll_id,
                 (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = m.id) AS thread_count
          FROM chat_messages m
          WHERE m.parent_id IS NULL AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))
@@ -499,6 +870,7 @@ export class ChatRoom extends DurableObject<Env> {
       : this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT m.id, m.username, m.markdown, m.created_at, m.updated_at, m.source_id,
                 m.avatar_seed, m.avatar_rotation, m.glowing, m.parent_id, m.mentions_json,
+                m.content_type, m.poll_id,
                 (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = m.id) AS thread_count
          FROM chat_messages m WHERE m.parent_id IS NULL ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
         HISTORY_PAGE_SIZE + 1,
@@ -506,8 +878,13 @@ export class ChatRoom extends DurableObject<Env> {
     const hasOlder = rows.length > HISTORY_PAGE_SIZE;
     const pageRows = rows.slice(0, HISTORY_PAGE_SIZE);
     const oldest = pageRows.at(-1);
+    const messages = pageRows.reverse().map((row) => {
+      const message = presentMessage(row);
+      const poll = row.poll_id ? this.getPollSnapshot(row.poll_id, username) : null;
+      return poll ? { ...message, poll } : message;
+    });
     return {
-      messages: pageRows.reverse().map(presentMessage),
+      messages,
       hasOlder,
       cursor: oldest ? { createdAt: oldest.created_at, id: oldest.id } : null,
     };

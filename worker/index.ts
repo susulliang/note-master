@@ -4526,7 +4526,8 @@ export default {
       if (
         roomId !== 'global' &&
         !/^dm-[0-9a-f]{64}$/.test(roomId) &&
-        !/^group-[0-9a-f-]{36}$/.test(roomId)
+        !/^group-[0-9a-f-]{36}$/.test(roomId) &&
+        !/^drive-presence-(?:team|personal-[a-z0-9._%-]{1,100})$/i.test(roomId)
       ) {
         return new Response('Invalid chat room', { status: 400 });
       }

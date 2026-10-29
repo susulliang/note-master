@@ -329,6 +329,11 @@ function isChatRoomId(roomId: string): boolean {
     || /^group-[0-9a-f-]{36}$/.test(roomId);
 }
 
+function isDrivePresenceRoom(roomId: string, username: string): boolean {
+  return roomId === 'drive-presence-team'
+    || roomId === `drive-presence-personal-${encodeURIComponent(username.toLowerCase())}`;
+}
+
 async function revalidateCollabDocument(
   env: Env,
   type: CollabDocumentType,
@@ -602,6 +607,11 @@ async function handleSocketTicket(request: Request, env: Env, user: ChatUser): P
   let roomId = '';
   if (payload.roomId === 'global') {
     roomId = 'global';
+  } else if (
+    typeof payload.roomId === 'string' &&
+    isDrivePresenceRoom(payload.roomId, user.username)
+  ) {
+    roomId = payload.roomId;
   } else if (typeof payload.peerUsername === 'string') {
     const requestedPeer = payload.peerUsername.trim();
     const peer = await env.DB.prepare(

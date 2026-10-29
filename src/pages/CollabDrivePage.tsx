@@ -20,19 +20,23 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import { toast } from 'sonner';
+import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import {
+  chatSocketUrl,
   createCollabDriveFolder,
   deleteCollabDriveFolder,
   deleteCollabDriveFile,
   downloadCollabDriveFile,
   getCollabDriveFileBlob,
   listCollabDrive,
+  requestChatTicket,
   updateCollabDriveFile,
   updateCollabDriveFolder,
   uploadCollabDriveFile,
   type CollabDriveFile,
   type CollabDriveFolder,
 } from '@/lib/chat-client';
+import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 import {
   readDriveIndex,
   readDrivePreview,
@@ -160,6 +164,7 @@ export default function CollabDrivePage({
   initialScope = 'team',
 }: CollabDrivePageProps) {
   const [scope, setScope] = useState<DriveScope>(initialScope);
+  const [presence, setPresence] = useState<CollaboratorPresence[]>([]);
   const [folderStack, setFolderStack] = useState<CollabDriveFolder[]>([]);
   const [folders, setFolders] = useState<CollabDriveFolder[]>([]);
   const [files, setFiles] = useState<CollabDriveFile[]>([]);
@@ -177,7 +182,105 @@ export default function CollabDrivePage({
   const [renameDraft, setRenameDraft] = useState('');
   const [savingRename, setSavingRename] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const presenceSocketRef = useRef<WebSocket | null>(null);
+  const typingActiveRef = useRef(false);
+  const typingRefreshAtRef = useRef(0);
+  const typingTimerRef = useRef<number | null>(null);
   const refreshSequenceRef = useRef(0);
+  const presenceRoomId = scope === 'team'
+    ? 'drive-presence-team'
+    : `drive-presence-personal-${encodeURIComponent(username.toLowerCase())}`;
+  const stopTypingPresence = useCallback(() => {
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+    const socket = presenceSocketRef.current;
+    if (typingActiveRef.current && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: false }));
+    }
+    typingActiveRef.current = false;
+    typingRefreshAtRef.current = 0;
+  }, []);
+  const refreshTypingPresence = useCallback(() => {
+    const socket = presenceSocketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (!typingActiveRef.current || now - typingRefreshAtRef.current >= 1_800) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: true }));
+      typingActiveRef.current = true;
+      typingRefreshAtRef.current = now;
+    }
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(stopTypingPresence, 2_400);
+  }, [stopTypingPresence]);
+
+  useEffect(() => {
+    let stopped = false;
+    let reconnectTimer = 0;
+    let reconnectAttempt = 0;
+    let socket: WebSocket | null = null;
+    let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
+    setPresence([]);
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, getWebSocketReconnectDelay(reconnectAttempt));
+      reconnectAttempt += 1;
+    };
+
+    const connect = async () => {
+      if (stopped) return;
+      try {
+        const ticket = await requestChatTicket({ roomId: presenceRoomId });
+        if (stopped) return;
+        const current = new WebSocket(chatSocketUrl(ticket));
+        socket = current;
+        presenceSocketRef.current = current;
+        current.onopen = () => {
+          reconnectAttempt = 0;
+          heartbeat = startWebSocketHeartbeat(current, () => current.close(4000, 'Heartbeat timeout'));
+        };
+        current.onmessage = (event) => {
+          let payload: Record<string, unknown>;
+          try {
+            payload = JSON.parse(String(event.data)) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (payload.type === 'heartbeat_ack') {
+            heartbeat?.acknowledge();
+            return;
+          }
+          if (payload.type === 'presence:update' && Array.isArray(payload.participants)) {
+            setPresence(payload.participants as CollaboratorPresence[]);
+          }
+        };
+        current.onclose = () => {
+          heartbeat?.stop();
+          heartbeat = null;
+          stopTypingPresence();
+          if (presenceSocketRef.current === current) presenceSocketRef.current = null;
+          setPresence([]);
+          scheduleReconnect();
+        };
+        current.onerror = () => current.close();
+      } catch {
+        scheduleReconnect();
+      }
+    };
+
+    void connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(reconnectTimer);
+      heartbeat?.stop();
+      stopTypingPresence();
+      if (presenceSocketRef.current === socket) presenceSocketRef.current = null;
+      socket?.close(1000, 'Drive changed');
+    };
+  }, [presenceRoomId, stopTypingPresence]);
   const renameInProgressRef = useRef(false);
   const cancelRenameOnBlurRef = useRef(false);
   const currentFolder = folderStack.at(-1) ?? null;
@@ -406,6 +509,7 @@ export default function CollabDrivePage({
           <h2>Team Drive</h2>
         </div>
         <div className="collab-tool-header-actions collab-drive-header-actions">
+          <CollabPresenceStack members={presence} viewer={username} />
           <div className="collab-segmented" aria-label="Drive scope">
             {(['team', 'personal'] as const).map((item) => (
               <button key={item} type="button" aria-pressed={scope === item} onClick={() => {
@@ -436,7 +540,10 @@ export default function CollabDrivePage({
           </button>
           <label className="collab-drive-search">
             <Search className="size-4" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this folder" />
+            <input value={query} onChange={(event) => {
+              setQuery(event.target.value);
+              refreshTypingPresence();
+            }} placeholder="Search this folder" />
           </label>
           <button
             type="button"
@@ -458,7 +565,10 @@ export default function CollabDrivePage({
       {creatingFolder && (
         <form className="collab-drive-new-folder" onSubmit={(event) => { event.preventDefault(); void createFolder(); }}>
           <FolderPlus className="size-4 text-accent" />
-          <input autoFocus maxLength={100} value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="Folder name" />
+          <input autoFocus maxLength={100} value={folderName} onChange={(event) => {
+            setFolderName(event.target.value);
+            refreshTypingPresence();
+          }} placeholder="Folder name" />
           <button type="submit" className="collab-tool-primary" disabled={!folderName.trim() || savingFolder}>Create</button>
         </form>
       )}
@@ -511,7 +621,10 @@ export default function CollabDrivePage({
                   autoFocus
                   value={renameDraft}
                   aria-label={`Rename folder ${folder.name}`}
-                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onChange={(event) => {
+                    setRenameDraft(event.target.value);
+                    refreshTypingPresence();
+                  }}
                   onClick={(event) => event.stopPropagation()}
                   onBlur={() => {
                     if (cancelRenameOnBlurRef.current) {
@@ -561,7 +674,10 @@ export default function CollabDrivePage({
                     value={renameDraft}
                     aria-label={`Rename file ${file.name}`}
                     disabled={savingRename}
-                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onChange={(event) => {
+                      setRenameDraft(event.target.value);
+                      refreshTypingPresence();
+                    }}
                     onBlur={() => {
                       if (cancelRenameOnBlurRef.current) {
                         cancelRenameOnBlurRef.current = false;

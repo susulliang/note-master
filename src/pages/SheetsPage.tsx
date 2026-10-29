@@ -31,6 +31,7 @@ import {
   type FormEvent,
 } from 'react';
 import { toast } from 'sonner';
+import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import {
   loadCollabDirectoryCache,
   loadSheetSnapshot,
@@ -174,6 +175,7 @@ export default function SheetsPage({
   const [activeSheet, setActiveSheet] = useState<CollaborativeSheet | null>(initialDocument ?? null);
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
+  const [presence, setPresence] = useState<CollaboratorPresence[]>([]);
   const [canEdit, setCanEdit] = useState(true);
   const [cells, setCells] = useState<SheetCellMap>({});
   const [rowCount, setRowCount] = useState(10);
@@ -200,6 +202,9 @@ export default function SheetsPage({
   const [importing, setImporting] = useState(false);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const typingActiveRef = useRef(false);
+  const typingRefreshAtRef = useRef(0);
+  const typingTimerRef = useRef<number | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +215,30 @@ export default function SheetsPage({
   const cancelEditOnBlurRef = useRef(false);
   const selectionRef = useRef(selected);
   selectionRef.current = selected;
+
+  const stopTypingPresence = useCallback(() => {
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+    const socket = socketRef.current;
+    if (typingActiveRef.current && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: false }));
+    }
+    typingActiveRef.current = false;
+    typingRefreshAtRef.current = 0;
+  }, []);
+
+  const refreshTypingPresence = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (!typingActiveRef.current || now - typingRefreshAtRef.current >= 1_800) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: true }));
+      typingActiveRef.current = true;
+      typingRefreshAtRef.current = now;
+    }
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(stopTypingPresence, 2_400);
+  }, [stopTypingPresence]);
 
   const reloadSheets = useCallback(async () => {
     try {
@@ -260,6 +289,7 @@ export default function SheetsPage({
     let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
     let ticketController: AbortController | null = null;
     setConnection('connecting');
+    setPresence([]);
     setCanEdit(false);
     setSnapshotReady(false);
     setSnapshotSheetId(null);
@@ -352,6 +382,10 @@ export default function SheetsPage({
           try {
             payload = JSON.parse(String(event.data)) as Record<string, unknown>;
           } catch {
+            return;
+          }
+          if (payload.type === 'presence:update' && Array.isArray(payload.participants)) {
+            setPresence(payload.participants as CollaboratorPresence[]);
             return;
           }
           if (payload.type === 'heartbeat_ack') {
@@ -465,6 +499,7 @@ export default function SheetsPage({
           window.clearTimeout(socketConnectTimer);
           heartbeat?.stop();
           heartbeat = null;
+          setPresence([]);
           window.clearTimeout(stableConnectionTimer);
           if (socketRef.current === socket) socketRef.current = null;
           scheduleReconnect();
@@ -506,10 +541,11 @@ export default function SheetsPage({
       window.removeEventListener('online', handleOnline);
       ticketController?.abort();
       heartbeat?.stop();
+      stopTypingPresence();
       currentSocket?.close();
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
-  }, [activeSheet?.id, connectionAttempt]);
+  }, [activeSheet?.id, connectionAttempt, stopTypingPresence]);
 
   useEffect(() => {
     if (!activeSheet || !snapshotReady || snapshotSheetId !== activeSheet.id) return undefined;
@@ -589,7 +625,7 @@ export default function SheetsPage({
   }, [editingCell]);
 
   const sendEvent = useCallback((payload: Record<string, unknown>) => {
-    if (payload.type !== 'heartbeat' && !canEdit) {
+    if (payload.type !== 'heartbeat' && payload.type !== 'presence:typing' && !canEdit) {
       toast.error('You have view access to this sheet.');
       return false;
     }
@@ -622,6 +658,7 @@ export default function SheetsPage({
 
   const beginEdit = useCallback((row: number, col: number, initial?: string) => {
     if (!canEdit) return;
+    refreshTypingPresence();
     const cell = getCell(cells, row, col);
     const key = cellKey(row, col);
     lastCommittedEditRef.current = null;
@@ -629,17 +666,18 @@ export default function SheetsPage({
     setEditDraft(initial ?? cell.raw);
     setEditingCell(key);
     setFormulaDraft(initial ?? cell.raw);
-  }, [canEdit, cells]);
+  }, [canEdit, cells, refreshTypingPresence]);
 
   const commitEdit = useCallback((nextRaw = editDraft) => {
     if (!editingCell || lastCommittedEditRef.current === editingCell) return;
+    stopTypingPresence();
     lastCommittedEditRef.current = editingCell;
     const [row, col] = editingCell.split(':').map(Number);
     const previous = getCell(cells, row, col);
     sendCells([{ ...previous, raw: nextRaw.slice(0, 5_000) }]);
     setFormulaDraft(nextRaw.slice(0, 5_000));
     setEditingCell(null);
-  }, [cells, editDraft, editingCell, sendCells]);
+  }, [cells, editDraft, editingCell, sendCells, stopTypingPresence]);
 
   const applyStyle = useCallback((patch: Partial<Required<SheetCellStyle>>) => {
     const updates = rangeCells(selectionRef.current).map(({ row, col }) => {
@@ -984,6 +1022,7 @@ export default function SheetsPage({
             className="sheets-cell-editor"
             value={editDraft}
             onChange={(event) => {
+              refreshTypingPresence();
               setEditDraft(event.target.value);
               setFormulaDraft(event.target.value);
             }}
@@ -1002,6 +1041,7 @@ export default function SheetsPage({
               } else if (event.key === 'Escape') {
                 event.preventDefault();
                 cancelEditOnBlurRef.current = true;
+                stopTypingPresence();
                 setEditingCell(null);
                 setEditDraft(cell.raw);
                 gridRef.current?.focus();
@@ -1225,6 +1265,7 @@ export default function SheetsPage({
           </div>
         </div>
         <div className="sheets-header-actions">
+          <CollabPresenceStack members={presence} viewer={username} />
           {!canEdit && <span className="sheets-readonly-badge">View only</span>}
           <span className="sheets-shared-label"><Users className="size-3.5" /> {columnCountLabel(activeSheet.memberCount)}</span>
           {activeSheet.owner === username && (

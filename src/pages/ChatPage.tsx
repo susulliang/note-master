@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   ArrowLeft,
   Bold,
+  BarChart3,
   Check,
   ClipboardPaste,
   Copy,
@@ -48,6 +49,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from 'react';
 import { toast } from 'sonner';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
+import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import {
   loadChatRoomCache,
   peekChatRoomCache,
@@ -84,6 +86,7 @@ import {
   unpinChatDocument,
   type ChatConversation,
   type ChatAvatarProfile,
+  type ChatPoll,
   type ChatMessage,
   type ChatSocketTicket,
   type ChatSticker,
@@ -662,6 +665,71 @@ function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(timestamp);
 }
 
+function PollMessageCard({
+  poll,
+  isSummary,
+  onVote,
+}: {
+  poll: ChatPoll;
+  isSummary: boolean;
+  onVote: (optionIndex: number) => void;
+}) {
+  const totalVotes = poll.voteCounts.reduce((total, count) => total + count, 0);
+  const highestCount = Math.max(0, ...poll.voteCounts);
+  const winnerCount = poll.closed && highestCount > 0
+    ? poll.voteCounts.filter((count) => count === highestCount).length
+    : 0;
+  const remainingHours = Math.max(0, Math.ceil((poll.closesAt - Date.now()) / 3_600_000));
+
+  return (
+    <section className="chat-poll-card" aria-label={isSummary ? 'Poll results' : 'Quick poll'}>
+      <header className="chat-poll-card-header">
+        <span className="chat-poll-card-mark"><BarChart3 className="size-3.5" /></span>
+        <span className="chat-poll-card-kicker">{poll.closed ? 'Final tally' : 'Quick poll'}</span>
+        <span className="chat-poll-card-votes">{totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</span>
+      </header>
+      <h3>{poll.question}</h3>
+      <div className="chat-poll-options">
+        {poll.options.map((option, index) => {
+          const votes = poll.voteCounts[index] ?? 0;
+          const percentage = totalVotes ? Math.round((votes / totalVotes) * 100) : 0;
+          const isWinner = poll.closed && winnerCount === 1 && votes === highestCount;
+          return (
+            <button
+              key={`${poll.id}:${index}`}
+              type="button"
+              className={cn(
+                'chat-poll-option',
+                `chat-poll-option--${index % 5}`,
+                poll.myVote === index && 'is-selected',
+                isWinner && 'is-winner',
+              )}
+              aria-pressed={poll.myVote === index}
+              disabled={poll.closed}
+              onClick={() => onVote(index)}
+            >
+              <span className="chat-poll-option-label">
+                <span className="truncate">{option}</span>
+                <span>{totalVotes ? `${percentage}% · ` : ''}{votes}</span>
+              </span>
+              <span className="chat-poll-meter">
+                <i style={{ width: `${percentage}%` }} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <footer className="chat-poll-card-footer">
+        {poll.closed
+          ? isSummary
+            ? 'The tiny democracy has spoken.'
+            : 'Voting is closed. Final results are in.'
+          : `Open for ${remainingHours}h · then the tiny democracy closes automatically.`}
+      </footer>
+    </section>
+  );
+}
+
 function fixNewsImagePaths(markdown: string): string {
   return markdown.replace(
     /(!\[[^\]]*\]\()(?:(?:\.\.\/)|(?:\.\/))*assets\//g,
@@ -778,6 +846,9 @@ export default function ChatPage({
   const [stickers, setStickers] = useState<ChatSticker[]>([]);
   const [stickerName, setStickerName] = useState('');
   const [uploadingSticker, setUploadingSticker] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [drivePickerScope, setDrivePickerScope] = useState<'team' | 'personal'>('team');
   const [drivePickerFiles, setDrivePickerFiles] = useState<CollabDriveFile[]>([]);
@@ -808,12 +879,16 @@ export default function ChatPage({
   const [threadParent, setThreadParent] = useState<ChatMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<ChatMessage[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [roomPresence, setRoomPresence] = useState<CollaboratorPresence[]>([]);
   const threadParentIdRef = useRef<string | null>(null);
   const messageDensityOwnerRef = useRef(username.toLowerCase());
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
   const [mentionSearching, setMentionSearching] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const typingActiveRef = useRef(false);
+  const typingRefreshAtRef = useRef(0);
+  const typingTimerRef = useRef<number | null>(null);
   const pendingTicketRef = useRef<ChatSocketTicket | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef('');
@@ -839,6 +914,28 @@ export default function ChatPage({
   const cursorRef = useRef<ChatMessageCursor | null>(peekChatRoomCache(username, 'global')?.cursor ?? null);
   const hasOlderRef = useRef(peekChatRoomCache(username, 'global')?.hasOlder ?? false);
   const loadingOlderRef = useRef(false);
+  const stopTypingPresence = useCallback(() => {
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+    const socket = socketRef.current;
+    if (typingActiveRef.current && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: false }));
+    }
+    typingActiveRef.current = false;
+    typingRefreshAtRef.current = 0;
+  }, []);
+  const refreshTypingPresence = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (!typingActiveRef.current || now - typingRefreshAtRef.current >= 1_800) {
+      socket.send(JSON.stringify({ type: 'presence:typing', active: true }));
+      typingActiveRef.current = true;
+      typingRefreshAtRef.current = now;
+    }
+    if (typingTimerRef.current !== null) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(stopTypingPresence, 2_400);
+  }, [stopTypingPresence]);
   const isOwnMessage = useCallback((message: ChatMessage) => (
     message.source === 'chat' && message.username.toLowerCase() === username.toLowerCase()
   ), [username]);
@@ -857,6 +954,7 @@ export default function ChatPage({
     setThreadParent(null);
     setThreadMessages([]);
     setThreadLoading(false);
+    setRoomPresence([]);
     threadParentIdRef.current = null;
     setChatListPreferences((current) => current.archivedRoomIds.includes(room.roomId)
       ? { ...current, archivedRoomIds: current.archivedRoomIds.filter((id) => id !== room.roomId) }
@@ -1114,6 +1212,46 @@ export default function ChatPage({
     editor.innerHTML = markdownToEditorHtml(markdown);
     hydrateEditorImages(editor, (url) => editorObjectUrlsRef.current.push(url));
   }, []);
+
+  const createQuickPoll = useCallback((questionValue: string, optionValues: string[]) => {
+    if (threadParentIdRef.current) {
+      toast.error('Close the thread before creating a room poll.');
+      return false;
+    }
+    if (editingId) {
+      toast.error('Finish editing your message before creating a poll.');
+      return false;
+    }
+    const question = questionValue.trim().replace(/\s+/g, ' ').slice(0, 240);
+    const options = [...new Map(optionValues
+      .map((option) => option.trim().replace(/\s+/g, ' ').slice(0, 80))
+      .filter(Boolean)
+      .map((option) => [option.toLowerCase(), option])).values()];
+    if (!question || options.length < 2 || options.length > 6) {
+      toast.error('Add a question and 2–6 different options.');
+      return false;
+    }
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to the room before creating a poll.');
+      return false;
+    }
+    try {
+      socket.send(JSON.stringify({ type: 'poll:create', question, options }));
+    } catch {
+      toast.error('The poll could not be sent. Please reconnect and try again.');
+      return false;
+    }
+    stopTypingPresence();
+    setComposerMarkdown('');
+    setEditingId(null);
+    setPollQuestion('');
+    setPollOptions(['', '']);
+    setPollComposerOpen(false);
+    setStickerPanelOpen(false);
+    setDrivePickerOpen(false);
+    return true;
+  }, [editingId, setComposerMarkdown, stopTypingPresence]);
 
   const loadDrivePickerFiles = useCallback(async (scope: 'team' | 'personal') => {
     setDrivePickerLoading(true);
@@ -1376,12 +1514,14 @@ export default function ChatPage({
     let ticketController: AbortController | null = null;
     let cacheInitialized = peekChatRoomCache(username, activeRoom.roomId)?.initialized ?? false;
     setConnection('connecting');
+    setRoomPresence([]);
     setLoadingOlder(false);
     loadingOlderRef.current = false;
 
     const scheduleReconnect = () => {
       if (stopped || reconnectTimer) return;
       setConnection('offline');
+      setRoomPresence([]);
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = 0;
         void connect();
@@ -1462,6 +1602,29 @@ export default function ChatPage({
           }
           if (payload.type === 'heartbeat_ack') {
             heartbeat?.acknowledge();
+            return;
+          }
+          if (payload.type === 'presence:update' && Array.isArray(payload.participants)) {
+            setRoomPresence(payload.participants as CollaboratorPresence[]);
+            return;
+          }
+          if (
+            payload.type === 'poll:update' &&
+            payload.poll &&
+            typeof payload.poll === 'object' &&
+            typeof (payload.poll as ChatPoll).id === 'string'
+          ) {
+            const poll = payload.poll as ChatPoll;
+            const updatePoll = (message: ChatMessage) => (
+              message.pollId === poll.id ? { ...message, poll } : message
+            );
+            setMessages((current) => {
+              const next = current.map(updatePoll);
+              persistRoomCache(next);
+              return next;
+            });
+            setThreadMessages((current) => current.map(updatePoll));
+            setThreadParent((current) => current?.pollId === poll.id ? { ...current, poll } : current);
             return;
           }
           if (payload.type === 'welcome') {
@@ -1603,6 +1766,7 @@ export default function ChatPage({
           window.clearTimeout(socketConnectTimer);
           heartbeat?.stop();
           heartbeat = null;
+          setRoomPresence([]);
           window.clearTimeout(stableConnectionTimer);
           if (socketRef.current === socket) socketRef.current = null;
           scheduleReconnect();
@@ -1649,10 +1813,11 @@ export default function ChatPage({
       window.removeEventListener('online', handleOnline);
       ticketController?.abort();
       heartbeat?.stop();
+      stopTypingPresence();
       if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) currentSocket.close(1000, 'Room changed');
       if (socketRef.current === currentSocket) socketRef.current = null;
     };
-  }, [activeRoom.roomId, refreshConversations, refreshPinnedDocument, username]);
+    }, [activeRoom.roomId, refreshConversations, refreshPinnedDocument, stopTypingPresence, username]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -1677,8 +1842,32 @@ export default function ChatPage({
 
   const sendMessage = useCallback(() => {
     const markdown = draftRef.current.trim();
+    const pollCommand = /^\/poll(?:\s+([\s\S]*))?$/i.exec(markdown);
+    if (pollCommand) {
+      if (threadParentIdRef.current) {
+        toast.error('Close the thread before creating a room poll.');
+        return;
+      }
+      if (editingId) {
+        toast.error('Finish editing your message before creating a poll.');
+        return;
+      }
+      const parts = (pollCommand[1] ?? '').split('|').map((part) => part.trim());
+      if (parts.length >= 3) {
+        createQuickPoll(parts[0], parts.slice(1));
+      } else {
+        setPollQuestion(parts[0] ?? '');
+        const prefilled = parts.slice(1, 7);
+        while (prefilled.length < 2) prefilled.push('');
+        setPollOptions(prefilled);
+        setPollComposerOpen(true);
+        setComposerMarkdown('');
+      }
+      return;
+    }
     const socket = socketRef.current;
     if (!markdown || !socket || socket.readyState !== WebSocket.OPEN || sending) return;
+    stopTypingPresence();
     setSending(true);
     socket.send(JSON.stringify(editingId
       ? { type: 'message:edit', id: editingId, markdown }
@@ -1686,7 +1875,7 @@ export default function ChatPage({
     setComposerMarkdown('');
     setEditingId(null);
     setSending(false);
-  }, [editingId, sending, setComposerMarkdown]);
+  }, [createQuickPoll, editingId, sending, setComposerMarkdown, stopTypingPresence]);
 
   const openThread = useCallback((message: ChatMessage) => {
     threadParentIdRef.current = message.id;
@@ -2475,6 +2664,7 @@ export default function ChatPage({
                   </>
                 )}
               </div>
+              <CollabPresenceStack members={roomPresence} viewer={username} />
             </div>
             {activeRoom.kind === 'global' && !editingTitle && (
               <div className="hidden items-center gap-1.5 rounded-full border border-border/70 bg-card/50 px-3 py-1.5 text-[11px] text-muted-foreground sm:flex">
@@ -2642,12 +2832,33 @@ export default function ChatPage({
                             ? 'rounded-tr-md border-accent/15 bg-accent/[0.09]'
                             : 'rounded-tl-md border-border/70 bg-card/65'),
                       )}>
-                        <MarkdownBody markdown={renderedMarkdown} />
-                        {!stickerOnly && <LinkPreviewCards markdown={renderedMarkdown} />}
-                        {message.updatedAt > message.createdAt + 1_000 && !news && (
+                        {message.poll && (message.contentType === 'poll' || message.contentType === 'poll_result')
+                          ? (
+                            <PollMessageCard
+                              poll={message.poll}
+                              isSummary={message.contentType === 'poll_result'}
+                              onVote={(optionIndex) => {
+                                const socket = socketRef.current;
+                                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                                  toast.error('Reconnect to vote in this poll.');
+                                  return;
+                                }
+                                socket.send(JSON.stringify({
+                                  type: 'poll:vote',
+                                  pollId: message.pollId ?? message.poll?.id,
+                                  optionIndex,
+                                }));
+                              }}
+                            />
+                          )
+                          : <MarkdownBody markdown={renderedMarkdown} />}
+                        {!stickerOnly && message.contentType === 'markdown' && (
+                          <LinkPreviewCards markdown={renderedMarkdown} />
+                        )}
+                        {message.contentType === 'markdown' && message.updatedAt > message.createdAt + 1_000 && !news && (
                           <span className="mt-2 block text-right text-[9px] text-muted-foreground">edited</span>
                         )}
-                        {mine && !news && (
+                        {mine && !news && message.contentType === 'markdown' && (
                           <button
                             type="button"
                             title="Edit message"
@@ -2786,6 +2997,15 @@ export default function ChatPage({
                   setDrivePickerOpen(opening);
                   if (opening) void loadDrivePickerFiles(drivePickerScope);
                 }, sharingDriveFileId !== null)}
+                {toolbarButton('Create a quick poll (/poll)', <BarChart3 className="size-3.5" />, () => {
+                  const opening = !pollComposerOpen;
+                  setPollComposerOpen(opening);
+                  if (opening) {
+                    setStickerPanelOpen(false);
+                    setDrivePickerOpen(false);
+                    setLinkEditorOpen(false);
+                  }
+                }, sending || threadParent !== null)}
                 <input
                   ref={photoInputRef}
                   type="file"
@@ -2795,6 +3015,76 @@ export default function ChatPage({
                   onChange={(event) => void handlePhotoFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
+
+              {pollComposerOpen && (
+                <section className="chat-poll-composer" aria-label="Create a quick poll">
+                  <header>
+                    <div className="chat-poll-composer-icon"><BarChart3 className="size-4" /></div>
+                    <div className="min-w-0 flex-1">
+                      <strong>Quick poll</strong>
+                      <span>Room-wide vote · closes automatically in 24 hours</span>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close poll composer"
+                      onClick={() => setPollComposerOpen(false)}
+                    ><X className="size-4" /></button>
+                  </header>
+                  <form onSubmit={(event) => {
+                    event.preventDefault();
+                    createQuickPoll(pollQuestion, pollOptions);
+                  }}>
+                    <label>
+                      <span>Question</span>
+                      <input
+                        autoFocus
+                        value={pollQuestion}
+                        onChange={(event) => {
+                          setPollQuestion(event.target.value);
+                          refreshTypingPresence();
+                        }}
+                        maxLength={240}
+                        placeholder="Settle a tiny but important debate…"
+                      />
+                    </label>
+                    <div className="chat-poll-composer-options">
+                      {pollOptions.map((option, index) => (
+                        <label key={index}>
+                          <span>{String.fromCharCode(65 + index)}</span>
+                          <input
+                            value={option}
+                            onChange={(event) => {
+                              setPollOptions((current) => current.map(
+                                (item, itemIndex) => itemIndex === index ? event.target.value : item,
+                              ));
+                              refreshTypingPresence();
+                            }}
+                            maxLength={80}
+                            placeholder={`Option ${index + 1}`}
+                          />
+                          {pollOptions.length > 2 && (
+                            <button
+                              type="button"
+                              aria-label={`Remove option ${index + 1}`}
+                              onClick={() => setPollOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                            ><X className="size-3.5" /></button>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                    <footer>
+                      <button
+                        type="button"
+                        disabled={pollOptions.length >= 6}
+                        onClick={() => setPollOptions((current) => [...current, ''])}
+                      ><Plus className="size-3.5" /> Add option</button>
+                      <button type="submit" disabled={sending}>
+                        <Sparkles className="size-3.5" /> Launch poll
+                      </button>
+                    </footer>
+                  </form>
+                </section>
+              )}
 
               {drivePickerOpen && (
                 <section className="chat-drive-picker">
@@ -3012,7 +3302,11 @@ export default function ChatPage({
                 aria-label="Write a formatted chat message"
                 aria-multiline="true"
                 spellCheck
-                onInput={syncComposerMarkdown}
+                onInput={(event) => {
+                  syncComposerMarkdown();
+                  if (event.currentTarget.innerText.trim()) refreshTypingPresence();
+                  else stopTypingPresence();
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && event.shiftKey) {
                     event.preventDefault();
