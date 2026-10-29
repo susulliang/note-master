@@ -72,6 +72,41 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
     )
   `).run();
   await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS collab_smartdocs (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      banner_asset_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS collab_smartdoc_media (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      object_key TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS collab_smartdoc_media_document_idx
+    ON collab_smartdoc_media (document_id, created_at DESC)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS collab_smartdoc_drive_assets (
+      document_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      added_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (document_id, file_id)
+    )
+  `).run();
+  await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS chat_pinned_documents (
       room_id TEXT PRIMARY KEY,
       document_type TEXT NOT NULL CHECK (document_type IN ('sheet', 'mindmap')),
@@ -253,6 +288,40 @@ export async function grantCollabPermission(
      ON CONFLICT(document_type, document_id, username)
      DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at`,
   ).bind(type, id, username, permission, Date.now()).run();
+}
+
+export async function getSmartDocPermission(
+  env: Env,
+  username: string,
+  id: string,
+): Promise<CollabPermission | null> {
+  const document = await env.DB.prepare(
+    'SELECT owner FROM collab_smartdocs WHERE id = ?',
+  ).bind(id).first<{ owner: string }>();
+  if (!document) return null;
+  if (document.owner.toLowerCase() === username.toLowerCase()) return 'edit';
+  const explicit = await env.DB.prepare(
+    `SELECT permission FROM collab_document_permissions
+     WHERE document_type = 'smartdoc' AND document_id = ? AND username = ? COLLATE NOCASE`,
+  ).bind(id, username).first<{ permission: CollabPermission }>();
+  return explicit?.permission === 'view' || explicit?.permission === 'edit'
+    ? explicit.permission
+    : null;
+}
+
+export async function grantSmartDocPermission(
+  env: Env,
+  id: string,
+  username: string,
+  permission: CollabPermission,
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO collab_document_permissions
+     (document_type, document_id, username, permission, updated_at)
+     VALUES ('smartdoc', ?, ?, ?, ?)
+     ON CONFLICT(document_type, document_id, username)
+     DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at`,
+  ).bind(id, username, permission, Date.now()).run();
 }
 
 export async function listPinnedDocumentPermissions(

@@ -1,0 +1,1279 @@
+.smart-docs-page {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--ui-font-family);
+}
+
+.smart-docs-page *,
+.smart-docs-page *::before,
+.smart-docs-page *::after {
+  box-sizing: border-box;
+}
+
+.smart-docs-loading,
+.smart-doc-editor-loading,
+.smart-doc-loading-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.smart-docs-loading {
+  flex: 1;
+}
+
+.smart-docs-library {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 9px;
+  overflow: auto;
+  padding: 2px 2px 30px;
+}
+
+.smart-doc-card {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 13px;
+  padding: 12px 14px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.smart-doc-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--card));
+}
+
+.smart-doc-card-icon,
+.smart-doc-drive-file-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 23%, transparent);
+  border-radius: 11px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--card));
+}
+
+.smart-doc-card-copy,
+.smart-doc-card-meta,
+.smart-doc-member-name {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.smart-doc-card-copy {
+  flex: 1;
+  gap: 4px;
+}
+
+.smart-doc-card-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-doc-card-copy small,
+.smart-doc-card-meta,
+.smart-doc-member-name small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.smart-doc-card-meta {
+  align-items: flex-end;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.smart-doc-card-chevron {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.smart-docs-empty {
+  display: flex;
+  max-width: 480px;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  padding: 35px 18px 70px;
+  text-align: center;
+}
+
+.smart-docs-empty > span {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 16px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+
+.smart-docs-empty h3 {
+  margin: 15px 0 4px;
+  font-size: 15px;
+}
+
+.smart-docs-empty p {
+  margin: 0 0 17px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.smart-doc-editor-page {
+  position: relative;
+  gap: 0;
+  padding: 0;
+}
+
+.smart-doc-editor-header {
+  display: flex;
+  min-height: 58px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  padding: 7px clamp(12px, 2vw, 25px);
+  background: color-mix(in srgb, var(--card) 45%, transparent);
+}
+
+.smart-doc-title-wrap {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.smart-doc-title-wrap input {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  outline: none;
+}
+
+.smart-doc-title-wrap input[readonly] {
+  cursor: default;
+}
+
+.smart-doc-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.smart-doc-connection i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.smart-doc-connection--connected i {
+  background: #3fb950;
+  box-shadow: 0 0 7px rgb(63 185 80 / 40%);
+}
+
+.smart-doc-connection--connecting i {
+  background: #d29922;
+}
+
+.smart-doc-connection--offline i {
+  background: #f85149;
+}
+
+.smart-doc-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.smart-doc-header-button {
+  min-height: 31px;
+  font-size: 9px;
+}
+
+.smart-doc-banner {
+  position: relative;
+  height: clamp(98px, 18vh, 178px);
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+.smart-doc-banner .smart-doc-embedded-image {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+
+.smart-doc-banner-actions {
+  display: flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 13px;
+  padding: 3px clamp(16px, 4vw, 60px);
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.smart-doc-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 2px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.smart-doc-text-button:hover {
+  color: var(--accent);
+}
+
+.smart-doc-workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(180px, 24%) minmax(0, 1fr);
+  overflow: hidden;
+  transition: grid-template-columns 180ms ease;
+}
+
+.smart-doc-workspace.is-outline-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.smart-doc-outline {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  background: color-mix(in srgb, var(--card) 28%, transparent);
+}
+
+.smart-doc-workspace.is-outline-collapsed .smart-doc-outline {
+  visibility: hidden;
+}
+
+.smart-doc-outline-header {
+  display: flex;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.smart-doc-outline-header strong {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.smart-doc-small-icon {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.smart-doc-small-icon:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.smart-doc-outline nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  padding: 0 7px 14px;
+}
+
+.smart-doc-outline-item {
+  min-height: 28px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 7px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.smart-doc-outline-item:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.smart-doc-outline-item--2 { padding-left: 15px; }
+.smart-doc-outline-item--3 { padding-left: 23px; }
+.smart-doc-outline-item--4,
+.smart-doc-outline-item--5,
+.smart-doc-outline-item--6 { padding-left: 31px; }
+
+.smart-doc-outline-empty {
+  padding: 0 12px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.smart-doc-outline-expand {
+  position: absolute;
+  z-index: 4;
+  top: calc(58px + 12px);
+  left: 9px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: 0 4px 15px rgb(0 0 0 / 12%);
+  cursor: pointer;
+}
+
+.smart-doc-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.smart-doc-toolbar {
+  display: flex;
+  min-height: 43px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--card) 30%, transparent);
+}
+
+.smart-doc-toolbar > button {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.smart-doc-toolbar > button:hover:not(:disabled) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.smart-doc-toolbar > button:disabled {
+  opacity: .38;
+  cursor: not-allowed;
+}
+
+.smart-doc-toolbar-divider {
+  width: 1px;
+  height: 19px;
+  flex: 0 0 auto;
+  margin: 0 3px;
+  background: color-mix(in srgb, var(--foreground) 13%, transparent);
+}
+
+.smart-doc-toolbar-hint {
+  margin-left: auto;
+  padding: 0 8px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.smart-doc-media-progress {
+  display: flex;
+  min-height: 31px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 5px 12px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--card) 56%, transparent);
+  font-size: 9px;
+}
+
+.smart-doc-media-progress > span {
+  min-width: 110px;
+}
+
+.smart-doc-media-progress > div {
+  height: 4px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.smart-doc-media-progress > div > i,
+.smart-doc-media-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.smart-doc-media-progress > div > i {
+  transition: width 160ms ease;
+}
+
+.smart-doc-media-progress > i.is-indeterminate {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.smart-doc-media-progress > i.is-indeterminate::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  border-radius: inherit;
+  background: var(--accent);
+  content: "";
+  animation: smart-doc-progress 1.1s ease-in-out infinite alternate;
+}
+
+.smart-doc-media-progress small {
+  min-width: 30px;
+  color: var(--foreground);
+  font-size: 8px;
+  text-align: right;
+}
+
+@keyframes smart-doc-progress {
+  from { left: 0; }
+  to { left: 66%; }
+}
+
+.smart-doc-editor-scroll,
+.smart-doc-preview-scroll {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.smart-doc-editor-scroll.is-media-dragging {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.smart-doc-drop-overlay {
+  position: absolute;
+  z-index: 4;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 65%, transparent);
+  border-radius: 14px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--background) 76%, transparent);
+  box-shadow: inset 0 0 36px color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.smart-doc-context-menu {
+  position: fixed;
+  z-index: 220;
+  display: grid;
+  width: 250px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  gap: 2px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent);
+  border-radius: 11px;
+  padding: 6px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 38%);
+  backdrop-filter: blur(22px);
+}
+
+.smart-doc-context-menu-title {
+  padding: 5px 8px 7px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.smart-doc-context-menu > button {
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 8px;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.smart-doc-context-menu > button > svg {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.smart-doc-context-menu > button:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.smart-doc-context-menu > button:hover > svg {
+  color: var(--accent);
+}
+
+.smart-doc-context-menu-divider {
+  height: 1px;
+  margin: 3px 5px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.smart-doc-editor,
+.smart-doc-preview {
+  width: min(100%, 850px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: clamp(22px, 5vw, 58px) clamp(20px, 6vw, 72px) 100px;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+
+.smart-doc-editor {
+  outline: none;
+  caret-color: var(--accent);
+}
+
+.smart-doc-editor:focus {
+  outline: none;
+}
+
+.smart-doc-editor:empty::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.smart-doc-editor h1,
+.smart-doc-preview h1 {
+  margin: 0 0 18px;
+  font-size: clamp(25px, 3vw, 35px);
+  line-height: 1.22;
+  letter-spacing: -.035em;
+}
+
+.smart-doc-editor h2,
+.smart-doc-preview h2 {
+  margin: 35px 0 12px;
+  font-size: 23px;
+  line-height: 1.3;
+  letter-spacing: -.025em;
+}
+
+.smart-doc-editor h3,
+.smart-doc-preview h3 {
+  margin: 26px 0 9px;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.smart-doc-editor h4,
+.smart-doc-editor h5,
+.smart-doc-editor h6,
+.smart-doc-preview h4,
+.smart-doc-preview h5,
+.smart-doc-preview h6 {
+  margin: 21px 0 8px;
+  font-size: 15px;
+}
+
+.smart-doc-editor p,
+.smart-doc-preview p {
+  margin: 0 0 13px;
+}
+
+.smart-doc-editor ul,
+.smart-doc-editor ol,
+.smart-doc-preview ul,
+.smart-doc-preview ol {
+  margin: 8px 0 18px;
+  padding-left: 26px;
+}
+
+.smart-doc-editor li,
+.smart-doc-preview li {
+  padding-left: 3px;
+}
+
+.smart-doc-editor blockquote,
+.smart-doc-preview blockquote {
+  margin: 18px 0;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  padding: 2px 0 2px 15px;
+  color: var(--muted-foreground);
+}
+
+.smart-doc-editor a,
+.smart-doc-preview a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.smart-doc-editor code,
+.smart-doc-preview code {
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  font-family: var(--ui-font-family);
+  font-size: .9em;
+}
+
+.smart-doc-editor pre,
+.smart-doc-preview pre {
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 10px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--card) 75%, transparent);
+  line-height: 1.55;
+}
+
+.smart-doc-editor pre code,
+.smart-doc-preview pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.smart-doc-mermaid {
+  max-width: 100%;
+  margin: 18px 0 24px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent);
+  border-radius: 11px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+}
+
+.smart-doc-mermaid-svg {
+  min-width: min-content;
+  text-align: center;
+}
+
+.smart-doc-mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.smart-doc-mermaid figcaption {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.smart-doc-mermaid figcaption pre {
+  max-height: 260px;
+  margin: 9px 0 0;
+}
+
+.smart-doc-editor table,
+.smart-doc-preview table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.smart-doc-editor th,
+.smart-doc-editor td,
+.smart-doc-preview th,
+.smart-doc-preview td {
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.smart-doc-editor th,
+.smart-doc-preview th {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.smart-doc-embedded-image {
+  display: block;
+  max-width: min(100%, 680px);
+  max-height: 620px;
+  margin: 14px 0 22px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.smart-doc-embedded-video {
+  display: block;
+  width: min(100%, 680px);
+  max-height: 520px;
+  margin: 14px 0 22px;
+  border-radius: 10px;
+  background: #000;
+}
+
+.smart-doc-media-loading,
+.smart-doc-media-error {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  border: 1px dashed color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.smart-doc-editor-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 7px 14px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  font-size: 8px;
+}
+
+.smart-doc-editor-loading {
+  min-height: 160px;
+  flex: 1;
+}
+
+.smart-doc-editor-placeholder {
+  position: absolute;
+  top: 28px;
+  left: max(20px, calc((100% - 706px) / 2));
+  z-index: 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.smart-doc-editor:focus:empty + .smart-doc-editor-placeholder {
+  opacity: .6;
+}
+
+.smart-doc-preview-empty {
+  color: var(--muted-foreground);
+}
+
+.smart-doc-readonly-note {
+  width: min(100%, 850px);
+  margin: 0 auto;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 8px clamp(20px, 6vw, 72px) 12px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.smart-doc-offline-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px auto 0;
+  width: min(100% - 24px, 780px);
+  border: 1px solid color-mix(in srgb, #d29922 35%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #d29922;
+  font-size: 9px;
+}
+
+.smart-doc-mention-menu {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 18px;
+  display: grid;
+  width: min(240px, calc(100% - 36px));
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-radius: 11px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 20%);
+  backdrop-filter: blur(18px);
+}
+
+.smart-doc-mention-menu > span {
+  padding: 5px 7px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.smart-doc-mention-menu button,
+.smart-doc-user-results button {
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  padding: 4px 7px;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.smart-doc-mention-menu button:hover,
+.smart-doc-user-results button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.smart-doc-mention-menu button > span,
+.smart-doc-user-results button > span {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.smart-doc-modal-backdrop {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 44%);
+  backdrop-filter: blur(5px);
+}
+
+.smart-doc-modal {
+  display: flex;
+  width: min(480px, 100%);
+  max-height: min(620px, 88dvh);
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-radius: 16px;
+  padding: 18px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
+  backdrop-filter: blur(22px);
+}
+
+.smart-doc-modal > header,
+.smart-doc-modal > footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.smart-doc-modal > header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.smart-doc-modal > footer {
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.smart-doc-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.smart-doc-field > input,
+.smart-doc-search {
+  width: 100%;
+  min-height: 37px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-radius: 9px;
+  padding: 0 10px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 65%, transparent);
+  font: inherit;
+  font-size: 11px;
+}
+
+.smart-doc-access-list {
+  display: grid;
+  gap: 5px;
+  overflow: auto;
+}
+
+.smart-doc-access-row {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+
+.smart-doc-access-row:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.smart-doc-member-avatar {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.smart-doc-member-name {
+  flex: 1;
+  gap: 1px;
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.smart-doc-member-name small,
+.smart-doc-owner-label {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.smart-doc-access-row select,
+.smart-doc-invite-actions select,
+.smart-doc-drive-scopes button {
+  min-height: 29px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 7px;
+  padding: 0 7px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  font: inherit;
+  font-size: 8px;
+}
+
+.smart-doc-invite {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding-top: 12px;
+}
+
+.smart-doc-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 9px;
+  color: var(--muted-foreground);
+}
+
+.smart-doc-search input {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: none;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+}
+
+.smart-doc-user-results {
+  display: grid;
+  max-height: 112px;
+  gap: 2px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.smart-doc-invite-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.smart-doc-drive-modal {
+  width: min(550px, 100%);
+}
+
+.smart-doc-drive-scopes {
+  display: flex;
+  gap: 5px;
+}
+
+.smart-doc-drive-scopes button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.smart-doc-drive-files {
+  display: grid;
+  min-height: 0;
+  gap: 5px;
+  overflow: auto;
+}
+
+.smart-doc-drive-files > button {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 5px 7px;
+  color: var(--foreground);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.smart-doc-drive-files > button:hover {
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.smart-doc-drive-file-icon {
+  width: 33px;
+  height: 33px;
+}
+
+.smart-doc-drive-files > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.smart-doc-drive-files strong,
+.smart-doc-drive-files small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-doc-drive-files strong {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.smart-doc-drive-files small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.smart-doc-loading-inline {
+  min-height: 100px;
+}
+
+.smart-docs-page button:focus-visible,
+.smart-docs-page input:focus-visible,
+.smart-docs-page select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.smart-doc-context-menu button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+@media (max-width: 700px) {
+  .smart-doc-workspace {
+    grid-template-columns: minmax(145px, 32%) minmax(0, 1fr);
+  }
+
+  .smart-doc-editor,
+  .smart-doc-preview {
+    padding: 25px 18px 80px;
+    font-size: 13px;
+  }
+
+  .smart-doc-outline-header {
+    padding-inline: 7px;
+  }
+
+  .smart-doc-outline nav {
+    padding-inline: 4px;
+  }
+
+  .smart-doc-outline-item {
+    font-size: 8px;
+  }
+
+  .smart-doc-header-button {
+    width: 31px;
+    min-width: 31px;
+    overflow: hidden;
+    justify-content: flex-start;
+    padding: 0 8px;
+    font-size: 0;
+  }
+
+  .smart-doc-header-button svg {
+    flex: 0 0 auto;
+  }
+
+  .smart-doc-card-meta {
+    display: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .smart-doc-editor-header {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .smart-doc-title-wrap input {
+    font-size: 12px;
+  }
+
+  .smart-doc-toolbar-hint {
+    display: none;
+  }
+
+  .smart-doc-workspace {
+    grid-template-columns: minmax(116px, 34%) minmax(0, 1fr);
+  }
+
+  .smart-doc-workspace.is-outline-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .smart-doc-outline-header strong {
+    font-size: 7px;
+  }
+
+  .smart-doc-outline-item--2 { padding-left: 9px; }
+  .smart-doc-outline-item--3 { padding-left: 15px; }
+  .smart-doc-outline-item--4,
+  .smart-doc-outline-item--5,
+  .smart-doc-outline-item--6 { padding-left: 21px; }
+
+  .smart-doc-modal {
+    max-height: min(600px, calc(100dvh - 24px));
+    padding: 14px;
+  }
+
+  .smart-doc-context-menu {
+    width: min(250px, calc(100vw - 16px));
+  }
+
+  .smart-doc-drop-overlay {
+    inset: 7px;
+    text-align: center;
+  }
+}

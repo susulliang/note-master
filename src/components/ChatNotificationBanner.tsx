@@ -39,6 +39,11 @@ function preview(markdown: string): string {
     .slice(0, 120);
 }
 
+function publishUnreadCount(counts: Map<string, number>): void {
+  const count = [...counts.values()].reduce((total, roomCount) => total + roomCount, 0);
+  window.dispatchEvent(new CustomEvent('econote:chat-unread-count', { detail: { count } }));
+}
+
 export default function ChatNotificationBanner({
   username,
   isChatOpen,
@@ -52,6 +57,7 @@ export default function ChatNotificationBanner({
   const noticeTimerRef = useRef<number | null>(null);
   const removeTimerRef = useRef<number | null>(null);
   const seenIdsRef = useRef(new Set<string>());
+  const unreadByRoomRef = useRef(new Map<string, number>());
   const conversationsRef = useRef<ChatConversation[]>([]);
   const activeRoomIdRef = useRef<string | null>(activeRoomId);
   const isChatOpenRef = useRef(isChatOpen);
@@ -140,11 +146,42 @@ export default function ChatNotificationBanner({
   useEffect(() => {
     const onActiveRoom = (event: Event) => {
       const detail = (event as CustomEvent<{ roomId?: string | null }>).detail;
-      setActiveRoomId(typeof detail?.roomId === 'string' ? detail.roomId : null);
+      const roomId = typeof detail?.roomId === 'string' ? detail.roomId : null;
+      setActiveRoomId(roomId);
+      if (
+        roomId &&
+        isChatOpenRef.current &&
+        document.hasFocus() &&
+        !document.hidden &&
+        unreadByRoomRef.current.delete(roomId)
+      ) {
+        publishUnreadCount(unreadByRoomRef.current);
+      }
     };
     window.addEventListener('econote:chat-active-room', onActiveRoom);
     return () => window.removeEventListener('econote:chat-active-room', onActiveRoom);
   }, []);
+
+  useEffect(() => {
+    const markActiveRoomRead = () => {
+      const roomId = activeRoomIdRef.current;
+      if (
+        !roomId ||
+        !isChatOpenRef.current ||
+        document.hidden ||
+        !document.hasFocus() ||
+        !unreadByRoomRef.current.delete(roomId)
+      ) return;
+      publishUnreadCount(unreadByRoomRef.current);
+    };
+    markActiveRoomRead();
+    window.addEventListener('focus', markActiveRoomRead);
+    document.addEventListener('visibilitychange', markActiveRoomRead);
+    return () => {
+      window.removeEventListener('focus', markActiveRoomRead);
+      document.removeEventListener('visibilitychange', markActiveRoomRead);
+    };
+  }, [activeRoomId, isChatOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -187,7 +224,15 @@ export default function ChatNotificationBanner({
         activeRoomIdRef.current === roomId &&
         document.hasFocus() &&
         !document.hidden;
-      if (isFocusedRoom && !mentioned) return;
+      if (isFocusedRoom) {
+        if (unreadByRoomRef.current.delete(roomId)) {
+          publishUnreadCount(unreadByRoomRef.current);
+        }
+        if (!mentioned) return;
+      } else {
+        unreadByRoomRef.current.set(roomId, (unreadByRoomRef.current.get(roomId) ?? 0) + 1);
+        publishUnreadCount(unreadByRoomRef.current);
+      }
 
       setNotice({ message, roomTitle, roomId });
       setVisible(true);

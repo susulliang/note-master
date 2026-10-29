@@ -125,6 +125,7 @@ const COMMON_EMOJIS = [
   '👏', '👍', '👎', '👌', '✌️', '🤝', '💪', '❤️', '🧡', '💛',
   '💚', '💙', '💜', '💔', '💯', '🔥', '🎉', '✨', '🚀', '😴',
 ];
+const QUICK_THREAD_REPLIES = ['👍', '👎', '❤️', '😂', '😮', '🙏', '✅', '❌'];
 
 function readChatHistoryWidth(): number {
   try {
@@ -1231,6 +1232,7 @@ export default function ChatPage({
   const [sharingDriveFileId, setSharingDriveFileId] = useState<string | null>(null);
   const [savingDriveCopyId, setSavingDriveCopyId] = useState<string | null>(null);
   const [mediaDropActive, setMediaDropActive] = useState(false);
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<number | null>(null);
   const [voiceStarting, setVoiceStarting] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceElapsed, setVoiceElapsed] = useState(0);
@@ -2534,6 +2536,7 @@ export default function ChatPage({
   };
 
   const handleMediaFiles = useCallback(async (files: File[]) => {
+    if (sending || mediaUploadProgress !== null) return;
     const mediaFiles = files
       .map((file) => ({ file, mimeType: commonMediaType(file) }))
       .filter((item): item is { file: File; mimeType: string } => item.mimeType !== null);
@@ -2547,7 +2550,9 @@ export default function ChatPage({
     const roomId = activeRoom.roomId;
     try {
       setSending(true);
+      setMediaUploadProgress(0);
       let totalBytes = 0;
+      let completedFiles = 0;
       for (const { file, mimeType } of mediaFiles) {
         const isImage = mimeType.startsWith('image/');
         let body: Blob;
@@ -2565,7 +2570,17 @@ export default function ChatPage({
         const namedBody = uploadedType === body.type
           ? body
           : new Blob([body], { type: uploadedType });
-        const mediaUrl = await uploadChatMedia(roomId, namedBody, file.name, isImage ? 'photo' : 'media');
+        const mediaUrl = await uploadChatMedia(
+          roomId,
+          namedBody,
+          file.name,
+          isImage ? 'photo' : 'media',
+          (progress) => {
+            setMediaUploadProgress(Math.round(((completedFiles + progress) / mediaFiles.length) * 100));
+          },
+        );
+        completedFiles += 1;
+        setMediaUploadProgress(Math.round((completedFiles / mediaFiles.length) * 100));
         const current = draftRef.current;
         const safeName = escapeMarkdownText(file.name.slice(0, 160) || 'Attachment');
         const insertion = isImage
@@ -2579,9 +2594,10 @@ export default function ChatPage({
       toast.error(error instanceof Error ? error.message : 'Could not add this media file.');
     } finally {
       setSending(false);
+      setMediaUploadProgress(null);
       if (photoInputRef.current) photoInputRef.current.value = '';
     }
-  }, [activeRoom.roomId, setComposerMarkdown]);
+  }, [activeRoom.roomId, mediaUploadProgress, sending, setComposerMarkdown]);
 
   const sendVoiceRecording = useCallback(async (blob: Blob) => {
     const roomId = activeRoom.roomId;
@@ -2595,7 +2611,14 @@ export default function ChatPage({
     const fileName = `Voice message.${extension}`;
     try {
       setSending(true);
-      const mediaUrl = await uploadChatMedia(roomId, blob, fileName, 'media');
+      setMediaUploadProgress(0);
+      const mediaUrl = await uploadChatMedia(
+        roomId,
+        blob,
+        fileName,
+        'media',
+        (progress) => setMediaUploadProgress(Math.round(progress * 100)),
+      );
       if (
         activeRoom.roomId !== roomId ||
         socketRef.current !== socket ||
@@ -2613,6 +2636,7 @@ export default function ChatPage({
       toast.error(error instanceof Error ? error.message : 'Could not send this voice message.');
     } finally {
       setSending(false);
+      setMediaUploadProgress(null);
     }
   }, [activeRoom.roomId]);
 
@@ -2836,6 +2860,23 @@ export default function ChatPage({
       message,
       forwarding: false,
     });
+  }, []);
+
+  const sendQuickThreadReply = useCallback((message: ChatMessage, quickReply: string) => {
+    if (message.source === 'news') return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to reply to this message.');
+      setMessageContextMenu(null);
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: 'message:create',
+      markdown: quickReply,
+      parentId: message.id,
+      quickReply,
+    }));
+    setMessageContextMenu(null);
   }, []);
 
   const saveImageToStickerPack = useCallback(async (image: { src: string; name: string }) => {
@@ -3776,6 +3817,25 @@ export default function ChatPage({
                 />
               </div>
 
+              {mediaUploadProgress !== null && (
+                <div className="chat-media-upload-progress" role="status" aria-live="polite">
+                  <div>
+                    <span>Uploading media</span>
+                    <span>{mediaUploadProgress}%</span>
+                  </div>
+                  <div
+                    className="chat-media-upload-progress-track"
+                    role="progressbar"
+                    aria-label="Media upload progress"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={mediaUploadProgress}
+                  >
+                    <span style={{ width: `${mediaUploadProgress}%` }} />
+                  </div>
+                </div>
+              )}
+
               {pollComposerOpen && (
                 <section className="chat-poll-composer" aria-label="Create a quick poll">
                   <header>
@@ -4100,8 +4160,22 @@ export default function ChatPage({
                   }
                 }}
                 onPaste={(event) => {
+                  const clipboard = event.clipboardData;
+                  const files = Array.from(clipboard.files);
+                  if (!files.length) {
+                    for (const item of Array.from(clipboard.items)) {
+                      if (item.kind !== 'file') continue;
+                      const file = item.getAsFile();
+                      if (file) files.push(file);
+                    }
+                  }
+                  if (files.length) {
+                    event.preventDefault();
+                    void handleMediaFiles(files);
+                    return;
+                  }
                   event.preventDefault();
-                  const plainText = event.clipboardData.getData('text/plain');
+                  const plainText = clipboard.getData('text/plain');
                   document.execCommand('insertText', false, plainText);
                   syncComposerMarkdown();
                 }}
@@ -4211,6 +4285,24 @@ export default function ChatPage({
             </>
           ) : (
             <>
+              {messageContextMenu.message.source !== 'news' && (
+                <div className="chat-quick-reply-menu">
+                  <span>Quick reply · added to thread</span>
+                  <div>
+                    {QUICK_THREAD_REPLIES.map((quickReply) => (
+                      <button
+                        key={quickReply}
+                        type="button"
+                        role="menuitem"
+                        aria-label={`Quick reply ${quickReply}`}
+                        onClick={() => sendQuickThreadReply(messageContextMenu.message, quickReply)}
+                      >
+                        {quickReply}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {contextDriveAttachments.map((attachment) => (
                 <button
                   key={attachment.id}

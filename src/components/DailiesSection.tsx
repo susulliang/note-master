@@ -112,14 +112,15 @@ function BarTooltip({ active, payload, label }: TooltipProps<number, string>) {
 interface ChannelPanelProps {
   channel: (typeof CHANNELS)[keyof typeof CHANNELS];
   total: number;
-  shifts: number;
+  /** MTD billable hours for the channel's agent pool (shift-equiv = hours / 8). */
+  hours: number;
   subtitle: string;
   asOf: string | null;
   children: React.ReactNode;
 }
 
-function ChannelPanel({ channel, total, shifts, subtitle, asOf, children }: ChannelPanelProps) {
-  const daily = shifts > 0 ? total / shifts : 0;
+function ChannelPanel({ channel, total, hours, subtitle, asOf, children }: ChannelPanelProps) {
+  const daily = hours > 0 ? total / (hours / 8) : 0;
   const Icon = channel.icon;
   return (
     <div className={cn('glass-panel flex flex-col rounded-xl p-3', channel.border)}>
@@ -141,7 +142,7 @@ function ChannelPanel({ channel, total, shifts, subtitle, asOf, children }: Chan
           </span>
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
             <Users className="size-3" />
-            {shifts} shifts
+            {(hours / 8).toFixed(1)} shift-equiv · {hours % 1 === 0 ? hours : hours.toFixed(1)}h
           </span>
         </div>
         <div className="mt-1 flex items-end gap-1.5">
@@ -242,10 +243,11 @@ interface Performer {
   chat: number;
   email: number;
   total: number;
-  shifts: number;
-  /** True when the agent wasn't matched in the roster and shifts were estimated. */
+  /** Billable hours for the agent MTD (shift-equiv = hours / 8). */
+  hours: number;
+  /** True when the agent wasn't matched in the roster and hours were estimated. */
   estimated: boolean;
-  /** contacts (chat+email) per worked shift */
+  /** contacts (chat+email) per shift-equivalent (8 billable hours) */
   rate: number;
   flag: 'overworked' | 'underworked' | 'ok';
 }
@@ -256,56 +258,57 @@ const UNDERWORKED_RATIO = 0.7;
 function computePerformers(
   chat: CountReport,
   email: CountReport,
-  shiftsByAgent: Record<string, number>,
+  hoursByAgent: Record<string, number>,
 ): { performers: Performer[]; avgRate: number } {
-  const map = new Map<string, { owner: string; chat: number; email: number; shifts: number }>();
+  const map = new Map<string, { owner: string; chat: number; email: number; hours: number }>();
   const identityFor = (owner: string) => {
-    const rosterMatch = matchRosterShift(owner, shiftsByAgent);
+    const rosterMatch = matchRosterShift(owner, hoursByAgent);
     const normalizedOwner = owner.normalize('NFKC').toLocaleLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
     return {
       key: rosterMatch ? `roster:${rosterMatch.name.toLocaleLowerCase()}` : `owner:${normalizedOwner}`,
       owner: rosterMatch?.name ?? owner,
-      shifts: rosterMatch?.shifts ?? 0,
+      hours: rosterMatch?.shifts ?? 0,
     };
   };
   for (const a of chat.agents) {
     const identity = identityFor(a.owner);
-    const current = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, shifts: identity.shifts };
+    const current = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, hours: identity.hours };
     current.chat += a.count;
     map.set(identity.key, current);
   }
   for (const a of email.agents) {
     const identity = identityFor(a.owner);
-    const e = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, shifts: identity.shifts };
+    const e = map.get(identity.key) ?? { owner: identity.owner, chat: 0, email: 0, hours: identity.hours };
     e.email += a.count;
     map.set(identity.key, e);
   }
   const performers: Performer[] = [];
-  const raw: { owner: string; chat: number; email: number; total: number; shifts: number }[] = [];
-  let matchedShifts = 0;
+  const raw: { owner: string; chat: number; email: number; total: number; hours: number }[] = [];
+  let matchedHours = 0;
   let matchedCount = 0;
   for (const v of map.values()) {
     const total = v.chat + v.email;
-    raw.push({ owner: v.owner, chat: v.chat, email: v.email, total, shifts: v.shifts });
-    if (v.shifts > 0) {
-      matchedShifts += v.shifts;
+    raw.push({ owner: v.owner, chat: v.chat, email: v.email, total, hours: v.hours });
+    if (v.hours > 0) {
+      matchedHours += v.hours;
       matchedCount++;
     }
   }
-  // Agents not in the roster get the average shifts of matched agents so their
-  // productivity is still comparable (avoid divide-by-zero → bogus 0 rate).
-  const fallbackShifts = matchedCount > 0 ? matchedShifts / matchedCount : 0;
+  // Agents not in the roster get the average billable hours of matched agents
+  // so their productivity is still comparable (avoid divide-by-zero → bogus 0 rate).
+  const fallbackHours = matchedCount > 0 ? matchedHours / matchedCount : 0;
   let totalContacts = 0;
-  let totalShifts = 0;
+  let totalEquiv = 0;
   for (const r of raw) {
-    const estimated = r.shifts === 0;
-    const shifts = estimated ? fallbackShifts : r.shifts;
-    const rate = shifts > 0 ? r.total / shifts : 0;
-    performers.push({ ...r, shifts, estimated, rate, flag: 'ok' });
+    const estimated = r.hours === 0;
+    const hours = estimated ? fallbackHours : r.hours;
+    const shiftEquiv = hours / 8;
+    const rate = shiftEquiv > 0 ? r.total / shiftEquiv : 0;
+    performers.push({ ...r, hours, estimated, rate, flag: 'ok' });
     totalContacts += r.total;
-    totalShifts += shifts;
+    totalEquiv += shiftEquiv;
   }
-  const avgRate = totalShifts > 0 ? totalContacts / totalShifts : 0;
+  const avgRate = totalEquiv > 0 ? totalContacts / totalEquiv : 0;
   for (const p of performers) {
     if (p.rate >= avgRate * OVERWORKED_RATIO) p.flag = 'overworked';
     else if (!p.estimated && p.rate <= avgRate * UNDERWORKED_RATIO) p.flag = 'underworked';
@@ -350,7 +353,7 @@ function PerformancePanel({ performers, avgRate }: { performers: Performer[]; av
           <FlagBadge flag={p.flag} />
         </div>
         <div className="font-mono text-[9px] text-muted-foreground">
-          {p.total} ({p.chat}c/{p.email}e) · {p.estimated ? '~' : ''}{p.shifts} shifts
+          {p.total} ({p.chat}c/{p.email}e) · {p.estimated ? '~' : ''}{p.hours % 1 === 0 ? p.hours : p.hours.toFixed(1)}h billable
         </div>
       </div>
       <div className="text-right">
@@ -410,7 +413,7 @@ function PerformancePanel({ performers, avgRate }: { performers: Performer[]; av
       </div>
 
       <p className="mt-3 text-[9px] leading-relaxed text-muted-foreground">
-        Rate = (chat + email) ÷ matched roster shifts. Call is team-level and excluded from per-agent ranking.
+        Rate = (chat + email) ÷ billable hours (8h per worked shift, minus recorded extra off-time). Call is team-level and excluded from per-agent ranking.
         Overworked ≥ {(OVERWORKED_RATIO * 100).toFixed(0)}% of avg; underworked ≤ {(UNDERWORKED_RATIO * 100).toFixed(0)}%.
       </p>
     </div>
@@ -437,27 +440,27 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
     return { rosterStart: start, rosterEnd: end, rosterLabel: label };
   }, [state]);
 
-  const shiftsByAgent = useMemo(
-    () => countMtdShifts(rosterStart, rosterEnd).byAgent,
+  const hoursByAgent = useMemo(
+    () => countMtdShifts(rosterStart, rosterEnd).hoursByAgent,
     [rosterStart, rosterEnd],
   );
-  const chatShifts = useMemo(
-    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CHAT_SKILLS]).total,
+  const chatHours = useMemo(
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CHAT_SKILLS]).totalHours,
     [rosterStart, rosterEnd],
   );
-  const callShifts = useMemo(
-    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CALL_SKILLS]).total,
+  const callHours = useMemo(
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CALL_SKILLS]).totalHours,
     [rosterStart, rosterEnd],
   );
-  const allShifts = useMemo(
-    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).total,
+  const allHours = useMemo(
+    () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).totalHours,
     [rosterStart, rosterEnd],
   );
 
   const performers = useMemo(() => {
     if (state.status !== 'ready') return null;
-    return computePerformers(state.data.chat, state.data.email, shiftsByAgent);
-  }, [state, shiftsByAgent]);
+    return computePerformers(state.data.chat, state.data.email, hoursByAgent);
+  }, [state, hoursByAgent]);
 
   return (
     <section className="glass-panel overflow-hidden rounded-xl">
@@ -471,7 +474,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
             <FileSpreadsheet className="size-3 shrink-0" />
             <span className="font-mono text-fuchsia-300/80">{rosterLabel}</span>
             <span className="text-muted-foreground/50">·</span>
-            denominator = {allShifts} shifts (Chat + Call + FR Call agents only, excl. SV/TL/T2/T3/DTC) · call ÷ {callShifts} · chat ÷ {chatShifts} · email ÷ {allShifts}
+            denominator = {allHours % 1 === 0 ? allHours : allHours.toFixed(1)}h billable (Chat + Call + FR Call agents only, excl. SV/TL/T2/T3/DTC) · call ÷ {callHours.toFixed(1)}h · chat ÷ {chatHours.toFixed(1)}h · email ÷ {allHours.toFixed(1)}h
           </p>
         </div>
       </header>
@@ -515,7 +518,8 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
             const emailT = state.data.email.total;
             const callT = state.data.call.handled;
             const grand = chatT + emailT + callT;
-            const grandDaily = allShifts > 0 ? grand / allShifts : 0;
+            const allEquiv = allHours / 8;
+            const grandDaily = allEquiv > 0 ? grand / allEquiv : 0;
             return (
               <div className="glass-panel flex flex-wrap items-center gap-4 rounded-xl border-fuchsia-500/30 p-4">
                 <div className="flex size-10 items-center justify-center rounded-lg bg-fuchsia-500/20 ring-1 ring-fuchsia-500/40">
@@ -569,7 +573,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           <ChannelPanel
             channel={CHANNELS.call}
             total={state.data.call.handled}
-            shifts={callShifts}
+            hours={callHours}
             subtitle={`${state.data.call.handled.toLocaleString()} handled · SL20 ${state.data.call.serviceLevel20.toFixed(1)}%`}
             asOf={null}
           >
@@ -601,7 +605,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           <ChannelPanel
             channel={CHANNELS.chat}
             total={state.data.chat.total}
-            shifts={chatShifts}
+            hours={chatHours}
             subtitle={`${state.data.chat.agents.length} agents · ${state.data.chat.total.toLocaleString()} sessions`}
             asOf={state.data.chat.asOf}
           >
@@ -612,7 +616,7 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           <ChannelPanel
             channel={CHANNELS.email}
             total={state.data.email.total}
-            shifts={allShifts}
+            hours={allHours}
             subtitle={`${state.data.email.agents.length} agents · ${state.data.email.total.toLocaleString()} messages`}
             asOf={state.data.email.asOf}
           >

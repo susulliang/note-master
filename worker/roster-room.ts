@@ -11,9 +11,9 @@ type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
  *
  * Wire protocol (JSON):
  *   server → client:
- *     { type: 'welcome', month, cells: [{ en, iso, code }] }   — full snapshot
- *     { type: 'roster_cell', en, iso, code }                   — single edit
- *     { type: 'roster_cells', cells: [{ en, iso, code }] }     — full upload
+ *     { type: 'welcome', month, cells: [{ en, iso, code, off, note }] }  — full snapshot
+ *     { type: 'roster_cell', en, iso, code, off }                        — single edit
+ *     { type: 'roster_cells', cells: [{ en, iso, code, off }] }          — full upload
  *     { type: 'heartbeat_ack', at }
  *   client → server:
  *     { type: 'heartbeat' }
@@ -23,6 +23,10 @@ export interface RosterCell {
   en: string;
   iso: string;
   code: string;
+  /** Extra off hours on this cell (billable = 8 - off for worked codes). */
+  off?: number;
+  /** Raw off-time comment text, for display. */
+  note?: string;
 }
 
 interface StoredCell extends RosterCell {
@@ -93,10 +97,26 @@ export class RosterRoom extends DurableObject<Env> {
           en TEXT NOT NULL,
           iso TEXT NOT NULL,
           code TEXT NOT NULL,
+          off REAL NOT NULL DEFAULT 0,
+          note TEXT NOT NULL DEFAULT '',
           updated_at INTEGER NOT NULL,
           PRIMARY KEY (en, iso)
         )
       `);
+      // Self-healing migration: instances created before billable off-hours
+      // store the old 3-column table — add the columns and re-seed from D1
+      // (which carries the imported off-time data) so both stay in sync.
+      const cols = this.ctx.storage.sql
+        .exec<{ name: string }>('PRAGMA table_info(roster_cells)')
+        .toArray()
+        .map((r) => String(r.name));
+      if (!cols.includes('off')) {
+        this.ctx.storage.sql.exec('ALTER TABLE roster_cells ADD COLUMN off REAL NOT NULL DEFAULT 0');
+        this.ctx.storage.sql.exec("ALTER TABLE roster_cells ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+        console.error(JSON.stringify({ event: 'roster_do_off_column_added', month: this.month }));
+        await this.hydrateFromD1();
+        return;
+      }
       // Cold start: if the DO store is empty, seed it once from the D1 backup
       // so the existing D1-first data keeps working after this deploy.
       const count = this.ctx.storage.sql
@@ -124,36 +144,49 @@ export class RosterRoom extends DurableObject<Env> {
   /** All cells for this month, straight from the DO's SQLite (first line). */
   async getCells(): Promise<Array<RosterCell & { updatedAt: number }>> {
     return this.ctx.storage.sql
-        .exec<SqlRow<StoredCell>>('SELECT en, iso, code, updated_at FROM roster_cells ORDER BY en, iso')
+        .exec<SqlRow<StoredCell>>('SELECT en, iso, code, off, note, updated_at FROM roster_cells ORDER BY en, iso')
       .toArray()
-      .map((row) => ({ en: row.en, iso: row.iso, code: row.code, updatedAt: row.updated_at }));
+      .map((row) => ({
+        en: row.en,
+        iso: row.iso,
+        code: row.code,
+        off: Number(row.off) || 0,
+        note: String(row.note ?? ''),
+        updatedAt: row.updated_at,
+      }));
   }
 
   /** Upsert a single cell, broadcast it live, then mirror to D1 (backup). */
-  async applyCell(en: string, iso: string, code: string): Promise<void> {
+  async applyCell(en: string, iso: string, code: string, off = 0, note = ''): Promise<void> {
     const now = Date.now();
     this.ctx.storage.sql.exec(
-      `INSERT INTO roster_cells (en, iso, code, updated_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(en, iso) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at`,
+      `INSERT INTO roster_cells (en, iso, code, off, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(en, iso) DO UPDATE SET code = excluded.code, off = excluded.off,
+         note = excluded.note, updated_at = excluded.updated_at`,
       en,
       iso,
       code,
+      off,
+      note,
       now,
     );
-    this.broadcast({ type: 'roster_cell', en, iso, code });
+    this.broadcast({ type: 'roster_cell', en, iso, code, off, note });
     try {
       await this.env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS roster_cells (
           month_key TEXT NOT NULL, en TEXT NOT NULL, iso TEXT NOT NULL, code TEXT NOT NULL,
+          off_hours REAL, off_note TEXT,
           updated_at TEXT NOT NULL DEFAULT (datetime('now')),
           PRIMARY KEY (month_key, en, iso)
         )`,
       ).run();
       await this.env.DB.prepare(
-        `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))
-         ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, updated_at = datetime('now')`,
+        `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, off_note, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+         ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, off_hours = ?5,
+           off_note = ?6, updated_at = datetime('now')`,
       )
-        .bind(this.month, en, iso, code)
+        .bind(this.month, en, iso, code, off || null, note || null)
         .run();
     } catch (error) {
       // The DO store already has the edit — a failed backup mirror is not fatal.
@@ -170,10 +203,12 @@ export class RosterRoom extends DurableObject<Env> {
       this.ctx.storage.sql.exec('DELETE FROM roster_cells');
       for (const cell of cells) {
         this.ctx.storage.sql.exec(
-          'INSERT INTO roster_cells (en, iso, code, updated_at) VALUES (?, ?, ?, ?)',
+          'INSERT INTO roster_cells (en, iso, code, off, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
           cell.en,
           cell.iso,
           cell.code,
+          cell.off ?? 0,
+          cell.note ?? '',
           now,
         );
       }
@@ -183,6 +218,7 @@ export class RosterRoom extends DurableObject<Env> {
       await this.env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS roster_cells (
           month_key TEXT NOT NULL, en TEXT NOT NULL, iso TEXT NOT NULL, code TEXT NOT NULL,
+          off_hours REAL, off_note TEXT,
           updated_at TEXT NOT NULL DEFAULT (datetime('now')),
           PRIMARY KEY (month_key, en, iso)
         )`,
@@ -193,10 +229,10 @@ export class RosterRoom extends DurableObject<Env> {
         ...chunk(cells, 20).map(
           (part) =>
             this.env.DB.prepare(
-              `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES ${part
-                .map((_, i) => `(?${i * 4 + 1}, ?${i * 4 + 2}, ?${i * 4 + 3}, ?${i * 4 + 4}, datetime('now'))`)
+              `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, off_note, updated_at) VALUES ${part
+                .map((_, i) => `(?${i * 6 + 1}, ?${i * 6 + 2}, ?${i * 6 + 3}, ?${i * 6 + 4}, ?${i * 6 + 5}, ?${i * 6 + 6}, datetime('now'))`)
                 .join(', ')}`
-            ).bind(...part.flatMap((cell) => [this.month, cell.en, cell.iso, cell.code])),
+            ).bind(...part.flatMap((cell) => [this.month, cell.en, cell.iso, cell.code, cell.off ?? null, cell.note ?? null])),
         ),
       ];
       await this.env.DB.batch(statements);
@@ -264,20 +300,34 @@ export class RosterRoom extends DurableObject<Env> {
   /** Seed the DO store from the D1 backup (one-time, on cold start). */
   private async hydrateFromD1(): Promise<void> {
     try {
-      const result = await this.env.DB.prepare(
-        'SELECT en, iso, code FROM roster_cells WHERE month_key = ?1',
-      )
-        .bind(this.month)
-        .all<RosterCell>();
-      const cells = result.results ?? [];
+      let rows: Array<{ en: string; iso: string; code: string; off_hours: number | null; off_note: string | null }>;
+      try {
+        const result = await this.env.DB.prepare(
+          'SELECT en, iso, code, off_hours, off_note FROM roster_cells WHERE month_key = ?1',
+        )
+          .bind(this.month)
+          .all<{ en: string; iso: string; code: string; off_hours: number | null; off_note: string | null }>();
+        rows = result.results ?? [];
+      } catch {
+        // D1 backup predates the off_hours/off_note columns — hydrate codes only.
+        const result = await this.env.DB.prepare(
+          'SELECT en, iso, code FROM roster_cells WHERE month_key = ?1',
+        )
+          .bind(this.month)
+          .all<{ en: string; iso: string; code: string }>();
+        rows = (result.results ?? []).map((r) => ({ ...r, off_hours: null, off_note: null }));
+      }
+      const cells = rows;
       if (!cells.length) return;
       const now = Date.now();
       for (const cell of cells) {
         this.ctx.storage.sql.exec(
-          'INSERT OR REPLACE INTO roster_cells (en, iso, code, updated_at) VALUES (?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO roster_cells (en, iso, code, off, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
           cell.en,
           cell.iso,
           cell.code,
+          cell.off_hours ?? 0,
+          cell.off_note ?? '',
           now,
         );
       }

@@ -24,6 +24,7 @@ import { RosterRoom, type RosterCell } from './roster-room';
 import { handleChatApi } from './chat-api';
 import { handleCollabApi } from './collab-api';
 import { handleSheetsApi } from './sheets-api';
+import { handleSmartDocsApi } from './smartdocs-api';
 import { handleAsk } from './ask';
 import {
   handleKbCreate,
@@ -44,6 +45,7 @@ export { ChatRoom } from './chat-room';
 export { ChatStickerPack } from './chat-sticker-pack';
 export { SheetsRoom } from './sheets-room';
 export { MindmapRoom } from './mindmap-room';
+export { SmartDocsRoom } from './smartdocs-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -3929,6 +3931,14 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleSheetsApi(request, env, user.username);
   }
+  if (
+    (path === '/api/collab/smartdocs' || path.startsWith('/api/collab/smartdocs/')) &&
+    path !== '/api/collab/smartdocs/socket'
+  ) {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleSmartDocsApi(request, env, user.username);
+  }
   if (path.startsWith('/api/collab/')) {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
@@ -4223,19 +4233,20 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
  * live broadcast).
  *
  * POST /api/roster (admin only) — two modes:
- *   { month: 'YYYY-MM', mode: 'full', agents: [{ en, shifts: { iso: code } }] }
+ *   { month: 'YYYY-MM', mode: 'full', agents: [{ en, shifts: { iso: code }, offHours?: { iso: hours } }] }
  *     → bulk-uploads every cell of the month (first submit).
- *   { month: 'YYYY-MM', mode: 'cell', en, iso, code }
- *     → upserts a single edited cell.
+ *   { month: 'YYYY-MM', mode: 'cell', en, iso, code, off? }
+ *     → upserts a single edited cell (off = extra off hours on that cell).
  */
 async function handleRosterPost(request: Request, env: Env): Promise<Response> {
   let payload: {
     month?: string;
     mode?: string;
-    agents?: Array<{ en: string; shifts: Record<string, string> }>;
+    agents?: Array<{ en: string; shifts: Record<string, string>; offHours?: Record<string, number> }>;
     en?: string;
     iso?: string;
     code?: string;
+    off?: number;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -4251,9 +4262,10 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
       const en = String(payload.en ?? '').trim();
       const iso = String(payload.iso ?? '').trim();
       const code = String(payload.code ?? '').trim();
+      const off = typeof payload.off === 'number' && payload.off >= 0 ? payload.off : 0;
       if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
-      await room.applyCell(en, iso, code);
-      return authJson({ ok: true, mode: 'cell', month, en, iso, code });
+      await room.applyCell(en, iso, code, off);
+      return authJson({ ok: true, mode: 'cell', month, en, iso, code, off });
     }
     if (payload.mode === 'full') {
       const agents = payload.agents ?? [];
@@ -4261,7 +4273,7 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
       const rows: RosterCell[] = [];
       for (const a of agents) {
         for (const [iso, code] of Object.entries(a.shifts ?? {})) {
-          rows.push({ en: a.en, iso, code: String(code) });
+          rows.push({ en: a.en, iso, code: String(code), off: a.offHours?.[iso] ?? 0 });
         }
       }
       if (rows.length === 0) return authJson({ error: 'No cells provided' }, 400);
@@ -4280,10 +4292,11 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
 async function handleRosterPostD1(
   payload: {
     mode?: string;
-    agents?: Array<{ en: string; shifts: Record<string, string> }>;
+    agents?: Array<{ en: string; shifts: Record<string, string>; offHours?: Record<string, number> }>;
     en?: string;
     iso?: string;
     code?: string;
+    off?: number;
   },
   month: string,
   env: Env,
@@ -4293,34 +4306,45 @@ async function handleRosterPostD1(
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS roster_cells (
       month_key TEXT NOT NULL, en TEXT NOT NULL, iso TEXT NOT NULL, code TEXT NOT NULL,
+      off_hours REAL, off_note TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (month_key, en, iso)
     )`
   ).run();
+  // Existing installs predate the billable off-hours columns — add them (the
+  // duplicate-column error on re-run is expected and ignored).
+  for (const ddl of ['ALTER TABLE roster_cells ADD COLUMN off_hours REAL', "ALTER TABLE roster_cells ADD COLUMN off_note TEXT"]) {
+    try {
+      await env.DB.prepare(ddl).run();
+    } catch {
+      /* column already exists */
+    }
+  }
 
   if (payload.mode === 'cell') {
     const en = String(payload.en ?? '').trim();
     const iso = String(payload.iso ?? '').trim();
     const code = String(payload.code ?? '').trim();
+    const off = typeof payload.off === 'number' && payload.off >= 0 ? payload.off : 0;
     if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
     await env.DB.prepare(
-      `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))
-       ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, updated_at = datetime('now')`
+      `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+       ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, off_hours = ?5, updated_at = datetime('now')`
     )
-      .bind(month, en, iso, code)
+      .bind(month, en, iso, code, off || null)
       .run();
-    return authJson({ ok: true, mode: 'cell', month, en, iso, code, degraded: true });
+    return authJson({ ok: true, mode: 'cell', month, en, iso, code, off, degraded: true });
   }
 
   if (payload.mode === 'full') {
     const agents = payload.agents ?? [];
     if (agents.length === 0) return authJson({ error: 'No agents provided' }, 400);
     // D1 caps bound parameters per statement — chunk the multi-row INSERTs
-    // (20 rows × 4 params = 80 params per statement) and batch them.
+    // (20 rows × 6 params = 120 params per statement) and batch them.
     const rows: RosterCell[] = [];
     for (const a of agents) {
       for (const [iso, code] of Object.entries(a.shifts ?? {})) {
-        rows.push({ en: a.en, iso, code: String(code) });
+        rows.push({ en: a.en, iso, code: String(code), off: a.offHours?.[iso] ?? 0 });
       }
     }
     if (rows.length === 0) return authJson({ error: 'No cells provided' }, 400);
@@ -4329,10 +4353,10 @@ async function handleRosterPostD1(
       ...chunk(rows, 20).map(
         (part) =>
           env.DB.prepare(
-            `INSERT INTO roster_cells (month_key, en, iso, code, updated_at) VALUES ${part
-              .map((_, i) => `(?${i * 4 + 1}, ?${i * 4 + 2}, ?${i * 4 + 3}, ?${i * 4 + 4}, datetime('now'))`)
+            `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, updated_at) VALUES ${part
+              .map((_, i) => `(?${i * 5 + 1}, ?${i * 5 + 2}, ?${i * 5 + 3}, ?${i * 5 + 4}, ?${i * 5 + 5}, datetime('now'))`)
               .join(', ')}`
-          ).bind(...part.flatMap((r) => [month, r.en, r.iso, r.code]))
+          ).bind(...part.flatMap((r) => [month, r.en, r.iso, r.code, r.off ?? null]))
       ),
     ]);
     return authJson({ ok: true, mode: 'full', month, cells: rows.length, degraded: true });
@@ -4358,26 +4382,48 @@ async function handleRosterGet(request: Request, env: Env): Promise<Response> {
     if (cells.length > 0) return authJson({ month, cells });
     // Empty may mean "never uploaded" — verify against the D1 backup before
     // answering, and pull the DO through if D1 somehow has rows.
-    const backup = await env.DB.prepare(
-      'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
-    )
-      .bind(month)
-      .all<{ en: string; iso: string; code: string; updatedAt: string }>();
-    if ((backup.results ?? []).length > 0) {
+    const backup = await selectRosterCellsD1(env, month);
+    if (backup.length > 0) {
       await env.ROSTER_ROOM.getByName(`roster-${month}`).applyFull(
-        (backup.results ?? []).map((row) => ({ en: row.en, iso: row.iso, code: row.code })),
+        backup.map((row) => ({ en: row.en, iso: row.iso, code: row.code, off: row.off ?? 0, note: row.note ?? '' })),
       );
-      return authJson({ month, cells: backup.results ?? [] });
+      return authJson({ month, cells: backup });
     }
     return authJson({ month, cells: [] });
   } catch (error) {
     console.error(JSON.stringify({ event: 'roster_do_unavailable', month, error: String(error) }));
+    const cells = await selectRosterCellsD1(env, month);
+    return authJson({ month, cells });
+  }
+}
+
+/** All cells for a month from the D1 backup, with billable off-hours when the
+ *  columns exist (older schemas fall back to codes only). */
+async function selectRosterCellsD1(
+  env: Env,
+  month: string,
+): Promise<Array<{ en: string; iso: string; code: string; off?: number; note?: string; updatedAt?: string }>> {
+  try {
     const result = await env.DB.prepare(
-      'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1'
+      'SELECT en, iso, code, off_hours AS off, off_note AS note, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1',
+    )
+      .bind(month)
+      .all<{ en: string; iso: string; code: string; off: number | null; note: string | null; updatedAt: string }>();
+    return (result.results ?? []).map((row) => ({
+      en: row.en,
+      iso: row.iso,
+      code: row.code,
+      off: row.off ?? 0,
+      note: row.note ?? '',
+      updatedAt: row.updatedAt,
+    }));
+  } catch {
+    const result = await env.DB.prepare(
+      'SELECT en, iso, code, updated_at AS updatedAt FROM roster_cells WHERE month_key = ?1',
     )
       .bind(month)
       .all<{ en: string; iso: string; code: string; updatedAt: string }>();
-    return authJson({ month, cells: result.results ?? [] });
+    return result.results ?? [];
   }
 }
 
@@ -4557,6 +4603,17 @@ export default {
         return await env.MINDMAP_ROOM.getByName(mindmapId).fetch(request);
       } catch {
         return new Response('Mind map is temporarily unavailable', { status: 503 });
+      }
+    }
+    if (url.pathname === '/api/collab/smartdocs/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      const documentId = url.searchParams.get('documentId') ?? '';
+      if (!/^[0-9a-f-]{36}$/i.test(documentId)) return new Response('Invalid Smart Doc', { status: 400 });
+      try {
+        return await env.SMARTDOC_ROOM.getByName(documentId).fetch(request);
+      } catch {
+        return new Response('Smart Docs room is temporarily unavailable', { status: 503 });
       }
     }
     if (url.pathname === '/api/call-transcription/socket') {

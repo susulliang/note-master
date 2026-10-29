@@ -1381,23 +1381,25 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     const end = dates[dates.length - 1];
     if (!end) return null;
     const start = monthStart(end);
-    const chatShifts = countMtdShifts(start, end, undefined, ['Chat']).total;
-    const callShifts = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).total;
-    const allShifts = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).total;
+    // Billable hours: 8h per worked shift minus recorded extra off-time;
+    // shift-equivalents (hours / 8) are the dailies divisor.
+    const chatEquiv = countMtdShifts(start, end, undefined, ['Chat']).totalHours / 8;
+    const callEquiv = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).totalHours / 8;
+    const allEquiv = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).totalHours / 8;
     const totalProcessed = data.call.handled + data.email.total + data.chat.total;
     return {
-      total: { shifts: allShifts, average: allShifts > 0 ? totalProcessed / allShifts : null },
-      email: { shifts: allShifts, average: allShifts > 0 ? data.email.total / allShifts : null },
-      chat: { shifts: chatShifts, average: chatShifts > 0 ? data.chat.total / chatShifts : null },
-      call: { shifts: callShifts, average: callShifts > 0 ? data.call.handled / callShifts : null },
+      total: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? totalProcessed / allEquiv : null },
+      email: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? data.email.total / allEquiv : null },
+      chat: { shifts: chatEquiv, hours: chatEquiv * 8, average: chatEquiv > 0 ? data.chat.total / chatEquiv : null },
+      call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? data.call.handled / callEquiv : null },
       through: end,
     };
   }, [data]);
   const volumes = [
-    { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, color: 'text-foreground', accent: 'bg-accent' },
-    { name: 'Call', value: data?.call.handled ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
-    { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
-    { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
+    { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, hours: shiftStats?.total.hours ?? null, color: 'text-foreground', accent: 'bg-accent' },
+    { name: 'Call', value: data?.call.handled ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
+    { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, hours: shiftStats?.email.hours ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
+    { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, hours: shiftStats?.chat.hours ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
   return (
     <section className={cn(PANEL, 'p-4 sm:p-5')}>
@@ -1420,13 +1422,13 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
             <div className={cn('mt-1 truncate font-mono text-xl font-semibold tabular-nums', volume.color)}>{volume.value === null ? '—' : formatNumber(volume.value)}</div>
             <div className="mt-1 text-[10px] text-muted-foreground">{volume.detail}</div>
             <div className="mt-2 text-[11px] text-muted-foreground">AVG / shift <span className="font-mono tabular-nums text-foreground">{volume.average === null ? '—' : volume.average.toFixed(1)}</span></div>
-            <div className="text-[10px] text-muted-foreground">{volume.shifts === null ? 'Roster shifts unavailable' : `${formatNumber(volume.shifts)} roster shifts`}</div>
+            <div className="text-[10px] text-muted-foreground">{volume.shifts === null ? 'Roster hours unavailable' : `${volume.hours?.toFixed(1)}h billable (≈${volume.shifts.toFixed(1)} shifts)`}</div>
           </div>
         ))}
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground">
         {refreshError ? 'Showing previous report data. ' : ''}
-        {shiftStats ? `Roster averages through ${shiftStats.through}; Total and Email use Chat + Call + FR Call shifts, Call uses Call + FR Call shifts, and Chat uses Chat shifts only.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
+        {shiftStats ? `Roster averages through ${shiftStats.through}; divisor = billable hours (8h per worked shift minus recorded extra off-time) ÷ 8. Total and Email use Chat + Call + FR Call hours, Call uses Call + FR Call hours, and Chat uses Chat hours only.` : 'Roster averages unavailable until Chat and Email report dates are available. '}
         {' '}Total processed sums independent source counts.
         {!data && state.status === 'loading' && ' Loading report volumes…'}
         {!data && state.status === 'error' && ` ${state.message}`}
@@ -1470,8 +1472,9 @@ function CallPerformanceCard({
     const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
     const end = dates[dates.length - 1];
     if (!end) return null;
-    const shifts = countMtdShifts(monthStart(end), end, undefined, ['Call', 'FR Call']).total;
-    return { average: shifts > 0 ? data.call.handled / shifts : null, shifts };
+    const hours = countMtdShifts(monthStart(end), end, undefined, ['Call', 'FR Call']).totalHours;
+    const equiv = hours / 8;
+    return { average: equiv > 0 ? data.call.handled / equiv : null, shifts: equiv, hours };
   }, [data]);
   const answerValues = plotAgents.map((agent) => agent.answerRate ?? 0);
   const serviceValues = plotAgents.map((agent) => agent.serviceLevel20 ?? 0);
@@ -1499,7 +1502,7 @@ function CallPerformanceCard({
           {
             label: 'Calls handled',
             value: data ? formatNumber(data.call.handled) : '—',
-            note: shiftAverage?.average === null || shiftAverage === null ? 'Roster shift average unavailable' : `${shiftAverage.average.toFixed(1)} per shift · ${formatNumber(shiftAverage.shifts)} shifts`,
+            note: shiftAverage?.average === null || shiftAverage === null ? 'Roster shift average unavailable' : `${shiftAverage.average.toFixed(1)} per shift · ${shiftAverage.hours.toFixed(1)}h billable`,
             color: 'text-amber-300',
           },
           {
@@ -1855,13 +1858,15 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
     const compatible = !!dateChat && dateChat === dateEmail;
     const end = compatible ? dateChat : null;
     const identityEnd = [dateChat, dateEmail].filter((date): date is string => !!date).sort().at(-1) ?? null;
-    const identityShifts = identityEnd
-      ? countMtdShifts(monthStart(identityEnd), identityEnd).byAgent
+    // Billable hours per agent (8h per worked shift minus extra off-time);
+    // shift-equivalents (hours / 8) are the per-shift rate divisor.
+    const identityHours = identityEnd
+      ? countMtdShifts(monthStart(identityEnd), identityEnd).hoursByAgent
       : {};
-    const shifts = end ? identityShifts : {};
+    const shifts = end ? identityHours : {};
     const names = new Map<string, { name: string; call: number; chat: number; email: number }>();
     const addVolume = (owner: string, channel: 'call' | 'chat' | 'email', count: number) => {
-      const rosterMatch = matchRosterShift(owner, identityShifts);
+      const rosterMatch = matchRosterShift(owner, identityHours);
       const key = rosterMatch
         ? `roster:${normalizeAgentName(rosterMatch.name)}`
         : `owner:${normalizeAgentName(owner)}`;
@@ -1882,7 +1887,8 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
     const all = [...names.values()].map((row) => {
       const rosterMatch = matchRosterShift(row.name, shifts);
       const rosterMatched = rosterMatch !== null;
-      const shiftCount = rosterMatch?.shifts ?? 0;
+      const hours = rosterMatch?.shifts ?? 0;
+      const shiftCount = hours / 8;
       return {
         ...row,
         total: row.call + row.chat + row.email,

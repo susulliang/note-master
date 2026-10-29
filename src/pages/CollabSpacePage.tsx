@@ -1,5 +1,6 @@
 import {
   FileSpreadsheet,
+  FileText,
   FolderOpen,
   GitBranch,
   ListTodo,
@@ -11,6 +12,7 @@ import SheetsPage from '@/pages/SheetsPage';
 import MindmapPage from '@/pages/MindmapPage';
 import CollabDrivePage from '@/pages/CollabDrivePage';
 import CollabTasksPage from '@/pages/CollabTasksPage';
+import SmartDocsPage from '@/pages/SmartDocsPage';
 import './CollabSpacePage.css';
 import './CollabToolsPage.css';
 
@@ -18,7 +20,7 @@ interface CollabSpacePageProps {
   username: string;
 }
 
-type CollabTab = 'sheets' | 'mindmaps' | 'drive' | 'tasks';
+type CollabTab = 'sheets' | 'mindmaps' | 'smartdocs' | 'drive' | 'tasks';
 
 export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   const location = useLocation();
@@ -28,7 +30,9 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   const initialFileId = params.get('file');
   const initialDriveScope = params.get('scope') === 'personal' ? 'personal' : 'team';
   const [activeTab, setActiveTab] = useState<CollabTab>(
-    params.get('type') === 'mindmap'
+    params.get('type') === 'smartdocs'
+      ? 'smartdocs'
+      : params.get('type') === 'mindmap'
       ? 'mindmaps'
       : params.get('type') === 'drive'
         ? 'drive'
@@ -38,7 +42,9 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   );
   useEffect(() => {
     const requested = new URLSearchParams(location.search).get('type');
-    setActiveTab(requested === 'mindmap'
+    setActiveTab(requested === 'smartdocs'
+      ? 'smartdocs'
+      : requested === 'mindmap'
       ? 'mindmaps'
       : requested === 'drive'
         ? 'drive'
@@ -49,6 +55,7 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   const tabs = [
     { id: 'sheets' as const, label: 'Sheets', icon: FileSpreadsheet, group: 'Documents' },
     { id: 'mindmaps' as const, label: 'Mind maps', icon: GitBranch, group: 'Documents' },
+    { id: 'smartdocs' as const, label: 'Smart Docs', icon: FileText, group: 'Documents' },
     { id: 'drive' as const, label: 'Team Drive', icon: FolderOpen, group: 'Workspace' },
     { id: 'tasks' as const, label: 'Tasks', icon: ListTodo, group: 'Workspace' },
   ];
@@ -87,6 +94,7 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
       <div className="collab-space-content">
         {activeTab === 'sheets' && <SheetsPage username={username} initialDocumentId={initialDocumentId} />}
         {activeTab === 'mindmaps' && <MindmapPage username={username} initialDocumentId={initialDocumentId} />}
+        {activeTab === 'smartdocs' && <SmartDocsPage username={username} initialDocumentId={initialDocumentId} />}
         {activeTab === 'drive' && <CollabDrivePage username={username} initialFileId={initialFileId} initialScope={initialDriveScope} />}
         {activeTab === 'tasks' && <CollabTasksPage username={username} initialTaskId={initialTaskId} />}
       </div>

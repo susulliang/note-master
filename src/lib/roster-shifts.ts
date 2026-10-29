@@ -14,11 +14,29 @@ export function isWorkedShift(code: string): boolean {
   return !!code && !OFF_SHIFT_CODES.has(code);
 }
 
+/** Standard shift = 9h on-site with a 1h break → 8 billable hours. */
+export const STANDARD_SHIFT_HOURS = 8;
+
+/**
+ * Billable hours for one agent-day: a worked shift is worth 8h by default,
+ * minus any extra off-time recorded for that cell (调休/事假/年假/病假
+ * comments, e.g. "调休1H" → 7h, "调休2H0100-0300" → 6h, "调休8H" → 0h).
+ * Non-worked codes (OFF/PH/AL/调休/病假/事假) are worth 0.
+ */
+export function effectiveHours(a: RosterAgent, iso: string, code: string): number {
+  if (!isWorkedShift(code)) return 0;
+  return Math.max(0, STANDARD_SHIFT_HOURS - (a.offHours?.[iso] ?? 0));
+}
+
 export interface ShiftCount {
   /** Per-agent MTD worked-shift counts, keyed by English name. */
   byAgent: Record<string, number>;
   /** Sum of all agents' MTD worked shifts. */
   total: number;
+  /** Per-agent MTD billable hours (shift-equiv = hours / 8). */
+  hoursByAgent: Record<string, number>;
+  /** Sum of all agents' MTD billable hours. */
+  totalHours: number;
 }
 
 /** "YYYY-MM" for a given ISO date string (or today's month). */
@@ -207,15 +225,23 @@ export function countMtdShifts(
   const agents = roster ?? pickRoster(first);
 
   const byAgent: Record<string, number> = {};
+  const hoursByAgent: Record<string, number> = {};
   let total = 0;
+  let totalHours = 0;
   for (const a of agents) {
     if (skillSet && !skillSet.has(a.skill)) continue;
     let n = 0;
+    let hours = 0;
     for (const [date, code] of Object.entries(a.shifts)) {
-      if (date >= first && date <= last && isWorkedShift(code)) n++;
+      if (date >= first && date <= last && isWorkedShift(code)) {
+        n++;
+        hours += effectiveHours(a, date, code);
+      }
     }
     byAgent[a.en] = n;
+    hoursByAgent[a.en] = hours;
     total += n;
+    totalHours += hours;
   }
-  return { byAgent, total };
+  return { byAgent, total, hoursByAgent, totalHours };
 }

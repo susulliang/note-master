@@ -532,17 +532,49 @@ export async function uploadChatMedia(
   media: Blob,
   fileName: string,
   kind: ChatMediaKind | 'media' = 'media',
+  onProgress?: (progress: number) => void,
 ): Promise<string> {
-  const result = await requestJson<{ url: string }>('/api/chat/media?roomId=' + encodeURIComponent(roomId), {
-    method: 'POST',
-    headers: headers({
-      'content-type': media.type || 'application/octet-stream',
-      'x-chat-media-kind': kind,
-      'x-chat-media-name': fileName,
-    }),
-    body: media,
+  const path = '/api/chat/media?roomId=' + encodeURIComponent(roomId);
+  const uploadHeaders = headers({
+    'content-type': media.type || 'application/octet-stream',
+    'x-chat-media-kind': kind,
+    'x-chat-media-name': fileName,
   });
-  return result.url;
+  if (!onProgress) {
+    const result = await requestJson<{ url: string }>(path, {
+      method: 'POST',
+      headers: uploadHeaders,
+      body: media,
+    });
+    return result.url;
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpoint(path));
+    uploadHeaders.forEach((value, name) => xhr.setRequestHeader(name, value));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.max(0, Math.min(1, event.loaded / event.total)));
+    };
+    xhr.onerror = () => reject(new Error('Media upload failed. Check your connection and try again.'));
+    xhr.onabort = () => reject(new Error('Media upload was cancelled.'));
+    xhr.onload = () => {
+      let result: { url?: string; error?: string };
+      try {
+        result = JSON.parse(xhr.responseText || '{}') as { url?: string; error?: string };
+      } catch {
+        reject(new Error(`Media upload failed (${xhr.status}).`));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !result.url) {
+        reject(new Error(result.error || `Media upload failed (${xhr.status}).`));
+        return;
+      }
+      onProgress(1);
+      resolve(result.url);
+    };
+    xhr.send(media);
+  });
 }
 
 export async function fetchChatStickers(): Promise<ChatSticker[]> {

@@ -14,6 +14,10 @@ export interface RosterCell {
   en: string;
   iso: string;
   code: string;
+  /** Extra off hours recorded on this cell (billable = 8 - off for worked codes). */
+  off?: number;
+  /** Raw off-time comment text (manager + hours/range), for display. */
+  note?: string;
   updatedAt?: string;
 }
 
@@ -37,7 +41,7 @@ export async function fetchRosterMonth(monthKey: string): Promise<RosterCell[]> 
 /** Upload the entire month (all agents × all days). Admin only. */
 export async function pushRosterFull(
   monthKey: string,
-  agents: Array<{ en: string; shifts: Record<string, string> }>
+  agents: Array<{ en: string; shifts: Record<string, string>; offHours?: Record<string, number> }>
 ): Promise<boolean> {
   const token = getStoredToken();
   if (!token) return false;
@@ -58,7 +62,8 @@ export async function pushRosterCell(
   monthKey: string,
   en: string,
   iso: string,
-  code: string
+  code: string,
+  off?: number
 ): Promise<boolean> {
   const token = getStoredToken();
   if (!token) return false;
@@ -66,7 +71,7 @@ export async function pushRosterCell(
     const res = await fetch(`${getApiBase()}/api/roster`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ month: monthKey, mode: 'cell', en, iso, code }),
+      body: JSON.stringify(off === undefined ? { month: monthKey, mode: 'cell', en, iso, code } : { month: monthKey, mode: 'cell', en, iso, code, off }),
     });
     return res.ok;
   } catch {
@@ -115,12 +120,18 @@ export function subscribeRosterMonth(monthKey: string, handlers: RosterSocketHan
         en: String(event.en ?? ''),
         iso: String(event.iso ?? ''),
         code: String(event.code ?? ''),
+        off: typeof event.off === 'number' ? event.off : undefined,
       };
       if (cell.en && cell.iso) handlers.onCell?.(cell);
     } else if (event.type === 'roster_cells' || event.type === 'welcome') {
       if (!Array.isArray(event.cells)) return;
       const cells = (event.cells as Array<Record<string, unknown>>)
-        .map((c) => ({ en: String(c.en ?? ''), iso: String(c.iso ?? ''), code: String(c.code ?? '') }))
+        .map((c) => ({
+          en: String(c.en ?? ''),
+          iso: String(c.iso ?? ''),
+          code: String(c.code ?? ''),
+          off: typeof c.off === 'number' ? c.off : undefined,
+        }))
         .filter((c) => c.en && c.iso);
       if (cells.length) handlers.onCells?.(cells);
     }

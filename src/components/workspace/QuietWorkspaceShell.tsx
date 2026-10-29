@@ -1,4 +1,4 @@
-import type { ReactNode, RefCallback } from 'react';
+import { useEffect, useState, type ReactNode, type RefCallback } from 'react';
 import {
   AudioLines,
   BarChart3,
@@ -85,6 +85,20 @@ export function QuietWorkspaceShell({
   children,
 }: QuietWorkspaceShellProps) {
   const views = VIEW_ORDER.filter((view) => availableViews.includes(view));
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+    const onUnreadCount = (event: Event) => {
+      const count = (event as CustomEvent<{ count?: number }>).detail?.count;
+      setUnreadChatCount(
+        typeof count === 'number' && Number.isFinite(count)
+          ? Math.max(0, Math.floor(count))
+          : 0,
+      );
+    };
+    window.addEventListener('econote:chat-unread-count', onUnreadCount);
+    return () => window.removeEventListener('econote:chat-unread-count', onUnreadCount);
+  }, []);
 
   return (
     <div className="quiet-shell">
@@ -101,16 +115,27 @@ export function QuietWorkspaceShell({
           <div className="quiet-dock-cluster quiet-dock-cluster--navigation" aria-label="Workspaces">
             {views.map((view) => {
               const Icon = VIEW_META[view].icon;
+              const unread = view === 'chat' ? unreadChatCount : 0;
+              const pulseDuration = Math.max(0.24, 1.5 / (1 + Math.log2(unread + 1)));
               return (
                 <button
                   key={view}
                   type="button"
-                  aria-label={VIEW_META[view].label}
+                  aria-label={unread
+                    ? `Chat, ${unread} unread message${unread === 1 ? '' : 's'}`
+                    : VIEW_META[view].label}
                   aria-current={activeView === view ? 'page' : undefined}
                   onClick={() => onNavigate(view)}
                   className={cn('quiet-orbit-action', activeView === view && 'quiet-orbit-action--active')}
                 >
                   <Icon className="size-[18px]" strokeWidth={1.8} />
+                  {unread > 0 && (
+                    <span
+                      className="quiet-chat-unread-dot"
+                      aria-hidden="true"
+                      style={{ animationDuration: `${pulseDuration}s` }}
+                    />
+                  )}
                   <span className="quiet-dock-tooltip" aria-hidden="true">{VIEW_META[view].label}</span>
                 </button>
               );

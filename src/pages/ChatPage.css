@@ -345,6 +345,38 @@
   outline-offset: -2px;
 }
 
+.chat-media-upload-progress {
+  display: grid;
+  gap: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  padding: 6px 12px 8px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.chat-media-upload-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-media-upload-progress-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.chat-media-upload-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: width 120ms linear;
+}
+
 .chat-composer-editor--voice-recording {
   outline: 2px solid color-mix(in srgb, var(--destructive) 68%, transparent);
   outline-offset: -2px;

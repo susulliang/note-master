@@ -20,6 +20,12 @@ export interface RosterAgent {
   phc: string;
   /** ISO date (YYYY-MM-DD) → shift code. */
   shifts: Record<string, string>;
+  /** ISO date → extra off hours applied on top of the standard 1h break
+   *  (from the managers' sheet cell comments, e.g. 调休1H → 7h billable).
+   *  Optional — months without comment records omit it. */
+  offHours?: Record<string, number>;
+  /** ISO date → raw off-time comment text (manager + hours/range), for display. */
+  offNote?: Record<string, string>;
 }
 
 /** One stat row below the agent block — replicates the source sheet's

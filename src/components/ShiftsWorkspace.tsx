@@ -6,6 +6,7 @@ import { getRoster } from '@/data/roster-index';
 import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
 import { useAuth } from '@/lib/auth-context';
+import { isWorkedShift, STANDARD_SHIFT_HOURS } from '@/lib/roster-shifts';
 import { fetchRosterMonth, pushRosterCell, pushRosterFull, subscribeRosterMonth } from '@/lib/roster-sync';
 import type { RosterCell } from '@/lib/roster-sync';
 import { DateBelt } from './DateBelt';
@@ -84,7 +85,7 @@ function hexAlpha(hex: string, alpha: string): string {
   return `${hex}${alpha}`;
 }
 
-type ShiftChange = { en: string; iso: string; code: string };
+type ShiftChange = { en: string; iso: string; code: string; /** Extra off hours (billable = 8 - off). */ off?: number };
 type GridPoint = { row: number; col: number };
 
 /* ------------------------------- date helpers ------------------------------ */
@@ -351,6 +352,8 @@ export default function ShiftsWorkspace() {
   const [agentEn, setAgentEn] = useState('');
   /** Local shift overrides — `${en}|${iso}` → code (never written to Feishu). */
   const [edits, setEdits] = useState<Record<string, string>>({});
+  /** Local extra-off-hours overrides — `${en}|${iso}` → hours (billable off-time). */
+  const [offEdits, setOffEdits] = useState<Record<string, number>>({});
 
   /** Month-scoped roster (day-total stat rows are computed LIVE so local
    *  edits re-flow the counters, matching the sheet's COUNTIF behavior).
@@ -360,13 +363,22 @@ export default function ShiftsWorkspace() {
     () => getRoster(`${year}-${String(month).padStart(2, '0')}`) ?? [],
     [year, month]
   );
-  /** Live D1 overlay — `${en}|${iso}` → code fetched from roster_cells. */
-  const [d1Overlay, setD1Overlay] = useState<Record<string, string>>({});
+  /** Live D1 overlay — `${en}|${iso}` → cell fetched from roster_cells
+   *  (shift code + billable off hours). */
+  const [d1Overlay, setD1Overlay] = useState<Record<string, { code: string; off?: number }>>({});
 
   const agent = useMemo(() => ROSTER.find((a) => a.en === agentEn) ?? null, [ROSTER, agentEn]);
 
   const shiftOf = (a: RosterAgent, iso: string): string =>
-    edits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`] ?? a.shifts[iso] ?? '';
+    edits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.code ?? a.shifts[iso] ?? '';
+
+  /** Extra off hours on a cell: local edit → D1 cell → baked comment record. */
+  const offOf = (a: RosterAgent, iso: string): number =>
+    offEdits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.off ?? a.offHours?.[iso] ?? 0;
+
+  /** Billable hours for one cell: worked shifts are 8h minus extra off-time. */
+  const billableOf = (a: RosterAgent, iso: string): number =>
+    isWorkedShift(shiftOf(a, iso)) ? Math.max(0, STANDARD_SHIFT_HOURS - offOf(a, iso)) : 0;
 
   /* ---------------- D1 backup (admin logins) ----------------
    * The first edit of a month uploads the entire table to the eco-data D1
@@ -392,7 +404,7 @@ export default function ShiftsWorkspace() {
         // Layer the live database state over the baked snapshot.
         setD1Overlay((prev) => {
           const next = { ...prev };
-          for (const cell of cells) next[`${cell.en}|${cell.iso}`] = cell.code;
+          for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off };
           return next;
         });
       }
@@ -402,7 +414,7 @@ export default function ShiftsWorkspace() {
       if (!alive) return;
       setD1Overlay((prev) => {
         const next = { ...prev };
-        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = cell.code;
+        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off };
         return next;
       });
     };
@@ -420,6 +432,17 @@ export default function ShiftsWorkspace() {
     if (changes.length === 0) return;
     const updates = new Map(changes.map(({ en, iso, code }) => [`${en}|${iso}`, code]));
     setEdits((prev) => ({ ...prev, ...Object.fromEntries(updates) }));
+    // Carry each cell's off-hours through so a code-only edit never wipes the
+    // recorded off-time, and off-only edits keep the existing code.
+    const offUpdates = new Map<string, number>(
+      changes
+        .map(({ en, iso, off }) => {
+          const a = ROSTER.find((x) => x.en === en);
+          return [`${en}|${iso}`, off ?? (a ? offOf(a, iso) : 0)] as const;
+        })
+        .filter(([, off]) => off !== undefined)
+    );
+    if (offUpdates.size > 0) setOffEdits((prev) => ({ ...prev, ...Object.fromEntries(offUpdates) }));
     if (!authUser?.canAccessAdmin || ROSTER.length === 0) return;
 
     // Serialize writes for a month so a first-time full snapshot cannot race
@@ -430,22 +453,36 @@ export default function ShiftsWorkspace() {
       .then(async () => {
         setD1Status('syncing');
         if (d1MonthRef.current.get(monthKey) === false) {
-          const roster = ROSTER.map((a) => ({
-            en: a.en,
-            shifts: Object.fromEntries(
-              dayList.map((d) => {
-                const iso = isoOf(year, month, d);
-                const key = `${a.en}|${iso}`;
-                return [iso, updates.get(key) ?? edits[key] ?? d1Overlay[key] ?? a.shifts[iso] ?? ''];
-              })
-            ),
-          }));
+          const roster = ROSTER.map((a) => {
+            const offHours: Record<string, number> = {};
+            for (const d of dayList) {
+              const iso = isoOf(year, month, d);
+              const key = `${a.en}|${iso}`;
+              const off = offUpdates.get(key) ?? offEdits[key] ?? d1Overlay[key]?.off ?? a.offHours?.[iso] ?? 0;
+              if (off > 0) offHours[iso] = off;
+            }
+            return {
+              en: a.en,
+              shifts: Object.fromEntries(
+                dayList.map((d) => {
+                  const iso = isoOf(year, month, d);
+                  const key = `${a.en}|${iso}`;
+                  return [iso, updates.get(key) ?? edits[key] ?? d1Overlay[key]?.code ?? a.shifts[iso] ?? ''];
+                })
+              ),
+              offHours: Object.keys(offHours).length > 0 ? offHours : undefined,
+            };
+          });
           const ok = await pushRosterFull(monthKey, roster);
           if (ok) d1MonthRef.current.set(monthKey, true);
           return ok;
         }
         const results = await Promise.all(
-          changes.map(({ en, iso, code }) => pushRosterCell(monthKey, en, iso, code))
+          changes.map(({ en, iso, code, off }) => {
+            const a = ROSTER.find((x) => x.en === en);
+            const carry = off ?? (a ? offOf(a, iso) : 0);
+            return pushRosterCell(monthKey, en, iso, code, carry);
+          })
         );
         return results.every(Boolean);
       })
@@ -577,7 +614,17 @@ export default function ShiftsWorkspace() {
       ) : agent ? (
         <AgentMonthView agent={agent} year={year} month={month} shiftOf={shiftOf} setShift={setShift} />
       ) : (
-        <RosterGrid year={year} month={month} dayList={dayList} shiftOf={shiftOf} applyShiftChanges={applyShiftChanges} agents={ROSTER} />
+        <RosterGrid
+          year={year}
+          month={month}
+          dayList={dayList}
+          shiftOf={shiftOf}
+          offOf={offOf}
+          billableOf={billableOf}
+          canAccessAdmin={!!authUser?.canAccessAdmin}
+          applyShiftChanges={applyShiftChanges}
+          agents={ROSTER}
+        />
       )}
     </div>
   );
@@ -626,6 +673,9 @@ function RosterGrid({
   month,
   dayList,
   shiftOf,
+  offOf,
+  billableOf,
+  canAccessAdmin,
   applyShiftChanges,
   agents,
 }: {
@@ -633,6 +683,9 @@ function RosterGrid({
   month: number;
   dayList: number[];
   shiftOf: (a: RosterAgent, iso: string) => string;
+  offOf: (a: RosterAgent, iso: string) => number;
+  billableOf: (a: RosterAgent, iso: string) => number;
+  canAccessAdmin: boolean;
   applyShiftChanges: (changes: ShiftChange[]) => void;
   agents: RosterAgent[];
 }) {
@@ -676,6 +729,23 @@ function RosterGrid({
       }))
     );
     setSelection(null);
+  };
+
+  /** Extra-off-hours input for the selection toolbar (empty string = unset). */
+  const [offInput, setOffInput] = useState('');
+  const applySelectedOff = () => {
+    const value = parseFloat(offInput);
+    if (selectedCells.length === 0 || !Number.isFinite(value) || value < 0) return;
+    const off = Math.min(STANDARD_SHIFT_HOURS, value);
+    applyShiftChanges(
+      selectedCells.map(({ row, col }) => ({
+        en: agents[row].en,
+        iso: isoOf(year, month, dayList[col]),
+        code: shiftOf(agents[row], isoOf(year, month, dayList[col])),
+        off,
+      }))
+    );
+    setOffInput('');
   };
 
   /** LIVE day totals — recomputed from the (locally edited) roster so the
@@ -781,12 +851,73 @@ function RosterGrid({
           onReset={resetBreaks}
         />
       )}
-      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-border/60 bg-card/50 px-2 py-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card/50 px-2 py-1">
         <span className="text-[10px] text-muted-foreground">
           {selectedCells.length > 0
             ? `${selectedCells.length} cell${selectedCells.length === 1 ? '' : 's'} selected`
             : 'Drag across the grid to select cells'}
         </span>
+        {selectedCells.length > 0 && (() => {
+          const billable = selectedCells.reduce(
+            (sum, { row, col }) => sum + billableOf(agents[row], isoOf(year, month, dayList[col])),
+            0
+          );
+          const offTotal = selectedCells.reduce(
+            (sum, { row, col }) => sum + offOf(agents[row], isoOf(year, month, dayList[col])),
+            0
+          );
+          const single = selectedCells.length === 1
+            ? { a: agents[selectedCells[0]!.row], iso: isoOf(year, month, dayList[selectedCells[0]!.col]) }
+            : null;
+          const note = single ? single.a.offNote?.[single.iso] : undefined;
+          return (
+            <span className="flex items-center gap-1.5 text-[10px]">
+              <span
+                className={cn(
+                  'font-mono font-bold',
+                  offTotal > 0 ? 'text-amber-300' : 'text-emerald-300'
+                )}
+                title="Billable = 8h per worked shift minus extra off-time recorded on the cell"
+              >
+                ⏱ {billable % 1 === 0 ? billable : billable.toFixed(1)}h billable
+              </span>
+              {offTotal > 0 && (
+                <span className="font-mono text-amber-300/80">−{offTotal % 1 === 0 ? offTotal : offTotal.toFixed(1)}h off</span>
+              )}
+              {note && (
+                <span className="max-w-[280px] truncate text-muted-foreground" title={note}>
+                  📝 {note}
+                </span>
+              )}
+            </span>
+          );
+        })()}
+        {canAccessAdmin && selectedCells.length > 0 && (
+          <span className="flex items-center gap-1">
+            <input
+              type="number"
+              min={0}
+              max={STANDARD_SHIFT_HOURS}
+              step={0.5}
+              value={offInput}
+              onChange={(e) => setOffInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applySelectedOff();
+              }}
+              placeholder="off h"
+              aria-label="Extra off hours to record on selected cells"
+              className="h-7 w-16 rounded-md border border-border bg-background px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            />
+            <button
+              type="button"
+              onClick={applySelectedOff}
+              title="Record this many extra off hours (调休/事假/病假) on every selected cell — billable becomes 8h minus this"
+              className="h-7 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/20"
+            >
+              −off hrs
+            </button>
+          </span>
+        )}
         <select
           aria-label="Apply shift to selected cells"
           value=""

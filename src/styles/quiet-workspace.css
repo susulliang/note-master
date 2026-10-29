@@ -1069,6 +1069,39 @@
   transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
 
+.quiet-chat-unread-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--qw-field);
+  border-radius: 50%;
+  background: #f85149;
+  box-shadow: 0 0 7px rgb(248 81 73 / 58%);
+  pointer-events: none;
+  animation: quiet-chat-unread-pulse 1s ease-in-out infinite;
+}
+
+@keyframes quiet-chat-unread-pulse {
+  0%,
+  100% {
+    transform: scale(.9);
+    box-shadow: 0 0 0 0 rgb(248 81 73 / 58%);
+  }
+
+  50% {
+    transform: scale(1.16);
+    box-shadow: 0 0 0 4px rgb(248 81 73 / 0%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quiet-chat-unread-dot {
+    animation: none;
+  }
+}
+
 .quiet-magic-ball-anchor {
   position: relative;
   display: grid;
