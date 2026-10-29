@@ -338,6 +338,7 @@ function DriveChatAttachment({ href, children }: { href: string; children: React
     let active = true;
     let objectUrl: string | null = null;
     setMediaError(false);
+    setMediaUrl(null);
     fetch(authorizedChatMediaUrl(href), { headers: chatAuthHeaders() })
       .then((response) => {
         if (!response.ok) throw new Error('File unavailable');
@@ -354,7 +355,6 @@ function DriveChatAttachment({ href, children }: { href: string; children: React
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      setMediaUrl(null);
     };
   }, [href, isMedia]);
 
@@ -398,6 +398,7 @@ function ChatMediaAttachment({ href, children }: { href: string; children: React
     let active = true;
     let objectUrl: string | null = null;
     setMediaError(false);
+    setMediaUrl(null);
     fetch(authorizedChatMediaUrl(href), { headers: chatAuthHeaders() })
       .then((response) => {
         if (!response.ok) throw new Error('Media unavailable');
@@ -414,7 +415,6 @@ function ChatMediaAttachment({ href, children }: { href: string; children: React
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      setMediaUrl(null);
     };
   }, [href]);
 
@@ -440,6 +440,20 @@ function ChatMediaAttachment({ href, children }: { href: string; children: React
       </a>
     </span>
   );
+}
+
+function ChatMarkdownAnchor({
+  href,
+  children,
+  ...props
+}: React.ComponentProps<'a'>) {
+  if (typeof href === 'string' && /^\/api\/collab\/drive\/files\/[0-9a-f-]+\/download(?:\?|$)/i.test(href)) {
+    return <DriveChatAttachment href={href}>{children}</DriveChatAttachment>;
+  }
+  if (typeof href === 'string' && /^\/api\/chat\/media\/[0-9a-f-]+(?:\?|$)/i.test(href)) {
+    return <ChatMediaAttachment href={href}>{children}</ChatMediaAttachment>;
+  }
+  return <a {...props} href={href} target="_blank" rel="noreferrer">{children}</a>;
 }
 
 function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
@@ -503,15 +517,7 @@ function MarkdownBody({ markdown }: { markdown: string }) {
         remarkPlugins={MARKDOWN_PLUGINS}
         components={{
           img: SecureChatImage,
-          a: ({ href, children, ...props }) => {
-            if (typeof href === 'string' && /^\/api\/collab\/drive\/files\/[0-9a-f-]+\/download(?:\?|$)/i.test(href)) {
-              return <DriveChatAttachment href={href}>{children}</DriveChatAttachment>;
-            }
-            if (typeof href === 'string' && /^\/api\/chat\/media\/[0-9a-f-]+(?:\?|$)/i.test(href)) {
-              return <ChatMediaAttachment href={href}>{children}</ChatMediaAttachment>;
-            }
-            return <a {...props} href={href} target="_blank" rel="noreferrer">{children}</a>;
-          },
+          a: ChatMarkdownAnchor,
         }}
       >
         {markdown}
@@ -2763,7 +2769,7 @@ export default function ChatPage({
                     ? 'Everyone in the workspace'
                     : activeRoom.kind === 'group'
                       ? `Group · ${activeRoom.memberCount ?? 0} members`
-                      : 'Private conversation'}
+                      : null}
                 </span>
                 {pinnedDocument && (
                   <>

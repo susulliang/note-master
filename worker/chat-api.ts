@@ -54,6 +54,7 @@ interface GroupRow {
 
 const MAX_IMAGE_BYTES = 512 * 1024;
 const MAX_CHAT_MEDIA_BYTES = 50 * 1024 * 1024;
+const CHAT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_STICKER_BYTES = 512 * 1024;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
 const MEDIA_ID_RE = /^[0-9a-f-]{36}$/i;
@@ -726,18 +727,24 @@ async function handleMediaUpload(
   if (!roomId || !await isChatRoomMember(env, user.username, roomId)) {
     return chatJson({ error: 'You do not have access to this chat.' }, 403);
   }
-  const contentType = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+  const suppliedContentType = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+  const contentType = suppliedContentType === 'image/jpg' || suppliedContentType === 'image/pjpeg'
+    ? 'image/jpeg'
+    : suppliedContentType;
   const isWebp = contentType === 'image/webp';
   const isGif = contentType === 'image/gif';
+  const isJpeg = contentType === 'image/jpeg';
+  const isPng = contentType === 'image/png';
+  const isImage = CHAT_IMAGE_TYPES.has(contentType);
   const isInlineMedia = INLINE_MEDIA_TYPES.has(contentType);
-  if (!isWebp && !isGif && !isInlineMedia) {
+  if (!isImage && !isInlineMedia) {
     return chatJson({ error: 'Use a common image, audio, or video format.' }, 415);
   }
-  const maxBytes = isInlineMedia ? MAX_CHAT_MEDIA_BYTES : MAX_IMAGE_BYTES;
+  const maxBytes = isImage ? MAX_IMAGE_BYTES : MAX_CHAT_MEDIA_BYTES;
   const declaredSize = Number(request.headers.get('content-length') ?? 0);
   if (declaredSize > maxBytes) {
     return chatJson({
-      error: isInlineMedia ? 'Audio and video files are limited to 50 MB.' : 'Each image must be 512 KB or smaller.',
+      error: isImage ? 'Each image must be 512 KB or smaller.' : 'Audio and video files are limited to 50 MB.',
     }, 413);
   }
   const media = await readLimitedBody(request, maxBytes);
@@ -754,6 +761,16 @@ async function handleMediaUpload(
     if (signature !== 'GIF87a' && signature !== 'GIF89a') {
       return chatJson({ error: 'The uploaded image is not a valid GIF file.' }, 415);
     }
+  }
+  if (isJpeg && (media[0] !== 0xff || media[1] !== 0xd8 || media[2] !== 0xff)) {
+    return chatJson({ error: 'The uploaded image is not a valid JPEG file.' }, 415);
+  }
+  if (
+    isPng &&
+    !(media[0] === 0x89 && media[1] === 0x50 && media[2] === 0x4e && media[3] === 0x47
+      && media[4] === 0x0d && media[5] === 0x0a && media[6] === 0x1a && media[7] === 0x0a)
+  ) {
+    return chatJson({ error: 'The uploaded image is not a valid PNG file.' }, 415);
   }
 
   const rawName = request.headers.get('x-chat-media-name') ?? '';
