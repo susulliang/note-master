@@ -25,13 +25,16 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
+  Pause,
   Pencil,
   Pin,
   PinOff,
+  Play,
   Plus,
   Search,
   Send,
   Reply,
+  FolderPlus,
   Sparkles,
   Sticker,
   Table2,
@@ -50,6 +53,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { toast } from 'sonner';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
 import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
+import DriveMediaPreviewDialog from '@/components/DriveMediaPreviewDialog';
 import {
   loadChatRoomCache,
   peekChatRoomCache,
@@ -70,6 +74,7 @@ import {
   fetchChatProfile,
   fetchChatStickers,
   listCollabDrive,
+  saveCollabDriveFileToPersonal,
   shareCollabDriveFileWithChat,
   downloadCollabDriveFile,
   findChatUsers,
@@ -120,6 +125,7 @@ const COMMON_EMOJIS = [
   '👏', '👍', '👎', '👌', '✌️', '🤝', '💪', '❤️', '🧡', '💛',
   '💚', '💙', '💜', '💔', '💯', '🔥', '🎉', '✨', '🚀', '😴',
 ];
+const QUICK_THREAD_REPLIES = ['👍', '👎', '❤️', '😂', '😮', '🙏', '✅', '❌'];
 
 function readChatHistoryWidth(): number {
   try {
@@ -322,6 +328,137 @@ function chatDriveFileGlyph(file: CollabDriveFile) {
   return FileIcon;
 }
 
+interface SharedDriveAttachment {
+  id: string;
+  roomId: string;
+  name: string;
+}
+
+function findSharedDriveAttachments(markdown: string, defaultRoomId: string): SharedDriveAttachment[] {
+  const attachments = new Map<string, SharedDriveAttachment>();
+  const pattern = /\]\((\/api\/collab\/drive\/files\/([0-9a-f-]{36})\/download(?:\?[^)\s]*)?)\)/gi;
+  for (const match of markdown.matchAll(pattern)) {
+    const [, href, id] = match;
+    try {
+      const url = new URL(href, window.location.origin);
+      attachments.set(id.toLowerCase(), {
+        id,
+        roomId: url.searchParams.get('roomId') || defaultRoomId,
+        name: url.searchParams.get('name') || 'Shared file',
+      });
+    } catch {
+      continue;
+    }
+  }
+  return [...attachments.values()];
+}
+
+function isStandaloneMediaMarkdown(markdown: string): boolean {
+  const blocks = markdown.trim().split(/\n+/).map((block) => block.trim()).filter(Boolean);
+  if (!blocks.length) return false;
+  return blocks.every((block) => {
+    const match = /^!?\[[^\]]*\]\((\S+)\)$/.exec(block);
+    if (!match) return false;
+    try {
+      const url = new URL(match[1], window.location.origin);
+      const isMediaRoute = /^\/api\/chat\/media\/[0-9a-f-]{36}$/i.test(url.pathname)
+        || /^\/api\/collab\/drive\/files\/[0-9a-f-]{36}\/download$/i.test(url.pathname);
+      return isMediaRoute && /^(image|audio|video)\//i.test(url.searchParams.get('mime') ?? '');
+    } catch {
+      return false;
+    }
+  });
+}
+
+function formatVoiceTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, '0')}`;
+}
+
+function ChatVoicePlayer({ src, fileName }: { src: string; fileName: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const durationKnown = Number.isFinite(duration) && duration > 0;
+  const progress = durationKnown ? Math.min(1, currentTime / duration) : 0;
+  const bars = Array.from({ length: 34 }, (_, index) => (
+    7 + Math.round(Math.abs(Math.sin(index * 1.73) * Math.cos(index * 0.39)) * 19)
+  ));
+
+  const togglePlayback = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) void audio.play().catch(() => toast.error('Could not play this voice message.'));
+    else audio.pause();
+  };
+
+  /** MediaRecorder webm/ogg streams report `duration = Infinity` until the
+   *  browser seeks past the end once — force that seek, read the real
+   *  length, then rewind. No-op for well-formed files (mp4/m4a). */
+  const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLAudioElement>) => {
+    const audio = event.currentTarget;
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      setDuration(audio.duration);
+      return;
+    }
+    const detectRealDuration = () => {
+      audio.removeEventListener('timeupdate', detectRealDuration);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration);
+      audio.currentTime = 0;
+      setCurrentTime(0);
+    };
+    audio.addEventListener('timeupdate', detectRealDuration);
+    audio.currentTime = 1e101;
+  };
+
+  return (
+    <div className="chat-voice-player" aria-label={fileName}>
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrentTime(0);
+        }}
+      />
+      <button
+        type="button"
+        className="chat-voice-play-button"
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+        onClick={togglePlayback}
+      >
+        {playing ? <Pause className="size-4" /> : <Play className="size-4 fill-current" />}
+      </button>
+      <button
+        type="button"
+        className="chat-voice-waveform"
+        aria-label={`Seek voice message, ${formatVoiceTime(currentTime)} of ${formatVoiceTime(durationKnown ? duration : 0)}`}
+        onClick={(event) => {
+          const audio = audioRef.current;
+          if (!audio || !durationKnown) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          audio.currentTime = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)) * duration;
+        }}
+      >
+        {bars.map((height, index) => (
+          <span
+            key={index}
+            className={index / bars.length <= progress ? 'is-played' : ''}
+            style={{ height: `${height}px` }}
+          />
+        ))}
+      </button>
+      <span className="chat-voice-duration">{formatVoiceTime(durationKnown ? duration : currentTime)}</span>
+    </div>
+  );
+}
+
 function DriveChatAttachment({ href, children }: { href: string; children: React.ReactNode }) {
   const parsed = new URL(href, window.location.origin);
   const match = /\/api\/collab\/drive\/files\/([0-9a-f-]+)\/download$/i.exec(parsed.pathname);
@@ -330,8 +467,10 @@ function DriveChatAttachment({ href, children }: { href: string; children: React
   const fileName = parsed.searchParams.get('name') ?? 'Shared file';
   const mimeType = parsed.searchParams.get('mime') ?? '';
   const isMedia = /^(image|audio|video)\//i.test(mimeType);
+  const isPdf = mimeType.toLowerCase() === 'application/pdf' || /\.pdf$/i.test(fileName);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!isMedia) return undefined;
@@ -361,13 +500,53 @@ function DriveChatAttachment({ href, children }: { href: string; children: React
   if (isMedia) {
     if (mediaError) return <span className="text-xs text-muted-foreground">Shared media is unavailable.</span>;
     if (!mediaUrl) return <span className="my-2 inline-flex h-16 w-40 items-center justify-center rounded-xl bg-muted/60 text-xs text-muted-foreground">Loading media…</span>;
-    if (mimeType.startsWith('image/')) {
-      return <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />;
-    }
-    if (mimeType.startsWith('video/')) {
-      return <video src={mediaUrl} controls preload="metadata" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />;
-    }
-    return <audio src={mediaUrl} controls preload="metadata" className="my-2 max-w-full" />;
+    return (
+      <>
+        {mimeType.startsWith('image/')
+          ? (
+            <button type="button" className="chat-media-preview-trigger" onClick={() => setPreviewOpen(true)} aria-label={`Preview ${fileName}`}>
+              <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />
+            </button>
+          )
+          : (
+            <span className="my-2 flex max-w-full flex-col items-start gap-1.5">
+              {mimeType.startsWith('video/')
+                ? <video src={mediaUrl} controls preload="metadata" onDoubleClick={() => setPreviewOpen(true)} className="max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />
+                : <audio src={mediaUrl} controls preload="metadata" className="max-w-full" />}
+              <button type="button" className="chat-media-fullscreen-button" onClick={() => setPreviewOpen(true)}>
+                <Maximize2 className="size-3" /> Preview full screen
+              </button>
+            </span>
+          )}
+        <DriveMediaPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          fileName={fileName}
+          mimeType={mimeType}
+          sourceUrl={mediaUrl}
+        />
+      </>
+    );
+  }
+
+  if (isPdf) {
+    return (
+      <>
+        <button type="button" onClick={() => setPreviewOpen(true)} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border/70 bg-card/70 px-2.5 py-2 text-xs text-accent hover:bg-muted/70">
+          <FileText className="size-4 shrink-0" />
+          <span className="truncate">{children || fileName}</span>
+          <Maximize2 className="size-3.5 shrink-0 opacity-65" />
+        </button>
+        <DriveMediaPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          fileId={fileId}
+          roomId={roomId}
+          fileName={fileName}
+          mimeType={mimeType || 'application/pdf'}
+        />
+      </>
+    );
   }
 
   return (
@@ -391,8 +570,10 @@ function ChatMediaAttachment({ href, children }: { href: string; children: React
   const parsed = new URL(href, window.location.origin);
   const mimeType = parsed.searchParams.get('mime') ?? '';
   const fileName = parsed.searchParams.get('name') ?? 'Chat media';
+  const isVoiceMessage = parsed.searchParams.get('voice') === '1';
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -422,23 +603,53 @@ function ChatMediaAttachment({ href, children }: { href: string; children: React
   if (!mediaUrl) {
     return <span className="my-2 inline-flex h-16 w-40 items-center justify-center rounded-xl bg-muted/60 text-xs text-muted-foreground">Loading media…</span>;
   }
+  if (isVoiceMessage && mimeType.startsWith('audio/')) {
+    return <ChatVoicePlayer src={mediaUrl} fileName={fileName} />;
+  }
   if (mimeType.startsWith('image/')) {
-    return <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />;
+    return (
+      <>
+        <button type="button" className="chat-media-preview-trigger" onClick={() => setPreviewOpen(true)} aria-label={`Preview ${fileName}`}>
+          <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />
+        </button>
+        <DriveMediaPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          fileName={fileName}
+          mimeType={mimeType}
+          sourceUrl={mediaUrl}
+        />
+      </>
+    );
   }
 
   return (
-    <span className="my-2 flex max-w-full flex-col items-start gap-1.5">
-      {mimeType.startsWith('video/')
-        ? <video src={mediaUrl} controls preload="metadata" className="max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />
-        : <audio src={mediaUrl} controls preload="metadata" className="max-w-full" />}
-      <a
-        href={mediaUrl}
-        download={fileName}
-        className="text-[10px] text-accent underline-offset-2 hover:underline"
-      >
-        Download {children || fileName}
-      </a>
-    </span>
+    <>
+      <span className="my-2 flex max-w-full flex-col items-start gap-1.5">
+        {mimeType.startsWith('video/')
+          ? <video src={mediaUrl} controls preload="metadata" onDoubleClick={() => setPreviewOpen(true)} className="max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />
+          : <audio src={mediaUrl} controls preload="metadata" className="max-w-full" />}
+        <span className="flex items-center gap-3">
+          <a
+            href={mediaUrl}
+            download={fileName}
+            className="text-[10px] text-accent underline-offset-2 hover:underline"
+          >
+            Download {children || fileName}
+          </a>
+          <button type="button" className="chat-media-fullscreen-button" onClick={() => setPreviewOpen(true)}>
+            <Maximize2 className="size-3" /> Preview full screen
+          </button>
+        </span>
+      </span>
+      <DriveMediaPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        fileName={fileName}
+        mimeType={mimeType}
+        sourceUrl={mediaUrl}
+      />
+    </>
   );
 }
 
@@ -460,6 +671,7 @@ function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElem
   const isPrivateChatMedia = typeof src === 'string' && /^\/api\/chat\/(media|stickers\/(public|private))\//.test(src);
   const isSticker = typeof src === 'string' && src.startsWith('/api/chat/stickers/');
   const [loadedSrc, setLoadedSrc] = useState<string | undefined>(isPrivateChatMedia ? undefined : src);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!isPrivateChatMedia || !src) {
@@ -495,7 +707,7 @@ function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElem
       </span>
     );
   }
-  return (
+  const image = (
     <img
       {...props}
       src={loadedSrc}
@@ -507,6 +719,26 @@ function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElem
         props.className,
       )}
     />
+  );
+  if (isSticker) return image;
+  return (
+    <>
+      <button
+        type="button"
+        className="chat-media-preview-trigger"
+        aria-label={`Preview ${alt || 'chat image'}`}
+        onClick={() => setPreviewOpen(true)}
+      >
+        {image}
+      </button>
+      <DriveMediaPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        fileName={alt || 'Chat image'}
+        mimeType="image/*"
+        sourceUrl={loadedSrc}
+      />
+    </>
   );
 }
 
@@ -809,6 +1041,17 @@ function mergeMessage(current: ChatMessage[], next: ChatMessage): ChatMessage[] 
   return merged.sort((a, b) => a.createdAt - b.createdAt);
 }
 
+function summarizeQuickReplies(replies: NonNullable<ChatMessage['quickReplies']>) {
+  const summary = new Map<string, { count: number; usernames: string[] }>();
+  for (const reply of replies) {
+    const current = summary.get(reply.quickReply) ?? { count: 0, usernames: [] };
+    current.count += 1;
+    if (!current.usernames.includes(reply.username)) current.usernames.push(reply.username);
+    summary.set(reply.quickReply, current);
+  }
+  return [...summary.entries()];
+}
+
 function quoteMessage(message: ChatMessage): string {
   const maxQuotedLength = 16_000;
   const original = message.markdown.trim();
@@ -963,7 +1206,11 @@ export default function ChatPage({
   const [drivePickerQuery, setDrivePickerQuery] = useState('');
   const [drivePickerLoading, setDrivePickerLoading] = useState(false);
   const [sharingDriveFileId, setSharingDriveFileId] = useState<string | null>(null);
+  const [savingDriveCopyId, setSavingDriveCopyId] = useState<string | null>(null);
   const [mediaDropActive, setMediaDropActive] = useState(false);
+  const [voiceStarting, setVoiceStarting] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
   const [chatListPreferences, setChatListPreferences] = useState<ChatListPreferences>(
@@ -1002,6 +1249,16 @@ export default function ChatPage({
   const draftRef = useRef('');
   const linkRangeRef = useRef<Range | null>(null);
   const editorObjectUrlsRef = useRef<string[]>([]);
+  const voicePointerIdRef = useRef<number | null>(null);
+  const voiceHoldTimerRef = useRef<number | null>(null);
+  const voiceMaxTimerRef = useRef<number | null>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const voiceSendOnStopRef = useRef(false);
+  const voiceStartedAtRef = useRef(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lastTouchTapRef = useRef<{ id: string; x: number; y: number; at: number } | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const stickerInputRef = useRef<HTMLInputElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
@@ -1842,6 +2099,30 @@ export default function ChatPage({
           ) {
             const incoming = payload.message as ChatMessage;
             if (incoming.parentId) {
+              if (incoming.quickReply) {
+                const addQuickReply = (parent: ChatMessage): ChatMessage => {
+                  const replies = parent.quickReplies ?? [];
+                  if (replies.some((reply) => reply.id === incoming.id)) return parent;
+                  return { ...parent, quickReplies: [...replies, {
+                    id: incoming.id,
+                    username: incoming.username,
+                    quickReply: incoming.quickReply!,
+                  }] };
+                };
+                setMessages((current) => {
+                  const next = current.map((message) => (
+                    message.id === incoming.parentId ? addQuickReply(message) : message
+                  ));
+                  const parent = next.find((message) => message.id === incoming.parentId);
+                  if (parent) {
+                    void upsertCachedChatMessage(username, activeRoom.roomId, parent).catch(() => undefined);
+                  }
+                  return next;
+                });
+                setThreadParent((current) => (
+                  current?.id === incoming.parentId ? addQuickReply(current) : current
+                ));
+              }
               if (incoming.parentId === threadParentIdRef.current) {
                 setThreadMessages((current) => mergeMessage(current, incoming));
                 setThreadLoading(false);
@@ -2258,6 +2539,194 @@ export default function ChatPage({
     }
   }, [activeRoom.roomId, setComposerMarkdown]);
 
+  const sendVoiceRecording = useCallback(async (blob: Blob) => {
+    const roomId = activeRoom.roomId;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to chat before sending a voice message.');
+      return;
+    }
+    const mimeType = blob.type.split(';')[0].toLowerCase() || 'audio/webm';
+    const extension = mimeType === 'audio/ogg' ? 'ogg' : mimeType === 'audio/mp4' ? 'm4a' : 'webm';
+    const fileName = `Voice message.${extension}`;
+    try {
+      setSending(true);
+      const mediaUrl = await uploadChatMedia(roomId, blob, fileName, 'media');
+      if (
+        activeRoom.roomId !== roomId ||
+        socketRef.current !== socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        throw new Error('The chat changed before the voice message finished uploading.');
+      }
+      const voiceUrl = `${mediaUrl}${mediaUrl.includes('?') ? '&' : '?'}voice=1`;
+      socket.send(JSON.stringify({
+        type: 'message:create',
+        markdown: `[Voice message](${voiceUrl})`,
+        parentId: threadParentIdRef.current ?? undefined,
+      }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not send this voice message.');
+    } finally {
+      setSending(false);
+    }
+  }, [activeRoom.roomId]);
+
+  const stopVoiceRecording = useCallback((pointerId: number, shouldSend: boolean) => {
+    if (voicePointerIdRef.current !== pointerId) return;
+    voicePointerIdRef.current = null;
+    if (voiceHoldTimerRef.current !== null) window.clearTimeout(voiceHoldTimerRef.current);
+    if (voiceMaxTimerRef.current !== null) window.clearTimeout(voiceMaxTimerRef.current);
+    voiceHoldTimerRef.current = null;
+    voiceMaxTimerRef.current = null;
+    voiceSendOnStopRef.current = shouldSend;
+    const recorder = voiceRecorderRef.current;
+    if (recorder?.state === 'recording') {
+      recorder.stop();
+    } else if (!recorder) {
+      voiceSendOnStopRef.current = false;
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceStreamRef.current = null;
+      setVoiceStarting(false);
+    }
+  }, []);
+
+  const beginVoiceRecording = useCallback(async (pointerId: number) => {
+    if (
+      voicePointerIdRef.current !== pointerId ||
+      draftRef.current.trim() ||
+      editingId ||
+      connection !== 'connected' ||
+      sending
+    ) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      voicePointerIdRef.current = null;
+      toast.error('Voice recording is not supported in this browser.');
+      return;
+    }
+    setVoiceStarting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (voicePointerIdRef.current !== pointerId) {
+        stream.getTracks().forEach((track) => track.stop());
+        setVoiceStarting(false);
+        return;
+      }
+      voiceStreamRef.current = stream;
+      const preferredMimeType = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, {
+          audioBitsPerSecond: 92_000,
+          ...(preferredMimeType ? { mimeType: preferredMimeType } : {}),
+        });
+      } catch {
+        recorder = new MediaRecorder(stream, { audioBitsPerSecond: 92_000 });
+      }
+      voiceChunksRef.current = [];
+      voiceSendOnStopRef.current = false;
+      voiceStartedAtRef.current = Date.now();
+      voiceRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) voiceChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const shouldSend = voiceSendOnStopRef.current;
+        voiceSendOnStopRef.current = false;
+        const duration = Date.now() - voiceStartedAtRef.current;
+        const chunks = voiceChunksRef.current;
+        voiceChunksRef.current = [];
+        voiceRecorderRef.current = null;
+        voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+        voiceStreamRef.current = null;
+        if (voiceMaxTimerRef.current !== null) window.clearTimeout(voiceMaxTimerRef.current);
+        voiceMaxTimerRef.current = null;
+        setVoiceRecording(false);
+        setVoiceElapsed(0);
+        if (!shouldSend) return;
+        if (duration < 350) {
+          toast.info('Hold a little longer to record a voice message.');
+          return;
+        }
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        if (blob.size < 12) {
+          toast.error('The recording was too short. Please try again.');
+          return;
+        }
+        void sendVoiceRecording(blob);
+      };
+      recorder.onerror = () => {
+        voiceSendOnStopRef.current = false;
+        if (recorder.state === 'recording') recorder.stop();
+        toast.error('Voice recording stopped unexpectedly.');
+      };
+      recorder.start(250);
+      setVoiceStarting(false);
+      setVoiceRecording(true);
+      voiceMaxTimerRef.current = window.setTimeout(
+        () => stopVoiceRecording(pointerId, true),
+        30_000,
+      );
+    } catch (error) {
+      voicePointerIdRef.current = null;
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceStreamRef.current = null;
+      setVoiceStarting(false);
+      toast.error(error instanceof Error ? error.message : 'Could not access the microphone.');
+    }
+  }, [connection, editingId, sending, sendVoiceRecording, stopVoiceRecording]);
+
+  const handleVoicePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      !event.isPrimary ||
+      event.button !== 0 ||
+      draftRef.current.trim() ||
+      editingId ||
+      sending ||
+      connection !== 'connected' ||
+      voicePointerIdRef.current !== null
+    ) return;
+    voicePointerIdRef.current = event.pointerId;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* Pointer capture is optional; the hold timer still works without it. */
+    }
+    voiceHoldTimerRef.current = window.setTimeout(() => {
+      voiceHoldTimerRef.current = null;
+      void beginVoiceRecording(event.pointerId);
+    }, 320);
+  }, [beginVoiceRecording, connection, editingId, sending]);
+
+  const handleVoicePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    stopVoiceRecording(event.pointerId, true);
+  }, [stopVoiceRecording]);
+
+  const handleVoicePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    stopVoiceRecording(event.pointerId, false);
+  }, [stopVoiceRecording]);
+
+  useEffect(() => {
+    if (!voiceRecording) return undefined;
+    const timer = window.setInterval(() => {
+      setVoiceElapsed(Math.min(30, (Date.now() - voiceStartedAtRef.current) / 1000));
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [voiceRecording]);
+
+  useEffect(() => () => {
+    if (voiceHoldTimerRef.current !== null) window.clearTimeout(voiceHoldTimerRef.current);
+    if (voiceMaxTimerRef.current !== null) window.clearTimeout(voiceMaxTimerRef.current);
+    voiceSendOnStopRef.current = false;
+    if (voiceRecorderRef.current?.state === 'recording') voiceRecorderRef.current.stop();
+    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
   const handleStickerFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
     const fallbackName = file.name.replace(/\.[^.]+$/, '').slice(0, 40);
@@ -2313,6 +2782,52 @@ export default function ChatPage({
   const insertEmoji = useCallback((emoji: string) => {
     insertComposerText(emoji);
   }, [insertComposerText]);
+
+  const showMessageContextMenu = useCallback((message: ChatMessage, x: number, y: number) => {
+    const menuWidth = Math.min(260, window.innerWidth - 16);
+    const menuHeight = Math.min(440, window.innerHeight * 0.75);
+    setMessageContextMenu({
+      x: Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8)),
+      message,
+      forwarding: false,
+    });
+  }, []);
+
+  const sendQuickThreadReply = useCallback((message: ChatMessage, quickReply: string) => {
+    if (message.source === 'news') return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to reply to this message.');
+      setMessageContextMenu(null);
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: 'message:create',
+      markdown: quickReply,
+      parentId: message.id,
+      quickReply,
+    }));
+    setMessageContextMenu(null);
+  }, []);
+
+  const saveDriveAttachmentToPersonal = useCallback(async (attachment: SharedDriveAttachment) => {
+    if (savingDriveCopyId) return;
+    setSavingDriveCopyId(attachment.id);
+    try {
+      const result = await saveCollabDriveFileToPersonal(attachment.id, attachment.roomId);
+      if (result.alreadyInPersonalDrive) {
+        toast.info(`${attachment.name} is already in your Personal Drive.`);
+      } else {
+        toast.success(`${attachment.name} saved to Personal Drive.`);
+      }
+      setMessageContextMenu(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save this file to Personal Drive.');
+    } finally {
+      setSavingDriveCopyId(null);
+    }
+  }, [savingDriveCopyId]);
 
   const replyToMessage = useCallback((message: ChatMessage) => {
     setEditingId(null);
@@ -2404,6 +2919,13 @@ export default function ChatPage({
   }, [insertComposerText, selectChatRoom]);
 
   const visibleMessages = useMemo(() => messages, [messages]);
+  const contextDriveAttachments = messageContextMenu && !messageContextMenu.forwarding
+    ? findSharedDriveAttachments(messageContextMenu.message.markdown, activeRoom.roomId)
+    : [];
+  const visibleThreadMessages = useMemo(
+    () => threadMessages.filter((message) => !message.quickReply),
+    [threadMessages],
+  );
   const selectedPinDocument = collabDocuments.find((document) => document.id === pinDocumentId);
   const canUnpinCurrent = !!pinnedDocument && (
     pinnedDocument.pinnedBy.toLowerCase() === username.toLowerCase() ||
@@ -2903,7 +3425,9 @@ export default function ChatPage({
                 const renderedMarkdown = news ? fixNewsImagePaths(message.markdown) : message.markdown;
                 const stickerOnly = /^!\[sticker:[\s\S]*\]\(\/api\/chat\/stickers\/(?:public|private)\/[^)\s]+\)$/i
                   .test(message.markdown.trim());
+                const mediaOnly = !news && isStandaloneMediaMarkdown(message.markdown);
                 const shaking = shakeMessage?.id === message.id;
+                const quickReplySummary = summarizeQuickReplies(message.quickReplies ?? []);
                 return (
                   <article
                     key={message.id}
@@ -2911,14 +3435,34 @@ export default function ChatPage({
                     className={cn('chat-message-row group flex gap-3', mine && !news && 'flex-row-reverse')}
                     onContextMenu={(event) => {
                       event.preventDefault();
-                      const menuWidth = 248;
-                      const menuHeight = 420;
-                      setMessageContextMenu({
-                        x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
-                        y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
-                        message,
-                        forwarding: false,
-                      });
+                      showMessageContextMenu(message, event.clientX, event.clientY);
+                    }}
+                    onDoubleClick={(event) => {
+                      event.preventDefault();
+                      showMessageContextMenu(message, event.clientX, event.clientY);
+                    }}
+                    onTouchStart={(event) => {
+                      const touch = event.touches[0];
+                      if (touch) touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+                    }}
+                    onTouchEnd={(event) => {
+                      const touch = event.changedTouches[0];
+                      const start = touchStartRef.current;
+                      touchStartRef.current = null;
+                      if (!touch || !start || Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 18) return;
+                      const now = Date.now();
+                      const previousTap = lastTouchTapRef.current;
+                      if (
+                        previousTap?.id === message.id &&
+                        now - previousTap.at < 420 &&
+                        Math.hypot(touch.clientX - previousTap.x, touch.clientY - previousTap.y) < 48
+                      ) {
+                        event.preventDefault();
+                        lastTouchTapRef.current = null;
+                        showMessageContextMenu(message, touch.clientX, touch.clientY);
+                      } else {
+                        lastTouchTapRef.current = { id: message.id, x: touch.clientX, y: touch.clientY, at: now };
+                      }
                     }}
                   >
                     {!grouped ? (
@@ -2950,10 +3494,12 @@ export default function ChatPage({
                         'chat-message-bubble',
                         stickerOnly
                           ? 'chat-message-bubble--sticker relative'
-                          : 'relative rounded-2xl border px-4 py-3 shadow-sm',
+                          : mediaOnly
+                            ? 'chat-message-bubble--media-only relative'
+                            : 'relative rounded-2xl border px-4 py-3 shadow-sm',
                         message.glowing && 'chat-message-glow',
                         shaking && 'chat-message-shake',
-                        !stickerOnly && (news
+                        !stickerOnly && !mediaOnly && (news
                           ? 'border-primary/15 bg-primary/[0.045]'
                           : mine
                             ? 'rounded-tr-md border-accent/15 bg-accent/[0.09]'
@@ -2979,7 +3525,7 @@ export default function ChatPage({
                             />
                           )
                           : <MarkdownBody markdown={renderedMarkdown} />}
-                        {!stickerOnly && message.contentType === 'markdown' && (
+                        {!stickerOnly && !mediaOnly && message.contentType === 'markdown' && (
                           <LinkPreviewCards markdown={renderedMarkdown} />
                         )}
                         {message.contentType === 'markdown' && message.updatedAt > message.createdAt + 1_000 && !news && (
@@ -3001,6 +3547,25 @@ export default function ChatPage({
                           </button>
                         )}
                       </div>
+                      {(quickReplySummary.length > 0 || (message.threadCount ?? 0) > 0) && (
+                        <div className={cn('chat-inline-quick-replies', mine && !news && 'is-own-message')}>
+                          {quickReplySummary.map(([quickReply, summary]) => (
+                            <span
+                              key={quickReply}
+                              className="chat-inline-quick-reply"
+                              title={summary.usernames.join(', ')}
+                            >
+                              {quickReply}<span>{summary.count}</span>
+                            </span>
+                          ))}
+                          {(message.threadCount ?? 0) > 0 && (
+                            <button type="button" onClick={() => openThread(message)}>
+                              <Reply className="size-3" />
+                              {message.threadCount} {message.threadCount === 1 ? 'reply' : 'replies'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </article>
                 );
@@ -3021,8 +3586,8 @@ export default function ChatPage({
                     <MarkdownBody markdown={threadParent.markdown} />
                   </article>
                   {threadLoading && <p className="chat-thread-state">Loading replies…</p>}
-                  {!threadLoading && threadMessages.length === 0 && <p className="chat-thread-state">No replies yet. Start the thread below.</p>}
-                  {threadMessages.map((reply) => (
+                  {!threadLoading && visibleThreadMessages.length === 0 && <p className="chat-thread-state">No written replies yet. Quick replies appear beside the original message.</p>}
+                  {visibleThreadMessages.map((reply) => (
                     <article className="chat-thread-reply" key={reply.id}>
                       <strong>{reply.username}</strong>
                       <MarkdownBody markdown={reply.markdown} />
@@ -3417,8 +3982,17 @@ export default function ChatPage({
                   </div>
                 )}
                 {!hasDraft && !threadParent && (
-                  <span className="pointer-events-none absolute left-4 top-4 text-sm text-muted-foreground/75">
-                    {editingId ? 'Edit your message…' : `Message ${activeRoom.title}…`}
+                  <span className={cn(
+                    'pointer-events-none absolute left-4 top-4 text-sm text-muted-foreground/75',
+                    voiceRecording && 'text-destructive',
+                  )}>
+                    {voiceRecording
+                      ? `Recording voice message · ${formatVoiceTime(voiceElapsed)} / 0:30 · release to send`
+                      : voiceStarting
+                        ? 'Starting microphone…'
+                        : editingId
+                          ? 'Edit your message…'
+                          : `Message ${activeRoom.title} · hold to record`}
                   </span>
                 )}
                 <div
@@ -3426,10 +4000,16 @@ export default function ChatPage({
                 contentEditable
                 suppressContentEditableWarning
                 role="textbox"
-                aria-label="Write a formatted chat message"
+                aria-label="Write a formatted chat message or hold to record audio"
                 aria-multiline="true"
                 spellCheck
+                onPointerDown={handleVoicePointerDown}
+                onPointerUp={handleVoicePointerUp}
+                onPointerCancel={handleVoicePointerCancel}
                 onInput={(event) => {
+                  if (event.currentTarget.innerText.trim() && voicePointerIdRef.current !== null) {
+                    stopVoiceRecording(voicePointerIdRef.current, false);
+                  }
                   syncComposerMarkdown();
                   if (event.currentTarget.innerText.trim()) refreshTypingPresence();
                   else stopTypingPresence();
@@ -3475,6 +4055,7 @@ export default function ChatPage({
                 className={cn(
                   'chat-composer-editor min-h-0 max-h-none w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6',
                   mediaDropActive && 'chat-composer-editor--drop-active',
+                  voiceRecording && 'chat-composer-editor--voice-recording',
                 )}
                 style={{ height: composerHeight }}
               />
@@ -3517,7 +4098,7 @@ export default function ChatPage({
           role="menu"
           aria-label={`Actions for message from ${messageContextMenu.message.username}`}
           onContextMenu={(event) => event.preventDefault()}
-          className="fixed z-[130] flex w-[248px] max-h-[min(75dvh,440px)] flex-col overflow-y-auto rounded-xl border border-border/80 bg-card/95 p-1.5 text-foreground shadow-2xl backdrop-blur-2xl"
+          className="fixed z-[130] flex w-[260px] max-w-[calc(100vw-16px)] max-h-[min(75dvh,440px)] flex-col overflow-y-auto rounded-xl border border-border/80 bg-card/95 p-1.5 text-foreground shadow-2xl backdrop-blur-2xl"
           style={{ left: messageContextMenu.x, top: messageContextMenu.y }}
         >
           {messageContextMenu.forwarding ? (
@@ -3562,6 +4143,40 @@ export default function ChatPage({
             </>
           ) : (
             <>
+              {messageContextMenu.message.source !== 'news' && (
+                <div className="chat-quick-reply-menu">
+                  <span>Quick reply · added to thread</span>
+                  <div>
+                    {QUICK_THREAD_REPLIES.map((quickReply) => (
+                      <button
+                        key={quickReply}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => sendQuickThreadReply(messageContextMenu.message, quickReply)}
+                      >
+                        {quickReply}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {contextDriveAttachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={savingDriveCopyId !== null}
+                  onClick={() => void saveDriveAttachmentToPersonal(attachment)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10 disabled:cursor-wait disabled:opacity-55"
+                >
+                  <FolderPlus className="size-3.5 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {savingDriveCopyId === attachment.id
+                      ? 'Saving to Personal Drive…'
+                      : `Save ${attachment.name} to Personal Drive`}
+                  </span>
+                </button>
+              ))}
               {messageContextMenu.message.source !== 'news' && (
                 <button
                   type="button"

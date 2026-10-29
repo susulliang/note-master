@@ -11,6 +11,7 @@ interface ChatMessageRow {
   avatar_rotation: number;
   glowing: number;
   parent_id?: string | null;
+  quick_reply?: string | null;
   mentions_json?: string;
   thread_count?: number;
   content_type?: string;
@@ -89,6 +90,7 @@ const HISTORY_PAGE_SIZE = 50;
 const PRESENCE_TTL_MS = 45_000;
 const TYPING_TTL_MS = 4_000;
 const POLL_TTL_MS = 24 * 60 * 60 * 1000;
+const QUICK_REPLIES = new Set(['👍', '👎', '❤️', '😂', '😮', '🙏', '✅', '❌']);
 
 function send(ws: WebSocket, event: ChatEvent): void {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -123,6 +125,7 @@ function presentMessage(row: ChatMessageRow) {
     glowing: row.glowing === 1,
     parentId: row.parent_id ?? null,
     threadCount: Number(row.thread_count ?? 0),
+    quickReply: row.quick_reply ?? null,
     contentType: row.content_type === 'poll' || row.content_type === 'poll_result' ? row.content_type : 'markdown',
     pollId: row.poll_id ?? null,
     mentions: (() => {
@@ -173,6 +176,7 @@ export class ChatRoom extends DurableObject<Env> {
       this.ensureColumn('chat_messages', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'glowing', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'parent_id', 'TEXT');
+      this.ensureColumn('chat_messages', 'quick_reply', 'TEXT');
       this.ensureColumn('chat_messages', 'mentions_json', "TEXT NOT NULL DEFAULT '[]'");
       this.ensureColumn('chat_messages', 'content_type', "TEXT NOT NULL DEFAULT 'markdown'");
       this.ensureColumn('chat_messages', 'poll_id', 'TEXT');
@@ -393,7 +397,15 @@ export class ChatRoom extends DurableObject<Env> {
     }
     if (event.type === 'message:create') {
       if (typeof event.markdown !== 'string') return;
-      const markdown = event.markdown.trim();
+      const quickReply = typeof event.quickReply === 'string' ? event.quickReply : null;
+      if (
+        (event.quickReply !== undefined && quickReply === null) ||
+        (quickReply !== null && (!QUICK_REPLIES.has(quickReply) || typeof event.parentId !== 'string'))
+      ) {
+        send(ws, { type: 'error', message: 'That quick reply is not available.' });
+        return;
+      }
+      const markdown = quickReply ?? event.markdown.trim();
       if (!markdown || markdown.length > MAX_MARKDOWN_LENGTH) {
         send(ws, { type: 'error', message: 'Messages must be between 1 and 20,000 characters.' });
         return;
@@ -432,12 +444,13 @@ export class ChatRoom extends DurableObject<Env> {
         avatar_rotation: user.avatarRotation,
         glowing: 0,
         parent_id: parentId,
+        quick_reply: quickReply,
         mentions_json: JSON.stringify(mentions),
       };
       this.ctx.storage.sql.exec(
         `INSERT INTO chat_messages
-         (id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, parent_id, mentions_json)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+         (id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, parent_id, quick_reply, mentions_json)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
         row.id,
         row.username,
         row.markdown,
@@ -446,6 +459,7 @@ export class ChatRoom extends DurableObject<Env> {
         row.avatar_seed,
         row.avatar_rotation,
         row.parent_id,
+        row.quick_reply ?? null,
         row.mentions_json,
       );
       await this.sharePrivateStickers(row.id, row.markdown, user.username);
@@ -531,7 +545,7 @@ export class ChatRoom extends DurableObject<Env> {
       if (!/^[0-9a-f-]{36}$/i.test(parentId)) return;
       const parent = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT id, username, markdown, created_at, updated_at, source_id,
-                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id,
+                avatar_seed, avatar_rotation, glowing, parent_id, quick_reply, mentions_json, content_type, poll_id,
                 (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = chat_messages.id) AS thread_count
          FROM chat_messages WHERE id = ? AND parent_id IS NULL`,
         parentId,
@@ -539,7 +553,7 @@ export class ChatRoom extends DurableObject<Env> {
       if (!parent) return;
       const replies = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
         `SELECT id, username, markdown, created_at, updated_at, source_id,
-                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json, content_type, poll_id,
+                avatar_seed, avatar_rotation, glowing, parent_id, quick_reply, mentions_json, content_type, poll_id,
                 0 AS thread_count
          FROM chat_messages WHERE parent_id = ? ORDER BY created_at, id`,
         parentId,
@@ -878,10 +892,30 @@ export class ChatRoom extends DurableObject<Env> {
     const hasOlder = rows.length > HISTORY_PAGE_SIZE;
     const pageRows = rows.slice(0, HISTORY_PAGE_SIZE);
     const oldest = pageRows.at(-1);
+    const parentIds = pageRows.map((row) => row.id);
+    const quickRepliesByParent = new Map<string, Array<{ id: string; username: string; quickReply: string }>>();
+    if (parentIds.length) {
+      const quickReplyRows = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT id, username, parent_id, quick_reply
+         FROM chat_messages WHERE quick_reply IS NOT NULL AND parent_id IN (${parentIds.map(() => '?').join(', ')})
+         ORDER BY created_at, id`,
+        ...parentIds,
+      ).toArray();
+      for (const reply of quickReplyRows) {
+        if (!reply.parent_id || !reply.quick_reply) continue;
+        const collection = quickRepliesByParent.get(reply.parent_id) ?? [];
+        collection.push({ id: reply.id, username: reply.username, quickReply: reply.quick_reply });
+        quickRepliesByParent.set(reply.parent_id, collection);
+      }
+    }
     const messages = pageRows.reverse().map((row) => {
       const message = presentMessage(row);
       const poll = row.poll_id ? this.getPollSnapshot(row.poll_id, username) : null;
-      return poll ? { ...message, poll } : message;
+      return {
+        ...message,
+        quickReplies: quickRepliesByParent.get(row.id) ?? [],
+        ...(poll ? { poll } : {}),
+      };
     });
     return {
       messages,

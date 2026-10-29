@@ -351,6 +351,133 @@ async function uploadDriveFile(request: Request, env: Env, username: string): Pr
   }, 201);
 }
 
+async function saveDriveFileToPersonal(
+  request: Request,
+  env: Env,
+  username: string,
+  id: string,
+): Promise<Response> {
+  if (!DOCUMENT_ID_RE.test(id)) return collabJson({ error: 'File not found.' }, 404);
+  const payload = await readPayload(request);
+  const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+  if (roomId && (
+    !isValidChatRoomId(roomId) ||
+    !await isChatRoomMember(env, username, roomId)
+  )) {
+    return collabJson({ error: 'You do not have access to this conversation.' }, 403);
+  }
+  const file = await env.DB.prepare(
+    `SELECT id, name, mime_type, size_bytes, scope, owner, object_key, text_index
+     FROM collab_drive_files WHERE id = ?`,
+  ).bind(id).first<{
+    id: string;
+    name: string;
+    mime_type: string;
+    size_bytes: number;
+    scope: string;
+    owner: string;
+    object_key: string;
+    text_index: string;
+  }>();
+  if (!file) return collabJson({ error: 'File not found.' }, 404);
+  if (file.scope === 'personal' && file.owner.toLowerCase() === username.toLowerCase()) {
+    return collabJson({ ok: true, alreadyInPersonalDrive: true });
+  }
+  if (file.scope === 'personal') {
+    if (!roomId) return collabJson({ error: 'File not found.' }, 404);
+    const share = await env.DB.prepare(
+      'SELECT 1 AS found FROM collab_drive_file_shares WHERE file_id = ? AND room_id = ?',
+    ).bind(id, roomId).first<{ found: number }>();
+    if (!share) return collabJson({ error: 'File not found.' }, 404);
+  }
+  const source = await env.CHAT_MEDIA_BUCKET.get(file.object_key);
+  if (!source) return collabJson({ error: 'File content is unavailable.' }, 404);
+
+  const now = Date.now();
+  await env.DB.prepare(
+    'DELETE FROM collab_drive_upload_reservations WHERE username = ? COLLATE NOCASE AND created_at < ?',
+  ).bind(username, now - DRIVE_RESERVATION_MAX_AGE).run();
+  const reservationId = crypto.randomUUID();
+  const reservation = await env.DB.prepare(`
+    INSERT INTO collab_drive_upload_reservations (id, username, size_bytes, created_at)
+    SELECT ?, ?, ?, ?
+    WHERE COALESCE((SELECT SUM(size_bytes) FROM collab_drive_files
+      WHERE scope = 'personal' AND owner = ? COLLATE NOCASE), 0)
+      + COALESCE((SELECT SUM(size_bytes) FROM collab_drive_upload_reservations
+        WHERE username = ? COLLATE NOCASE), 0) + ? <= ?
+  `).bind(
+    reservationId,
+    username,
+    file.size_bytes,
+    now,
+    username,
+    username,
+    file.size_bytes,
+    MAX_PERSONAL_DRIVE_BYTES,
+  ).run();
+  if (!reservation.meta.changes) {
+    return collabJson({ error: 'Your Personal Drive is full. The total storage limit is 100 MB.' }, 413);
+  }
+
+  const copyId = crypto.randomUUID();
+  const objectKey = `team-drive/personal/${encodeURIComponent(username)}/${copyId}`;
+  try {
+    await env.CHAT_MEDIA_BUCKET.put(objectKey, source.body, {
+      httpMetadata: {
+        contentType: file.mime_type || 'application/octet-stream',
+        cacheControl: 'private, max-age=300',
+      },
+      customMetadata: {
+        owner: username,
+        scope: 'personal',
+        originalName: file.name,
+        copiedFrom: file.id,
+      },
+    });
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO collab_drive_files
+        (id, name, mime_type, size_bytes, scope, owner, folder_id, object_key, text_index, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'personal', ?, NULL, ?, ?, ?, ?)
+      `).bind(
+        copyId,
+        file.name,
+        file.mime_type,
+        file.size_bytes,
+        username,
+        objectKey,
+        file.text_index,
+        now,
+        now,
+      ),
+      env.DB.prepare('DELETE FROM collab_drive_upload_reservations WHERE id = ?').bind(reservationId),
+    ]);
+  } catch (error) {
+    await env.CHAT_MEDIA_BUCKET.delete(objectKey).catch(() => undefined);
+    await env.DB.prepare('DELETE FROM collab_drive_upload_reservations WHERE id = ?')
+      .bind(reservationId)
+      .run()
+      .catch(() => undefined);
+    console.error(JSON.stringify({ event: 'collab_drive_copy_failed', error: String(error) }));
+    return collabJson({ error: 'Could not save this file to Personal Drive.' }, 500);
+  }
+  return collabJson({
+    ok: true,
+    alreadyInPersonalDrive: false,
+    file: {
+      id: copyId,
+      name: file.name,
+      mime_type: file.mime_type,
+      size_bytes: file.size_bytes,
+      scope: 'personal',
+      owner: username,
+      folder_id: null,
+      created_at: now,
+      updated_at: now,
+    },
+  }, 201);
+}
+
 async function driveFileRoute(
   request: Request,
   env: Env,
@@ -788,17 +915,20 @@ export async function handleCollabApi(request: Request, env: Env, username: stri
   if (url.pathname === '/api/collab/drive/folders' && request.method === 'POST') {
     return createDriveFolder(request, env, username);
   }
-  const driveFileMatch = /^\/api\/collab\/drive\/files\/([^/]+)(?:\/(download|share))?$/.exec(url.pathname);
+  const driveFileMatch = /^\/api\/collab\/drive\/files\/([^/]+)(?:\/(download|share|save-personal))?$/.exec(url.pathname);
   if (driveFileMatch && driveFileMatch[2] === 'share' && request.method === 'POST') {
     return shareDriveFileWithChat(request, env, username, driveFileMatch[1]);
+  }
+  if (driveFileMatch && driveFileMatch[2] === 'save-personal' && request.method === 'POST') {
+    return saveDriveFileToPersonal(request, env, username, driveFileMatch[1]);
   }
   if (driveFileMatch && !driveFileMatch[2] && request.method === 'PATCH') {
     return updateDriveFile(request, env, username, driveFileMatch[1]);
   }
-  if (driveFileMatch && request.method === 'GET') {
+  if (driveFileMatch && (!driveFileMatch[2] || driveFileMatch[2] === 'download') && request.method === 'GET') {
     return driveFileRoute(request, env, username, driveFileMatch[1], 'download');
   }
-  if (driveFileMatch && request.method === 'DELETE') {
+  if (driveFileMatch && !driveFileMatch[2] && request.method === 'DELETE') {
     return driveFileRoute(request, env, username, driveFileMatch[1], 'delete');
   }
   const driveFolderMatch = /^\/api\/collab\/drive\/folders\/([^/]+)$/.exec(url.pathname);

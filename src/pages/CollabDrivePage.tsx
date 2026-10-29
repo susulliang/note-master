@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import { toast } from 'sonner';
 import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
+import DriveMediaPreviewDialog from '@/components/DriveMediaPreviewDialog';
 import {
   chatSocketUrl,
   createCollabDriveFolder,
@@ -90,7 +91,21 @@ function fileGlyph(file: CollabDriveFile) {
   return File;
 }
 
-function DriveFilePreview({ file, cacheKey }: { file: CollabDriveFile; cacheKey: string }) {
+function isPreviewableDriveFile(file: CollabDriveFile): boolean {
+  return /^(image|audio|video)\//i.test(file.mime_type)
+    || file.mime_type.toLowerCase() === 'application/pdf'
+    || /\.pdf$/i.test(file.name);
+}
+
+function DriveFilePreview({
+  file,
+  cacheKey,
+  onOpenPreview,
+}: {
+  file: CollabDriveFile;
+  cacheKey: string;
+  onOpenPreview: () => void;
+}) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -149,11 +164,24 @@ function DriveFilePreview({ file, cacheKey }: { file: CollabDriveFile; cacheKey:
     };
   }, [cacheKey, file.id, file.mime_type, visible]);
 
+  const content = previewUrl
+    ? <img src={previewUrl} alt="" loading="lazy" />
+    : <Icon className="collab-drive-preview-icon" />;
   return (
-    <div ref={previewRef} className="collab-drive-preview" aria-label={file.name}>
-      {previewUrl
-        ? <img src={previewUrl} alt="" loading="lazy" />
-        : <Icon className="collab-drive-preview-icon" />}
+    <div ref={previewRef} className="collab-drive-preview">
+      {isPreviewableDriveFile(file)
+        ? (
+          <button
+            type="button"
+            className="collab-drive-preview-trigger"
+            aria-label={`Preview ${file.name}`}
+            title={`Preview ${file.name}`}
+            onClick={onOpenPreview}
+          >
+            {content}
+          </button>
+        )
+        : content}
     </div>
   );
 }
@@ -175,7 +203,8 @@ export default function CollabDrivePage({
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [savingFolder, setSavingFolder] = useState(false);
   const [folderName, setFolderName] = useState('');
-  const [layout, setLayout] = useState<'list' | 'grid'>('list');
+  const [layout, setLayout] = useState<'list' | 'grid'>('grid');
+  const [previewFile, setPreviewFile] = useState<CollabDriveFile | null>(null);
   const [contextMenu, setContextMenu] = useState<DriveContextMenuState | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<DriveRenameTarget | null>(null);
@@ -590,7 +619,7 @@ export default function CollabDrivePage({
         {!loading && folders.map((folder) => (
           <div
             key={folder.id}
-            className={`collab-drive-item collab-drive-folder ${dropFolderId === folder.id ? 'is-drop-target' : ''}`}
+            className={`collab-drive-item collab-drive-folder ${layout === 'grid' ? 'is-column-item' : ''} ${dropFolderId === folder.id ? 'is-drop-target' : ''}`}
             role="button"
             tabIndex={0}
             onClick={() => openFolder(folder)}
@@ -614,7 +643,7 @@ export default function CollabDrivePage({
             }}
             onDrop={(event) => handleFolderDrop(event, folder)}
           >
-            <span className="collab-drive-file-icon is-folder"><Folder className="size-5" /></span>
+            <span className="collab-drive-file-icon is-folder"><Folder className="size-9" /></span>
             <span className="collab-drive-file-name">
               {renameTarget?.kind === 'folder' && renameTarget.id === folder.id ? (
                 <input
@@ -647,7 +676,7 @@ export default function CollabDrivePage({
               ) : <strong title={folder.name}>{folder.name}</strong>}
               <small>Folder · {folder.owner}</small>
             </span>
-            <ChevronRight className="size-4 text-muted-foreground" />
+            <ChevronRight className="collab-drive-folder-chevron size-4 text-muted-foreground" />
           </div>
         ))}
         {!loading && visibleFiles.map((file) => {
@@ -666,7 +695,11 @@ export default function CollabDrivePage({
               }}
               onContextMenu={(event) => showContextMenu(event, { kind: 'file', file })}
             >
-              <DriveFilePreview file={file} cacheKey={previewCacheKey} />
+              <DriveFilePreview
+                file={file}
+                cacheKey={previewCacheKey}
+                onOpenPreview={() => setPreviewFile(file)}
+              />
               <span className="collab-drive-file-name">
                 {renameTarget?.kind === 'file' && renameTarget.id === file.id ? (
                   <input
@@ -695,6 +728,15 @@ export default function CollabDrivePage({
                       }
                     }}
                   />
+                ) : isPreviewableDriveFile(file) ? (
+                  <button
+                    type="button"
+                    className="collab-drive-preview-name"
+                    title={file.name}
+                    onClick={() => setPreviewFile(file)}
+                  >
+                    {file.name}
+                  </button>
                 ) : <strong title={file.name}>{file.name}</strong>}
                 <small>{formatBytes(file.size_bytes)} · {new Date(file.updated_at).toLocaleDateString()}</small>
               </span>
@@ -707,6 +749,15 @@ export default function CollabDrivePage({
           </div>
         )}
       </div>
+      <DriveMediaPreviewDialog
+        open={previewFile !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewFile(null);
+        }}
+        fileId={previewFile?.id}
+        fileName={previewFile?.name ?? ''}
+        mimeType={previewFile?.mime_type ?? ''}
+      />
       {contextMenu && (
         <div
           data-drive-context-menu

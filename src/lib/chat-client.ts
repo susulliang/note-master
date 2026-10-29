@@ -11,6 +11,12 @@ export interface ChatMessage {
   glowing?: boolean;
   parentId?: string | null;
   threadCount?: number;
+  quickReply?: string | null;
+  quickReplies?: Array<{
+    id: string;
+    username: string;
+    quickReply: string;
+  }>;
   mentions?: string[];
   contentType?: 'markdown' | 'poll' | 'poll_result';
   pollId?: string | null;
@@ -274,6 +280,21 @@ export async function shareCollabDriveFileWithChat(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ roomId }),
   });
+}
+
+export async function saveCollabDriveFileToPersonal(
+  id: string,
+  roomId: string,
+): Promise<{ alreadyInPersonalDrive: boolean }> {
+  const result = await requestJson<{ alreadyInPersonalDrive?: boolean }>(
+    `/api/collab/drive/files/${encodeURIComponent(id)}/save-personal`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roomId }),
+    },
+  );
+  return { alreadyInPersonalDrive: result.alreadyInPersonalDrive === true };
 }
 
 export async function downloadCollabDriveFile(id: string, fileName: string, roomId?: string): Promise<void> {
