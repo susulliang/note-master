@@ -116,6 +116,7 @@ import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
 import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/components/FlowchartCanvas';
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import { useAuth } from '@/lib/auth-context';
+import { searchCollab, type CollabSearchResult } from '@/lib/chat-client';
 import {
   getStoredToken,
   saveGeneratedTicketNote,
@@ -983,6 +984,14 @@ export default function TicketNotesPage() {
   }, [location.pathname, navigate]);
   const [notificationRoomId, setNotificationRoomId] = useState<string | null>(null);
   const openChatNotification = useCallback((roomId: string) => {
+    if (roomId.startsWith('collab-task:')) {
+      navigate(`/collab?type=tasks&task=${encodeURIComponent(roomId.slice('collab-task:'.length))}`);
+      return;
+    }
+    if (roomId.startsWith('collab-drive:')) {
+      navigate(`/collab?type=drive&file=${encodeURIComponent(roomId.slice('collab-drive:'.length))}`);
+      return;
+    }
     setNotificationRoomId(roomId);
     navigateToView('chat');
   }, [navigateToView]);
@@ -999,6 +1008,12 @@ export default function TicketNotesPage() {
   const [kittyHelpOpen, setKittyHelpOpen] = useState(false);
   const [kittySpotlightOpen, setKittySpotlightOpen] = useState(false);
   const [kittySpotlightQuery, setKittySpotlightQuery] = useState('');
+  const [kittySearchState, setKittySearchState] = useState<{
+    query: string;
+    results: CollabSearchResult[];
+    loading: boolean;
+    error: string;
+  } | null>(null);
   const [kittyInitialQuestion, setKittyInitialQuestion] = useState('');
   const [autoAskOnOpen, setAutoAskOnOpen] = useState(false);
   const [kittyModel, setKittyModel] = useState<AskModel>(readStoredAskModel);
@@ -1006,20 +1021,59 @@ export default function TicketNotesPage() {
   const openKittyHelp = useCallback(() => {
     setKittySpotlightQuery('');
     setKittyInitialQuestion('');
+    setKittySearchState(null);
     setAutoAskOnOpen(false);
     setKittySpotlightOpen(true);
   }, []);
   const submitKittySpotlight = useCallback(() => {
     const question = kittySpotlightQuery.trim();
     setKittyInitialQuestion(question);
+    setKittySearchState(null);
     setAutoAskOnOpen(Boolean(question));
     setKittySpotlightOpen(false);
     setKittyHelpOpen(true);
+  }, [kittySpotlightQuery]);
+  const searchFromKittySpotlight = useCallback(async () => {
+    const query = kittySpotlightQuery.trim();
+    if (!query) return;
+    setKittySpotlightOpen(false);
+    setKittyHelpOpen(true);
+    setKittyInitialQuestion('');
+    setAutoAskOnOpen(false);
+    setKittySearchState({ query, results: [], loading: true, error: '' });
+    try {
+      const results = await searchCollab(query);
+      setKittySearchState({ query, results, loading: false, error: '' });
+    } catch (error) {
+      setKittySearchState({
+        query,
+        results: [],
+        loading: false,
+        error: error instanceof Error ? error.message : 'Search failed.',
+      });
+    }
   }, [kittySpotlightQuery]);
   const closeKittySpotlight = useCallback(() => {
     setKittySpotlightOpen(false);
     setKittySpotlightQuery('');
   }, []);
+  const openKittySearchResult = useCallback((result: CollabSearchResult) => {
+    setKittyHelpOpen(false);
+    if (result.type === 'message' && result.roomId) {
+      setNotificationRoomId(result.roomId);
+      navigateToView('chat');
+      return;
+    }
+    if (result.target) {
+      navigate(result.target);
+      return;
+    }
+    const type = result.type.startsWith('mindmap') ? 'mindmap'
+      : result.type === 'task' ? 'tasks'
+        : result.type === 'file' ? 'drive'
+          : 'sheet';
+    navigate(`/collab?type=${type}`);
+  }, [navigate, navigateToView]);
   const consumeAutoAsk = useCallback(() => setAutoAskOnOpen(false), []);
   const changeKittyModel = useCallback((model: AskModel) => {
     setKittyModel(model);
@@ -3240,6 +3294,16 @@ Additional information (if needed): ${additional}`;
             </button>
             <button
               type="button"
+              className="quiet-kitty-spotlight-search"
+              aria-label="Search messages and shared work"
+              title="Search messages and shared work"
+              disabled={!kittySpotlightQuery.trim()}
+              onClick={() => void searchFromKittySpotlight()}
+            >
+              <Search className="size-4" />
+            </button>
+            <button
+              type="button"
               onClick={closeKittySpotlight}
               className="quiet-kitty-spotlight-close"
               aria-label="Close Ask Kitty search"
@@ -3259,6 +3323,7 @@ Additional information (if needed): ${additional}`;
             onClose={() => {
               setKittyHelpOpen(false);
               setKittyInitialQuestion('');
+              setKittySearchState(null);
             }}
             model={kittyModel}
             onModelChange={changeKittyModel}
@@ -3272,6 +3337,8 @@ Additional information (if needed): ${additional}`;
             result={kitty.result}
             onResolve={(question, runId, onStream) => { void kitty.start(question, runId, onStream); }}
             initialQuestion={kittyInitialQuestion}
+            externalSearch={kittySearchState}
+            onOpenSearchResult={openKittySearchResult}
             autoAskOnOpen={autoAskOnOpen}
             onAutoAskConsumed={consumeAutoAsk}
             askEvidence={kittyAskEvidence}

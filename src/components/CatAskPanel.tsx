@@ -12,6 +12,7 @@ import {
   type AskModel,
 } from '@shared/ask-models';
 import { readStoredAskModel, storeAskModel } from '@/lib/ask-model-preferences';
+import type { CollabSearchResult } from '@/lib/chat-client';
 
 const CONVERSATION_STORAGE_PREFIX = '__app_shiftc_ask_conversation_v1:';
 const EMPTY_ANSWER_NOTICE =
@@ -204,6 +205,8 @@ export function CatAskPanel({
   initialQuestion = '',
   autoAskOnMount = false,
   onAutoAskConsumed,
+  externalSearch,
+  onOpenSearchResult,
 }: {
   onClose: () => void;
   notes: string;
@@ -228,6 +231,13 @@ export function CatAskPanel({
   initialQuestion?: string;
   autoAskOnMount?: boolean;
   onAutoAskConsumed?: () => void;
+  externalSearch: {
+    query: string;
+    results: CollabSearchResult[];
+    loading: boolean;
+    error: string;
+  } | null;
+  onOpenSearchResult: (result: CollabSearchResult) => void;
 }) {
   const storageKey = conversationStorageKey(agentName);
   const [conversation, setConversation] = useState<AskTurn[]>(() => readConversation(storageKey));
@@ -620,6 +630,53 @@ export function CatAskPanel({
               </div>
             </article>
           ))}
+          {externalSearch && (
+            <section className="space-y-3 rounded-xl border border-accent/20 bg-accent/[0.035] p-3 sm:p-4" aria-live="polite">
+              <header className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-accent">Workspace search</p>
+                  <p className="mt-1 truncate text-sm font-medium text-foreground">“{externalSearch.query}”</p>
+                </div>
+                {!externalSearch.loading && !externalSearch.error && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {externalSearch.results.length} result{externalSearch.results.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              </header>
+              {externalSearch.loading && (
+                <p className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                  <span className="size-2 animate-pulse rounded-full bg-accent" /> Searching chats and shared work…
+                </p>
+              )}
+              {externalSearch.error && <p role="alert" className="text-xs text-destructive">{externalSearch.error}</p>}
+              {!externalSearch.loading && !externalSearch.error && externalSearch.results.length === 0 && (
+                <p className="py-2 text-xs text-muted-foreground">No matches found in your chats or shared work.</p>
+              )}
+              <div className="grid gap-2">
+                {externalSearch.results.map((result) => (
+                  <button
+                    key={`${result.type}:${result.id}`}
+                    type="button"
+                    onClick={() => onOpenSearchResult(result)}
+                    className="rounded-lg border border-border/70 bg-card/65 px-3 py-2.5 text-left transition hover:border-accent/35 hover:bg-accent/[0.055] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      <strong className="min-w-0 truncate text-xs font-semibold text-foreground">{result.title}</strong>
+                      <span className="shrink-0 rounded-full border border-accent/20 bg-accent/5 px-1.5 py-0.5 text-[9px] capitalize text-accent">
+                        {result.type.replace('-', ' ')}
+                      </span>
+                    </span>
+                    <span className="mt-1.5 block line-clamp-3 whitespace-pre-wrap break-words text-[10px] leading-relaxed text-muted-foreground">
+                      {result.excerpt}
+                    </span>
+                    <span className="mt-1.5 block text-[9px] text-muted-foreground/75">
+                      {new Date(result.updatedAt).toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           {error && !conversation.some((turn) => turn.error === error) && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
 

@@ -6,9 +6,16 @@ import {
   Check,
   ClipboardPaste,
   Copy,
+  Download,
+  File as FileIcon,
+  FileAudio2,
+  FileImage,
+  FileText,
+  FileVideo2,
   Forward,
   Group,
   Globe2,
+  FolderOpen,
   ImagePlus,
   Italic,
   Link2,
@@ -60,6 +67,9 @@ import {
   fetchChatConversations,
   fetchChatProfile,
   fetchChatStickers,
+  listCollabDrive,
+  shareCollabDriveFileWithChat,
+  downloadCollabDriveFile,
   findChatUsers,
   createChatGroup,
   requestChatTicket,
@@ -78,6 +88,7 @@ import {
   type ChatSocketTicket,
   type ChatSticker,
   type ChatUser,
+  type CollabDriveFile,
   type CollabDocument,
   type PinnedCollabDocument,
 } from '@/lib/chat-client';
@@ -95,6 +106,7 @@ const CHAT_PINNED_PANE_WIDTH_KEY = 'econote_chat_pinned_pane_width';
 const MIN_CHAT_PINNED_PANE_WIDTH = 35;
 const MAX_CHAT_PINNED_PANE_WIDTH = 65;
 const CHAT_LIST_PREFS_KEY = 'econote_chat_list_preferences';
+const CHAT_MESSAGE_DENSITY_KEY = 'econote_chat_message_density';
 const COMPOSER_HEIGHT_KEY = 'econote_chat_composer_height';
 const MIN_COMPOSER_HEIGHT = 120;
 const MAX_COMPOSER_HEIGHT = 360;
@@ -236,6 +248,16 @@ function readChatListPreferences(username: string): ChatListPreferences {
   }
 }
 
+function readChatMessageDensity(username: string): 'compact' | 'comfortable' {
+  try {
+    return window.localStorage.getItem(`${CHAT_MESSAGE_DENSITY_KEY}:${username.toLowerCase()}`) === 'compact'
+      ? 'compact'
+      : 'comfortable';
+  } catch {
+    return 'comfortable';
+  }
+}
+
 function readComposerHeight(): number {
   try {
     const stored = Number(window.localStorage.getItem(COMPOSER_HEIGHT_KEY));
@@ -281,6 +303,86 @@ function remarkUnderline() {
 }
 
 const MARKDOWN_PLUGINS = [remarkGfm, remarkUnderline];
+
+function formatDriveFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function chatDriveFileGlyph(file: CollabDriveFile) {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (file.mime_type.startsWith('image/')) return FileImage;
+  if (file.mime_type.startsWith('audio/')) return FileAudio2;
+  if (file.mime_type.startsWith('video/')) return FileVideo2;
+  if (['xls', 'xlsx', 'csv', 'tsv'].includes(extension ?? '')) return FileSpreadsheet;
+  if (['doc', 'docx', 'ppt', 'pptx', 'pdf', 'txt', 'md', 'markdown'].includes(extension ?? '')) return FileText;
+  return FileIcon;
+}
+
+function DriveChatAttachment({ href, children }: { href: string; children: React.ReactNode }) {
+  const parsed = new URL(href, window.location.origin);
+  const match = /\/api\/collab\/drive\/files\/([0-9a-f-]+)\/download$/i.exec(parsed.pathname);
+  const fileId = match?.[1] ?? '';
+  const roomId = parsed.searchParams.get('roomId') ?? '';
+  const fileName = parsed.searchParams.get('name') ?? 'Shared file';
+  const mimeType = parsed.searchParams.get('mime') ?? '';
+  const isMedia = /^(image|audio|video)\//i.test(mimeType);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState(false);
+
+  useEffect(() => {
+    if (!isMedia) return undefined;
+    let active = true;
+    let objectUrl: string | null = null;
+    setMediaError(false);
+    fetch(authorizedChatMediaUrl(href), { headers: chatAuthHeaders() })
+      .then((response) => {
+        if (!response.ok) throw new Error('File unavailable');
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setMediaUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setMediaError(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setMediaUrl(null);
+    };
+  }, [href, isMedia]);
+
+  if (isMedia) {
+    if (mediaError) return <span className="text-xs text-muted-foreground">Shared media is unavailable.</span>;
+    if (!mediaUrl) return <span className="my-2 inline-flex h-16 w-40 items-center justify-center rounded-xl bg-muted/60 text-xs text-muted-foreground">Loading media…</span>;
+    if (mimeType.startsWith('image/')) {
+      return <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />;
+    }
+    if (mimeType.startsWith('video/')) {
+      return <video src={mediaUrl} controls preload="metadata" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />;
+    }
+    return <audio src={mediaUrl} controls preload="metadata" className="my-2 max-w-full" />;
+  }
+
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        void downloadCollabDriveFile(fileId, fileName, roomId)
+          .catch((error: unknown) => toast.error(error instanceof Error ? error.message : 'Download failed.'));
+      }}
+      className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border/70 bg-card/70 px-2.5 py-2 text-xs text-accent no-underline hover:bg-muted/70"
+    >
+      <FileIcon className="size-4 shrink-0" />
+      <span className="truncate">{children || fileName}</span>
+      <Download className="size-3.5 shrink-0 opacity-65" />
+    </a>
+  );
+}
 
 function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
   const isPrivateChatMedia = typeof src === 'string' && /^\/api\/chat\/(media|stickers\/(public|private))\//.test(src);
@@ -343,11 +445,12 @@ function MarkdownBody({ markdown }: { markdown: string }) {
         remarkPlugins={MARKDOWN_PLUGINS}
         components={{
           img: SecureChatImage,
-          a: ({ href, children, ...props }) => (
-            <a {...props} href={href} target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
+          a: ({ href, children, ...props }) => {
+            if (typeof href === 'string' && /^\/api\/collab\/drive\/files\/[0-9a-f-]+\/download(?:\?|$)/i.test(href)) {
+              return <DriveChatAttachment href={href}>{children}</DriveChatAttachment>;
+            }
+            return <a {...props} href={href} target="_blank" rel="noreferrer">{children}</a>;
+          },
         }}
       >
         {markdown}
@@ -675,11 +778,20 @@ export default function ChatPage({
   const [stickers, setStickers] = useState<ChatSticker[]>([]);
   const [stickerName, setStickerName] = useState('');
   const [uploadingSticker, setUploadingSticker] = useState(false);
+  const [drivePickerOpen, setDrivePickerOpen] = useState(false);
+  const [drivePickerScope, setDrivePickerScope] = useState<'team' | 'personal'>('team');
+  const [drivePickerFiles, setDrivePickerFiles] = useState<CollabDriveFile[]>([]);
+  const [drivePickerQuery, setDrivePickerQuery] = useState('');
+  const [drivePickerLoading, setDrivePickerLoading] = useState(false);
+  const [sharingDriveFileId, setSharingDriveFileId] = useState<string | null>(null);
   const [photoDropActive, setPhotoDropActive] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
   const [chatListPreferences, setChatListPreferences] = useState<ChatListPreferences>(
     () => readChatListPreferences(username),
+  );
+  const [messageDensity, setMessageDensity] = useState<'compact' | 'comfortable'>(
+    () => readChatMessageDensity(username),
   );
   const [archivedExpanded, setArchivedExpanded] = useState(false);
   const [composerHeight, setComposerHeight] = useState(readComposerHeight);
@@ -693,6 +805,14 @@ export default function ChatPage({
   const [permissionUsers, setPermissionUsers] = useState<ChatUser[]>([]);
   const [loadingPin, setLoadingPin] = useState(false);
   const [savingPin, setSavingPin] = useState(false);
+  const [threadParent, setThreadParent] = useState<ChatMessage | null>(null);
+  const [threadMessages, setThreadMessages] = useState<ChatMessage[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const threadParentIdRef = useRef<string | null>(null);
+  const messageDensityOwnerRef = useRef(username.toLowerCase());
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
+  const [mentionSearching, setMentionSearching] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingTicketRef = useRef<ChatSocketTicket | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -734,6 +854,10 @@ export default function ChatPage({
     setMessageContextMenu(null);
     setConversationContextMenu(null);
     setShakeMessage(null);
+    setThreadParent(null);
+    setThreadMessages([]);
+    setThreadLoading(false);
+    threadParentIdRef.current = null;
     setChatListPreferences((current) => current.archivedRoomIds.includes(room.roomId)
       ? { ...current, archivedRoomIds: current.archivedRoomIds.filter((id) => id !== room.roomId) }
       : current);
@@ -818,6 +942,20 @@ export default function ChatPage({
       /* Keep chat-list controls usable when storage is unavailable. */
     }
   }, [chatListPreferences, username]);
+
+  useEffect(() => {
+    const owner = username.toLowerCase();
+    if (messageDensityOwnerRef.current !== owner) {
+      messageDensityOwnerRef.current = owner;
+      setMessageDensity(readChatMessageDensity(username));
+      return;
+    }
+    try {
+      window.localStorage.setItem(`${CHAT_MESSAGE_DENSITY_KEY}:${owner}`, messageDensity);
+    } catch {
+      /* Keep the message density control usable if storage is unavailable. */
+    }
+  }, [messageDensity, username]);
 
   useEffect(() => {
     if (!conversationContextMenu) return undefined;
@@ -977,6 +1115,55 @@ export default function ChatPage({
     hydrateEditorImages(editor, (url) => editorObjectUrlsRef.current.push(url));
   }, []);
 
+  const loadDrivePickerFiles = useCallback(async (scope: 'team' | 'personal') => {
+    setDrivePickerLoading(true);
+    try {
+      const directory = await listCollabDrive(scope, null, {
+        allFiles: true,
+        chatRoomId: activeRoom.roomId,
+      });
+      setDrivePickerFiles(directory.files);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load Drive files.');
+    } finally {
+      setDrivePickerLoading(false);
+    }
+  }, [activeRoom.roomId]);
+
+  const addDriveFileToDraft = useCallback(async (file: CollabDriveFile) => {
+    if (sharingDriveFileId) return;
+    setSharingDriveFileId(file.id);
+    try {
+      const { downloadUrl } = await shareCollabDriveFileWithChat(file.id, activeRoom.roomId);
+      const current = draftRef.current;
+      const attachment = `[${escapeMarkdownText(file.name)}](${downloadUrl})`;
+      const next = `${current}${current.trim() ? '\n\n' : ''}${attachment}`;
+      if (next.length > 20_000) throw new Error('Messages are limited to 20,000 characters.');
+      setComposerMarkdown(next);
+      setDrivePickerOpen(false);
+      setDrivePickerQuery('');
+      requestAnimationFrame(() => editorRef.current?.focus());
+      toast.success('Drive link added to the message.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not share this Drive file.');
+    } finally {
+      setSharingDriveFileId(null);
+    }
+  }, [activeRoom.roomId, setComposerMarkdown, sharingDriveFileId]);
+
+  const visibleDrivePickerFiles = useMemo(() => {
+    const query = drivePickerQuery.trim().toLocaleLowerCase();
+    return query
+      ? drivePickerFiles.filter((file) => file.name.toLocaleLowerCase().includes(query))
+      : drivePickerFiles;
+  }, [drivePickerFiles, drivePickerQuery]);
+
+  useEffect(() => {
+    setDrivePickerOpen(false);
+    setDrivePickerFiles([]);
+    setDrivePickerQuery('');
+  }, [activeRoom.roomId]);
+
   const syncComposerMarkdown = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -988,6 +1175,8 @@ export default function ChatPage({
     }
     draftRef.current = markdown;
     setHasDraft(Boolean(markdown.trim()));
+    const mentionMatch = /(?:^|\s)@([A-Za-z0-9_.-]*)$/.exec(markdown);
+    setMentionQuery(mentionMatch ? mentionMatch[1] : null);
   }, [setComposerMarkdown]);
 
   const focusComposerAtEnd = useCallback(() => {
@@ -1022,6 +1211,15 @@ export default function ChatPage({
     setComposerMarkdown(next.slice(0, 20_000));
     focusComposerAtEnd();
   }, [focusComposerAtEnd, setComposerMarkdown, syncComposerMarkdown]);
+
+  const insertMention = useCallback((person: ChatUser) => {
+    const current = draftRef.current;
+    const next = current.replace(/(^|\s)@[\w.-]*$/, (_match, prefix: string) => `${prefix}@${person.username} `);
+    setComposerMarkdown(next);
+    setMentionQuery(null);
+    setMentionUsers([]);
+    focusComposerAtEnd();
+  }, [focusComposerAtEnd, setComposerMarkdown]);
 
   useEffect(() => () => {
     editorObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -1146,6 +1344,26 @@ export default function ChatPage({
       window.clearTimeout(timer);
     };
   }, [newChatOpen, userQuery]);
+
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionUsers([]);
+      setMentionSearching(false);
+      return;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      setMentionSearching(true);
+      void findChatUsers(mentionQuery)
+        .then((users) => { if (alive) setMentionUsers(users); })
+        .catch(() => { if (alive) setMentionUsers([]); })
+        .finally(() => { if (alive) setMentionSearching(false); });
+    }, mentionQuery ? 160 : 0);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [mentionQuery]);
 
   useEffect(() => {
     let stopped = false;
@@ -1289,6 +1507,32 @@ export default function ChatPage({
             void refreshPinnedDocument();
             return;
           }
+          if (
+            payload.type === 'thread:messages' &&
+            payload.parent &&
+            typeof payload.parent === 'object' &&
+            Array.isArray(payload.messages) &&
+            (payload.parent as ChatMessage).id === threadParentIdRef.current
+          ) {
+            const parent = payload.parent as ChatMessage;
+            setThreadParent(parent);
+            setThreadMessages(payload.messages as ChatMessage[]);
+            setThreadLoading(false);
+            setMessages((current) => current.map((message) => message.id === parent.id
+              ? { ...message, threadCount: parent.threadCount }
+              : message));
+            return;
+          }
+          if (payload.type === 'thread:count' && typeof payload.parentId === 'string') {
+            const count = Number(payload.count) || 0;
+            setMessages((current) => current.map((message) => message.id === payload.parentId
+              ? { ...message, threadCount: count }
+              : message));
+            setThreadParent((current) => current?.id === payload.parentId
+              ? { ...current, threadCount: count }
+              : current);
+            return;
+          }
           if (payload.type === 'history:older' && Array.isArray(payload.messages)) {
             const beforeHeight = messageListRef.current?.scrollHeight ?? 0;
             const older = payload.messages as ChatMessage[];
@@ -1325,10 +1569,18 @@ export default function ChatPage({
             (payload.type === 'message:created' || payload.type === 'message:updated') &&
             payload.message && typeof payload.message === 'object'
           ) {
+            const incoming = payload.message as ChatMessage;
+            if (incoming.parentId) {
+              if (incoming.parentId === threadParentIdRef.current) {
+                setThreadMessages((current) => mergeMessage(current, incoming));
+                setThreadLoading(false);
+              }
+              return;
+            }
             const list = messageListRef.current;
             const shouldStick = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 180;
-            setMessages((current) => mergeMessage(current, payload.message as ChatMessage));
-            void upsertCachedChatMessage(username, activeRoom.roomId, payload.message as ChatMessage).catch(() => undefined);
+            setMessages((current) => mergeMessage(current, incoming));
+            void upsertCachedChatMessage(username, activeRoom.roomId, incoming).catch(() => undefined);
             if (shouldStick) {
               requestAnimationFrame(() => messageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
             }
@@ -1430,11 +1682,35 @@ export default function ChatPage({
     setSending(true);
     socket.send(JSON.stringify(editingId
       ? { type: 'message:edit', id: editingId, markdown }
-      : { type: 'message:create', markdown }));
+      : { type: 'message:create', markdown, parentId: threadParentIdRef.current ?? undefined }));
     setComposerMarkdown('');
     setEditingId(null);
     setSending(false);
   }, [editingId, sending, setComposerMarkdown]);
+
+  const openThread = useCallback((message: ChatMessage) => {
+    threadParentIdRef.current = message.id;
+    setThreadParent(message);
+    setThreadMessages([]);
+    setThreadLoading(true);
+    requestAnimationFrame(() => {
+      const list = messageListRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+    });
+  }, []);
+
+  const closeThread = useCallback(() => {
+    threadParentIdRef.current = null;
+    setThreadParent(null);
+    setThreadMessages([]);
+    setThreadLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (!threadParent || connection !== 'connected') return;
+    socketRef.current?.send(JSON.stringify({ type: 'thread:load', parentId: threadParent.id }));
+    setThreadLoading(true);
+  }, [connection, threadParent?.id]);
 
   const openDirectChat = useCallback(async (peerUsername: string, peerAvatar?: ChatAvatarProfile) => {
     try {
@@ -2262,10 +2538,10 @@ export default function ChatPage({
                 }}
               />
             )}
-            <section className="chat-message-pane">
+            <section className={cn('chat-message-pane', messageDensity === 'compact' && 'chat-message-pane--compact')}>
           <div
             ref={messageListRef}
-            className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-7"
+            className="chat-message-list flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-7"
           >
             {loadingOlder && (
               <div className="mb-4 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
@@ -2301,7 +2577,7 @@ export default function ChatPage({
                 </p>
               </div>
             )}
-            <div className="mx-auto flex w-full max-w-[900px] flex-col gap-5">
+            <div className="chat-message-stack mx-auto flex w-full max-w-[900px] flex-col gap-5">
               {visibleMessages.map((message, index) => {
                 const mine = isOwnMessage(message);
                 const previous = visibleMessages[index - 1];
@@ -2315,7 +2591,7 @@ export default function ChatPage({
                   <article
                     key={message.id}
                     data-chat-message-id={message.id}
-                    className={cn('group flex gap-3', mine && !news && 'flex-row-reverse')}
+                    className={cn('chat-message-row group flex gap-3', mine && !news && 'flex-row-reverse')}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       const menuWidth = 248;
@@ -2345,7 +2621,7 @@ export default function ChatPage({
                     ) : <div className="w-8 shrink-0" />}
                     <div className={cn('flex min-w-0 max-w-[min(88%,720px)] flex-col', mine && !news && 'items-end')}>
                       {!grouped && (
-                        <div className={cn('mb-1.5 flex items-center gap-2 px-1', mine && !news && 'flex-row-reverse')}>
+                        <div className={cn('chat-message-meta mb-1.5 flex items-center gap-2 px-1', mine && !news && 'flex-row-reverse')}>
                           <span className="text-xs font-semibold text-foreground/85">{news ? 'News & Updates' : message.username}</span>
                           {news && <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">Pinned source</span>}
                           <time className="text-[10px] text-muted-foreground">{formatTime(message.createdAt)}</time>
@@ -2354,8 +2630,9 @@ export default function ChatPage({
                       <div
                         key={shaking ? `${message.id}:${shakeMessage?.shakeId}` : message.id}
                         className={cn(
+                        'chat-message-bubble',
                         stickerOnly
-                          ? 'relative'
+                          ? 'chat-message-bubble--sticker relative'
                           : 'relative rounded-2xl border px-4 py-3 shadow-sm',
                         message.glowing && 'chat-message-glow',
                         shaking && 'chat-message-shake',
@@ -2390,6 +2667,34 @@ export default function ChatPage({
                   </article>
                 );
               })}
+              {threadParent && (
+                <section className="chat-thread-panel">
+                  <header>
+                    <div className="min-w-0">
+                      <p>Thread</p>
+                      <span className="truncate">{threadParent.threadCount ?? threadMessages.length} replies</span>
+                    </div>
+                    <button type="button" aria-label="Close thread" title="Close thread" onClick={closeThread}>
+                      <X className="size-4" />
+                    </button>
+                  </header>
+                  <article className="chat-thread-parent">
+                    <strong>{threadParent.username}</strong>
+                    <MarkdownBody markdown={threadParent.markdown} />
+                  </article>
+                  {threadLoading && <p className="chat-thread-state">Loading replies…</p>}
+                  {!threadLoading && threadMessages.length === 0 && <p className="chat-thread-state">No replies yet. Start the thread below.</p>}
+                  {threadMessages.map((reply) => (
+                    <article className="chat-thread-reply" key={reply.id}>
+                      <strong>{reply.username}</strong>
+                      <MarkdownBody markdown={reply.markdown} />
+                      {reply.mentions?.some((name) => name.toLowerCase() === username.toLowerCase()) && (
+                        <span className="chat-mention-label">Mentioned you</span>
+                      )}
+                    </article>
+                  ))}
+                </section>
+              )}
               <div ref={messageEndRef} />
             </div>
           </div>
@@ -2476,6 +2781,11 @@ export default function ChatPage({
                   setStickerPanelOpen(opening);
                   if (opening) void refreshStickers();
                 }, uploadingSticker)}
+                {toolbarButton('Attach a Drive file', <FolderOpen className="size-3.5" />, () => {
+                  const opening = !drivePickerOpen;
+                  setDrivePickerOpen(opening);
+                  if (opening) void loadDrivePickerFiles(drivePickerScope);
+                }, sharingDriveFileId !== null)}
                 <input
                   ref={photoInputRef}
                   type="file"
@@ -2485,6 +2795,67 @@ export default function ChatPage({
                   onChange={(event) => void handlePhotoFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
+
+              {drivePickerOpen && (
+                <section className="chat-drive-picker">
+                  <header className="chat-drive-picker-header">
+                    <div>
+                      <strong>Share a Drive file</strong>
+                      <span>Personal files are shared with this chat only.</span>
+                    </div>
+                    <button type="button" aria-label="Close Drive file picker" onClick={() => setDrivePickerOpen(false)}>
+                      <X className="size-4" />
+                    </button>
+                  </header>
+                  <div className="chat-drive-picker-controls">
+                    <div className="inline-flex rounded-lg border border-border/70 bg-background/70 p-0.5">
+                      {(['team', 'personal'] as const).map((scope) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          aria-pressed={drivePickerScope === scope}
+                          onClick={() => {
+                            setDrivePickerScope(scope);
+                            setDrivePickerQuery('');
+                            void loadDrivePickerFiles(scope);
+                          }}
+                        >{scope === 'team' ? 'Team Drive' : 'My Drive'}</button>
+                      ))}
+                    </div>
+                    <label className="chat-drive-picker-search">
+                      <Search className="size-3.5" />
+                      <input
+                        value={drivePickerQuery}
+                        onChange={(event) => setDrivePickerQuery(event.target.value)}
+                        placeholder="Find a file"
+                      />
+                    </label>
+                  </div>
+                  <div className="chat-drive-picker-files">
+                    {drivePickerLoading ? (
+                      <p>Loading Drive files…</p>
+                    ) : visibleDrivePickerFiles.length ? visibleDrivePickerFiles.map((file) => {
+                      const Icon = chatDriveFileGlyph(file);
+                      return (
+                        <button
+                          key={file.id}
+                          type="button"
+                          disabled={sharingDriveFileId !== null}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => void addDriveFileToDraft(file)}
+                          title={`${file.name} · ${formatDriveFileSize(file.size_bytes)}`}
+                        >
+                          <span><Icon className="size-4" /></span>
+                          <strong>{file.name}</strong>
+                          <small>{formatDriveFileSize(file.size_bytes)}</small>
+                        </button>
+                      );
+                    }) : (
+                      <p>{drivePickerQuery ? 'No files match this search.' : 'No files in this Drive yet.'}</p>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {stickerPanelOpen && (
                 <section className="border-b border-border/55 bg-background/45 p-3">
@@ -2599,7 +2970,36 @@ export default function ChatPage({
               )}
 
               <div className="relative w-full">
-                {!hasDraft && (
+                {threadParent && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/20 bg-accent/[0.06] px-3 py-2 text-[10px]">
+                    <Reply className="size-3.5 text-accent" />
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                      Replying to <strong className="text-foreground">{threadParent.username}</strong>
+                    </span>
+                    <button type="button" onClick={closeThread} className="text-muted-foreground hover:text-foreground">Cancel</button>
+                  </div>
+                )}
+                {mentionQuery !== null && (
+                  <div className="chat-mention-suggestions" role="listbox" aria-label="Mention a teammate">
+                    {mentionSearching ? (
+                      <p>Finding teammates…</p>
+                    ) : mentionUsers.length ? mentionUsers.slice(0, 7).map((person) => (
+                      <button
+                        key={person.username}
+                        type="button"
+                        role="option"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => insertMention(person)}
+                      >
+                        <span className="chat-mention-avatar">{person.username.slice(0, 1).toUpperCase()}</span>
+                        <span>{person.username}</span>
+                      </button>
+                    )) : (
+                      <p>{mentionQuery ? 'No matching teammates.' : 'Type a name to mention a teammate.'}</p>
+                    )}
+                  </div>
+                )}
+                {!hasDraft && !threadParent && (
                   <span className="pointer-events-none absolute left-4 top-4 text-sm text-muted-foreground/75">
                     {editingId ? 'Edit your message…' : `Message ${activeRoom.title}…`}
                   </span>
@@ -2680,7 +3080,7 @@ export default function ChatPage({
                   className="inline-flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-xs font-semibold text-accent-foreground transition hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <Send className="size-3" />
-                  {editingId ? 'Save edit' : 'Send'}
+                  {editingId ? 'Save edit' : threadParent ? 'Reply' : 'Send'}
                 </button>
               </div>
             </div>
@@ -2741,6 +3141,22 @@ export default function ChatPage({
             </>
           ) : (
             <>
+              {messageContextMenu.message.source !== 'news' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    openThread(messageContextMenu.message);
+                    setMessageContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+                >
+                  <Reply className="size-3.5 text-muted-foreground" />
+                  {messageContextMenu.message.threadCount
+                    ? `Open thread · ${messageContextMenu.message.threadCount} ${messageContextMenu.message.threadCount === 1 ? 'reply' : 'replies'}`
+                    : 'Reply in thread'}
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -2767,6 +3183,21 @@ export default function ChatPage({
               >
                 <ClipboardPaste className="size-3.5 text-muted-foreground" />
                 Paste from clipboard
+              </button>
+              <div role="separator" className="my-1 border-t border-border/60" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMessageDensity((current) => current === 'compact' ? 'comfortable' : 'compact');
+                  setMessageContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10"
+              >
+                {messageDensity === 'compact'
+                  ? <Maximize2 className="size-3.5 text-muted-foreground" />
+                  : <Minimize2 className="size-3.5 text-muted-foreground" />}
+                {messageDensity === 'compact' ? 'Comfortable messages' : 'Compact messages'}
               </button>
               <button
                 type="button"

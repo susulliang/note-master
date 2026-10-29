@@ -9,6 +9,7 @@ import { ASK_MODELS, type AskModel } from '@shared/ask-models';
 import { getCatSprite, type CatId } from '@/lib/cat-sprites';
 import type { KittyHelpResult, KittyStage } from '@/hooks/use-kitty-help';
 import { hydrateSupportEvidence, type SupportEvidence } from '@/lib/support-evidence';
+import type { CollabSearchResult } from '@/lib/chat-client';
 import { CatAskPanel } from '@/components/CatAskPanel';
 
 interface KittyHelpWorkspaceProps {
@@ -32,6 +33,13 @@ interface KittyHelpWorkspaceProps {
   onAutoAskConsumed: () => void;
   askEvidence: SupportEvidence[];
   onAskEvidenceChange: (evidence: SupportEvidence[]) => void;
+  externalSearch: {
+    query: string;
+    results: CollabSearchResult[];
+    loading: boolean;
+    error: string;
+  } | null;
+  onOpenSearchResult: (result: CollabSearchResult) => void;
 }
 
 function EvidenceRail({ sources, tldr }: { sources: SupportEvidence[]; tldr: string }) {
@@ -124,6 +132,8 @@ export function KittyHelpWorkspace({
   onAutoAskConsumed,
   askEvidence,
   onAskEvidenceChange,
+  externalSearch,
+  onOpenSearchResult,
 }: KittyHelpWorkspaceProps) {
   const rawEvidence = useMemo(() => {
     const unique = new Map<string, SupportEvidence>();
@@ -248,6 +258,8 @@ export function KittyHelpWorkspace({
               resolveStage={resolveStage}
               resolveError={resolveError}
               initialQuestion={initialQuestion}
+              externalSearch={externalSearch}
+              onOpenSearchResult={onOpenSearchResult}
               autoAskOnMount={autoAskOnOpen}
               onAutoAskConsumed={onAutoAskConsumed}
             />

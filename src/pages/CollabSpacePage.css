@@ -3,30 +3,27 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   color: var(--foreground);
 }
 
-.collab-space-header {
-  z-index: 2;
+.collab-space-sidebar {
   display: flex;
-  min-height: 62px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 8px clamp(12px, 2vw, 28px);
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  background: color-mix(in srgb, var(--card) 72%, transparent);
-  backdrop-filter: blur(18px);
+  width: 204px;
+  min-width: 204px;
+  flex-direction: column;
+  padding: 20px 12px 14px;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--card) 52%, transparent);
 }
 
 .collab-space-brand {
   display: flex;
   min-width: 0;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 2px 5px 23px;
 }
 
 .collab-space-brand-icon {
@@ -51,37 +48,49 @@
 
 .collab-space-brand h1 {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: -.01em;
 }
 
 .collab-space-tabs {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  border-radius: 11px;
-  padding: 3px;
-  background: color-mix(in srgb, var(--background) 58%, transparent);
+  flex-direction: column;
+  gap: 19px;
 }
 
 .collab-space-tabs button {
-  display: inline-flex;
-  min-height: 32px;
+  display: flex;
+  width: 100%;
+  min-height: 38px;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
+  gap: 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 11px;
   color: var(--muted-foreground);
   background: transparent;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
+  text-align: left;
   cursor: pointer;
   transition: color 140ms ease, background 140ms ease;
+}
+
+.collab-nav-group {
+  display: grid;
+  gap: 3px;
+}
+
+.collab-nav-group > p {
+  margin: 0 0 4px;
+  padding: 0 11px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
 }
 
 .collab-space-tabs button:hover,
@@ -91,7 +100,8 @@
 }
 
 .collab-space-tabs button.is-active {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .collab-space-tabs button:focus-visible {
@@ -99,10 +109,36 @@
   outline-offset: 2px;
 }
 
+.collab-space-sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.collab-space-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
 .collab-space-content {
+  display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+
+.collab-space-content > * {
+  width: 100%;
+  min-width: 0;
 }
 
 .collab-space-content > .sheets-page,
@@ -110,30 +146,50 @@
   height: 100%;
 }
 
-.collab-space-content > .sheets-page {
-  padding-bottom: 76px;
-}
-
 @media (max-width: 520px) {
-  .collab-space-header {
-    min-height: 56px;
-    padding-right: 8px;
-    padding-left: 9px;
+  .collab-space-page {
+    flex-direction: column;
+  }
+
+  .collab-space-sidebar {
+    width: 100%;
+    min-width: 0;
+    padding: 8px 10px 0;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
   }
 
   .collab-space-brand {
-    gap: 7px;
+    display: none;
   }
 
-  .collab-space-brand-icon {
-    width: 30px;
-    height: 30px;
+  .collab-space-sidebar-footer,
+  .collab-nav-group > p {
+    display: none;
+  }
+
+  .collab-space-tabs {
+    flex-direction: row;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .collab-nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 2px;
   }
 
   .collab-space-tabs button {
-    min-height: 30px;
-    gap: 5px;
-    padding: 0 8px;
+    width: auto;
+    min-height: 38px;
+    gap: 6px;
+    padding: 0 9px;
     font-size: 9px;
+  }
+
+  .collab-space-tabs button.is-active {
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
 }

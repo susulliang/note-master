@@ -9,6 +9,9 @@ export interface ChatMessage {
   source: 'chat' | 'news';
   avatar: ChatAvatarProfile;
   glowing?: boolean;
+  parentId?: string | null;
+  threadCount?: number;
+  mentions?: string[];
 }
 
 export interface ChatConversation {
@@ -75,6 +78,52 @@ export interface MindmapSocketTicket {
   permission: CollabPermission;
 }
 
+export interface CollabDriveFolder {
+  id: string;
+  name: string;
+  scope: 'team' | 'personal';
+  owner: string;
+  parent_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CollabDriveFile {
+  id: string;
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  scope: 'team' | 'personal';
+  owner: string;
+  folder_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CollabTask {
+  id: string;
+  title: string;
+  description: string;
+  scope: 'team' | 'personal';
+  owner: string;
+  assignee: string;
+  dueAt: number | null;
+  completedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  mentions: string[];
+}
+
+export interface CollabSearchResult {
+  id: string;
+  type: 'message' | 'sheet' | 'sheet-cell' | 'mindmap' | 'mindmap-node' | 'file' | 'task';
+  title: string;
+  excerpt: string;
+  updatedAt: number;
+  roomId?: string;
+  target?: string;
+}
+
 export type ChatMediaKind = 'photo' | 'sticker';
 
 function endpoint(path: string): string {
@@ -113,6 +162,187 @@ export async function fetchChatConversations(): Promise<ChatConversation[]> {
 export async function fetchCollabDocuments(): Promise<CollabDocument[]> {
   const result = await requestJson<{ documents?: CollabDocument[] }>('/api/collab/documents');
   return result.documents ?? [];
+}
+
+export async function searchCollab(query: string, signal?: AbortSignal): Promise<CollabSearchResult[]> {
+  const params = new URLSearchParams({ q: query });
+  const result = await requestJson<{ results?: CollabSearchResult[] }>(
+    `/api/collab/search?${params}`,
+    { signal },
+  );
+  return result.results ?? [];
+}
+
+export async function listCollabDrive(
+  scope: 'team' | 'personal',
+  folderId: string | null,
+  options: { allFiles?: boolean; chatRoomId?: string } = {},
+): Promise<{
+  folders: CollabDriveFolder[];
+  files: CollabDriveFile[];
+  usage: { usedBytes: number; limitBytes: number } | null;
+}> {
+  const params = new URLSearchParams({ scope });
+  if (folderId) params.set('folderId', folderId);
+  if (options.allFiles) params.set('all', '1');
+  if (options.chatRoomId) {
+    params.set('chat', '1');
+    params.set('roomId', options.chatRoomId);
+  }
+  return requestJson(`/api/collab/drive/files?${params}`);
+}
+
+export async function createCollabDriveFolder(
+  name: string,
+  scope: 'team' | 'personal',
+  parentId: string | null,
+): Promise<CollabDriveFolder> {
+  const result = await requestJson<{ folder: CollabDriveFolder }>('/api/collab/drive/folders', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, scope, parentId }),
+  });
+  return result.folder;
+}
+
+export async function uploadCollabDriveFile(
+  file: File,
+  scope: 'team' | 'personal',
+  folderId: string | null,
+): Promise<CollabDriveFile> {
+  const body = new FormData();
+  body.set('file', file);
+  body.set('scope', scope);
+  if (folderId) body.set('folderId', folderId);
+  const response = await fetch(endpoint('/api/collab/drive/files'), {
+    method: 'POST',
+    headers: headers(),
+    body,
+  });
+  const result = await response.json().catch(() => ({})) as { file?: CollabDriveFile; error?: string };
+  if (!response.ok || !result.file) throw new Error(result.error || `Upload failed (${response.status})`);
+  return result.file;
+}
+
+export async function deleteCollabDriveFile(id: string): Promise<void> {
+  await requestJson(`/api/collab/drive/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function updateCollabDriveFile(
+  id: string,
+  update: { name?: string; folderId?: string | null },
+): Promise<void> {
+  await requestJson(`/api/collab/drive/files/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+}
+
+export async function updateCollabDriveFolder(id: string, name: string): Promise<void> {
+  await requestJson(`/api/collab/drive/folders/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteCollabDriveFolder(id: string): Promise<void> {
+  await requestJson(`/api/collab/drive/folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function shareCollabDriveFileWithChat(
+  id: string,
+  roomId: string,
+): Promise<{ downloadUrl: string }> {
+  return requestJson(`/api/collab/drive/files/${encodeURIComponent(id)}/share`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ roomId }),
+  });
+}
+
+export async function downloadCollabDriveFile(id: string, fileName: string, roomId?: string): Promise<void> {
+  const blob = await getCollabDriveFileBlob(id, roomId);
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export async function getCollabDriveFileBlob(id: string, roomId?: string): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (roomId) params.set('roomId', roomId);
+  const suffix = params.size ? `?${params}` : '';
+  const response = await fetch(endpoint(`/api/collab/drive/files/${encodeURIComponent(id)}/download${suffix}`), {
+    headers: headers(),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(result.error || `Download failed (${response.status})`);
+  }
+  return response.blob();
+}
+
+export async function listCollabTasks(scope?: 'team' | 'personal'): Promise<CollabTask[]> {
+  const params = new URLSearchParams();
+  if (scope) params.set('scope', scope);
+  const result = await requestJson<{ tasks?: CollabTask[] }>(
+    `/api/collab/tasks${params.size ? `?${params}` : ''}`,
+  );
+  return result.tasks ?? [];
+}
+
+export async function createCollabTask(payload: {
+  title: string;
+  description: string;
+  scope: 'team' | 'personal';
+  assignee: string;
+  dueAt: number | null;
+}): Promise<CollabTask> {
+  const result = await requestJson<{ task: CollabTask }>('/api/collab/tasks', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return result.task;
+}
+
+export async function setCollabTaskCompleted(id: string, completed: boolean): Promise<void> {
+  await requestJson(`/api/collab/tasks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ completed }),
+  });
+}
+
+export async function deleteCollabTask(id: string): Promise<void> {
+  await requestJson(`/api/collab/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export interface CollabNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  target_url: string;
+  created_at: number;
+  read_at: number | null;
+}
+
+export async function fetchCollabNotifications(): Promise<CollabNotification[]> {
+  const result = await requestJson<{ notifications?: CollabNotification[] }>('/api/collab/notifications');
+  return result.notifications ?? [];
+}
+
+export async function markCollabNotificationRead(id: string): Promise<void> {
+  await requestJson('/api/collab/notifications/read', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
 }
 
 export async function createCollabMindmap(title: string): Promise<CollabDocument> {

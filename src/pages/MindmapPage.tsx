@@ -116,7 +116,6 @@ export default function MindmapPage({
   const socketRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
-  const initialDocumentRef = useRef(initialDocumentId);
   const directoryOwnerRef = useRef(username);
 
   const refreshMaps = useCallback(async () => {
@@ -151,10 +150,10 @@ export default function MindmapPage({
   }, [initialDocument, maps, username]);
 
   useEffect(() => {
-    if (!initialDocumentRef.current || activeMap) return;
-    const match = maps.find((map) => map.id === initialDocumentRef.current);
+    if (!initialDocumentId || activeMap?.id === initialDocumentId) return;
+    const match = maps.find((map) => map.id === initialDocumentId);
     if (match) setActiveMap(match);
-  }, [activeMap, maps]);
+  }, [activeMap, initialDocumentId, maps]);
 
   useEffect(() => {
     if (!activeMap) return;

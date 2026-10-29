@@ -139,6 +139,18 @@ export class SheetsRoom extends DurableObject<Env> {
     );
   }
 
+  async searchCells(query: string, limit = 12): Promise<Array<{ row: number; col: number; raw: string }>> {
+    const term = query.trim().slice(0, 120);
+    if (!term) return [];
+    return this.ctx.storage.sql.exec<{ row_index: number; col_index: number; raw: string }>(
+      `SELECT row_index, col_index, raw FROM sheet_cells
+       WHERE raw LIKE ? ESCAPE '\\' COLLATE NOCASE
+       ORDER BY row_index, col_index LIMIT ?`,
+      `%${term.replace(/[\\%_]/g, '\\$&')}%`,
+      Math.max(1, Math.min(20, Math.trunc(limit))),
+    ).toArray().map((cell) => ({ row: cell.row_index, col: cell.col_index, raw: cell.raw }));
+  }
+
   async createTicket(username: string, permission: 'view' | 'edit' = 'edit'): Promise<string> {
     const now = Date.now();
     const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;

@@ -102,45 +102,11 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
         className={cn(
           'glass-panel relative z-10 overflow-hidden shadow-2xl',
           pagePresentation
-            ? 'grid w-full max-w-6xl rounded-[28px] border-white/10 bg-[#0b121c]/85 shadow-[0_32px_100px_rgba(0,0,0,0.48)] backdrop-blur-2xl lg:min-h-[660px] lg:grid-cols-[1.05fr_0.95fr]'
+            ? 'w-full max-w-md rounded-2xl border-white/10 bg-[#0b121c]/85 shadow-[0_24px_72px_rgba(0,0,0,0.42)] backdrop-blur-2xl'
             : 'w-[min(420px,calc(100vw-32px))] rounded-2xl border-violet-400/30 p-6'
         )}
       >
-        {pagePresentation && (
-          <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-white/10 bg-[linear-gradient(145deg,rgba(18,36,46,0.9),rgba(12,20,31,0.62)_60%,rgba(15,28,42,0.8))] p-8 lg:flex xl:p-12">
-            <div className="absolute -right-20 -top-20 size-72 rounded-full bg-teal-300/10 blur-3xl" aria-hidden />
-            <div className="absolute -bottom-24 -left-16 size-72 rounded-full bg-blue-400/10 blur-3xl" aria-hidden />
-            <div className="relative">
-              <div className="mb-8 flex size-14 items-center justify-center rounded-[20px] border border-teal-200/20 bg-teal-300/10 shadow-[0_0_42px_rgba(45,212,191,0.1)]">
-                <KeyRound className="size-6 text-teal-200" />
-              </div>
-              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.28em] text-teal-100/65">ECONOTE / AGENT WORKSPACE</p>
-              <h1 className="mt-5 max-w-md text-4xl font-semibold leading-[1.08] tracking-tight text-white xl:text-5xl">
-                Econote, <span className="text-teal-200">notey note.</span>
-              </h1>
-              <p className="mt-5 max-w-sm text-sm leading-7 text-slate-300/80">
-                A calmer place to capture customer details, work through a call, and stay in sync with your team.
-              </p>
-            </div>
-            <div className="relative grid max-w-md gap-2.5">
-              {[
-                ['01', 'Call notes', 'Keep every detail in the flow'],
-                ['02', 'Team chat', 'Pick up conversations together'],
-                ['03', 'Collab space', 'Stay close to shared work'],
-              ].map(([number, title, description]) => (
-                <div key={number} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] px-3.5 py-3">
-                  <span className="font-mono text-[10px] text-teal-200/60">{number}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-semibold text-slate-100/90">{title}</span>
-                    <span className="mt-0.5 block text-[10px] text-slate-400">{description}</span>
-                  </span>
-                  <span className="size-1.5 rounded-full bg-teal-300/70 shadow-[0_0_10px_rgba(94,234,212,0.55)]" />
-                </div>
-              ))}
-            </div>
-          </aside>
-        )}
-        <div className={cn('relative', pagePresentation ? 'p-5 sm:p-8 lg:p-10 xl:p-12' : '')}>
+        <div className={cn('relative', pagePresentation ? 'p-5 sm:p-8' : '')}>
         {!required && !pagePresentation && (
           <button
             type="button"

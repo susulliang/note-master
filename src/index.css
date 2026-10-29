@@ -26,18 +26,20 @@
   body {
     background-color: var(--background);
     color: var(--foreground);
-    font-family: var(--ui-font-family);
   }
   .container {
     margin-left: auto;
     margin-right: auto;
   }
 
-  /* Keep native form controls in sync with the selected global UI font. */
+  /* Global textfield font — Bahnschrift (Windows DIN-style variable font).
+     UI text uses Elms Sans (see --font-sans in tailwind-theme.css). */
   input,
   textarea,
   select {
-    font-family: var(--ui-font-family);
+    font-family:
+      'Bahnschrift', 'Elms Sans', 'Segoe UI', system-ui, -apple-system,
+      sans-serif;
     font-variant-ligatures: none;
   }
 }

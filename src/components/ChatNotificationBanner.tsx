@@ -1,13 +1,16 @@
-import { MessageCircle } from 'lucide-react';
+import { ListTodo, MessageCircle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   chatSocketUrl,
   fetchChatConversations,
   fetchChatGlobalTitle,
+  fetchCollabNotifications,
+  markCollabNotificationRead,
   requestChatTicket,
   type ChatConversation,
   type ChatMessage,
   type ChatSocketTicket,
+  type CollabNotification,
 } from '@/lib/chat-client';
 import { upsertCachedChatMessage } from '@/lib/chat-message-cache';
 import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
@@ -20,7 +23,8 @@ interface ChatNotificationBannerProps {
 }
 
 interface Notice {
-  message: ChatMessage;
+  message?: ChatMessage;
+  task?: CollabNotification;
   roomTitle: string;
   roomId: string;
 }
@@ -84,6 +88,56 @@ export default function ChatNotificationBanner({
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    const refreshTaskMentions = async () => {
+      try {
+        const notifications = await fetchCollabNotifications();
+        if (!alive) return;
+        const unread = notifications.filter((notification) => !notification.read_at);
+        for (const item of unread) {
+          if (seenIdsRef.current.has(item.id)) continue;
+          seenIdsRef.current.add(item.id);
+          setNotice({ task: item, roomTitle: 'Tasks', roomId: `collab-task:${item.id}` });
+          setVisible(true);
+          if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+          if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
+          noticeTimerRef.current = window.setTimeout(() => {
+            setVisible(false);
+            removeTimerRef.current = window.setTimeout(() => setNotice(null), 250);
+          }, 6_000);
+          if (
+            'Notification' in window &&
+            Notification.permission === 'granted' &&
+            (document.hidden || !document.hasFocus())
+          ) {
+            const notification = new Notification(item.title, {
+              body: item.body || 'Open Collab Space to review the task.',
+              icon: '/favicon.ico',
+              tag: `collab-task-${item.id}`,
+            });
+            notification.onclick = () => {
+              window.focus();
+              void markCollabNotificationRead(item.id).catch(() => undefined);
+              onOpenChatRef.current(`collab-task:${item.id}`);
+              notification.close();
+            };
+          }
+        }
+      } catch {
+        /* Keep chat notifications available if task notifications are offline. */
+      }
+    };
+    void refreshTaskMentions();
+    const timer = window.setInterval(() => void refreshTaskMentions(), 30_000);
+    window.addEventListener('focus', refreshTaskMentions);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshTaskMentions);
+    };
+  }, []);
+
+  useEffect(() => {
     const onActiveRoom = (event: Event) => {
       const detail = (event as CustomEvent<{ roomId?: string | null }>).detail;
       setActiveRoomId(typeof detail?.roomId === 'string' ? detail.roomId : null);
@@ -128,11 +182,12 @@ export default function ChatNotificationBanner({
       const roomTitle = roomId === 'global'
         ? globalTitle
         : conversationsRef.current.find((conversation) => conversation.roomId === roomId)?.title ?? 'Direct message';
+      const mentioned = message.mentions?.some((name) => name.toLowerCase() === username.toLowerCase()) ?? false;
       const isFocusedRoom = isChatOpenRef.current &&
         activeRoomIdRef.current === roomId &&
         document.hasFocus() &&
         !document.hidden;
-      if (isFocusedRoom) return;
+      if (isFocusedRoom && !mentioned) return;
 
       setNotice({ message, roomTitle, roomId });
       setVisible(true);
@@ -147,6 +202,7 @@ export default function ChatNotificationBanner({
         'Notification' in window &&
         Notification.permission === 'granted' &&
         (
+          mentioned ||
           document.hidden ||
           !document.hasFocus() ||
           !isChatOpenRef.current ||
@@ -154,7 +210,7 @@ export default function ChatNotificationBanner({
         )
       ) {
         const notification = new Notification(roomTitle, {
-          body: `${message.username}: ${preview(message.markdown) || 'Sent a message'}`,
+          body: `${mentioned ? 'Mentioned you · ' : ''}${message.username}: ${preview(message.markdown) || 'Sent a message'}`,
           icon: '/favicon.ico',
           tag: `chat-${roomId}-${message.id}`,
         });
@@ -194,7 +250,9 @@ export default function ChatNotificationBanner({
               typeof payload.message === 'object'
             ) {
               const message = payload.message as ChatMessage;
-              void upsertCachedChatMessage(username, roomId, message).catch(() => undefined);
+              if (!message.parentId) {
+                void upsertCachedChatMessage(username, roomId, message).catch(() => undefined);
+              }
               if (payload.type === 'message:created') showNotice(message, roomId);
             }
           } catch {
@@ -232,7 +290,8 @@ export default function ChatNotificationBanner({
   }, [globalTitle, roomKey, username]);
 
   if (!notice) return null;
-  const { message } = notice;
+  const message = notice.message;
+  const task = notice.task;
   return (
     <div
       className={cn(
@@ -242,23 +301,33 @@ export default function ChatNotificationBanner({
     >
       <button
         type="button"
-        onClick={() => onOpenChat(notice.roomId)}
+        onClick={() => {
+          if (task) void markCollabNotificationRead(task.id).catch(() => undefined);
+          onOpenChat(notice.roomId);
+        }}
         className="flex w-full items-center gap-3 rounded-2xl border border-border/80 bg-card/90 p-3 text-left shadow-[0_16px_50px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-label={`New message from ${message.username}`}
+        aria-label={task ? task.title : `New message from ${message?.username ?? 'teammate'}`}
       >
-        <PixelHumanoidAvatar
-          seed={message.avatar?.seed ?? 0}
-          rotation={message.avatar?.rotation ?? 0}
-          size={40}
-          className="shrink-0 rounded-xl bg-muted/60"
-        />
+        {task
+          ? <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><ListTodo className="size-5" /></span>
+          : <PixelHumanoidAvatar
+            seed={message?.avatar?.seed ?? 0}
+            rotation={message?.avatar?.rotation ?? 0}
+            size={40}
+            className="shrink-0 rounded-xl bg-muted/60"
+          />}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            <MessageCircle className="size-3.5 text-accent" />
-            {message.username}
-            <span className="font-normal text-muted-foreground">in {notice.roomTitle}</span>
+            {task ? <ListTodo className="size-3.5 text-accent" /> : <MessageCircle className="size-3.5 text-accent" />}
+            {task ? task.title : message?.username}
+            {!task && <span className="font-normal text-muted-foreground">in {notice.roomTitle}</span>}
+            {message?.mentions?.some((name) => name.toLowerCase() === username.toLowerCase()) && (
+              <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-accent">Mention</span>
+            )}
           </span>
-          <span className="mt-1 block truncate text-xs text-muted-foreground">{preview(message.markdown)}</span>
+          <span className="mt-1 block truncate text-xs text-muted-foreground">
+            {task ? task.body : preview(message?.markdown ?? '')}
+          </span>
         </span>
         <span className="shrink-0 text-[10px] font-medium text-accent">Open</span>
       </button>

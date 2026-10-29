@@ -112,6 +112,18 @@ export class MindmapRoom extends DurableObject<Env> {
     );
   }
 
+  async searchNodes(query: string, limit = 12): Promise<MindmapNode[]> {
+    const term = query.trim().slice(0, 120);
+    if (!term) return [];
+    return this.ctx.storage.sql.exec<MindmapNode>(
+      `SELECT id, text, x, y, color FROM mindmap_nodes
+       WHERE text LIKE ? ESCAPE '\\' COLLATE NOCASE
+       ORDER BY rowid LIMIT ?`,
+      `%${term.replace(/[\\%_]/g, '\\$&')}%`,
+      Math.max(1, Math.min(20, Math.trunc(limit))),
+    ).toArray();
+  }
+
   async createTicket(username: string, permission: 'view' | 'edit'): Promise<string> {
     const now = Date.now();
     const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;

@@ -239,7 +239,7 @@ export default function SheetsPage({
   }, [initialDocument, sheets, username]);
 
   useEffect(() => {
-    if (!initialDocumentId || activeSheet || loadingSheets) return;
+    if (!initialDocumentId || loadingSheets || activeSheet?.id === initialDocumentId) return;
     const requested = sheets.find((sheet) => sheet.id === initialDocumentId);
     if (requested) setActiveSheet(requested);
   }, [activeSheet, initialDocumentId, loadingSheets, sheets]);

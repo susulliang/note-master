@@ -10,6 +10,9 @@ interface ChatMessageRow {
   avatar_seed: number;
   avatar_rotation: number;
   glowing: number;
+  parent_id?: string | null;
+  mentions_json?: string;
+  thread_count?: number;
 }
 
 interface TicketRow {
@@ -84,6 +87,16 @@ function presentMessage(row: ChatMessageRow) {
     source: row.source_id ? 'news' : 'chat',
     avatar: { seed: row.avatar_seed, rotation: row.avatar_rotation },
     glowing: row.glowing === 1,
+    parentId: row.parent_id ?? null,
+    threadCount: Number(row.thread_count ?? 0),
+    mentions: (() => {
+      try {
+        const value: unknown = JSON.parse(row.mentions_json ?? '[]');
+        return Array.isArray(value) ? value.filter((name): name is string => typeof name === 'string') : [];
+      } catch {
+        return [];
+      }
+    })(),
   };
 }
 
@@ -123,6 +136,11 @@ export class ChatRoom extends DurableObject<Env> {
       this.ensureColumn('chat_messages', 'avatar_seed', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'avatar_rotation', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('chat_messages', 'glowing', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('chat_messages', 'parent_id', 'TEXT');
+      this.ensureColumn('chat_messages', 'mentions_json', "TEXT NOT NULL DEFAULT '[]'");
+      this.ctx.storage.sql.exec(
+        'CREATE INDEX IF NOT EXISTS chat_messages_parent_idx ON chat_messages (parent_id, created_at, id)',
+      );
     });
   }
 
@@ -209,6 +227,22 @@ export class ChatRoom extends DurableObject<Env> {
     this.broadcast({ type: 'pinned-document:changed', roomId: this.roomId });
   }
 
+  async searchMessages(query: string, limit = 12): Promise<Array<ReturnType<typeof presentMessage>>> {
+    const term = query.trim().slice(0, 120);
+    if (!term) return [];
+    const rows = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+      `SELECT id, username, markdown, created_at, updated_at, source_id,
+              avatar_seed, avatar_rotation, glowing, parent_id, mentions_json,
+              0 AS thread_count
+       FROM chat_messages
+       WHERE markdown LIKE ? ESCAPE '\\' COLLATE NOCASE
+       ORDER BY created_at DESC LIMIT ?`,
+      `%${term.replace(/[\\%_]/g, '\\$&')}%`,
+      Math.max(1, Math.min(20, Math.trunc(limit))),
+    ).toArray();
+    return rows.map(presentMessage);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
@@ -264,6 +298,28 @@ export class ChatRoom extends DurableObject<Env> {
         send(ws, { type: 'error', message: 'Messages must be between 1 and 20,000 characters.' });
         return;
       }
+      const parentId = typeof event.parentId === 'string' ? event.parentId : null;
+      if (parentId) {
+        const parent = this.ctx.storage.sql.exec<{ id: string; parent_id: string | null }>(
+          'SELECT id, parent_id FROM chat_messages WHERE id = ? AND source_id IS NULL',
+          parentId,
+        ).toArray()[0];
+        if (!parent || parent.parent_id) {
+          send(ws, { type: 'error', message: 'That thread is no longer available.' });
+          return;
+        }
+      }
+      const mentionedNames = [...new Set(
+        Array.from(markdown.matchAll(/(?:^|[^A-Za-z0-9_])@([A-Za-z0-9_.-]{1,32})/g), (match) => match[1].toLowerCase()),
+      )].slice(0, 40);
+      let mentions: string[] = [];
+      if (mentionedNames.length) {
+        const placeholders = mentionedNames.map(() => '?').join(', ');
+        const found = await this.env.DB.prepare(
+          `SELECT username FROM auth_users WHERE lower(username) IN (${placeholders})`,
+        ).bind(...mentionedNames).all<{ username: string }>();
+        mentions = (found.results ?? []).map((person) => person.username);
+      }
       const now = Date.now();
       const row: ChatMessageRow = {
         id: crypto.randomUUID(),
@@ -275,11 +331,13 @@ export class ChatRoom extends DurableObject<Env> {
         avatar_seed: user.avatarSeed,
         avatar_rotation: user.avatarRotation,
         glowing: 0,
+        parent_id: parentId,
+        mentions_json: JSON.stringify(mentions),
       };
       this.ctx.storage.sql.exec(
         `INSERT INTO chat_messages
-         (id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+         (id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, parent_id, mentions_json)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
         row.id,
         row.username,
         row.markdown,
@@ -287,10 +345,13 @@ export class ChatRoom extends DurableObject<Env> {
         row.updated_at,
         row.avatar_seed,
         row.avatar_rotation,
+        row.parent_id,
+        row.mentions_json,
       );
       await this.sharePrivateStickers(row.id, row.markdown, user.username);
       const payload = { type: 'message:created', message: presentMessage(row) };
       this.broadcast(payload);
+      if (parentId) this.broadcastThreadCount(parentId);
       await this.updateInboxPreview(markdown, now);
       return;
     }
@@ -365,6 +426,31 @@ export class ChatRoom extends DurableObject<Env> {
       });
       return;
     }
+    if (event.type === 'thread:load') {
+      const parentId = typeof event.parentId === 'string' ? event.parentId : '';
+      if (!/^[0-9a-f-]{36}$/i.test(parentId)) return;
+      const parent = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT id, username, markdown, created_at, updated_at, source_id,
+                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json,
+                (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = chat_messages.id) AS thread_count
+         FROM chat_messages WHERE id = ? AND parent_id IS NULL`,
+        parentId,
+      ).toArray()[0];
+      if (!parent) return;
+      const replies = this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
+        `SELECT id, username, markdown, created_at, updated_at, source_id,
+                avatar_seed, avatar_rotation, glowing, parent_id, mentions_json,
+                0 AS thread_count
+         FROM chat_messages WHERE parent_id = ? ORDER BY created_at, id`,
+        parentId,
+      ).toArray();
+      send(ws, {
+        type: 'thread:messages',
+        parent: presentMessage(parent),
+        messages: replies.map(presentMessage),
+      });
+      return;
+    }
     if (event.type === 'history:older') {
       const rawCursor = event.cursor as Partial<MessageCursor> | null;
       if (
@@ -399,18 +485,22 @@ export class ChatRoom extends DurableObject<Env> {
   private getMessages(before?: MessageCursor) {
     const rows = before
       ? this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
-        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, glowing
-         FROM chat_messages
-         WHERE created_at < ? OR (created_at = ? AND id < ?)
-         ORDER BY created_at DESC, id DESC LIMIT ?`,
+        `SELECT m.id, m.username, m.markdown, m.created_at, m.updated_at, m.source_id,
+                m.avatar_seed, m.avatar_rotation, m.glowing, m.parent_id, m.mentions_json,
+                (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = m.id) AS thread_count
+         FROM chat_messages m
+         WHERE m.parent_id IS NULL AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))
+         ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
         before.createdAt,
         before.createdAt,
         before.id,
         HISTORY_PAGE_SIZE + 1,
       ).toArray()
       : this.ctx.storage.sql.exec<SqlRow<ChatMessageRow>>(
-        `SELECT id, username, markdown, created_at, updated_at, source_id, avatar_seed, avatar_rotation, glowing
-         FROM chat_messages ORDER BY created_at DESC, id DESC LIMIT ?`,
+        `SELECT m.id, m.username, m.markdown, m.created_at, m.updated_at, m.source_id,
+                m.avatar_seed, m.avatar_rotation, m.glowing, m.parent_id, m.mentions_json,
+                (SELECT COUNT(*) FROM chat_messages replies WHERE replies.parent_id = m.id) AS thread_count
+         FROM chat_messages m WHERE m.parent_id IS NULL ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
         HISTORY_PAGE_SIZE + 1,
       ).toArray();
     const hasOlder = rows.length > HISTORY_PAGE_SIZE;
@@ -428,6 +518,14 @@ export class ChatRoom extends DurableObject<Env> {
     if (!columns.some((entry) => entry.name === column)) {
       this.ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
+  }
+
+  private broadcastThreadCount(parentId: string): void {
+    const row = this.ctx.storage.sql.exec<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM chat_messages WHERE parent_id = ?',
+      parentId,
+    ).toArray()[0];
+    this.broadcast({ type: 'thread:count', parentId, count: Number(row?.count ?? 0) });
   }
 
   private broadcast(event: ChatEvent): void {
