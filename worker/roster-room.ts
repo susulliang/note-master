@@ -73,6 +73,10 @@ function attachment(ws: WebSocket): RosterAttachment | null {
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+/** Bump to force a one-time re-seed from D1 on the next cold start
+ *  (v2 = billable off-hours columns + imported off-time records). */
+const ROSTER_SCHEMA_VERSION = 2;
+
 export class RosterRoom extends DurableObject<Env> {
   /** The month this instance owns, derived from the DO instance name. */
   private readonly month: string;
@@ -104,8 +108,9 @@ export class RosterRoom extends DurableObject<Env> {
         )
       `);
       // Self-healing migration: instances created before billable off-hours
-      // store the old 3-column table — add the columns and re-seed from D1
-      // (which carries the imported off-time data) so both stay in sync.
+      // store the old 3-column table — add the columns. A schema-version gate
+      // then forces a one-time re-seed from D1 so imported off-time records and
+      // refreshed shift codes land even when the columns were added earlier.
       const cols = this.ctx.storage.sql
         .exec<{ name: string }>('PRAGMA table_info(roster_cells)')
         .toArray()
@@ -114,15 +119,35 @@ export class RosterRoom extends DurableObject<Env> {
         this.ctx.storage.sql.exec('ALTER TABLE roster_cells ADD COLUMN off REAL NOT NULL DEFAULT 0');
         this.ctx.storage.sql.exec("ALTER TABLE roster_cells ADD COLUMN note TEXT NOT NULL DEFAULT ''");
         console.error(JSON.stringify({ event: 'roster_do_off_column_added', month: this.month }));
-        await this.hydrateFromD1();
-        return;
       }
-      // Cold start: if the DO store is empty, seed it once from the D1 backup
-      // so the existing D1-first data keeps working after this deploy.
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS roster_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+      const versionRow = this.ctx.storage.sql
+        .exec<SqlRow<{ value: string }>>("SELECT value FROM roster_meta WHERE key = 'schema_version'")
+        .toArray()[0];
+      const version = Number(versionRow?.value ?? '') || 1;
       const count = this.ctx.storage.sql
         .exec<{ n: number }>('SELECT COUNT(*) AS n FROM roster_cells')
         .toArray()[0]?.n ?? 0;
-      if (count === 0) await this.hydrateFromD1();
+      if (version < ROSTER_SCHEMA_VERSION) {
+        // Re-seed from the D1 backup (which carries the imported billable
+        // off-time data) and stamp the schema version.
+        await this.hydrateFromD1();
+        this.ctx.storage.sql.exec(
+          "INSERT INTO roster_meta (key, value) VALUES ('schema_version', ?1) " +
+            'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          String(ROSTER_SCHEMA_VERSION),
+        );
+        console.error(JSON.stringify({ event: 'roster_do_reseeded', month: this.month, from: version, to: ROSTER_SCHEMA_VERSION }));
+      } else if (count === 0) {
+        // Cold start with an empty store: seed once from the D1 backup so the
+        // existing D1-first data keeps working after this deploy.
+        await this.hydrateFromD1();
+      }
     });
   }
 

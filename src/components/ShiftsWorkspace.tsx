@@ -372,9 +372,16 @@ export default function ShiftsWorkspace() {
   const shiftOf = (a: RosterAgent, iso: string): string =>
     edits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.code ?? a.shifts[iso] ?? '';
 
-  /** Extra off hours on a cell: local edit → D1 cell → baked comment record. */
-  const offOf = (a: RosterAgent, iso: string): number =>
-    offEdits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.off ?? a.offHours?.[iso] ?? 0;
+  /** Extra off hours on a cell: local edit → D1 cell (only a POSITIVE D1 value
+   *  overrides — pre-migration mirrors report 0 for every cell and must not
+   *  shadow the baked comment records) → baked comment record. */
+  const offOf = (a: RosterAgent, iso: string): number => {
+    const local = offEdits[`${a.en}|${iso}`];
+    if (local !== undefined) return local;
+    const d1 = d1Overlay[`${a.en}|${iso}`]?.off;
+    if (typeof d1 === 'number' && d1 > 0) return d1;
+    return a.offHours?.[iso] ?? 0;
+  };
 
   /** Billable hours for one cell: worked shifts are 8h minus extra off-time. */
   const billableOf = (a: RosterAgent, iso: string): number =>
@@ -990,6 +997,7 @@ function RosterGrid({
               {dayList.map((d, col) => {
                 const iso = isoOf(year, month, d);
                 const code = shiftOf(a, iso);
+                const off = offOf(a, iso);
                 const weekend = [0, 6].includes(new Date(year, month - 1, d).getDay());
                 const point = { row: rowIndex, col };
                 const isSelected = selectedKeys.has(`${point.row}:${point.col}`);
@@ -1014,12 +1022,13 @@ function RosterGrid({
                   >
                     <button
                       type="button"
-                      aria-label={`${a.en}, ${iso}: ${code || 'no shift'}`}
+                      aria-label={`${a.en}, ${iso}: ${code || 'no shift'}${off > 0 ? ` (${off}h off)` : ''}`}
                       aria-pressed={isSelected}
-                      title={`${a.en} · ${iso} · ${code || 'No shift'}`}
+                      title={`${a.en} · ${iso} · ${code || 'No shift'}${off > 0 ? ` · ${off}h extra off (billable ${Math.max(0, 8 - off)}h)` : ''}${a.offNote?.[iso] ? ` · ${a.offNote[iso]}` : ''}`}
                       className={cn(
                         'flex h-6 w-full select-none items-center justify-center border-0 px-0.5 font-mono text-[9px] font-bold leading-none outline-none',
                         !code && weekend && 'bg-white/[0.025]',
+                        off > 0 && !isSelected && 'ring-2 ring-inset ring-amber-400',
                         isSelected && 'relative z-[1] ring-2 ring-inset ring-primary',
                         'focus-visible:relative focus-visible:z-[2] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary'
                       )}
