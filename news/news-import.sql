@@ -25,7 +25,7 @@ VALUES ('2026-08-01-ultramarine-p1-nose-lift-while-moving', '2026-08-01', 'Ultra
 
 **3、水泵不转 BUG / Water pump not spinning (bug)**
 现象 / Symptom: 水泵不转，驱动电机正常运行、灯光蓝灯常亮 / Water pump does not spin; drive motors run normally and the blue light stays on.
-措施/话术 / Action: V5.29.0 版本已解决，引导用户升级至最新固件版本 V5.33.0 / Fixed in V5.29.0 — guide the user to upgrade to the latest firmware V5.33.0.', 1793056250867)
+措施/话术 / Action: V5.29.0 版本已解决，引导用户升级至最新固件版本 V5.33.0 / Fixed in V5.29.0 — guide the user to upgrade to the latest firmware V5.33.0.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -46,7 +46,7 @@ VALUES ('2026-08-04-ecovacs-home-app-v3-15-0-release', '2026-08-04', 'ECOVACS HO
 - 【国际】全新升级 | 发现页面升级为服务频道，补充自助服务功能、IKO 入口、使用指南等 / Discover page upgraded into a Service channel with self-service, IKO entry and user guides
 - 【国际】新增 | 账号异常登录提醒 / New alert for abnormal account logins
 - 【国际】新增 | 支持从 Alexa app 快捷调起 Ecovacs Home 进行授权 / Quick-launch ECOVACS HOME from the Alexa app for authorization
-- 新增 | 营销广告黑名单功能 / Marketing-ad blacklist feature', 1793056250867)
+- 新增 | 营销广告黑名单功能 / Marketing-ad blacklist feature', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -59,7 +59,7 @@ VALUES ('2026-08-05-ai-chat-assist-preview', '2026-08-05', 'AI Chat Troubleshoot
 
 AI Chat 功能各场景节点测试工作已全部完成，预计本周四 8.6 正式上线。该功能落地后，将作为海外客服工单排障场景的智能辅助工具，提供标准化回复话术。
 
-All scenario-node testing for AI Chat is complete; official launch expected Thursday, August 6. Once live it will act as an intelligent assistant for overseas after-sales troubleshooting, providing standardized reply scripts.', 1793056250867)
+All scenario-node testing for AI Chat is complete; official launch expected Thursday, August 6. Once live it will act as an intelligent assistant for overseas after-sales troubleshooting, providing standardized reply scripts.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -72,7 +72,7 @@ VALUES ('2026-08-05-us-site-featured-product-change-t90-pro-omni', '2026-08-05',
 
 - 由于 T90 PRO OMNI CARE 已售罄，目前库存已清空，暂不作为主推商品 / T90 PRO OMNI CARE is sold out and its stock is cleared — it is temporarily removed from the featured slot.
 - T90 PRO OMNI 已到仓，统一调整主推商品为 T90 PRO OMNI / T90 PRO OMNI has arrived at the warehouse; the featured product is now unified as T90 PRO OMNI.
-- 但请各位注意两个品的功能差异，尤其是自动加液功能 / Note the feature differences between the two models, especially the auto solution-refill function.', 1793056250867)
+- 但请各位注意两个品的功能差异，尤其是自动加液功能 / Note the feature differences between the two models, especially the auto solution-refill function.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -82,7 +82,7 @@ VALUES ('2026-08-06-goat-ao-mowing-task-48h-auto-terminate', '2026-08-06', 'GOAT
 
 为避免 2026 年 A&O 系列与计划表中的割草任务产生冲突，当割草任务暂停超过 48 小时时，系统/App 将自动终止该任务。
 
-To avoid conflicts between the 2026 A&O series and scheduled mowing tasks, when a mowing task is paused for more than 48 hours, the system/app will automatically terminate that task.', 1793056250867)
+To avoid conflicts between the 2026 A&O series and scheduled mowing tasks, when a mowing task is paused for more than 48 hours, the system/app will automatically terminate that task.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -95,7 +95,7 @@ VALUES ('2026-08-06-goat-battery-exchange-logic-restored', '2026-08-06', 'GOAT B
 
 但是，若用户明确要求备用电池，请咨询 Tier 2 和 TL 再给用户解决方案。
 
-However, if a user explicitly requests a spare battery, consult Tier 2 and the TL before offering a solution.', 1793056250867)
+However, if a user explicitly requests a spare battery, consult Tier 2 and the TL before offering a solution.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -108,7 +108,7 @@ UltraMarine P1 FAQ 在线版本有更新，请大家积极主动多多参考。
 The UltraMarine P1 online FAQ has been updated — please refer to it actively.
 
 **注意：只有阅读权限，请勿外传 Read-only access — do NOT share externally.**
-在线 FAQ Online FAQ: https://ecovacs.feishu.cn/sheets/WCJ0sqcb1hx1nStogZocKYnznHc?sheet=lKcOWZ', 1793056250867)
+在线 FAQ Online FAQ: https://ecovacs.feishu.cn/sheets/WCJ0sqcb1hx1nStogZocKYnznHc?sheet=lKcOWZ', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -124,7 +124,7 @@ VALUES ('2026-08-08-w2s-pro-materials-faq-htu-video', '2026-08-08', 'W2S PRO & W
 **HTU 视频更新 HTU video updated (2026-08-08)：** W2S PRO & W2S PRO OMNI 窗宝新品 HTU 视频已更新至共享表格和 "Email Template" 模板库 — The new WINBOT W2S PRO & W2S PRO OMNI HTU video has been added to the sheet and the Email Template library:
 https://lmgx8md8u1.feishu.cn/sheets/OTfAsEyjkhPw46teTexcOjIZn2c?sheet=pR2GQ3
 
-*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793056250867)
+*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -140,7 +140,7 @@ VALUES ('2026-08-10-ai-chat-assist-official-launch', '2026-08-10', 'AI Chat Assi
 If needed, enable AI Assist in live chat to help generate troubleshooting FAQs. Report any issues to the on-duty Tier 2 / Team Leader promptly.
 
 - Tier 2: 李书蒙Steve / 蒋志聪 / 凌键杨
-- TL: Alexia / Harrison', 1793056250867)
+- TL: Alexia / Harrison', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -169,7 +169,7 @@ We''re excited about our upcoming products, though we''re not able to confirm sp
 All models currently on sale, as well as new models planned for 2026, are developed and managed in accordance with applicable regulatory requirements.
 
 **6. 公司要退出美国市场了吗？**
-We understand your concern. We can confirm that we remain committed to serving our customers in the US, and we''ll continue to provide support and service. For any official updates, please keep an eye on our official channels and announcements.', 1793056250867)
+We understand your concern. We can confirm that we remain committed to serving our customers in the US, and we''ll continue to provide support and service. For any official updates, please keep an eye on our official channels and announcements.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -191,7 +191,7 @@ Firmware upgrade will be rolled out for the X12 series with the new firmware ver
 上述新功能的使用方法以及截图将在 OTA 推送完成后同步更新至共享盘课件。/ Instructions and screenshots for the new features will be updated to the shared-drive courseware after the OTA push completes.
 
 【体验优化 / Experience Upgrade】
-修复已知问题，整体使用体验更流畅。/ Bug fixes and overall performance enhancements for a smoother experience.', 1793056250867)
+修复已知问题，整体使用体验更流畅。/ Bug fixes and overall performance enhancements for a smoother experience.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -210,7 +210,7 @@ X9 Series August OTA regular update will be pushed as scheduled below, please be
 - 推送范围 / Scope: 国际 100% / Global 100%
 
 【体验优化 / Experience Optimization】
-修复已知问题，提升整体使用体验。/ Fixed known issues to improve overall user experience.', 1793056250867)
+修复已知问题，提升整体使用体验。/ Fixed known issues to improve overall user experience.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -235,7 +235,7 @@ VALUES ('2026-08-12-august-promotions-us-ca', '2026-08-12', 'August Promotions �
 
 **美加以旧换新（8.1 - 8.31）/ US & CA Trade-in (Aug 1 - Aug 31)**，两种形式 / two options:
 1. 原价拿下新机先，DTC 给 Label 把旧的寄回来，然后再退差价给客人 / Buy the new unit at full price first; DTC issues a return label for the old unit, then refunds the difference.
-2. 拿 SN 直接就抵扣了，旧机也不用寄回来 / Trade in by SN for an instant discount — no need to send the old unit back.', 1793056250867)
+2. 拿 SN 直接就抵扣了，旧机也不用寄回来 / Trade in by SN for an instant discount — no need to send the old unit back.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -252,7 +252,7 @@ Two updated email templates for roller-mop tangling issues are now live (updated
 
 感谢配合！Thank you for your cooperation!
 
-*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793056250867)
+*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -265,7 +265,7 @@ VALUES ('2026-08-13-goat-free-battery-inquiry-handling', '2026-08-13', 'GOAT Fre
 **For GOAT users asking about a free battery without reporting any battery/charging problem:**
 
 - 请确认 Serial Number 后，与 Tier 2 / Team Lead 确认进一步操作。/ Confirm the Serial Number first, then check with Tier 2 / Team Lead before proceeding.
-- 切勿直接拒绝用户，也不得在未确认的情况下直接答应，来问过先。/ Never refuse outright, and never promise anything before confirmation — ask us first.', 1793056250867)
+- 切勿直接拒绝用户，也不得在未确认的情况下直接答应，来问过先。/ Never refuse outright, and never promise anything before confirmation — ask us first.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -288,7 +288,7 @@ GOAT A/O LiDAR PRO 系列最新 OTA 信息更新如下 / Latest OTA update for G
 - 手动遥控体验优化 / Smoother manual remote control
 - 卡困点逻辑调整：删除卡困点后，卡困障碍物即刻消失 / Stuck-point update: deleting a stuck point now removes the obstacle right away
 - A LiDAR PRO 建图边长限制调整为 150m / A LiDAR PRO map size limit changed to 150m
-- 其他 bug 修复 / Other bug fixes', 1793056250867)
+- 其他 bug 修复 / Other bug fixes', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -301,7 +301,7 @@ VALUES ('2026-08-14-t30s-pro-scheduled-start-targeted-push-registration', '2026-
 
 若升级到 1.49.0 后依然有预约启动异常，请联系 Alexia / Harrison / Hoi 重新登记，机器将定推 1.50.0 版本固件。
 
-If the issue persists after upgrading to 1.49.0, contact Alexia / Harrison / Hoi to re-register the unit for a targeted push of firmware 1.50.0.', 1793056250867)
+If the issue persists after upgrading to 1.49.0, contact Alexia / Harrison / Hoi to re-register the unit for a targeted push of firmware 1.50.0.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -318,7 +318,7 @@ T30S Series: OTA version 1.50.0 starts 30% general rollout for all overseas regi
 - 遇到预约不按时问题：先核查固件版本，引导用户升级；尚未收到 1.50.0 版本的，正常登记定推 — For scheduled-time mismatch issues: check the firmware version first and guide users to upgrade. For users who haven''t received 1.50.0, register for targeted push as normal.
 - 1.50.0 版本下出现预约清洁异常问题，请继续在群内反馈 — For abnormal scheduled-clean issues occurring on 1.50.0, keep reporting in the group.
 
-**临时处理方案 Temporary handling (related, 2026-08-14)：** 关于 DEEBOT T30S PRO 系列预约启动异常：若升级到 1.49.0 后依然有异常的，可联系 @Alexia @Harrison @Hoi 重新登记，将定推 1.50.0 — For T30S PRO series scheduled-start anomalies: if issues persist after upgrading to 1.49.0, contact Alexia / Harrison / Hoi to re-register the device for a targeted 1.50.0 push.', 1793056250867)
+**临时处理方案 Temporary handling (related, 2026-08-14)：** 关于 DEEBOT T30S PRO 系列预约启动异常：若升级到 1.49.0 后依然有异常的，可联系 @Alexia @Harrison @Hoi 重新登记，将定推 1.50.0 — For T30S PRO series scheduled-start anomalies: if issues persist after upgrading to 1.49.0, contact Alexia / Harrison / Hoi to re-register the device for a targeted 1.50.0 push.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -332,7 +332,7 @@ VALUES ('2026-08-18-call-handling-available-and-case-notes-reminder', '2026-08-1
 - 接电话途中做好 note，维护好 case info / Take good notes during the call and keep case info up to date.
 - 如果需要邮件跟进，请和客户说明我们一般会在 30 分钟左右发出邮件（视情况减少或者延长）。
 
-If email follow-up is needed, tell the customer we normally send the email within about 30 minutes (shorter or longer depending on the situation). Thank you for your cooperation.', 1793056250867)
+If email follow-up is needed, tell the customer we normally send the email within about 30 minutes (shorter or longer depending on the situation). Thank you for your cooperation.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -343,7 +343,7 @@ VALUES ('2026-08-19-download-latest-gbu-package', '2026-08-19', 'Download the La
 **Notice 通知：** 请大家移步下载最新的 GBU（全球业务指南）资料包。
 **Please download the latest GBU package.**
 
-路径 / Path: K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\GBU', 1793056250867)
+路径 / Path: K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\GBU', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -356,7 +356,7 @@ VALUES ('2026-08-20-hands-on-assessment-hq-observations', '2026-08-20', 'Hands-O
 
 1. **零部件认识不足 / Part identification** — 有同事把割草机的雷达 LiDAR 当成 AIVI 3D TOF 摄像头；不清楚割草机电极片的位置 / Some agents mistake the mower''s LiDAR radar for the AIVI 3D TOF camera, or cannot locate the mower''s electrode plates.
 2. **产品使用/维护 / Usage & maintenance** — 泳池滤篮不可单独使用；W3 清洗边刷的方法；X12 滚筒遮蔽盖拆卸 / The pool robot''s debris basket cannot be used alone; how to clean the W3 side brush; how to remove the X12 roller cover.
-3. **安装问题 / Installation** — 打草模块内置螺丝同样需要拧紧 / The trimmer module''s built-in screws must also be tightened.', 1793056250867)
+3. **安装问题 / Installation** — 打草模块内置螺丝同样需要拧紧 / The trimmer module''s built-in screws must also be tightened.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -450,7 +450,7 @@ VALUES ('2026-08-20-hands-on-assessment-topic-list', '2026-08-20', 'Hands-On Ass
 | APP 类 | 用户说已更换滤篮，但 APP 还一直提醒 / App keeps prompting to replace the basket after replacement |
 | 故障类 | "机器人吸不上来东西，吸力变小了"排查 / Weak suction — robot is not picking up debris |
 | 故障类 | "机器人没工作多久就没电了"排查 / Battery drains quickly |
-| 故障类 | "机器人老在同一个地方转圈，大片地方没扫到"排查 / Robot keeps circling the same spot, large areas missed |', 1793056250867)
+| 故障类 | "机器人老在同一个地方转圈，大片地方没扫到"排查 / Robot keeps circling the same spot, large areas missed |', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -475,7 +475,7 @@ VALUES ('2026-08-20-overseas-login-forced-verification', '2026-08-20', 'Overseas
 3. **检查邮箱过滤规则 Review Email Filters：** 确认没有设置自动转发、黑名单或域名过滤器拦截我们的邮件 — Make sure you don''t have auto-forwarding, block lists, or domain filters set up that could prevent our emails from reaching your inbox.
 4. **重新请求 Request Again：** 稍等片刻后在验证界面点击 "Resend code" 按钮，检查网络连接后重试 — Click the "Resend code" button on the verification screen after a moment, check your internet connection and try again.
 
-*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793056250867)
+*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -488,7 +488,7 @@ VALUES ('2026-08-25-extended-warranty-cancellation-incident', '2026-08-25', 'Ext
 
 经 DTC 确认，目前是延保服务商的服务器数据进行迁移导致系统误触发了通知，客户的延保订单依然有效。客户咨询的时候我们先人为进行安抚。同时客户也可以联系延保公司确认延保订单的有效性。
 
-Confirmed by DTC: the warranty provider''s server data migration caused the system to mistakenly trigger cancellation notices. Customers'' extended warranty orders remain valid. Reassure customers when they inquire, and let them know they may also contact the warranty company directly to confirm their order is still valid.', 1793056250867)
+Confirmed by DTC: the warranty provider''s server data migration caused the system to mistakenly trigger cancellation notices. Customers'' extended warranty orders remain valid. Reassure customers when they inquire, and let them know they may also contact the warranty company directly to confirm their order is still valid.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -501,7 +501,7 @@ VALUES ('2026-08-25-t90-omni-sold-out-us-site', '2026-08-25', 'US Site — T90 O
 
 如有客户咨询购买，请告知暂时无货，可推荐在售的同类机型。
 
-If customers ask about buying it, advise that it is temporarily out of stock and recommend an available alternative model.', 1793056250867)
+If customers ask about buying it, advise that it is temporarily out of stock and recommend an available alternative model.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -510,7 +510,7 @@ VALUES ('2026-08-26-x11-omnicyclone-sold-out-us-site', '2026-08-26', 'US Site �
 > Source: General · Hoi · 2026-08-26
 
 **Notice 通知：** US 官网 X11 OmniCyclone 下架通知。由于 X11 OmniCyclone 全部售罄，当前已做下架处理。
-**US webstore: X11 OmniCyclone has been delisted — stock is fully sold out.**', 1793056250867)
+**US webstore: X11 OmniCyclone has been delisted — stock is fully sold out.**', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -523,7 +523,7 @@ VALUES ('2026-08-26-x12s-49mm-obstacle-crossing-spec', '2026-08-26', 'X12S 49mm 
 
 "至高越障 49mm" 指科沃斯地宝 X12S 家族在第一层高低 ≤25mm、第二层高度 ≤24mm 的情况下，最高实现双层合计 49mm 的越障。数据来源为科沃斯实验室，具体以家庭实际使用为准。
 
-"Up to 49mm obstacle crossing" means the DEEBOT X12S family can cross a two-step obstacle totalling up to 49mm — first step ≤25mm and second step ≤24mm. Figure sourced from the ECOVACS lab; real-world results depend on the home environment.', 1793056250867)
+"Up to 49mm obstacle crossing" means the DEEBOT X12S family can cross a two-step obstacle totalling up to 49mm — first step ≤25mm and second step ≤24mm. Figure sourced from the ECOVACS lab; real-world results depend on the home environment.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -542,7 +542,7 @@ US：DEEBOT X12S OmniCyclone 上架通知 / listing:
    https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/bundle-deebot-x12s-omnicyclone-cleaning-solution-kit
    X12S OmniCyclone 的适配耗材预计 11 月有货 / Compatible consumables for X12S OmniCyclone expected in stock around November.
 3. **X12S OC + W3 OMNI（bundle）**
-   https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/bundle-deebot-x12s-omnicyclone-winbot-w3-omni', 1793056250867)
+   https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/bundle-deebot-x12s-omnicyclone-winbot-w3-omni', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -572,7 +572,7 @@ Referenced to a vertical glass surface (90°), the supported angle for the **nor
 2. 实际是否可清洁，以窗宝识别判断为准；如果窗户角度不满足条件，设备会弹窗提醒并报警 — Always follow WINBOT''s on-device judgement; it will alert and alarm if the angle is unsupported.
 3. 即便人工判定角度处于支持区间，最终仍以机器自身检测结果为准 — Even if manual check shows the angle is within range, the robot''s self-detection result takes priority.
 
-*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793056250867)
+*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -582,7 +582,7 @@ VALUES ('2026-09-02-service-languages-english-french-only', '2026-09-02', 'Servi
 
 **Policy 政策提醒：** 请大家注意，目前我们的服务语言有且只有英语和法语。我们不提供西语服务，除非用户情绪激动或有差评等风险。
 
-**Our service languages are English and French only.** We do not provide Spanish service, unless the user is highly agitated or there is a risk of a bad review or similar.', 1793056250867)
+**Our service languages are English and French only.** We do not provide Spanish service, unless the user is highly agitated or there is a risk of a bad review or similar.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -659,7 +659,7 @@ Air-Watt is the unit of **effective suction power**, expressing the combined eff
 ## 区域特性 Regional differences
 
 - **仅 AMR & KR 配备隐私挡片**，可物理遮挡摄像头 — Privacy shutter (physical camera cover) only on AMR & KR units.
-- **海外仅 AMR 不配备污水箱加热抑菌功能**，外观与原 X12 Series 清污水箱相同 — Overseas, only AMR lacks dirty-water-tank heating;外观与原 X12 系列水箱相同 (same appearance as the original X12 Series tanks).', 1793056250867)
+- **海外仅 AMR 不配备污水箱加热抑菌功能**，外观与原 X12 Series 清污水箱相同 — Overseas, only AMR lacks dirty-water-tank heating;外观与原 X12 系列水箱相同 (same appearance as the original X12 Series tanks).', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -690,7 +690,7 @@ If a customer **cannot receive the login verification code**, first complete the
 - *Email address associated with your account: xxxxxxx*
 - *Country of registration: US/CA*
 
-*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793056250867)
+*(Screenshots are available in the original Feishu message — image export was not authorized for these attachments.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -699,7 +699,7 @@ VALUES ('2026-09-04-call-business-hours-restoring-9am-9pm', '2026-09-04', 'Call 
 > Source: General · Alexia · 2026-09-04
 
 **Notice 通知：** 雷霆快报：下周一 9.7 北美 call 业务营业时间将正式恢复 9AM-9PM。
-**Flash update: from Monday, September 7, the North America call business hours officially return to 9AM-9PM ET.**', 1793056250867)
+**Flash update: from Monday, September 7, the North America call business hours officially return to 9AM-9PM ET.**', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -727,7 +727,7 @@ VALUES ('2026-09-05-x12s-vs-x12-comparison', '2026-09-05', 'X12S vs X12 Series �
 1. **真空除螨 Dust Mite Removal 真空除螨：** 主刷盖板上新增 3 个小辅轮，配合加厚刷条实现高频拍打，加上 **53 AW 强吸力**，实现吸尘式除螨，清洁更健康 — 3 new small auxiliary wheels on the main-brush cover combine with thickened brush strips for high-frequency tapping, and together with 53 AW of suction enable vacuum-based dust-mite removal for a healthier clean.
 2. **FocusJet 2.0：** 相比 X12 的 FocusJet，FocusJet 2.0 新增高压交叉喷淋清洁液，快速覆盖污渍区域，有效渗透溶解顽固污垢 — Compared to the FocusJet on X12, FocusJet 2.0 adds high-pressure cross-spray cleaning fluid that quickly covers stained areas, effectively penetrating and dissolving stubborn dirt.
 
-*(另有 X11 vs T90 vs X12 vs X12S 对比图，见飞书原消息 — A X11 vs T90 vs X12 vs X12S comparison chart is available in the original Feishu message.)*', 1793056250867)
+*(另有 X11 vs T90 vs X12 vs X12S 对比图，见飞书原消息 — A X11 vs T90 vs X12 vs X12S comparison chart is available in the original Feishu message.)*', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -750,7 +750,7 @@ X12 系列将启动新版本推送，推送版本为 1.85.0。版本推送计划
 3. 升级瞬时超充逻辑，延长清扫续航时间。/ Upgraded PowerBoost charging logic to extend cleaning runtime.
 4. 新增集尘袋安装到位语音提示。/ Added a voice prompt confirming the dust bag is properly installed.
 5. 优化运行逻辑，改善碰撞表现。/ Optimized operating logic to improve collision handling.
-6. 修复多项细节问题，提升整机稳定性。/ Fixed various minor issues to improve overall stability.', 1793056250867)
+6. 修复多项细节问题，提升整机稳定性。/ Fixed various minor issues to improve overall stability.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -762,7 +762,7 @@ VALUES ('2026-09-08-call-business-hours-officially-restored', '2026-09-08', 'Cal
 **Flash update: ECOVACS North America Customer Support call hours have officially returned to 9AM-9PM ET.**
 
 - 请各位 A00 的小伙伴做好准备，同时多注意自己班表的排班 / A00 agents please get ready and double-check your shift schedule.
-- PS：9 月 21 日有在线培训，具体安排请留意后续通知 / Online training on September 21 — watch for follow-up notices.', 1793056250867)
+- PS：9 月 21 日有在线培训，具体安排请留意后续通知 / Online training on September 21 — watch for follow-up notices.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -784,7 +784,7 @@ VALUES ('2026-09-08-ecovacs-home-app-v3-16-0-release', '2026-09-08', 'ECOVACS HO
 设置页新增"产品与服务数据"下载入口，支持用户导出个人数据。操作路径：设置 → 产品与服务数据 → 输入邮箱并提交 → 邮箱验证 → 查收邮件下载数据。/ A new "Product & Service Data" download entry in Settings lets users export their personal data. Path: Settings → Product & Service Data → Enter Email and Submit → Email Verification → Check Email to Download.
 
 **4. 海外新增三种语言支持 / New overseas languages**
-新增爱沙尼亚语、保加利亚语、匈牙利语。/ Estonian, Bulgarian, and Hungarian have been added.', 1793056250867)
+新增爱沙尼亚语、保加利亚语、匈牙利语。/ Estonian, Bulgarian, and Hungarian have been added.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -802,7 +802,7 @@ VALUES ('2026-09-08-ultramarine-p1-ota-v5-39-0', '2026-09-08', 'UltraMarine P1 O
 
 【更新内容 / Update Details】—— 可对外 / For external use
 
-本次更新为产品性能优化，提升整体使用体验。/ This update includes product performance optimizations to improve overall user experience.', 1793056250867)
+本次更新为产品性能优化，提升整体使用体验。/ This update includes product performance optimizations to improve overall user experience.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -811,7 +811,7 @@ VALUES ('2026-09-09-n30-pro-omni-white-sold-out-us-site', '2026-09-09', 'US Site
 > Source: General · Harrison · 2026-09-09
 
 **Notice 通知：** 美国官网 N30 PRO OMNI WHITE 下架通知。N30 PRO OMNI WHITE 现有库存已全部售罄，官网做下架处理。
-**US webstore: N30 PRO OMNI WHITE has been delisted — stock is fully sold out.**', 1793056250867)
+**US webstore: N30 PRO OMNI WHITE has been delisted — stock is fully sold out.**', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -824,7 +824,7 @@ VALUES ('2026-09-14-omni-station-hot-water-washing', '2026-09-14', 'OMNI Station
 If a customer reports the All-in-One Station / OMNI Station seemingly fails to wash mops with hot water (e.g. the mops feel cool when taken out mid-cleaning), refer to the following:
 
 - 地宝首次进行抹布清洗时使用的是冷水，在后续回洗过程中才会开启热水加热 — The FIRST mop wash of a cleaning session always uses cold water; hot-water heating only kicks in for subsequent washes.
-- 回洗过程中，热水会持续喷淋并不断流出。由于热量会随着水流持续消耗和散失，回洗阶段的水温会逐渐降低，因此用户在回洗过程中触摸抹布时可能会感觉水温越来越低，属于正常现象 — During washing, hot water is sprayed continuously and flows out constantly. Heat is consumed and dissipated with the water flow, so the water temperature GRADUALLY DECREASES during the wash cycle — the mops feeling cooler and cooler is normal behavior.', 1793056250867)
+- 回洗过程中，热水会持续喷淋并不断流出。由于热量会随着水流持续消耗和散失，回洗阶段的水温会逐渐降低，因此用户在回洗过程中触摸抹布时可能会感觉水温越来越低，属于正常现象 — During washing, hot water is sprayed continuously and flows out constantly. Heat is consumed and dissipated with the water flow, so the water temperature GRADUALLY DECREASES during the wash cycle — the mops feeling cooler and cooler is normal behavior.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -838,7 +838,7 @@ The ECOVACS WINBOT dedicated cleaning fluid contains NO nano particles, nano pow
 
 配方成分为：去离子水、异丙醇、非离子表面活性剂、防腐剂、亮蓝二钠盐、芳樟醇，没有添加纳米粒子/纳米材料 — The formula consists of deionized water, isopropyl alcohol, non-ionic surfactants, preservatives, brilliant blue disodium salt, and linalool. No nano particles or nano materials are added.
 
-部分窗宝机型宣传的 "nano-level spray / 纳米级喷雾"，不是清洁液里面含有纳米颗粒，是主机超声波雾化技术，把液体打散成极细小雾滴，属于液滴物理形态，不是添加纳米固体粉末 — The "nano-level spray" advertised for some WINBOT models does not mean the fluid contains nano particles. It refers to the robot''s ultrasonic atomization technology, which breaks the liquid into extremely fine droplets — a physical droplet form, not added solid nano powder.', 1793056250867)
+部分窗宝机型宣传的 "nano-level spray / 纳米级喷雾"，不是清洁液里面含有纳米颗粒，是主机超声波雾化技术，把液体打散成极细小雾滴，属于液滴物理形态，不是添加纳米固体粉末 — The "nano-level spray" advertised for some WINBOT models does not mean the fluid contains nano particles. It refers to the robot''s ultrasonic atomization technology, which breaks the liquid into extremely fine droplets — a physical droplet form, not added solid nano powder.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -874,7 +874,7 @@ Connect the app and manually remote-drive the robot to a position where it can b
 - 新抹布 New cloth: **201-J001-00A7**（留痕、变形改善后物料，可同时适配 W3 新老款机器）— improved material with less marking/deformation; fits both new and old W3 units.
 - 老抹布 Old cloth: **201-J001-0072**（备件将优先消耗老抹布库存）— old stock will be consumed first.
 
-若新版 W3 机器（固件版本 V2.7.0，铭牌生产日期 2026 年 9 月）安装上老抹布 201-J001-0072 后报障"气压不足"或出现"开始工作一分钟就播报清洁完成"的情况，引导用户连接 APP，点小红点进行 OTA 升级 — If a new W3 (firmware V2.7.0, nameplate date Sep 2026) with the old cloth 201-J001-0072 reports low pressure or "cleaning complete" one minute after starting, guide the user into the app and tap the red dot to run the OTA update.', 1793056250867)
+若新版 W3 机器（固件版本 V2.7.0，铭牌生产日期 2026 年 9 月）安装上老抹布 201-J001-0072 后报障"气压不足"或出现"开始工作一分钟就播报清洁完成"的情况，引导用户连接 APP，点小红点进行 OTA 升级 — If a new W3 (firmware V2.7.0, nameplate date Sep 2026) with the old cloth 201-J001-0072 reports low pressure or "cleaning complete" one minute after starting, guide the user into the app and tap the red dot to run the OTA update.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -886,7 +886,7 @@ VALUES ('2026-09-17-goat-mower-path-requires-two-zones', '2026-09-17', 'GOAT Mow
 
 The GOAT mower cannot add a channel/Path: a Path can only be created when there are exactly TWO zones. Also, when creating additional zones, there must be a gap between the two zones.
 
-![GOAT Path creation example](assets/goat-path-two-zones-01.jpg)', 1793056250867)
+![GOAT Path creation example](assets/goat-path-two-zones-01.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -908,7 +908,7 @@ A: 50mm refers to the maximum continuous obstacle-crossing height of the robot. 
 
 至高越障 49mm 指科沃斯地宝 X12S 家族在第一层高度 ≤25mm、第二层高度 ≤24mm 时，最高实现双层 49mm 的越障。数据来源科沃斯实验室，具体以家庭实际使用为准。
 
-"Up to 49mm" refers to the DEEBOT X12S family crossing a double-layer obstacle at most 49mm high when the first layer is ≤25mm and the second layer is ≤24mm. Data from the ECOVACS lab; actual performance may vary in home environments.', 1793056250867)
+"Up to 49mm" refers to the DEEBOT X12S family crossing a double-layer obstacle at most 49mm high when the first layer is ≤25mm and the second layer is ≤24mm. Data from the ECOVACS lab; actual performance may vary in home environments.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -921,7 +921,7 @@ VALUES ('2026-09-18-issue-type-and-model-no-entry-requirement', '2026-09-18', 'I
 **Always enter Issue Type and (AMR) Model No. accurately and keep them up to date on every ticket.**
 
 - 目前质检端已建立专项进行抽查，后续将严格按照要求进行检查并扣分。/ QA has set up a dedicated audit — checks will be strict and errors will cost points.
-- 请大家务必做好基础信息维护，不要因个人基础信息维护不到位，影响团队整体业务指标的达成。/ Keep these basics accurate so individual entries don''t drag down team metrics.', 1793056250867)
+- 请大家务必做好基础信息维护，不要因个人基础信息维护不到位，影响团队整体业务指标的达成。/ Keep these basics accurate so individual entries don''t drag down team metrics.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -943,7 +943,7 @@ From September 17, 2026, for the listed models purchased within ≤6 months, the
 
 **不要寄回的型号 / No return needed:** 全线窗宝、全线泳池机、GOAT GX600、亲宝（狗子）/ all WINBOTs, all pool robots, GOAT GX600, mother & baby machines.
 
-（补充 / Note: T30 系列后续也确认为无需寄回，见 2026-09-19 条目。/ T30 series was later confirmed exempt too — see the Sep 19 entry.）', 1793056250867)
+（补充 / Note: T30 系列后续也确认为无需寄回，见 2026-09-19 条目。/ T30 series was later confirmed exempt too — see the Sep 19 entry.）', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -954,7 +954,7 @@ VALUES ('2026-09-19-t30-series-exempt-from-device-return', '2026-09-19', 'T30 Se
 **Policy 政策补充：** 请各位注意，T30 系列也无需寄回（2026-9-8）。
 **Note: the T30 series is also exempt from returning the original device (as of Sep 8).**
 
-此为原设备寄回政策更新（2026-09-17 生效）的补充说明。/ This supplements the original-device return policy update effective September 17, 2026.', 1793056250867)
+此为原设备寄回政策更新（2026-09-17 生效）的补充说明。/ This supplements the original-device return policy update effective September 17, 2026.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1013,7 +1013,7 @@ Email templates: search "UltraMarine P1 - Spin in Circles" / "UltraMarine P1 - �
 ## 附图 Screenshots (现象判断表 Symptom-judgement table)
 
 ![UltraMarine P1 spin troubleshooting 1](assets/ultramarine-p1-spin-01.jpg)
-![UltraMarine P1 spin troubleshooting 2](assets/ultramarine-p1-spin-02.jpg)', 1793056250867)
+![UltraMarine P1 spin troubleshooting 2](assets/ultramarine-p1-spin-02.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1027,7 +1027,7 @@ VALUES ('2026-09-19-x12s-side-brush-breakage-camera-shutter', '2026-09-19', 'X12
 
 1. 确认摄像头挡板是否处于关闭状态 — Confirm whether the camera shutter is closed.
 2. 摄像头可辅助机器人进行避障，因此建议用户在清扫时打开摄像头挡板 — The camera assists obstacle avoidance, so advise users to OPEN the camera shutter while cleaning.
-3. 不进行清扫时可关闭摄像头挡板 — The shutter may be closed when not cleaning.', 1793056250867)
+3. 不进行清扫时可关闭摄像头挡板 — The shutter may be closed when not cleaning.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1040,7 +1040,7 @@ VALUES ('2026-09-20-ultramarine-p1-ota-v5-39-0-paused', '2026-09-20', 'UltraMari
 
 请勿引导用户检查/等待该版本更新；恢复推送后会有后续通知（后续已重新推送为 V5.40.0，见 9 月 22 日条目）。
 
-Do not direct users to check for this update for now. A follow-up notice will come when the rollout resumes (it was later re-pushed as V5.40.0 — see the September 22 entry).', 1793056250867)
+Do not direct users to check for this update for now. A follow-up notice will come when the rollout resumes (it was later re-pushed as V5.40.0 — see the September 22 entry).', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1053,7 +1053,7 @@ VALUES ('2026-09-21-dtc-web-5-0-account-password-rotated', '2026-09-21', 'DTC We
 
 出于安全考虑，此处不展示账号密码（该新闻内容会打包进客户端）。请查看群内原消息获取新凭据，或向当值 TL / Tier 2 索取。
 
-For security reasons the credentials are not shown here (this news content is bundled into the app). Check the original group message for the new credentials, or ask the on-duty TL / Tier 2.', 1793056250867)
+For security reasons the credentials are not shown here (this news content is bundled into the app). Check the original group message for the new credentials, or ask the on-duty TL / Tier 2.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1064,7 +1064,7 @@ VALUES ('2026-09-22-north-america-laws-regulations-reference', '2026-09-22', 'No
 **Reference 参考资料分享：** 现向大家普及北美相关法律法规，供大家参考，详见以下文件。
 **Sharing a reference document on North America laws and regulations for everyone''s reference:**
 
-https://ecovacs.feishu.cn/wiki/Oup9wVFAjiBFoVkpPfzcP4Zznqc', 1793056250867)
+https://ecovacs.feishu.cn/wiki/Oup9wVFAjiBFoVkpPfzcP4Zznqc', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1100,7 +1100,7 @@ VALUES ('2026-09-22-t90-max-pro-omni-spec-notes', '2026-09-22', 'T90 Max Pro Omn
 ![T90 Max Pro Omni 8](assets/t90-max-pro-omni-08.jpg)
 ![T90 Max Pro Omni 9](assets/t90-max-pro-omni-09.jpg)
 ![T90 Max Pro Omni 10](assets/t90-max-pro-omni-10.jpg)
-![T90 Max Pro Omni 11](assets/t90-max-pro-omni-11.jpg)', 1793056250867)
+![T90 Max Pro Omni 11](assets/t90-max-pro-omni-11.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1115,7 +1115,7 @@ Re-pushed at 100%, version number updated to 5.40.0. Content remains unchanged.
 
 如用户咨询"为什么我的版本是 5.40.0 而不是 5.39.0"，属于正常情况：此前 V5.39.0 推送暂停后，恢复推送时版本号统一调整为 5.40.0，更新内容一致。
 
-If a user asks why their version is 5.40.0 instead of 5.39.0, this is expected: after the V5.39.0 pause, the resumed rollout uses 5.40.0 with identical content.', 1793056250867)
+If a user asks why their version is 5.40.0 instead of 5.39.0, this is expected: after the V5.39.0 pause, the resumed rollout uses 5.40.0 with identical content.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1133,7 +1133,7 @@ VALUES ('2026-09-24-side-brush-behavior-change-t90-x12-series', '2026-09-24', 'S
 
 **话术 Script（中文）：** 您好，这款机器对边刷转动逻辑做了优化调整：机器在回充、建图、定位、巡航、跨区运行时，边刷会正常转动。该调整不会影响机器整体清洁与各项功能正常运行，您可以放心使用。
 
-**Script (English):** Hello, this model has an optimized side-brush rotation logic: the side brush now rotates normally during dock-return, mapping, positioning, cruising and zone-crossing. This adjustment does not affect the robot''s overall cleaning performance or any of its functions — you can use it with confidence.', 1793056250867)
+**Script (English):** Hello, this model has an optimized side-brush rotation logic: the side brush now rotates normally during dock-return, mapping, positioning, cruising and zone-crossing. This adjustment does not affect the robot''s overall cleaning performance or any of its functions — you can use it with confidence.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1153,7 +1153,7 @@ PF 大促和黑五期间【以旧换新】活动会暂时停掉，届时所有 B
 
 The Trade-in program is suspended during PF and Black Friday. All banners will be removed; the Trade-in / Upgrade Program entry in the top/bottom navigation stays but shows a "promotion paused" notice.
 
-换句话说，2026-9-26 开始，官网以旧换新暂时停运。/ In short: from September 26, 2026, the webstore trade-in program is temporarily out of service.', 1793056250867)
+换句话说，2026-9-26 开始，官网以旧换新暂时停运。/ In short: from September 26, 2026, the webstore trade-in program is temporarily out of service.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1169,7 +1169,7 @@ VALUES ('2026-09-25-t90s-t90-max-bundles-us-launch', '2026-09-25', 'T90S / T90 M
 2. **T90S PRO OMNI White + Accessories**
    https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/bundle-deebot-t90s-pro-omni-white-accessories
 3. **T90 MAX Plus OMNI + Accessories**
-   https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90-max-plus-omni-accessories', 1793056250867)
+   https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90-max-plus-omni-accessories', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1190,7 +1190,7 @@ The corresponding FAQ video links have been added to the sheet, including how to
 
 **相关邮件模板更新 Related email template update：** "UltraMarine P1 - Spin in Circles" 邮件模板已同步更新（搜索 "UltraMarine P1 - Spin in Circles" 或 "UltraMarine P1 - 转圈"）。
 
-请大家知悉，如有疑问随时沟通。Please be informed. Feel free to reach out if you have any questions.', 1793056250867)
+请大家知悉，如有疑问随时沟通。Please be informed. Feel free to reach out if you have any questions.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1203,7 +1203,7 @@ VALUES ('2026-09-29-ultramarine-p1-spin-in-circles-email-template-update', '2026
 
 请使用最新模板回复相关咨询；转圈故障的处理方案详见同日 FAQ 更新（新增自主更换螺丝方案）。
 
-Use the latest template for related inquiries. For handling details see the same-day FAQ update (new self-service screw replacement solution).', 1793056250867)
+Use the latest template for related inquiries. For handling details see the same-day FAQ update (new self-service screw replacement solution).', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1215,7 +1215,7 @@ VALUES ('2026-09-29-us-site-prime-fall-early-bird-live', '2026-09-29', 'US Site 
 **US webstore: the Prime Fall early-bird promotion is now live.**
 
 - 时间 / Period: 9/26 - 10/2
-- 落地页 / Landing page: https://www.ecovacs.com/us/shop/promotion', 1793056250867)
+- 落地页 / Landing page: https://www.ecovacs.com/us/shop/promotion', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1238,7 +1238,7 @@ The T50 OMNI and T50S OMNI are both excellent products. For obstacle avoidance, 
 
 In addition, the T50S OMNI is our new 2026 model. It boasts upgraded suction power of up to 2.5 kPa, and its anti-tangle technology has been upgraded from version 2.0 to 3.0.
 
-If you are looking for the latest model with stronger suction and superior anti-tangle performance, the T50S OMNI is the better choice. If price is your top priority and you only need it for routine cleaning, the T50 OMNI will serve you perfectly well.', 1793056250867)
+If you are looking for the latest model with stronger suction and superior anti-tangle performance, the T50S OMNI is the better choice. If price is your top priority and you only need it for routine cleaning, the T50 OMNI will serve you perfectly well.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1251,7 +1251,7 @@ VALUES ('2026-10-01-qa-case-info-entry-requirements', '2026-10-01', 'QA Standard
 
 详细标准见 Wiki 文档 / Full standard in the Wiki document:
 
-https://ecovacs.feishu.cn/wiki/KNSjwpG2hilJZQk59r1cH5nenJd', 1793056250867)
+https://ecovacs.feishu.cn/wiki/KNSjwpG2hilJZQk59r1cH5nenJd', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1266,7 +1266,7 @@ VALUES ('2026-10-06-canada-besender-discontinued-inventory-source', '2026-10-06'
 可以先看 SF（Shopify/官方系统）的库存，或参考以下表格（周度更新）：
 Check SF first, or refer to the sheet below (updated weekly):
 
-https://lmgx8md8u1.feishu.cn/sheets/N11bsJjd3hdHYktGuP5cHoepned?sheet=0LoYQB', 1793056250867)
+https://lmgx8md8u1.feishu.cn/sheets/N11bsJjd3hdHYktGuP5cHoepned?sheet=0LoYQB', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1280,7 +1280,7 @@ VALUES ('2026-10-06-x12s-low-price-order-cancellation-inquiries', '2026-10-06', 
 1. 如用户咨询 X12S 低价订单被取消：请先建议用户联系亚马逊（原卖家）。该价格由亚马逊平台设定，建议优先联系亚马逊团队沟通处理。/ Advise the user to contact Amazon (the original seller) first — the price was set by the Amazon platform.
 2. 如亚马逊团队未能协助解决，用户可再联系我们，我方协同处理。/ If Amazon cannot resolve it, the user can come back to us and we will assist.
 
-如遇到类似工单，请及时上报给 T2 / TL 统一跟进处理。/ Report similar tickets to T2 / TL for unified follow-up.', 1793056250867)
+如遇到类似工单，请及时上报给 T2 / TL 统一跟进处理。/ Report similar tickets to T2 / TL for unified follow-up.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1293,7 +1293,7 @@ VALUES ('2026-10-07-pf-promo-ccrb5-ccace10-coupon-handling', '2026-10-07', 'PF P
 **If users cannot use CCRB5 / CCACE10 coupons during the Prime Fall promotion (Oct 3 - Oct 7):**
 
 - 请联系 Tier 2 / Team Lead 获取券码，一客一码。/ Contact Tier 2 / Team Lead for a coupon code — one code per customer.
-- 用户不满的，请酌情升级到 DTC。/ Escalate to DTC as appropriate if the user remains dissatisfied.', 1793056250867)
+- 用户不满的，请酌情升级到 DTC。/ Escalate to DTC as appropriate if the user remains dissatisfied.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1308,7 +1308,7 @@ VALUES ('2026-10-07-x12s-omnicyclone-amazon-restocked', '2026-10-07', 'X12S Omni
 
 If you encounter users whose earlier ~$200 low-price orders were cancelled, hand the case to Tier 2 / Team Lead.
 
-https://www.amazon.com/ECOVACS-DEEBOT-X12S-OMNICYCLONE-Vacuum/dp/B0H9XTFY99', 1793056250867)
+https://www.amazon.com/ECOVACS-DEEBOT-X12S-OMNICYCLONE-Vacuum/dp/B0H9XTFY99', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1326,7 +1326,7 @@ If customers ask during this period, explain as usual — they knew the estimate
 
 如果有特别着急的客户，我们可以对应送一些耗材（以库存情况为准）。/ For especially anxious customers, we may offer some consumables as a goodwill gesture (subject to stock availability).
 
-生效时间 / Effective: Oct 7, 2026, until further notice.', 1793056250867)
+生效时间 / Effective: Oct 7, 2026, until further notice.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1339,7 +1339,7 @@ VALUES ('2026-10-08-warranty-exchange-no-ship-remote-areas-update', '2026-10-08'
 
 - Iqaluit, Nunavut, Canada
 
-请各位知悉。/ Please be informed.', 1793056250867)
+请各位知悉。/ Please be informed.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1353,7 +1353,7 @@ VALUES ('2026-10-09-claims-high-risk-ticket-handling', '2026-10-09', 'Claims / H
 - 凡涉及索赔倾向的案件（如人身伤害、财产损失等），回复前必须与 T2 / TL 确认，严禁以甲方立场轻易承认错误或答应赔偿。/ Any case with claim potential (personal injury, property damage, etc.) MUST be confirmed with T2 / TL before replying. Never admit fault or promise compensation on the client''s behalf.
 - 若不确定案件是否属于高风险，请直接定位为高风险工单，先与 T2 / TL 确认后再回复。/ If unsure whether a case is high-risk, treat it as high-risk and confirm with T2 / TL before responding.
 - 如因擅自许诺造成甲方财产损失，甲方有权向项目乃至 VXI 索赔，届时将直接影响团队结算及个人绩效。/ Unauthorized promises that cause the client financial loss may trigger claims against the project or even VXI, directly impacting team settlement and individual performance.
-- 请严格执行：遇到此类案件，第一时间上报 T2 / TL，不得自行回复或表态。/ Strictly comply: report to T2 / TL immediately — do not reply or commit on your own.', 1793056250867)
+- 请严格执行：遇到此类案件，第一时间上报 T2 / TL，不得自行回复或表态。/ Strictly comply: report to T2 / TL immediately — do not reply or commit on your own.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1373,7 +1373,7 @@ VALUES ('2026-10-09-new-instruction-manuals-and-faq-uploads', '2026-10-09', 'New
   K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\说明书\地宝说明书\T90Max PRO_Instruction Manual.pdf
   K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\说明书\地宝说明书\T90Max_Instruction Manual.pdf
 - **X12S**
-  K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\FAQ\DEEBOT\普朗克S PLUS（X12S Series）FAQ2.0.xlsx', 1793056250867)
+  K:\Guangzhou\Ecovacs\Agent\Ecovacs NA\产品资料\FAQ\DEEBOT\普朗克S PLUS（X12S Series）FAQ2.0.xlsx', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1385,7 +1385,7 @@ VALUES ('2026-10-10-ca-besender-discontinued-inventory-via-sf', '2026-10-10', 'C
 
 如果**发配件**过程中选择了 **AMR CA Parts**，但有 pricebook 相关报错的，请及时上报。/ When **ordering parts**, if you selected **AMR CA Parts** but hit a pricebook-related error, report it promptly.
 
-**Update 2026-10-20：** BESENDER 已不处理加拿大业务，库存请看 CA 库存表单（已更新 2026-10-19）：https://lmgx8md8u1.feishu.cn/sheets/N11bsJjd3hdHYktGuP5cHoepned?sheet=0LoYQB / BESENDER no longer handles CA business — use the CA inventory sheet (updated 2026-10-19) for stock checks.', 1793056250867)
+**Update 2026-10-20：** BESENDER 已不处理加拿大业务，库存请看 CA 库存表单（已更新 2026-10-19）：https://lmgx8md8u1.feishu.cn/sheets/N11bsJjd3hdHYktGuP5cHoepned?sheet=0LoYQB / BESENDER no longer handles CA business — use the CA inventory sheet (updated 2026-10-19) for stock checks.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1413,7 +1413,7 @@ VALUES ('2026-10-10-email-issue-type-entry-scoring-rule-change', '2026-10-10', '
 **3. 特殊情况 / Edge cases**
 
 - 若 AI Summary 因任何原因没有生成，还是按原来人工录入的评分规则。/ If AI Summary produced no recommendation, the original manual-entry scoring rules apply.
-- 若 CC 提及案例处理时能看到 AI Summary 推荐的 issue type，案例关闭后看不到：质检按 AI Summary 报表的历史记录进行追溯——若无记录，参考原来人工录入的评分规则；若有记录且 CC 录入与历史记录推荐一致，算正确；不一致，算录入有误。/ If the recommendation was visible during handling but not after closure, QA traces the AI Summary report history: no record → manual rules; record matches entry → correct; record differs → entry error.', 1793056250867)
+- 若 CC 提及案例处理时能看到 AI Summary 推荐的 issue type，案例关闭后看不到：质检按 AI Summary 报表的历史记录进行追溯——若无记录，参考原来人工录入的评分规则；若有记录且 CC 录入与历史记录推荐一致，算正确；不一致，算录入有误。/ If the recommendation was visible during handling but not after closure, QA traces the AI Summary report history: no record → manual rules; record matches entry → correct; record differs → entry error.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1430,7 +1430,7 @@ VALUES ('2026-10-13-t90-t90s-water-tank-dry-mopping-no-water-decrease', '2026-10
 3. 打开清水箱，取下过滤件，拔掉其连接的水管，使用清洁刷清理过滤件。/ Open the clean water tank, take out the filter, disconnect its water hose, and clean the filter with the cleaning brush.
 4. 清理完成后，将水管重新插好，把过滤件放回原位，最后将清水箱放回基站。/ After cleaning, reconnect the water hose, put the filter back in place, and finally return the clean water tank to the dock.
 5. 将机器人放入基站充电，打开 APP 点击 "基站" → "洗抹布"，观察洗抹布结束后抹布是否有被浸湿。/ Place the robot on the station, open the app, tap "Station" → "Wash Mop", and check whether the mop becomes wet after the wash cycle finishes.
-6. 若完成以上操作后清水箱仍不出水，可登记补发清水箱。/ If the clean water tank still outputs no water after completing the above steps, register for a replacement clean water tank.', 1793056250867)
+6. 若完成以上操作后清水箱仍不出水，可登记补发清水箱。/ If the clean water tank still outputs no water after completing the above steps, register for a replacement clean water tank.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1441,7 +1441,7 @@ VALUES ('2026-10-14-dtc-coupon-codes-ccrb5-ccace10-update', '2026-10-14', 'DTC W
 【DTC 官网优惠券使用更新】（2026-10-13）/ [DTC website coupon usage update] (2026-10-13)
 
 - **CA DTC 官网：** CCRB5 和 CCACE10 两个 code 均已开启，当前有效期**暂定至 11 月 12 日**，并将在**黑五活动开始前结束**。黑五期间：继续采用**一人一码**的形式。/ On the CA DTC site, both CCRB5 and CCACE10 are now active, valid **tentatively until Nov 12**, and will **end before Black Friday starts**. During Black Friday: the **one-code-per-person** format continues.
-- **US DTC 官网：** 待 US PF 活动结束后，再调整 US DTC 官网客服端 code 的有效期。/ On the US DTC site, the support-side code validity will be adjusted only after the US PF campaign ends.', 1793056250867)
+- **US DTC 官网：** 待 US PF 活动结束后，再调整 US DTC 官网客服端 code 的有效期。/ On the US DTC site, the support-side code validity will be adjusted only after the US PF campaign ends.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1451,7 +1451,7 @@ VALUES ('2026-10-15-call-transfer-case-owner-rule', '2026-10-15', 'Call Transfer
 
 **转电话须知：** 转接电话给 Premium Agent 时，请务必把该电话工单的 **Case Owner 改为实际接听电话的 Agent**，确保工单归属清晰、责任明确。请各位知悉并严格执行。/ When transferring a call to a Premium Agent, always change the ticket''s **Case Owner to the agent who actually took the call**, so ownership and responsibility stay clear. Please acknowledge and follow strictly.
 
-**补充（Hoi，同日）：** 任何类型的转 call 都是这个原则——如果接到法语 call 需要转给对应同事，也请把 case owner 转为对应的接线 agent。/ Follow-up (Hoi, same day): this principle applies to every kind of call transfer — e.g. French calls transferred to the designated colleague also require reassigning the case owner to the answering agent.', 1793056250867)
+**补充（Hoi，同日）：** 任何类型的转 call 都是这个原则——如果接到法语 call 需要转给对应同事，也请把 case owner 转为对应的接线 agent。/ Follow-up (Hoi, same day): this principle applies to every kind of call transfer — e.g. French calls transferred to the designated colleague also require reassigning the case owner to the answering agent.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1474,7 +1474,7 @@ VALUES ('2026-10-15-faq-update-t90-t90s-t90-80-max-x12-x12s', '2026-10-15', 'FAQ
   2. 按压主机底部排污口，查看是否卡滞或被异物堵塞。若有异物，请清理。/ Press the bottom drain port to check for sticking or blockage; clean if needed.
   3. 同时按压基站左右两侧充电簧片 1–2s 后松开，观察基站排污顶杆是否正常起落。/ Press both charging reeds for 1–2s, release, and observe the drain push rod.
   4. 检查 APP 中是否开启了 AI 污渍识别，请关闭后重试。/ Check whether AI Stain Recognition is on in the app; turn it off and retry.
-  5. 检查 APP 中 "瞬时超充" 是否设置为 "自适应" 模式，若有，请改为 "标准" 模式。/ Check whether "Instant Supercharge" is set to "Adaptive"; if so, switch to "Standard".', 1793056250867)
+  5. 检查 APP 中 "瞬时超充" 是否设置为 "自适应" 模式，若有，请改为 "标准" 模式。/ Check whether "Instant Supercharge" is set to "Adaptive"; if so, switch to "Standard".', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1482,7 +1482,7 @@ INSERT INTO news_entries (id, date, title, author, body, updated_at)
 VALUES ('2026-10-15-us-ca-trade-in-relaunch-coupon-codes-restored', '2026-10-15', 'US & CA Trade-In Back Online, Coupon Codes Restored', 'Hoi', '
 > Source: General · Hoi · 2026-10-15
 
-US 和 CA 官网**以旧换新**均已重新上线，另外之前的 **Coupon Code** 也都恢复使用（2026-10-15）。/ The **trade-in** programs on both the US and CA official websites are back online, and the previous **coupon codes** have been restored as well (2026-10-15).', 1793056250867)
+US 和 CA 官网**以旧换新**均已重新上线，另外之前的 **Coupon Code** 也都恢复使用（2026-10-15）。/ The **trade-in** programs on both the US and CA official websites are back online, and the previous **coupon codes** have been restored as well (2026-10-15).', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1494,7 +1494,7 @@ VALUES ('2026-10-16-pin-reset-verification-requirements', '2026-10-16', 'PIN Res
 
 1. **机器序列号（SN）+ 购机凭证**（收据 / 订单、发票）；/ **Machine serial number (SN) + proof of purchase** (receipt / order, invoice);
 2. **注册账号匹配**——客户之前在品牌 APP 注册绑定该机器；/ **Registered account match** — the customer previously registered and bound the machine in the brand app;
-3. **设备绑定的邮箱 / 手机号接收一次性验证码**。/ **One-time verification code** sent to the email / phone bound to the device.', 1793056250867)
+3. **设备绑定的邮箱 / 手机号接收一次性验证码**。/ **One-time verification code** sent to the email / phone bound to the device.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1506,7 +1506,7 @@ VALUES ('2026-10-16-video-too-large-email-cloud-drive-script', '2026-10-16', 'Vi
 
 > If the video file is too large to attach to an email, you may upload it to Google Drive, iCloud, or Dropbox and share the link with us. This will allow our team to review the video and provide you with more accurate assistance.
 
-![Cloud drive share script](assets/2026-10-16-cloud-drive-video-share.jpg)', 1793056250867)
+![Cloud drive share script](assets/2026-10-16-cloud-drive-video-share.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1518,7 +1518,7 @@ VALUES ('2026-10-17-black-friday-2026-prep-and-official-period', '2026-10-17', '
 
 **Update 2026-10-22（已确定 / confirmed）：** 黑五正式期时间为 **11/19 – 11/30**，其中 **11/26 – 11/30** 为官方正日子。/ The official Black Friday period runs **Nov 19 – Nov 30**, with **Nov 26 – Nov 30** being the official core days.
 
-有任何需要支持的部分或需求（包括但不限于产品知识 / 售前应对技巧 / 价保流程与规范 / 旗舰产品排障等），欢迎 DM Hoi，或在话题中留言。/ For any support needs (including but not limited to product knowledge, pre-sales techniques, price-match processes and policies, flagship troubleshooting), DM Hoi or leave a message in the thread.', 1793056250867)
+有任何需要支持的部分或需求（包括但不限于产品知识 / 售前应对技巧 / 价保流程与规范 / 旗舰产品排障等），欢迎 DM Hoi，或在话题中留言。/ For any support needs (including but not limited to product knowledge, pre-sales techniques, price-match processes and policies, flagship troubleshooting), DM Hoi or leave a message in the thread.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1534,7 +1534,7 @@ T90 系列清水箱不出水问题——常规排障后，如问题依旧，请�
   - 201-L001-0091 黑 / Black
   - 201-L001-0090 白 / White
 - **T90S：**
-  - 201-L006-0199 白 / White', 1793056250867)
+  - 201-L006-0199 白 / White', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1547,7 +1547,7 @@ VALUES ('2026-10-17-us-window-bot-beta-tester-recruitment', '2026-10-17', 'US Wi
 - **投放时间（上线–下线）/ Push window:** 北京时间（GMT+8）2026/10/17 10:00 – 2026/10/24 23:59
 - **美国问卷 / US survey:** https://v.wjx.cn/vm/YJIlunJ.aspx#
 - **入选通知方式 / Selection notice:** 邮件沟通 / via email
-- **筛选完成时间 / Screening completes:** 2026/10/28', 1793056250867)
+- **筛选完成时间 / Screening completes:** 2026/10/28', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1569,7 +1569,7 @@ VALUES ('2026-10-20-other-region-service-inquiry-script', '2026-10-20', 'Other-R
 >
 > We appreciate your understanding and thank you for choosing ECOVACS.
 
-![Other region inquiry script](assets/2026-10-20-other-region-inquiry-script.jpg)', 1793056250867)
+![Other region inquiry script](assets/2026-10-20-other-region-inquiry-script.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1589,7 +1589,7 @@ VALUES ('2026-10-20-qa-details-voice-and-email', '2026-10-20', 'QA Details — V
 **Email 沟通中 / In emails：**
 
 - **Issue type** 录入：如果 AI Summary 有推荐，请按照推荐项进行填写或修改。/ Issue type entry: follow the AI Summary recommendation when one is available.
-- **机器型号 / AMR Model No.**：如果用户在邮件正文或标题中有提及，甚至通过 Web Form 提交表单时填入了 SN 并可 Search SN 验证到型号，请及时规范填写。/ Machine model: fill it in promptly and correctly if mentioned in the email body/subject, or when an SN was submitted via Web Form and the model can be verified by searching the SN.', 1793056250867)
+- **机器型号 / AMR Model No.**：如果用户在邮件正文或标题中有提及，甚至通过 Web Form 提交表单时填入了 SN 并可 Search SN 验证到型号，请及时规范填写。/ Machine model: fill it in promptly and correctly if mentioned in the email body/subject, or when an SN was submitted via Web Form and the model can be verified by searching the SN.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1609,7 +1609,7 @@ Amazon Canada 中由 **ECOVACS ROBOTICS**（即 Amazon 3P Seller）出售的订�
 
 ![Order product details](assets/2026-10-21-amazon-ca-sf-verify-2.jpg)
 
-![Order date](assets/2026-10-21-amazon-ca-sf-verify-3.jpg)', 1793056250867)
+![Order date](assets/2026-10-21-amazon-ca-sf-verify-3.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1621,7 +1621,7 @@ VALUES ('2026-10-21-deebot-error-codes-sheet', '2026-10-21', 'New DEEBOT Error C
 
 - Feishu sheet: https://lmgx8md8u1.feishu.cn/sheets/SiedsZWcThDIAGtUov8cLDP7nVd?sheet=3n8KN8
 
-![DEEBOT error code sheet](assets/2026-10-21-deebot-error-codes-sheet.jpg)', 1793056250867)
+![DEEBOT error code sheet](assets/2026-10-21-deebot-error-codes-sheet.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1639,7 +1639,7 @@ VALUES ('2026-10-21-qa-standard-refill-drain-module-issue-types', '2026-10-21', 
 
 ![Refill drain module examples 2](assets/2026-10-21-refill-drain-module-qa-2.jpg)
 
-![Refill drain module examples 3](assets/2026-10-21-refill-drain-module-qa-3.jpg)', 1793056250867)
+![Refill drain module examples 3](assets/2026-10-21-refill-drain-module-qa-3.jpg)', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1670,7 +1670,7 @@ VALUES ('2026-10-22-call-transfer-process-and-rules', '2026-10-22', 'Call Transf
 - **场景 / Scenario:** 用户**多次**指明某一 Agent 接听电话。/ The user repeatedly insists on a specific agent.
 - **动作 / Action:** 当前 Agent 需先**礼貌婉拒一次**，并明确表达乐意协助、主动承接。/ The current agent first politely declines once, expressing willingness to help.
 - **参考话术 / Suggested script:** "I understand you''d prefer to speak with the dedicated agent, unfortunately they are currently unavailable. I''m more than happy to assist in any way possible."
-- **转接条件 / Transfer condition:** 若用户**两次及以上**明确坚持只与该特定 Agent 沟通，请先确认该 Agent 的现场状态，**必须经得该 Agent 本人同意**后，方可转交电话。/ If the user insists twice or more, check the agent''s availability; the transfer may only proceed **with that agent''s explicit consent**.', 1793056250867)
+- **转接条件 / Transfer condition:** 若用户**两次及以上**明确坚持只与该特定 Agent 沟通，请先确认该 Agent 的现场状态，**必须经得该 Agent 本人同意**后，方可转交电话。/ If the user insists twice or more, check the agent''s availability; the transfer may only proceed **with that agent''s explicit consent**.', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1680,7 +1680,7 @@ VALUES ('2026-10-22-ecovacs-home-app-v3-17-0-release', '2026-10-22', 'ECOVACS HO
 
 【ECOVACS HOME APP 新版本通知】最新版本 **V3.17.0** 已发布，具体细节可参考文档（文档内部仅供内部参考）。/ The latest version **V3.17.0** of the ECOVACS HOME app has been released; details are in the internal doc (internal reference only).
 
-- Doc: https://ecovacs.feishu.cn/wiki/I5cMwl5E3isJlikSLQKcy4y0n6e?from=from_copylink', 1793056250867)
+- Doc: https://ecovacs.feishu.cn/wiki/I5cMwl5E3isJlikSLQKcy4y0n6e?from=from_copylink', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1702,7 +1702,7 @@ VALUES ('2026-10-26-wo-missing-tracking-interim-lookup', '2026-10-26', 'WO Missi
 
 When a customer asks for the **tracking number of a replacement unit** from the warranty flow but the WO shows **no synced Tracking information**, look the number up in this sheet first: [WO Tracking Interim Lookup Sheet](https://ecovacs.feishu.cn/sheets/Tvy2sB0ZYhnhL7t8Xy2cv7OZn3d?sheet=0ScCdf) (internal access).
 
-Example / 示例: `WE16515` / `WO260911504665`', 1793056250867)
+Example / 示例: `WE16515` / `WO260911504665`', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
@@ -1745,7 +1745,325 @@ VALUES ('2026-10-27-canada-oow-atravesar-inspection-fee-update', '2026-10-27', '
 **Flow recap / 流程回顾：**
 1. Customer fills in the [Atravesar Services Repair Request form](https://www.atravesar.ca/OOW-Webform/)
 2. Quotation + payment link issued (**inspection fee CAD 40, payable upfront**)
-3. Customer pays and ships the unit to the repair center (Dock 5, 145 Riviera Dr, Markham, ON L3R 5J6 · +1 (647) 636-5234 / +1 (905) 887-4222 · info@atravesar.ca)', 1793056250867)
+3. Customer pays and ships the unit to the repair center (Dock 5, 145 Riviera Dr, Markham, ON L3R 5J6 · +1 (647) 636-5234 / +1 (905) 887-4222 · info@atravesar.ca)', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-27-qc-pitfalls-two-week-review', '2026-10-27', 'QC Pitfalls — Two-Week Deduction Review', 'Alexia', '
+> Source: 流程相关 · Alexia · 2026-10-27
+
+近两周质检重点扣分项避雷清单：
+
+- 💣 **避雷 1：通话称谓** — 电话中未称呼客人两次及以上，只要不够两次，**直接扣 10 分**。
+- 💣 **避雷 2：Call Note 完整性** — 电话中缺少用户信息（电话号码、名字、型号），或 Call Note 中记录的**型号信息不精准**，都算不完整。
+- 💣 **避雷 3：Case Tag（每错一项扣 15 分）** — 针对**美国/加拿大过保用户**，务必选择**对应国家**的 **OOW Case**。
+- 💣 **避雷 4：Issue Type、Model 与 SN 信息** — Issue Type 选错、Model 选错（历史记录有但选 unknown）；用户提供了地宝/基站 SN 但未及时填写到左侧信息栏。
+- 💣 **关差避雷：重复收集** — 一个重复索要就是 B 类关差。
+- 💣 **关差避雷：Dead Air** — 客人说话后我们超过 5 秒没有在电话中回应，就是一个 C 类关差。
+
+![OOW Case Tag selection example](assets/qc-pitfalls-oow-case-tag.jpg)
+
+![Issue type / model / SN info panel example](assets/qc-pitfalls-issue-type-sn.png)
+
+——
+
+**QC pitfalls from the past two weeks — avoid these deductions:**
+
+- **Greeting**: failing to address the customer by name at least **twice** on a call is an instant **-10**.
+- **Call Note completeness**: missing user info (phone number, name, model) or an **imprecise model** recorded in the note counts as incomplete.
+- **Case Tag (15 points each)**: for US/CA out-of-warranty customers, always pick the **country-specific OOW** case tag.
+- **Issue Type / Model / SN**: wrong issue type, wrong model (history exists but "unknown" selected), or a provided robot/dock SN not entered into the info panel.
+- **Escalation pitfall — repeated collection**: asking for the same info twice is a Class-B escalation.
+- **Escalation pitfall — dead air**: more than 5 seconds of silence after the customer speaks is a Class-C escalation.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-27-salesforce-new-features-chat-wo', '2026-10-27', 'Salesforce New Features — Chat, AMR Shipping Limits, WO Changes', 'Hoi', '
+> Source: General · Hoi · 2026-10-27
+
+Salesforce 即将上线的功能（2026-10-27 重点快览）：
+
+**Chat 功能优化：**
+1. 客户发送信息时将 **highlight** 展示
+2. 所有坐席皆忙碌时，客户发起聊天会收到"坐席正忙、排队中"提示
+3. 坐席释放后**自动接入**排队中的客户
+4. 同一客户当天再次进线，可在聊天页面右侧往下滚动找到 **"Chat History" Tab**
+5. 点击 Chat History 可查看该客户**近 2 天内**的过往聊天记录
+6. 点击 **"Open Case"** 可进入聊天记录关联的 Case 详情页
+
+![Chat message highlight](assets/sf-chat-highlight.jpg)
+
+**国家发货限制 — AMR：**
+- US 客户 Case 创建 Spare Parts Shipment WO 时，**Add Product 只能搜到 US 库存**
+- CA 客户 Case 所需配件无 CA 库存时，可搜索到 **US 仓库库存**（当前 SAP B1 测试环境只有 US 库存数据，上线后以实际为准）
+
+**保外维修工单同步到 SF：**
+- SF 已自动拉取维修商保外工单，Work Order Owner 设为 **AMR Service Head**，各 CC 可通过 **「AMR Repair」视图**查看 AMR-Repair WO 数据
+
+**WO Cancel 功能优化：**
+- WO Close 时弹出取消原因 **"Cancellation Remarks"** 填写页面
+
+——
+
+**Salesforce features rolling out (2026-10-27 highlights):**
+
+**Chat optimizations:** customer messages render highlighted; when all agents are busy, customers get a queue notice and are auto-connected once an agent frees up; a **Chat History** tab (scroll down on the right panel) shows the customer''s chats from the last 2 days, with **Open Case** linking to the related case.
+
+**Country shipping limits — AMR:** US cases creating Spare Parts Shipment WOs can only search US stock in Add Product; CA cases can fall back to US warehouse stock when parts are out of stock in CA (SAP B1 test env is US-only for now).
+
+**OOW repair WO sync:** SF now pulls repair-partner OOW work orders automatically, with Work Order Owner set to AMR Service Head — view them under the **AMR Repair** view.
+
+**WO Cancel:** closing a WO now prompts a **"Cancellation Remarks"** reason page.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-27-t90s-ultra-omni-us-launch', '2026-10-27', 'T90S ULTRA OMNI Black & White Launch on US Site', 'Hoi', '
+> Source: General · Hoi · 2026-10-27
+
+**2026-10-27 新品上市通知**：US 站 **T90S ULTRA OMNI** 黑/白两色上架：
+
+1. [T90S ULTRA OMNI Black](https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90s-ultra-omni-black)
+2. [T90S ULTRA OMNI White](https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90s-ultra-omni-white)
+
+**与 T90S PRO OMNI 的区别**：**双仓** + inbox 内多一瓶**重污清洁液**。
+
+——
+
+**New launch 2026-10-27**: the **T90S ULTRA OMNI** (Black / White) is now listed on the US site:
+
+1. [T90S ULTRA OMNI Black](https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90s-ultra-omni-black)
+2. [T90S ULTRA OMNI White](https://www.ecovacs.com/us/shop/deebot-robotic-vacuum-cleaner/deebot-t90s-ultra-omni-white)
+
+**Difference vs the T90S PRO OMNI**: **dual tanks** plus an extra bottle of **heavy-soil cleaning solution** in the box.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-27-us-ca-halloween-sale-live', '2026-10-27', 'US & CA Halloween Sale Live', 'Hoi', '
+> Source: General · Hoi · 2026-10-27
+
+**US Halloween sale 活动已上线**，时间 **10/27 – 11/2**，落地页：[ecovacs.com/us/shop/promotion](https://www.ecovacs.com/us/shop/promotion)。
+
+主推品：
+- X12S OC+ 过渡套装（重\*1 + 普\*1）
+- T90S ULTRA OMNI
+- W3 OMNI Package（抹布\*4 + 清洁液\*2）
+- A3000 LiDAR PRO 小套装
+
+**CA Halloween sale 活动已上线**，时间 **10/26 – 11/1**，落地页：[ecovacs.com/ca/shop/promotion](https://www.ecovacs.com/ca/shop/promotion)。
+
+——
+
+**The US Halloween sale is live**, running **Oct 27 – Nov 2** — landing page: [ecovacs.com/us/shop/promotion](https://www.ecovacs.com/us/shop/promotion).
+
+Featured items: X12S OC+ transition bundle (1 heavy-duty + 1 standard mop), T90S ULTRA OMNI, W3 OMNI Package (4 mop cloths + 2 cleaning solution), and the A3000 LiDAR PRO mini bundle.
+
+**The CA Halloween sale is live**, running **Oct 26 – Nov 1** — landing page: [ecovacs.com/ca/shop/promotion](https://www.ecovacs.com/ca/shop/promotion).', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-28-oow-courtesy-email-templates-update', '2026-10-28', 'OOW Courtesy Email Templates — Pick the Right One', 'Alexia', '
+> Source: 流程相关 · Alexia · 2026-10-28
+
+处理 **OOW（过保）礼遇换机** 用户时，务必根据**实际情况**选择并发送正确的邮件模板，避免"给超两年用户发 90 天质保"的乌龙。
+
+**🔴 核心区别：**
+- **OOW Courtesy（购买 >1 年 且 <2 年）**：换机后享有 **90 天**质保
+- **OOW Special Courtesy（购买 >2 年）**：换机后**无**额外质保
+
+**✅ 场景一：购买已超 1 年，但小于 2 年**
+- 步骤 1（收集信息）：(购买超1年小于2年) Collect Info 2 — 收集地址准备创 WO
+- 步骤 2（确认服务）：(购买超1年小于2年) OOW Courtesy 服务中，用户无需退还原机
+
+![OOW Courtesy — collect info 2 template](assets/oow-courtesy-collect-info.jpg)
+
+![OOW Courtesy — confirm service template](assets/oow-courtesy-confirm-service.jpg)
+
+**✅ 场景二：购买已超 2 年**
+- 步骤 1（收集信息）：(购买超2年) Collect Info 2 — 收集地址准备创 WO
+- 步骤 2（确认服务）：(购买超礼遇2年) Special OOW Courtesy 服务中，用户无需退还原机
+
+![OOW Special — collect info 2 template](assets/oow-special-collect-info.jpg)
+
+![OOW Special — confirm service template](assets/oow-special-confirm-service.jpg)
+
+（更新时间 2026-10-27）
+
+——
+
+When handling **OOW courtesy replacement** customers, choose the correct email template based on their **actual purchase age** — do not send the 90-day-warranty template to 2-year-plus users.
+
+**🔴 Key difference:**
+- **OOW Courtesy (purchase >1 yr and <2 yrs)**: the replacement carries a **90-day** warranty.
+- **OOW Special Courtesy (purchase >2 yrs)**: **no** extra warranty on the replacement.
+
+Scenario 1 (>1 yr, <2 yrs): use "(购买超1年小于2年) Collect Info 2" to collect the address and create the WO, then "(购买超1年小于2年) OOW Courtesy" to confirm no return of the original unit is needed.
+
+Scenario 2 (>2 yrs): use "(购买超2年) Collect Info 2" and "(购买超礼遇2年) Special OOW Courtesy" respectively — see the four template screenshots above (updated 2026-10-27).', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-29-connection-outage-response-and-escalation', '2026-10-29', 'Connection Outage — Response Flow & Escalation Template', 'Alexia', '
+> Source: General · Alexia · 2026-10-29
+
+**【问题收集】突然断连 / Time Out / 无法连接服务器（10-29）**
+
+如遇用户反馈"突然断连、Time Out 或无法连接服务器"：
+
+1. 先按标准流程协助用户完成**基础排障**
+2. 排障完成后仍未解决的，收集用户 **SN** 并附上对应 **Case Number** 在群内接龙上报
+
+**断联紧急升级模板**（仅限已收集完信息的用户）：
+
+![Outage urgent escalation template](assets/outage-escalation-template.jpg)
+
+**若无 SN，也无法 fetch 到，请务必在沟通过程中收集到！**
+
+系统侧确认是服务端问题后（Hoi 同步），无需继续排障，直接告知用户："Some users may experience connection issues with our app right now. Our team is working on it and it will be back soon. Please try again later."
+
+——
+
+**【Issue collection】Sudden disconnection / Time Out / cannot connect to server (Oct 29)**
+
+When users report these symptoms: run the standard basic troubleshooting first; if unresolved, collect the user''s **SN** plus the **Case Number** and report it in the group thread.
+
+Use the **urgent escalation template** (screenshot above) **only for users whose info has been fully collected** — and if there is no SN and it cannot be fetched, make sure to obtain it during the conversation.
+
+Once the server-side outage is confirmed, skip further troubleshooting and tell the user: "Some users may experience connection issues with our app right now. Our team is working on it and it will be back soon. Please try again later."', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-29-ecovacs-home-app-v3-17-1-release', '2026-10-29', 'ECOVACS HOME App V3.17.1 Released', 'Hoi', '
+> Source: General · Hoi · 2026-10-29
+
+**【Ecovacs Home APP 新版本通知】** 最新版本 **V3.17.1** 已发布，具体细节可参考文档：[App 版本 Wiki](https://ecovacs.feishu.cn/wiki/I5cMwl5E3isJlikSLQKcy4y0n6e?from=from_copylink)（内部参考）。
+
+![V3.17.1 supplementary notes](assets/app-v3-17-1-notes.jpg)
+
+——
+
+**【ECOVACS HOME APP New Version Notification】** The latest version **V3.17.1** has been released. Refer to the [App version wiki](https://ecovacs.feishu.cn/wiki/I5cMwl5E3isJlikSLQKcy4y0n6e?from=from_copylink) for details (internal reference only).', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-29-winbot-mini-2-detachable-corner-brush', '2026-10-29', 'WINBOT MINI 2 — Detachable Corner Brush Design Transition', 'Hoi', '
+> Source: 知识点分享群 · Hoi · 2026-10-29
+
+**【产品变更通知与售后应对指引】WINBOT MINI 2 四角边刷可拆卸设计已在生产端导入变更。** 生产批次过渡期内旧版机型仍在流通，近期边刷相关咨询请**先确认机型生产日期**，再对应处理，避免误判。
+
+**一、产品变更点：**
+- MINI 2 四角边刷改为**可拆卸设计**，直接插拔即可，无需额外操作
+- **版本分界（以生产日期为准）**：2026 年 8 月前生产 = 不可拆卸（旧版）；2026 年 8 月起生产 = 可拆卸（新版）
+
+**二、主要风险点：**
+MINI 2 说明书因多语翻译存在歧义（包含"清洁或替换边刷"表述），平面团队会完成调整，后续电子说明书将更新为通用型表述（不再体现"边刷可拆卸"）。
+
+**咨询场景 A**（8 月前生产版本）：用户因说明书产生疑惑。
+**应对**：说明其机型边刷为**固定式设计**，日常清洁即可；若用户非常坚持更换，可安排送修处理，**不支持用户自主更换**。
+
+**咨询场景 B**（8 月后生产版本）：边刷实际可拆卸，用户拆下后询问"如何装回"。
+**应对**：属**正常设计**，指导插拔安装即可，**切勿误判为故障、误走维修**。
+
+**三、用户端感知：**
+边刷可拆卸在用户端实际无感知（尤其说明书改为通用型后）。边刷保养方式遵循**说明书第 19 页**内容，对所有版本通用。
+
+——
+
+**【Product change notice & service guideline】The WINBOT MINI 2 corner brush design has changed at the production level.** During the batch transition, earlier-version units remain in circulation — confirm the unit''s production date before responding to corner-brush inquiries.
+
+**Change:** the four corner brushes are now a **detachable plug-in/out design**. Version cutoff (by production date): produced **before August 2026 = non-detachable (old)**; **from August 2026 = detachable (new)**.
+
+**Risk:** the multilingual manual ambiguously says "clean or replace the wiping pad and corner brushes" — the e-manual will later be updated to generic wording.
+
+**Scenario A (pre-August units):** explain the brushes are a **fixed design** and routine cleaning is sufficient; if the user strongly insists on replacement, arrange repair service — **self-replacement is not supported**.
+
+**Scenario B (post-August units):** detachable is the **normal design** — guide the user to re-plug the brush. Do **NOT** misdiagnose it as a fault or route it to repair.
+
+**User-side perception:** detachability is effectively invisible; brush maintenance follows **manual page 19** and applies to all versions.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-30-halloween-app-theme-live', '2026-10-30', 'Halloween App Theme Live — 3D Map Default & How to Turn It Off', 'Alexia', '
+> Source: General · Alexia · 2026-10-30
+
+**App 活动上线同步 — 万圣节 App 主题**：App 产品团队在北美（美国和加拿大）区域上线**万圣节专属 App 主题**。
+
+![Halloween app theme](assets/halloween-app-theme.jpg)
+
+**主题功能推送时间**：2026.10.27 20:00 – 2026.11.02 11:59（GMT+8）
+
+**机型范围：**
+- **地宝**：X12、X11、X9S、T90、T80S 及之后全部机型
+- **窗宝**：W1 及以后全部机型
+- **割草机**：G1 及以后全部机型
+
+活动期间，操控页内涉及氛围功能的地宝型号，用户界面的**地图默认为 3D 视角展示**（与平时默认 2D 不同）。若有用户咨询请帮忙说明，**双击屏幕即可回到 2D 视角**。
+
+**关闭节日元素展示的两种方式：**
+- **单次关闭**：主题上线后 App 首页会提示已切换至个性化主题，点击提示弹窗内 **"拒绝这个主题"** 即可关闭此次活动
+- **长期关闭**：App 内 **我的 - 设置 - 个性化氛围**，关闭该功能开关后 App 内不再展示节日主题相关功能
+
+![Theme toggle settings](assets/halloween-theme-toggle.jpg)
+
+——
+
+**Halloween App theme is live for North America (US & CA)**, pushed **Oct 27 20:00 – Nov 2 11:59 (GMT+8)**.
+
+**Eligible models:** DEEBOT X12, X11, X9S, T90, T80S and all later models; WINBOT W1 and later; GOAT (mower) G1 and later.
+
+During the event, the map on the control page defaults to a **3D view** instead of the usual 2D — double-tap the screen to switch back to 2D. Please explain this to users who ask.
+
+**To turn off the holiday theme:**
+- **One-time:** tap **"拒绝这个主题" (Reject this theme)** on the homepage popup shown when the theme first applies.
+- **Permanently:** in the App go to **Me - Settings - Personalized ambience** and switch it off.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-30-remove-ai-support-from-email-subject', '2026-10-30', 'Remove "AI Support" from Email Subjects Before Replying', 'Hoi', '
+> Source: 流程相关 · Hoi · 2026-10-30
+
+AI Agent 回复邮件之后，邮件编辑栏 / Interaction - Email 的**主题/Subject 会自动出现 "AI Support" 字样**。请各位在回复时**手动把这块删掉**，以减少用户误解，感谢配合。
+
+![AI Support text in email subject](assets/ai-support-subject.png)
+
+——
+
+After the AI Agent replies to an email, the subject line in the email editor / Interaction - Email automatically contains **"AI Support"**. Please **manually delete it before sending** your reply to avoid confusing the customer. Thank you for your cooperation.', 1793310869179)
+ON CONFLICT(id) DO UPDATE SET
+  date = excluded.date, title = excluded.title, author = excluded.author,
+  body = excluded.body, updated_at = excluded.updated_at;
+INSERT INTO news_entries (id, date, title, author, body, updated_at)
+VALUES ('2026-10-30-tech-escalation-case-handling', '2026-10-30', 'Technical Escalation Cases — Tag, Status & Daily Follow-Up', 'Hoi', '
+> Source: 流程相关 · Hoi · 2026-10-30
+
+**【技术升级处理规范 2026-10-27】** 名下有技术升级 case 的同事，请完成/检查以下操作：
+
+1. **Case Tag** — 选中 **Waiting for Technical**
+2. **Status** — 选中 **Working**
+
+**每天查一次进度。**
+
+![Case tag — Waiting for Technical](assets/tech-escalation-case-tag.jpg)
+
+![Status — Working](assets/tech-escalation-status.jpg)
+
+——
+
+**【Technical escalation handling standard 2026-10-27】** For every technical-escalation case you own, complete/verify the following:
+
+1. **Case Tag** — select **Waiting for Technical**
+2. **Status** — select **Working**
+
+**Check progress once every day.**', 1793310869179)
 ON CONFLICT(id) DO UPDATE SET
   date = excluded.date, title = excluded.title, author = excluded.author,
   body = excluded.body, updated_at = excluded.updated_at;
