@@ -850,30 +850,41 @@ async function handleStickerUpload(
   if (scopeValue !== 'public' && scopeValue !== 'private') {
     return chatJson({ error: 'Choose the public pack or your private pack.' }, 400);
   }
-  if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/png') {
-    return chatJson({ error: 'Stickers must be PNG images.' }, 415);
+  const stickerType = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+  const isPng = stickerType === 'image/png';
+  const isWebp = stickerType === 'image/webp';
+  if (!isPng && !isWebp) {
+    return chatJson({ error: 'Stickers must be PNG or WebP images.' }, 415);
   }
   const declaredSize = Number(request.headers.get('content-length') ?? 0);
   if (declaredSize > MAX_STICKER_BYTES) return chatJson({ error: 'Stickers must be 512 KB or smaller.' }, 413);
   const image = await readLimitedBody(request, MAX_STICKER_BYTES);
   if (!image || image.byteLength < 24) return chatJson({ error: 'Sticker image is empty or exceeds 512 KB.' }, 413);
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-  if (signature.some((byte, index) => image[index] !== byte)) {
-    return chatJson({ error: 'The uploaded sticker is not a PNG image.' }, 415);
-  }
-  const dimensions = new DataView(image.buffer, image.byteOffset, image.byteLength);
-  const width = dimensions.getUint32(16, false);
-  const height = dimensions.getUint32(20, false);
-  if (width < 1 || height < 1 || width > 256 || height > 256) {
-    return chatJson({ error: 'Stickers must fit within 256 × 256 pixels.' }, 413);
+  if (isWebp) {
+    const signature = new TextDecoder().decode(image.subarray(0, 4));
+    const format = new TextDecoder().decode(image.subarray(8, 12));
+    if (signature !== 'RIFF' || format !== 'WEBP') {
+      return chatJson({ error: 'The uploaded sticker is not a valid WebP image.' }, 415);
+    }
+  } else {
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (signature.some((byte, index) => image[index] !== byte)) {
+      return chatJson({ error: 'The uploaded sticker is not a PNG image.' }, 415);
+    }
+    const dimensions = new DataView(image.buffer, image.byteOffset, image.byteLength);
+    const width = dimensions.getUint32(16, false);
+    const height = dimensions.getUint32(20, false);
+    if (width < 1 || height < 1 || width > 256 || height > 256) {
+      return chatJson({ error: 'Stickers must fit within 256 × 256 pixels.' }, 413);
+    }
   }
   const rawName = request.headers.get('x-sticker-name')?.trim() ?? '';
   const name = rawName.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 40) || 'Sticker';
   const id = crypto.randomUUID();
-  const png = image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength) as ArrayBuffer;
+  const stickerBytes = image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength) as ArrayBuffer;
   const sticker = await env.CHAT_STICKER_PACK
     .getByName(stickerPackName(user, scopeValue))
-    .addSticker(id, user.username, name, png);
+    .addSticker(id, user.username, name, stickerBytes, stickerType);
   return chatJson({ ...sticker, scope: scopeValue }, 201);
 }
 
@@ -909,7 +920,7 @@ async function handleStickerGet(
   if (!image) return chatJson({ error: 'Sticker not found.' }, 404);
   return new Response(image.png, {
     headers: {
-      'content-type': 'image/png',
+      'content-type': image.mime || 'image/png',
       'cache-control': scope === 'public' ? 'private, max-age=300' : 'private, max-age=60',
       'x-content-type-options': 'nosniff',
       'access-control-allow-origin': '*',

@@ -5,6 +5,7 @@ interface StickerRow {
   owner: string;
   name: string;
   png: ArrayBuffer;
+  mime: string;
   created_at: number;
 }
 
@@ -34,23 +35,37 @@ export class ChatStickerPack extends DurableObject<Env> {
           owner TEXT NOT NULL,
           name TEXT NOT NULL,
           png BLOB NOT NULL,
+          mime TEXT NOT NULL DEFAULT 'image/png',
           created_at INTEGER NOT NULL
         )
       `);
       this.ctx.storage.sql.exec(
         'CREATE INDEX IF NOT EXISTS chat_stickers_created_idx ON chat_stickers (created_at DESC)',
       );
+      // Packs created before WebP stickers existed lack the mime column.
+      try {
+        this.ctx.storage.sql.exec(`ALTER TABLE chat_stickers ADD COLUMN mime TEXT NOT NULL DEFAULT 'image/png'`);
+      } catch {
+        /* Column already present. */
+      }
     });
   }
 
-  async addSticker(id: string, owner: string, name: string, png: ArrayBuffer): Promise<ChatStickerMetadata> {
+  async addSticker(
+    id: string,
+    owner: string,
+    name: string,
+    png: ArrayBuffer,
+    mime = 'image/png',
+  ): Promise<ChatStickerMetadata> {
     const createdAt = Date.now();
     this.ctx.storage.sql.exec(
-      'INSERT INTO chat_stickers (id, owner, name, png, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO chat_stickers (id, owner, name, png, mime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       id,
       owner,
       name,
       png,
+      mime,
       createdAt,
     );
     return { id, owner, name, createdAt };
@@ -71,11 +86,13 @@ export class ChatStickerPack extends DurableObject<Env> {
   }
 
   async getSticker(id: string): Promise<StickerRow | null> {
-    return this.ctx.storage.sql
+    const row = this.ctx.storage.sql
       .exec<SqlRow<StickerRow>>(
-        'SELECT id, owner, name, png, created_at FROM chat_stickers WHERE id = ? LIMIT 1',
+        'SELECT id, owner, name, png, mime, created_at FROM chat_stickers WHERE id = ? LIMIT 1',
         id,
       )
       .toArray()[0] ?? null;
+    if (!row) return null;
+    return { ...row, mime: typeof row.mime === 'string' && row.mime ? row.mime : 'image/png' };
   }
 }

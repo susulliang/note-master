@@ -553,16 +553,16 @@ export async function fetchChatStickers(): Promise<ChatSticker[]> {
 export async function uploadChatSticker(
   name: string,
   scope: 'public' | 'private',
-  png: Blob,
+  image: Blob,
 ): Promise<ChatSticker> {
   return requestJson<ChatSticker>('/api/chat/stickers', {
     method: 'POST',
     headers: headers({
-      'content-type': 'image/png',
+      'content-type': image.type || 'image/png',
       'x-sticker-name': name,
       'x-sticker-scope': scope,
     }),
-    body: png,
+    body: image,
   });
 }
 

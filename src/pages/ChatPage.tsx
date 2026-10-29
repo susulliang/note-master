@@ -125,7 +125,6 @@ const COMMON_EMOJIS = [
   '👏', '👍', '👎', '👌', '✌️', '🤝', '💪', '❤️', '🧡', '💛',
   '💚', '💙', '💜', '💔', '💯', '🔥', '🎉', '✨', '🚀', '😴',
 ];
-const QUICK_THREAD_REPLIES = ['👍', '👎', '❤️', '😂', '😮', '🙏', '✅', '❌'];
 
 function readChatHistoryWidth(): number {
   try {
@@ -1130,10 +1129,12 @@ function commonMediaType(file: File): string | null {
   return null;
 }
 
-async function compressSticker(file: File): Promise<Blob> {
-  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
-  if (file.size > 24 * 1024 * 1024) throw new Error('Choose an image smaller than 24 MB.');
-  const bitmap = await createImageBitmap(file);
+/** Scale an image to at most 256px and re-encode it as WebP (PNG fallback
+ *  for browsers without WebP canvas encoding). */
+async function compressSticker(source: Blob): Promise<Blob> {
+  if (source.type && !source.type.startsWith('image/')) throw new Error('Choose an image file.');
+  if (source.size > 24 * 1024 * 1024) throw new Error('Choose an image smaller than 24 MB.');
+  const bitmap = await createImageBitmap(source);
   try {
     const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
@@ -1142,13 +1143,35 @@ async function compressSticker(file: File): Promise<Blob> {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Sticker compression is unavailable in this browser.');
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (!png) throw new Error('Could not encode this sticker as PNG.');
-    if (png.size > 512 * 1024) throw new Error('This sticker exceeds 512 KB after compression.');
-    return png;
+    const webp = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
+    const encoded = webp && webp.size > 0
+      ? webp
+      : await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!encoded) throw new Error('Could not encode this sticker.');
+    if (encoded.size > 512 * 1024) throw new Error('This sticker exceeds 512 KB after compression.');
+    return encoded;
   } finally {
     bitmap.close();
   }
+}
+
+/** Derive a sticker name from a chat image URL (?name= query, alt text) or
+ *  fall back to a timestamp label. */
+function stickerNameFromImage(src: string, alt: string): string {
+  const clean = (value: string) => value
+    .replace(/\.[a-z0-9]{1,5}$/i, '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 40);
+  try {
+    const fromUrl = clean(new URL(src, window.location.origin).searchParams.get('name') ?? '');
+    if (fromUrl) return fromUrl;
+  } catch {
+    /* blob:/data: URLs have no parseable name. */
+  }
+  const fromAlt = clean(alt);
+  if (fromAlt && fromAlt.toLowerCase() !== 'sticker') return fromAlt;
+  return `Picture ${new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
 }
 
 export default function ChatPage({
@@ -1213,6 +1236,9 @@ export default function ChatPage({
   const [voiceElapsed, setVoiceElapsed] = useState(0);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
+  /** Right-clicked picture — offers "Save to my sticker pack". */
+  const [imageContextMenu, setImageContextMenu] = useState<{ x: number; y: number; src: string; name: string } | null>(null);
+  const [savingImageSticker, setSavingImageSticker] = useState(false);
   const [chatListPreferences, setChatListPreferences] = useState<ChatListPreferences>(
     () => readChatListPreferences(username),
   );
@@ -1315,6 +1341,7 @@ export default function ChatPage({
     loadingOlderRef.current = false;
     setMessageContextMenu(null);
     setConversationContextMenu(null);
+    setImageContextMenu(null);
     setShakeMessage(null);
     setThreadParent(null);
     setThreadMessages([]);
@@ -1526,6 +1553,23 @@ export default function ChatPage({
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [messageContextMenu]);
+
+  useEffect(() => {
+    if (!imageContextMenu) return undefined;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-chat-image-menu]')) return;
+      setImageContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setImageContextMenu(null);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress, true);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [imageContextMenu]);
 
   useEffect(() => {
     if (!shakeMessage) return undefined;
@@ -2794,22 +2838,26 @@ export default function ChatPage({
     });
   }, []);
 
-  const sendQuickThreadReply = useCallback((message: ChatMessage, quickReply: string) => {
-    if (message.source === 'news') return;
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      toast.error('Reconnect to reply to this message.');
-      setMessageContextMenu(null);
-      return;
+  const saveImageToStickerPack = useCallback(async (image: { src: string; name: string }) => {
+    setImageContextMenu(null);
+    if (savingImageSticker) return;
+    setSavingImageSticker(true);
+    try {
+      // Remote chat assets need the auth header; blob:/data:/http(s) URLs
+      // fetch as-is.
+      const url = /^(https?:|blob:|data:)/i.test(image.src) ? image.src : authorizedChatMediaUrl(image.src);
+      const init = image.src.startsWith('/') ? { headers: chatAuthHeaders() } : undefined;
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error('Could not load this picture.');
+      const sticker = await uploadChatSticker(image.name, 'private', await compressSticker(await response.blob()));
+      setStickers((current) => [sticker, ...current.filter((item) => item.id !== sticker.id)]);
+      toast.success(`"${sticker.name}" saved to your sticker pack.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save this picture to your sticker pack.');
+    } finally {
+      setSavingImageSticker(false);
     }
-    socket.send(JSON.stringify({
-      type: 'message:create',
-      markdown: quickReply,
-      parentId: message.id,
-      quickReply,
-    }));
-    setMessageContextMenu(null);
-  }, []);
+  }, [savingImageSticker]);
 
   const saveDriveAttachmentToPersonal = useCallback(async (attachment: SharedDriveAttachment) => {
     if (savingDriveCopyId) return;
@@ -3060,7 +3108,27 @@ export default function ChatPage({
     pinnedRoomOrder.has(conversationContextMenu.roomId);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background/80 text-foreground">
+    <div
+      className="flex h-full min-h-0 flex-col bg-background/80 text-foreground"
+      onContextMenuCapture={(event) => {
+        // Any picture in the chat (message photos, stickers, composer
+        // images) → picture menu instead of the message/bubble menus.
+        const target = event.target as HTMLElement | null;
+        const image = target?.closest?.('img');
+        if (!(image instanceof HTMLImageElement) || !image.src) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const markdownSrc = image.getAttribute('data-chat-markdown-src');
+        const menuWidth = 240;
+        const menuHeight = 96;
+        setImageContextMenu({
+          x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+          y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+          src: markdownSrc ?? image.currentSrc ?? image.src,
+          name: stickerNameFromImage(markdownSrc ?? image.src, image.alt),
+        });
+      }}
+    >
       <div ref={chatLayoutRef} className="chat-layout flex min-h-0 flex-1">
         <aside className={cn(
           'chat-conversation-sidebar w-full shrink-0 flex-col border-r border-border/70 bg-card/25 md:flex',
@@ -4143,23 +4211,6 @@ export default function ChatPage({
             </>
           ) : (
             <>
-              {messageContextMenu.message.source !== 'news' && (
-                <div className="chat-quick-reply-menu">
-                  <span>Quick reply · added to thread</span>
-                  <div>
-                    {QUICK_THREAD_REPLIES.map((quickReply) => (
-                      <button
-                        key={quickReply}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => sendQuickThreadReply(messageContextMenu.message, quickReply)}
-                      >
-                        {quickReply}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               {contextDriveAttachments.map((attachment) => (
                 <button
                   key={attachment.id}
@@ -4271,6 +4322,30 @@ export default function ChatPage({
               )}
             </>
           )}
+        </section>
+      )}
+
+      {imageContextMenu && (
+        <section
+          data-chat-image-menu
+          role="menu"
+          aria-label="Picture actions"
+          onContextMenu={(event) => event.preventDefault()}
+          className="fixed z-[130] flex w-[240px] max-w-[calc(100vw-16px)] flex-col overflow-y-auto rounded-xl border border-border/80 bg-card/95 p-1.5 text-foreground shadow-2xl backdrop-blur-2xl"
+          style={{ left: imageContextMenu.x, top: imageContextMenu.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={savingImageSticker}
+            onClick={() => void saveImageToStickerPack(imageContextMenu)}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-accent/10 disabled:cursor-wait disabled:opacity-55"
+          >
+            <Sticker className="size-3.5 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">
+              {savingImageSticker ? 'Saving to your sticker pack…' : 'Save to my sticker pack'}
+            </span>
+          </button>
         </section>
       )}
 

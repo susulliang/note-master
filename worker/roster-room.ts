@@ -164,8 +164,9 @@ export class RosterRoom extends DurableObject<Env> {
   /** Replace every cell of this month, broadcast the snapshot, mirror to D1. */
   async applyFull(cells: RosterCell[]): Promise<number> {
     const now = Date.now();
-    this.ctx.storage.sql.exec('BEGIN');
-    try {
+    // DO SQLite forbids manual BEGIN/COMMIT — the storage transaction API
+    // makes the delete + re-insert atomic (auto-rollback on throw).
+    this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('DELETE FROM roster_cells');
       for (const cell of cells) {
         this.ctx.storage.sql.exec(
@@ -176,11 +177,7 @@ export class RosterRoom extends DurableObject<Env> {
           now,
         );
       }
-      this.ctx.storage.sql.exec('COMMIT');
-    } catch (error) {
-      this.ctx.storage.sql.exec('ROLLBACK');
-      throw error;
-    }
+    });
     this.broadcast({ type: 'roster_cells', cells });
     try {
       await this.env.DB.prepare(
