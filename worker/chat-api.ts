@@ -53,17 +53,34 @@ interface GroupRow {
 }
 
 const MAX_IMAGE_BYTES = 512 * 1024;
+const MAX_CHAT_MEDIA_BYTES = 50 * 1024 * 1024;
 const MAX_STICKER_BYTES = 512 * 1024;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
 const MEDIA_ID_RE = /^[0-9a-f-]{36}$/i;
 const STICKER_ID_RE = /^[0-9a-f-]{36}$/i;
+const INLINE_MEDIA_TYPES = new Set([
+  'audio/aac',
+  'audio/flac',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'audio/webm',
+  'audio/x-m4a',
+  'audio/x-wav',
+  'video/mp4',
+  'video/ogg',
+  'video/quicktime',
+  'video/webm',
+  'video/x-msvideo',
+]);
 
 function chatJson(data: unknown, status = 200): Response {
   const response = Response.json(data, { status });
   response.headers.set('access-control-allow-origin', '*');
   response.headers.set(
     'access-control-allow-headers',
-    'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
+    'content-type, authorization, x-chat-media-kind, x-chat-media-name, x-sticker-name, x-sticker-scope',
   );
   response.headers.set('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
   return response;
@@ -703,29 +720,51 @@ async function handleMediaUpload(
 ): Promise<Response> {
   const roomId = new URL(request.url).searchParams.get('roomId') ?? '';
   const requestedKind = request.headers.get('x-chat-media-kind') ?? 'photo';
-  const mediaKind = requestedKind === 'sticker' ? 'sticker' : 'photo';
+  const mediaKind = requestedKind === 'media'
+    ? 'media'
+    : requestedKind === 'sticker' ? 'sticker' : 'photo';
   if (!roomId || !await isChatRoomMember(env, user.username, roomId)) {
     return chatJson({ error: 'You do not have access to this chat.' }, 403);
   }
-  if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/webp') {
-    return chatJson({ error: 'Chat photos must be compressed as WebP.' }, 415);
+  const contentType = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+  const isWebp = contentType === 'image/webp';
+  const isGif = contentType === 'image/gif';
+  const isInlineMedia = INLINE_MEDIA_TYPES.has(contentType);
+  if (!isWebp && !isGif && !isInlineMedia) {
+    return chatJson({ error: 'Use a common image, audio, or video format.' }, 415);
   }
+  const maxBytes = isInlineMedia ? MAX_CHAT_MEDIA_BYTES : MAX_IMAGE_BYTES;
   const declaredSize = Number(request.headers.get('content-length') ?? 0);
-  if (declaredSize > MAX_IMAGE_BYTES) return chatJson({ error: 'Each photo must be 512 KB or smaller.' }, 413);
-  const image = await readLimitedBody(request, MAX_IMAGE_BYTES);
-  if (!image || image.byteLength < 16) return chatJson({ error: 'The uploaded photo is empty or exceeds 512 KB.' }, 413);
-  const signature = new TextDecoder().decode(image.subarray(0, 4));
-  const format = new TextDecoder().decode(image.subarray(8, 12));
-  if (signature !== 'RIFF' || format !== 'WEBP') {
-    return chatJson({ error: 'The uploaded file is not a valid WebP image.' }, 415);
+  if (declaredSize > maxBytes) {
+    return chatJson({
+      error: isInlineMedia ? 'Audio and video files are limited to 50 MB.' : 'Each image must be 512 KB or smaller.',
+    }, 413);
+  }
+  const media = await readLimitedBody(request, maxBytes);
+  if (!media || media.byteLength < 12) return chatJson({ error: 'The uploaded media is empty or too large.' }, 413);
+  if (isWebp) {
+    const signature = new TextDecoder().decode(media.subarray(0, 4));
+    const format = new TextDecoder().decode(media.subarray(8, 12));
+    if (signature !== 'RIFF' || format !== 'WEBP') {
+      return chatJson({ error: 'The uploaded image is not a valid WebP file.' }, 415);
+    }
+  }
+  if (isGif) {
+    const signature = new TextDecoder().decode(media.subarray(0, 6));
+    if (signature !== 'GIF87a' && signature !== 'GIF89a') {
+      return chatJson({ error: 'The uploaded image is not a valid GIF file.' }, 415);
+    }
   }
 
+  const rawName = request.headers.get('x-chat-media-name') ?? '';
+  const fileName = rawName.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim().slice(0, 180) || 'Attachment';
+
   const id = crypto.randomUUID();
-  const objectKey = `chat-media/${id}.webp`;
+  const objectKey = `chat-media/${id}`;
   try {
-    await env.CHAT_MEDIA_BUCKET.put(objectKey, image, {
-      httpMetadata: { contentType: 'image/webp', cacheControl: 'private, max-age=300' },
-      customMetadata: { roomId, owner: user.username },
+    await env.CHAT_MEDIA_BUCKET.put(objectKey, media, {
+      httpMetadata: { contentType, cacheControl: 'private, max-age=300' },
+      customMetadata: { roomId, owner: user.username, originalName: fileName },
     });
     await env.DB.prepare(
       'INSERT INTO chat_media (id, room_id, owner, object_key, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -735,7 +774,8 @@ async function handleMediaUpload(
     console.error(JSON.stringify({ event: 'chat_media_upload_failed', error: String(error) }));
     return chatJson({ error: 'Could not save the photo.' }, 500);
   }
-  return chatJson({ id, url: `/api/chat/media/${id}` }, 201);
+  const params = new URLSearchParams({ mime: contentType, name: fileName });
+  return chatJson({ id, url: `/api/chat/media/${id}?${params}` }, 201);
 }
 
 async function handleMediaGet(
@@ -754,11 +794,15 @@ async function handleMediaGet(
   const object = await env.CHAT_MEDIA_BUCKET.get(media.object_key);
   if (!object) return chatJson({ error: 'Photo not found.' }, 404);
   const headers = new Headers({
-    'content-type': 'image/webp',
+    'content-type': object.httpMetadata?.contentType || 'application/octet-stream',
     'cache-control': 'private, max-age=300',
     'x-content-type-options': 'nosniff',
     'access-control-allow-origin': '*',
   });
+  const fileName = object.customMetadata?.originalName;
+  if (fileName) {
+    headers.set('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+  }
   if (object.size) headers.set('content-length', String(object.size));
   return new Response(object.body, { headers });
 }

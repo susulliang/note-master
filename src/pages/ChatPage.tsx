@@ -75,7 +75,7 @@ import {
   findChatUsers,
   createChatGroup,
   requestChatTicket,
-  uploadChatPhoto,
+  uploadChatMedia,
   uploadChatSticker,
   fetchChatGlobalTitle,
   fetchCollabDocuments,
@@ -387,6 +387,61 @@ function DriveChatAttachment({ href, children }: { href: string; children: React
   );
 }
 
+function ChatMediaAttachment({ href, children }: { href: string; children: React.ReactNode }) {
+  const parsed = new URL(href, window.location.origin);
+  const mimeType = parsed.searchParams.get('mime') ?? '';
+  const fileName = parsed.searchParams.get('name') ?? 'Chat media';
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setMediaError(false);
+    fetch(authorizedChatMediaUrl(href), { headers: chatAuthHeaders() })
+      .then((response) => {
+        if (!response.ok) throw new Error('Media unavailable');
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setMediaUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setMediaError(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setMediaUrl(null);
+    };
+  }, [href]);
+
+  if (mediaError) return <span className="text-xs text-muted-foreground">Shared media is unavailable.</span>;
+  if (!mediaUrl) {
+    return <span className="my-2 inline-flex h-16 w-40 items-center justify-center rounded-xl bg-muted/60 text-xs text-muted-foreground">Loading media…</span>;
+  }
+  if (mimeType.startsWith('image/')) {
+    return <img src={mediaUrl} alt={fileName} loading="lazy" className="my-2 max-h-72 max-w-full rounded-xl border border-border/70 object-contain" />;
+  }
+
+  return (
+    <span className="my-2 flex max-w-full flex-col items-start gap-1.5">
+      {mimeType.startsWith('video/')
+        ? <video src={mediaUrl} controls preload="metadata" className="max-h-72 max-w-full rounded-xl border border-border/70 bg-black/80" />
+        : <audio src={mediaUrl} controls preload="metadata" className="max-w-full" />}
+      <a
+        href={mediaUrl}
+        download={fileName}
+        className="text-[10px] text-accent underline-offset-2 hover:underline"
+      >
+        Download {children || fileName}
+      </a>
+    </span>
+  );
+}
+
 function SecureChatImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
   const isPrivateChatMedia = typeof src === 'string' && /^\/api\/chat\/(media|stickers\/(public|private))\//.test(src);
   const isSticker = typeof src === 'string' && src.startsWith('/api/chat/stickers/');
@@ -451,6 +506,9 @@ function MarkdownBody({ markdown }: { markdown: string }) {
           a: ({ href, children, ...props }) => {
             if (typeof href === 'string' && /^\/api\/collab\/drive\/files\/[0-9a-f-]+\/download(?:\?|$)/i.test(href)) {
               return <DriveChatAttachment href={href}>{children}</DriveChatAttachment>;
+            }
+            if (typeof href === 'string' && /^\/api\/chat\/media\/[0-9a-f-]+(?:\?|$)/i.test(href)) {
+              return <ChatMediaAttachment href={href}>{children}</ChatMediaAttachment>;
             }
             return <a {...props} href={href} target="_blank" rel="noreferrer">{children}</a>;
           },
@@ -755,6 +813,10 @@ function quoteMessage(message: ChatMessage): string {
 
 async function compressPhoto(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  if (file.type === 'image/gif') {
+    if (file.size > 512 * 1024) throw new Error('Animated GIFs must be 512 KB or smaller.');
+    return file;
+  }
   if (file.size > 24 * 1024 * 1024) throw new Error('Choose a photo smaller than 24 MB to compress.');
   const bitmap = await createImageBitmap(file);
   try {
@@ -777,6 +839,46 @@ async function compressPhoto(file: File): Promise<Blob> {
   } finally {
     bitmap.close();
   }
+}
+
+function commonMediaType(file: File): string | null {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+  const byExtension: Record<string, string> = {
+    aac: 'audio/aac',
+    avi: 'video/x-msvideo',
+    avif: 'image/avif',
+    bmp: 'image/bmp',
+    flac: 'audio/flac',
+    gif: 'image/gif',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    m4a: 'audio/x-m4a',
+    mov: 'video/quicktime',
+    mp3: 'audio/mpeg',
+    mp4: 'video/mp4',
+    oga: 'audio/ogg',
+    ogg: 'audio/ogg',
+    ogv: 'video/ogg',
+    png: 'image/png',
+    wav: 'audio/wav',
+    webm: file.type.startsWith('audio/') ? 'audio/webm' : 'video/webm',
+    webp: 'image/webp',
+  };
+  const providedType = file.type.toLowerCase();
+  const supportedType = providedType.startsWith('image/')
+    || providedType.startsWith('video/')
+    || providedType.startsWith('audio/');
+  const mime = supportedType ? providedType : byExtension[extension] || '';
+  if (mime.startsWith('image/')) return mime;
+  if (
+    mime.startsWith('video/') &&
+    ['video/mp4', 'video/ogg', 'video/quicktime', 'video/webm', 'video/x-msvideo'].includes(mime)
+  ) return mime;
+  if (
+    mime.startsWith('audio/') &&
+    ['audio/aac', 'audio/flac', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/x-m4a', 'audio/x-wav'].includes(mime)
+  ) return mime;
+  return null;
 }
 
 async function compressSticker(file: File): Promise<Blob> {
@@ -855,7 +957,7 @@ export default function ChatPage({
   const [drivePickerQuery, setDrivePickerQuery] = useState('');
   const [drivePickerLoading, setDrivePickerLoading] = useState(false);
   const [sharingDriveFileId, setSharingDriveFileId] = useState<string | null>(null);
-  const [photoDropActive, setPhotoDropActive] = useState(false);
+  const [mediaDropActive, setMediaDropActive] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
   const [chatListPreferences, setChatListPreferences] = useState<ChatListPreferences>(
@@ -2100,36 +2202,55 @@ export default function ChatPage({
     setLinkEditorOpen((open) => !open);
   };
 
-  const handlePhotoFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
-    if (!imageFiles.length) {
-      if (files.length) toast.error('Drop image files to attach them to chat.');
+  const handleMediaFiles = useCallback(async (files: File[]) => {
+    const mediaFiles = files
+      .map((file) => ({ file, mimeType: commonMediaType(file) }))
+      .filter((item): item is { file: File; mimeType: string } => item.mimeType !== null);
+    if (!mediaFiles.length) {
+      if (files.length) toast.error('Choose a common image, audio, or video file.');
       return;
+    }
+    if (mediaFiles.length < files.length) {
+      toast.error(`${files.length - mediaFiles.length} unsupported file${files.length - mediaFiles.length === 1 ? ' was' : 's were'} skipped.`);
     }
     const roomId = activeRoom.roomId;
     try {
       setSending(true);
       let totalBytes = 0;
-      for (const file of imageFiles) {
-        const compressed = await compressPhoto(file);
-        const mediaUrl = await uploadChatPhoto(roomId, compressed);
+      for (const { file, mimeType } of mediaFiles) {
+        const isImage = mimeType.startsWith('image/');
+        let body: Blob;
+        let uploadedType: string;
+        if (isImage) {
+          body = await compressPhoto(file);
+          uploadedType = body.type || 'image/webp';
+        } else {
+          if (file.size > 50 * 1024 * 1024) {
+            throw new Error('Audio and video files are limited to 50 MB each.');
+          }
+          body = file.type === mimeType ? file : new Blob([file], { type: mimeType });
+          uploadedType = mimeType;
+        }
+        const namedBody = uploadedType === body.type
+          ? body
+          : new Blob([body], { type: uploadedType });
+        const mediaUrl = await uploadChatMedia(roomId, namedBody, file.name, isImage ? 'photo' : 'media');
         const current = draftRef.current;
-        const insertion = `![${escapeMarkdownText(file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Photo')}](${mediaUrl})`;
+        const safeName = escapeMarkdownText(file.name.slice(0, 160) || 'Attachment');
+        const insertion = isImage
+          ? `![${safeName}](${mediaUrl})`
+          : `[${safeName}](${mediaUrl})`;
         setComposerMarkdown(`${current}${current.trim() ? '\n\n' : ''}${insertion}`);
-        totalBytes += compressed.size;
+        totalBytes += namedBody.size;
       }
-      toast.success(`${imageFiles.length} photo${imageFiles.length === 1 ? '' : 's'} ready · ${(totalBytes / 1024).toFixed(0)} KB WebP`);
+      toast.success(`${mediaFiles.length} media file${mediaFiles.length === 1 ? '' : 's'} ready · ${(totalBytes / 1024).toFixed(0)} KB`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not add this photo.');
+      toast.error(error instanceof Error ? error.message : 'Could not add this media file.');
     } finally {
       setSending(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
     }
   }, [activeRoom.roomId, setComposerMarkdown]);
-
-  const handlePhoto = useCallback((file?: File) => {
-    if (file) void handlePhotoFiles([file]);
-  }, [handlePhotoFiles]);
 
   const handleStickerFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -2986,7 +3107,7 @@ export default function ChatPage({
                 {toolbarButton('Insert table', <Table2 className="size-3.5" />, insertTable)}
                 {toolbarButton('Add link', <Link2 className="size-3.5" />, beginLink)}
                 <span className="mx-1 h-5 w-px bg-border/70" />
-                {toolbarButton('Add photo', <ImagePlus className="size-3.5" />, () => photoInputRef.current?.click(), sending)}
+                {toolbarButton('Add media', <ImagePlus className="size-3.5" />, () => photoInputRef.current?.click(), sending)}
                 {toolbarButton('Sticker packs', <Sticker className="size-3.5" />, () => {
                   const opening = !stickerPanelOpen;
                   setStickerPanelOpen(opening);
@@ -3009,10 +3130,10 @@ export default function ChatPage({
                 <input
                   ref={photoInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,audio/*,video/*"
                   multiple
                   className="hidden"
-                  onChange={(event) => void handlePhotoFiles(Array.from(event.target.files ?? []))}
+                  onChange={(event) => void handleMediaFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
 
@@ -3334,26 +3455,26 @@ export default function ChatPage({
                   if (!event.dataTransfer.types.includes('Files')) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'copy';
-                  setPhotoDropActive(true);
+                  setMediaDropActive(true);
                 }}
                 onDragLeave={(event) => {
                   if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-                  setPhotoDropActive(false);
+                  setMediaDropActive(false);
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  setPhotoDropActive(false);
-                  void handlePhotoFiles(Array.from(event.dataTransfer.files));
+                  setMediaDropActive(false);
+                  void handleMediaFiles(Array.from(event.dataTransfer.files));
                 }}
                 className={cn(
                   'chat-composer-editor min-h-0 max-h-none w-full overflow-y-auto bg-transparent px-4 pb-16 pt-4 text-sm leading-relaxed outline-none [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-1 [&_table]:my-2 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6',
-                  photoDropActive && 'chat-composer-editor--drop-active',
+                  mediaDropActive && 'chat-composer-editor--drop-active',
                 )}
                 style={{ height: composerHeight }}
               />
-                {photoDropActive && (
+                {mediaDropActive && (
                   <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-accent/10 text-sm font-medium text-accent">
-                    Drop photos to attach
+                    Drop images, audio, or video to attach
                   </div>
                 )}
               </div>

@@ -589,7 +589,7 @@ export default function ProductLookupPanel({
             >
               <SelectValue placeholder="Compare…" />
             </SelectTrigger>
-            <SelectContent className="max-h-[320px] text-[11px]">
+            <SelectContent className="z-[200] max-h-[320px] text-[11px]">
               <SelectItem value="__none__">— No comparison —</SelectItem>
               {allModelNames.map((name) => (
                 <SelectItem key={name} value={name}>

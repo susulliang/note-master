@@ -3910,7 +3910,7 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     preflight.headers.set('access-control-allow-origin', '*');
     preflight.headers.set(
       'access-control-allow-headers',
-      'content-type, authorization, x-chat-media-kind, x-sticker-name, x-sticker-scope',
+      'content-type, authorization, x-chat-media-kind, x-chat-media-name, x-sticker-name, x-sticker-scope',
     );
     preflight.headers.set('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
     preflight.headers.set('access-control-max-age', '86400');

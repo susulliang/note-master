@@ -138,7 +138,7 @@ export interface CollabSearchResult {
   target?: string;
 }
 
-export type ChatMediaKind = 'photo' | 'sticker';
+export type ChatMediaKind = 'photo' | 'sticker' | 'media';
 
 function endpoint(path: string): string {
   return `${getApiBase()}${path}`;
@@ -503,10 +503,23 @@ export async function uploadChatPhoto(
   image: Blob,
   kind: ChatMediaKind = 'photo',
 ): Promise<string> {
+  return uploadChatMedia(roomId, image, 'Photo.webp', kind);
+}
+
+export async function uploadChatMedia(
+  roomId: string,
+  media: Blob,
+  fileName: string,
+  kind: ChatMediaKind | 'media' = 'media',
+): Promise<string> {
   const result = await requestJson<{ url: string }>('/api/chat/media?roomId=' + encodeURIComponent(roomId), {
     method: 'POST',
-    headers: headers({ 'content-type': 'image/webp', 'x-chat-media-kind': kind }),
-    body: image,
+    headers: headers({
+      'content-type': media.type || 'application/octet-stream',
+      'x-chat-media-kind': kind,
+      'x-chat-media-name': fileName,
+    }),
+    body: media,
   });
   return result.url;
 }

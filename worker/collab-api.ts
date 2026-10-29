@@ -391,6 +391,7 @@ async function driveFileRoute(
     'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
     'cache-control': 'private, max-age=60',
     'x-content-type-options': 'nosniff',
+    'access-control-allow-origin': '*',
   });
   if (object.size) headers.set('content-length', String(object.size));
   return new Response(object.body, { headers });
