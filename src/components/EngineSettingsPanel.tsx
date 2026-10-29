@@ -1009,7 +1009,13 @@ export default function EngineSettingsPanel({
                     })}
                   </select>
                   <p className="mt-1 text-[9px] leading-snug text-muted-foreground/80">
-                    Used by remote parse, QA, SOP matching, Kitty Help, and COMMUNE roleplay. Local models remain on-device.
+                    {REMOTE_LLM_MODELS.some((model) =>
+                      model.id === cloud.selectedModel &&
+                      'zeroDataRetention' in model &&
+                      model.zeroDataRetention
+                    )
+                      ? 'Uses Cloudflare AI Gateway with ZDR requested per call; request logging and caching are disabled. Requires Cloudflare-managed Unified Billing credentials.'
+                      : 'Used by remote parse, QA, SOP matching, Kitty Help, and COMMUNE roleplay. Local models remain on-device.'}
                   </p>
                 </div>
               )}

@@ -349,6 +349,11 @@ const WORKERS_AI_MODELS = [
   '@cf/google/gemma-4-26b-a4b-it',
 ] as const;
 type WorkersAiModel = (typeof WORKERS_AI_MODELS)[number];
+const CLOUDFLARE_ZDR_MODELS = [
+  'openai/gpt-4.1-nano',
+  'google/gemini-2.5-flash-lite',
+] as const;
+type CloudflareZdrModel = (typeof CLOUDFLARE_ZDR_MODELS)[number];
 const DEEPSEEK_MODEL_ID = 'deepseek-v4-flash';
 const MAX_LLM_REQUEST_BYTES = 1_000_000;
 
@@ -357,6 +362,21 @@ type LlmChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 function isWorkersAiModel(model: string): model is WorkersAiModel {
   return WORKERS_AI_MODELS.some((candidate) => candidate === model);
 }
+
+function isCloudflareZdrModel(model: string): model is CloudflareZdrModel {
+  return CLOUDFLARE_ZDR_MODELS.some((candidate) => candidate === model);
+}
+
+const ZDR_AI_OPTIONS = {
+  gateway: {
+    id: 'default',
+    skipCache: true,
+    collectLog: false,
+  },
+  extraHeaders: {
+    'cf-aig-zdr': 'true',
+  },
+};
 
 function normalizeWorkersAiStream(stream: ReadableStream<Uint8Array>): Response {
   const decoder = new TextDecoder();
@@ -379,10 +399,17 @@ function normalizeWorkersAiStream(stream: ReadableStream<Uint8Array>): Response 
               const value = JSON.parse(payload) as {
                 response?: unknown;
                 choices?: Array<{ delta?: { content?: unknown } }>;
+                candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
               };
+              const candidateText = value.candidates?.[0]?.content?.parts
+                ?.map((part) => typeof part.text === 'string' ? part.text : '')
+                .join('');
+              const choiceText = value.choices?.[0]?.delta?.content;
               const text = typeof value.response === 'string'
                 ? value.response
-                : value.choices?.[0]?.delta?.content;
+                : typeof choiceText === 'string'
+                  ? choiceText
+                  : candidateText;
               if (typeof text === 'string' && text.length > 0) {
                 controller.enqueue(encoder.encode(
                   `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`,
@@ -401,10 +428,23 @@ function normalizeWorkersAiStream(stream: ReadableStream<Uint8Array>): Response 
           if (frame.startsWith('data:')) {
             const payload = frame.slice(5).trim();
             try {
-              const value = JSON.parse(payload) as { response?: unknown };
-              if (typeof value.response === 'string' && value.response.length > 0) {
+              const value = JSON.parse(payload) as {
+                response?: unknown;
+                choices?: Array<{ delta?: { content?: unknown } }>;
+                candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+              };
+              const candidateText = value.candidates?.[0]?.content?.parts
+                ?.map((part) => typeof part.text === 'string' ? part.text : '')
+                .join('');
+              const choiceText = value.choices?.[0]?.delta?.content;
+              const text = typeof value.response === 'string'
+                ? value.response
+                : typeof choiceText === 'string'
+                  ? choiceText
+                  : candidateText;
+              if (typeof text === 'string' && text.length > 0) {
                 controller.enqueue(encoder.encode(
-                  `data: ${JSON.stringify({ choices: [{ delta: { content: value.response } }] })}\n\n`,
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`,
                 ));
               }
             } catch {
@@ -477,10 +517,14 @@ function extractWorkersAiReply(result: unknown): string {
   const record = result as {
     response?: unknown;
     choices?: Array<{ message?: { content?: unknown } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
   };
   if (typeof record.response === 'string') return record.response;
-  const content = record.choices?.[0]?.message?.content;
-  return typeof content === 'string' ? content : '';
+  const choiceContent = record.choices?.[0]?.message?.content;
+  if (typeof choiceContent === 'string') return choiceContent;
+  return record.candidates?.[0]?.content?.parts
+    ?.map((part) => typeof part.text === 'string' ? part.text : '')
+    .join('') ?? '';
 }
 
 async function handleLlmModels(request: Request, env: Env): Promise<Response> {
@@ -489,7 +533,7 @@ async function handleLlmModels(request: Request, env: Env): Promise<Response> {
 
   const models: string[] = [];
   if (env.DEEPSEEK_API_KEY?.trim()) models.push(DEEPSEEK_MODEL_ID);
-  if (env.AI) models.push(...WORKERS_AI_MODELS);
+  if (env.AI) models.push(...WORKERS_AI_MODELS, ...CLOUDFLARE_ZDR_MODELS);
   return authJson({ models });
 }
 
@@ -518,7 +562,8 @@ async function handleLlmChat(request: Request, env: Env): Promise<Response> {
   const model = typeof payload.model === 'string' ? payload.model : '';
   const isDeepseek = model === DEEPSEEK_MODEL_ID;
   const isWorkersAi = isWorkersAiModel(model);
-  if (!isDeepseek && !isWorkersAi) return authJson({ error: 'Unsupported remote model.' }, 400);
+  const isZdrModel = isCloudflareZdrModel(model);
+  if (!isDeepseek && !isWorkersAi && !isZdrModel) return authJson({ error: 'Unsupported remote model.' }, 400);
   if (!Array.isArray(payload.messages) || payload.messages.length < 1 || payload.messages.length > 80)
     return authJson({ error: 'Messages must contain between 1 and 80 entries.' }, 400);
 
@@ -610,6 +655,14 @@ async function handleLlmChat(request: Request, env: Env): Promise<Response> {
         case '@cf/google/gemma-4-26b-a4b-it':
           streamResult = await env.AI.run(model, { ...aiInput, stream: true });
           break;
+        case 'openai/gpt-4.1-nano':
+        case 'google/gemini-2.5-flash-lite':
+          streamResult = await env.AI.run(
+            model,
+            { ...aiInput, stream: true },
+            ZDR_AI_OPTIONS,
+          );
+          break;
         default:
           return authJson({ error: 'Unsupported Workers AI model.' }, 400);
       }
@@ -625,6 +678,10 @@ async function handleLlmChat(request: Request, env: Env): Promise<Response> {
         break;
       case '@cf/google/gemma-4-26b-a4b-it':
         result = await env.AI.run(model, aiInput);
+        break;
+      case 'openai/gpt-4.1-nano':
+      case 'google/gemini-2.5-flash-lite':
+        result = await env.AI.run(model, aiInput, ZDR_AI_OPTIONS);
         break;
       default:
         return authJson({ error: 'Unsupported Workers AI model.' }, 400);

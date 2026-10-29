@@ -21,6 +21,18 @@ export const REMOTE_LLM_MODELS = [
     label: 'Gemma 4 26B A4B IT',
     provider: 'Workers AI',
   },
+  {
+    id: 'openai/gpt-4.1-nano',
+    label: 'GPT-4.1 Nano',
+    provider: 'Cloudflare AI Gateway · ZDR',
+    zeroDataRetention: true,
+  },
+  {
+    id: 'google/gemini-2.5-flash-lite',
+    label: 'Gemini 2.5 Flash Lite',
+    provider: 'Cloudflare AI Gateway · ZDR',
+    zeroDataRetention: true,
+  },
 ] as const;
 
 export type RemoteLlmModel = (typeof REMOTE_LLM_MODELS)[number]['id'];
