@@ -25,7 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { asOfDate, countMtdShifts, matchRosterShift, monthStart } from '@/lib/roster-shifts';
+import { asOfDate, countMtdShifts, makeFrontlineFilter, matchRosterShift, monthStart } from '@/lib/roster-shifts';
 import { useRosterLiveVersion } from '@/lib/roster-live';
 import type { CountReport } from '@/lib/sf-reports';
 import type { DailiesState } from '@/hooks/use-dailies-report';
@@ -414,7 +414,7 @@ function PerformancePanel({ performers, avgRate }: { performers: Performer[]; av
       </div>
 
       <p className="mt-3 text-[9px] leading-relaxed text-muted-foreground">
-        Rate = (chat + email) ÷ billable hours (8h per worked shift, minus recorded extra off-time). Call is team-level and excluded from per-agent ranking.
+        Rate = (chat + email) ÷ billable hours (8h per worked shift, minus recorded extra off-time). Only tickets processed by frontline Call/Chat agents count — TL / T2 / SV(OM) / DTC handling is excluded. Call is team-level and excluded from per-agent ranking.
         Overworked ≥ {(OVERWORKED_RATIO * 100).toFixed(0)}% of avg; underworked ≤ {(UNDERWORKED_RATIO * 100).toFixed(0)}%.
       </p>
     </div>
@@ -462,10 +462,29 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
     [rosterStart, rosterEnd, rosterLiveVersion],
   );
 
+  // Numerator filter — only count tickets processed by frontline Call/Chat
+  // agents (excludes TL / T2 / SV(OM) / DTC and unresolvable owners).
+  const chatOnly = useMemo(() => makeFrontlineFilter(rosterStart, CHAT_SKILLS), [rosterStart]);
+  const callOnly = useMemo(() => makeFrontlineFilter(rosterStart, CALL_SKILLS), [rosterStart]);
+  const allFrontline = useMemo(() => makeFrontlineFilter(rosterStart, DAILIES_SKILLS), [rosterStart]);
+  const filteredTotals = useMemo(() => {
+    if (state.status !== 'ready') return null;
+    const chat = state.data.chat.agents.filter((a) => chatOnly(a.owner)).reduce((s, a) => s + a.count, 0);
+    const email = state.data.email.agents.filter((a) => allFrontline(a.owner)).reduce((s, a) => s + a.count, 0);
+    const call = state.data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0);
+    const chatAgents = state.data.chat.agents.filter((a) => chatOnly(a.owner)).length;
+    const emailAgents = state.data.email.agents.filter((a) => allFrontline(a.owner)).length;
+    return { chat, email, call, chatAgents, emailAgents };
+  }, [state, chatOnly, callOnly, allFrontline]);
+
   const performers = useMemo(() => {
     if (state.status !== 'ready') return null;
-    return computePerformers(state.data.chat, state.data.email, hoursByAgent);
-  }, [state, hoursByAgent]);
+    return computePerformers(
+      { ...state.data.chat, agents: state.data.chat.agents.filter((a) => chatOnly(a.owner)) },
+      { ...state.data.email, agents: state.data.email.agents.filter((a) => allFrontline(a.owner)) },
+      hoursByAgent,
+    );
+  }, [state, hoursByAgent, chatOnly, allFrontline]);
 
   return (
     <section className="glass-panel overflow-hidden rounded-xl">
@@ -517,11 +536,11 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
       {state.status === 'ready' && (
         <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-4">
-          {/* Grand total */}
+          {/* Grand total — frontline agents only (TL/T2/SV/DTC excluded) */}
           {(() => {
-            const chatT = state.data.chat.total;
-            const emailT = state.data.email.total;
-            const callT = state.data.call.handled;
+            const chatT = filteredTotals?.chat ?? 0;
+            const emailT = filteredTotals?.email ?? 0;
+            const callT = filteredTotals?.call ?? 0;
             const grand = chatT + emailT + callT;
             const allEquiv = allHours / 8;
             const grandDaily = allEquiv > 0 ? grand / allEquiv : 0;
@@ -577,9 +596,9 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           {/* Call */}
           <ChannelPanel
             channel={CHANNELS.call}
-            total={state.data.call.handled}
+            total={filteredTotals?.call ?? 0}
             hours={callHours}
-            subtitle={`${state.data.call.handled.toLocaleString()} handled · SL20 ${state.data.call.serviceLevel20.toFixed(1)}%`}
+            subtitle={`${(filteredTotals?.call ?? 0).toLocaleString()} handled (frontline) · SL20 ${state.data.call.serviceLevel20.toFixed(1)}%`}
             asOf={null}
           >
             <CallBars
@@ -609,9 +628,9 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           {/* Chat */}
           <ChannelPanel
             channel={CHANNELS.chat}
-            total={state.data.chat.total}
+            total={filteredTotals?.chat ?? 0}
             hours={chatHours}
-            subtitle={`${state.data.chat.agents.length} agents · ${state.data.chat.total.toLocaleString()} sessions`}
+            subtitle={`${filteredTotals?.chatAgents ?? 0} agents · ${(filteredTotals?.chat ?? 0).toLocaleString()} sessions`}
             asOf={state.data.chat.asOf}
           >
             <AgentBars report={state.data.chat} color={CHANNELS.chat.bar} />
@@ -620,9 +639,9 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
           {/* Email */}
           <ChannelPanel
             channel={CHANNELS.email}
-            total={state.data.email.total}
+            total={filteredTotals?.email ?? 0}
             hours={allHours}
-            subtitle={`${state.data.email.agents.length} agents · ${state.data.email.total.toLocaleString()} messages`}
+            subtitle={`${filteredTotals?.emailAgents ?? 0} agents · ${(filteredTotals?.email ?? 0).toLocaleString()} messages`}
             asOf={state.data.email.asOf}
           >
             <AgentBars report={state.data.email} color={CHANNELS.email.bar} />

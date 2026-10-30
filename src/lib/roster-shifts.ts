@@ -202,6 +202,36 @@ export function matchRosterShift(
 }
 
 /**
+ * Builds a predicate that resolves a report owner (SF "Case Owner" / agent
+ * name) to the roster and returns true only when the matched agent's skill is
+ * in `skills`. Used to exclude TL / T2 / SV(OM) / DTC-processed tickets from
+ * the dailies numerators so only frontline Call/Chat agents' work counts.
+ * Unresolvable owners (no confident roster match) are excluded.
+ */
+export function makeFrontlineFilter(
+  start: string | undefined,
+  skills: readonly string[],
+): (owner: string) => boolean {
+  const roster = pickRoster(start);
+  const all: Record<string, number> = {};
+  const skillByName = new Map<string, string>();
+  for (const a of roster) {
+    all[a.en] = 1;
+    skillByName.set(a.en, a.skill);
+  }
+  const set = new Set(skills);
+  const cache = new Map<string, boolean>();
+  return (owner: string) => {
+    const cached = cache.get(owner);
+    if (cached !== undefined) return cached;
+    const match = matchRosterShift(owner, all);
+    const ok = match ? set.has(skillByName.get(match.name) ?? '') : false;
+    cache.set(owner, ok);
+    return ok;
+  };
+}
+
+/**
  * Counts Month-To-Date worked shifts for the roster, between `start`
  * (inclusive) and `end` (inclusive). Defaults to the current calendar month
  * from the 1st through today.

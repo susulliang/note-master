@@ -33,7 +33,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { countMtdShifts, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
+import { countMtdShifts, makeFrontlineFilter, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
 import { useRosterLiveVersion } from '@/lib/roster-live';
 import { useCsatReport } from '@/hooks/use-csat-report';
 import { useOneTouchReport } from '@/hooks/use-one-touch-report';
@@ -1384,17 +1384,24 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     const end = dates[dates.length - 1];
     if (!end) return null;
     const start = monthStart(end);
+    // Numerators count only frontline-processed tickets (TL/T2/SV/DTC excluded).
+    const chatOnly = makeFrontlineFilter(start, ['Chat']);
+    const callOnly = makeFrontlineFilter(start, ['Call', 'FR Call']);
+    const allFrontline = makeFrontlineFilter(start, ['Chat', 'Call', 'FR Call']);
+    const chatTotal = data.chat.agents.filter((a) => chatOnly(a.owner)).reduce((s, a) => s + a.count, 0);
+    const emailTotal = data.email.agents.filter((a) => allFrontline(a.owner)).reduce((s, a) => s + a.count, 0);
+    const callTotal = data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0);
     // Billable hours: 8h per worked shift minus recorded extra off-time;
     // shift-equivalents (hours / 8) are the dailies divisor.
     const chatEquiv = countMtdShifts(start, end, undefined, ['Chat']).totalHours / 8;
     const callEquiv = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).totalHours / 8;
     const allEquiv = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).totalHours / 8;
-    const totalProcessed = data.call.handled + data.email.total + data.chat.total;
+    const totalProcessed = callTotal + emailTotal + chatTotal;
     return {
       total: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? totalProcessed / allEquiv : null },
-      email: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? data.email.total / allEquiv : null },
-      chat: { shifts: chatEquiv, hours: chatEquiv * 8, average: chatEquiv > 0 ? data.chat.total / chatEquiv : null },
-      call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? data.call.handled / callEquiv : null },
+      email: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? emailTotal / allEquiv : null },
+      chat: { shifts: chatEquiv, hours: chatEquiv * 8, average: chatEquiv > 0 ? chatTotal / chatEquiv : null },
+      call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? callTotal / callEquiv : null },
       through: end,
     };
   }, [data, rosterLiveVersion]);
@@ -1476,9 +1483,12 @@ function CallPerformanceCard({
     const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
     const end = dates[dates.length - 1];
     if (!end) return null;
+    // Frontline-processed calls only (TL/T2/SV/DTC excluded).
+    const callOnly = makeFrontlineFilter(monthStart(end), ['Call', 'FR Call']);
+    const handled = data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0);
     const hours = countMtdShifts(monthStart(end), end, undefined, ['Call', 'FR Call']).totalHours;
     const equiv = hours / 8;
-    return { average: equiv > 0 ? data.call.handled / equiv : null, shifts: equiv, hours };
+    return { average: equiv > 0 ? handled / equiv : null, shifts: equiv, hours };
   }, [data, rosterLiveVersion]);
   const answerValues = plotAgents.map((agent) => agent.answerRate ?? 0);
   const serviceValues = plotAgents.map((agent) => agent.serviceLevel20 ?? 0);
