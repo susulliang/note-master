@@ -842,7 +842,8 @@ function RosterGrid({
     : null;
   useEffect(() => {
     setNoteInput(singleSelection ? noteOf(singleSelection.a, singleSelection.iso) : '');
-  }, [singleSelection?.a.en, singleSelection?.iso]); // eslint-disable-line react-hooks/exhaustive-deps -- re-prefill only on selection change
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-prefill only on selection change
+  }, [singleSelection?.a.en, singleSelection?.iso]);
   const applySelectedNote = () => {
     if (selectedCells.length === 0) return;
     const note = noteInput.trim().slice(0, 300);
