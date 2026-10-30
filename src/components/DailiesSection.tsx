@@ -471,10 +471,13 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
     if (state.status !== 'ready') return null;
     const chat = state.data.chat.agents.filter((a) => chatOnly(a.owner)).reduce((s, a) => s + a.count, 0);
     const email = state.data.email.agents.filter((a) => allFrontline(a.owner)).reduce((s, a) => s + a.count, 0);
-    const call = state.data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0);
+    const callRows = state.data.historical.agents.filter((a) => callOnly(a.owner));
+    const call = callRows.reduce((s, a) => s + a.handled, 0);
+    const callOutbound = callRows.reduce((s, a) => s + a.handledOutbound, 0);
+    const callAbandoned = callRows.reduce((s, a) => s + a.nonResponseAbandons, 0);
     const chatAgents = state.data.chat.agents.filter((a) => chatOnly(a.owner)).length;
     const emailAgents = state.data.email.agents.filter((a) => allFrontline(a.owner)).length;
-    return { chat, email, call, chatAgents, emailAgents };
+    return { chat, email, call, callOutbound, callAbandoned, chatAgents, emailAgents };
   }, [state, chatOnly, callOnly, allFrontline]);
 
   const performers = useMemo(() => {
@@ -604,9 +607,9 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
             <CallBars
               color={CHANNELS.call.bar}
               data={[
-                { name: 'Incoming', value: state.data.call.handled - state.data.call.handledOutbound },
-                { name: 'Outbound', value: state.data.call.handledOutbound },
-                { name: 'Abandoned', value: state.data.call.abandoned },
+                { name: 'Incoming', value: (filteredTotals?.call ?? 0) - (filteredTotals?.callOutbound ?? 0) },
+                { name: 'Outbound', value: filteredTotals?.callOutbound ?? 0 },
+                { name: 'Abandoned', value: filteredTotals?.callAbandoned ?? 0 },
               ]}
             />
             <div className="mt-2 grid grid-cols-2 gap-2">

@@ -1375,41 +1375,50 @@ function CommonIssuesWidget({ state }: { state: ReturnType<typeof useDashData>['
 function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDashData>['dailies']['state']; onExplore: () => void }) {
   const data = state.status === 'ready' ? state.data : null;
   const refreshError = state.status === 'ready' ? state.refreshError : undefined;
-  const total = data ? data.call.handled + data.email.total + data.chat.total : null;
   // Live roster edits (SHIFTS workspace) bump this version — recompute below.
   const rosterLiveVersion = useRosterLiveVersion();
-  const shiftStats = useMemo(() => {
+  // Frontline-filtered numerators (TL/T2/SV(OM)/DTC processing excluded) —
+  // drive BOTH the volume values and the per-shift averages.
+  const frontline = useMemo(() => {
     if (!data) return null;
     const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
     const end = dates[dates.length - 1];
     if (!end) return null;
     const start = monthStart(end);
-    // Numerators count only frontline-processed tickets (TL/T2/SV/DTC excluded).
     const chatOnly = makeFrontlineFilter(start, ['Chat']);
     const callOnly = makeFrontlineFilter(start, ['Call', 'FR Call']);
     const allFrontline = makeFrontlineFilter(start, ['Chat', 'Call', 'FR Call']);
-    const chatTotal = data.chat.agents.filter((a) => chatOnly(a.owner)).reduce((s, a) => s + a.count, 0);
-    const emailTotal = data.email.agents.filter((a) => allFrontline(a.owner)).reduce((s, a) => s + a.count, 0);
-    const callTotal = data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0);
+    return {
+      chat: data.chat.agents.filter((a) => chatOnly(a.owner)).reduce((s, a) => s + a.count, 0),
+      email: data.email.agents.filter((a) => allFrontline(a.owner)).reduce((s, a) => s + a.count, 0),
+      call: data.historical.agents.filter((a) => callOnly(a.owner)).reduce((s, a) => s + a.handled, 0),
+      end,
+      start,
+    };
+  }, [data]);
+  const total = data && frontline ? frontline.call + frontline.email + frontline.chat : null;
+  const shiftStats = useMemo(() => {
+    if (!data || !frontline) return null;
+    const { start, end } = frontline;
     // Billable hours: 8h per worked shift minus recorded extra off-time;
     // shift-equivalents (hours / 8) are the dailies divisor.
     const chatEquiv = countMtdShifts(start, end, undefined, ['Chat']).totalHours / 8;
     const callEquiv = countMtdShifts(start, end, undefined, ['Call', 'FR Call']).totalHours / 8;
     const allEquiv = countMtdShifts(start, end, undefined, ['Chat', 'Call', 'FR Call']).totalHours / 8;
-    const totalProcessed = callTotal + emailTotal + chatTotal;
+    const totalProcessed = frontline.call + frontline.email + frontline.chat;
     return {
       total: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? totalProcessed / allEquiv : null },
-      email: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? emailTotal / allEquiv : null },
-      chat: { shifts: chatEquiv, hours: chatEquiv * 8, average: chatEquiv > 0 ? chatTotal / chatEquiv : null },
-      call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? callTotal / callEquiv : null },
+      email: { shifts: allEquiv, hours: allEquiv * 8, average: allEquiv > 0 ? frontline.email / allEquiv : null },
+      chat: { shifts: chatEquiv, hours: chatEquiv * 8, average: chatEquiv > 0 ? frontline.chat / chatEquiv : null },
+      call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? frontline.call / callEquiv : null },
       through: end,
     };
-  }, [data, rosterLiveVersion]);
+  }, [data, frontline, rosterLiveVersion]);
   const volumes = [
     { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, hours: shiftStats?.total.hours ?? null, color: 'text-foreground', accent: 'bg-accent' },
-    { name: 'Call', value: data?.call.handled ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
-    { name: 'Email', value: data?.email.total ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, hours: shiftStats?.email.hours ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
-    { name: 'Chat', value: data?.chat.total ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, hours: shiftStats?.chat.hours ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
+    { name: 'Call', value: frontline?.call ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
+    { name: 'Email', value: frontline?.email ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, hours: shiftStats?.email.hours ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
+    { name: 'Chat', value: frontline?.chat ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, hours: shiftStats?.chat.hours ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
   return (
     <section className={cn(PANEL, 'p-4 sm:p-5')}>
