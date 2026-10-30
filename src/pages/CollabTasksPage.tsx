@@ -194,10 +194,10 @@ export default function CollabTasksPage({ username, initialTaskId = null }: Coll
   const visibleTasks = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return tasks.filter((task) => (
-      (task.scope === scope || task.mentions.some((name) => name.toLowerCase() === username.toLowerCase())) &&
+      task.scope === scope &&
       (!needle || `${task.title} ${task.description} ${task.owner} ${task.assignee}`.toLocaleLowerCase().includes(needle))
     ));
-  }, [query, scope, tasks, username]);
+  }, [query, scope, tasks]);
 
   const workerTagsByDay = useMemo(() => {
     const latestRoster = getRoster(ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? '');
@@ -375,80 +375,100 @@ export default function CollabTasksPage({ username, initialTaskId = null }: Coll
             <span>{loading ? 'Loading shared tasks…' : 'Select a time slot to add a task or reminder'}</span>
           </div>
           <div className="collab-calendar-scroll">
-            {weekDays.map((day) => {
-              const iso = dateKey(day);
-              const workers = workerTagsByDay.get(iso) ?? [];
-              const dayTasks = visibleTasks.filter((task) => (
-                task.dueAt !== null && dateKey(new Date(task.dueAt)) === iso
-              ));
-              const today = iso === dateKey(new Date());
-              return (
-                <section className="collab-calendar-day" key={iso}>
-                  <header className="collab-calendar-day-header">
-                    <div className="collab-calendar-day-title">
-                      <span>{day.toLocaleDateString(undefined, { weekday: 'short' })}</span>
-                      <strong>{day.getDate()}</strong>
-                      <small>{day.toLocaleDateString(undefined, { month: 'short' })}</small>
-                      {today && <em>Today</em>}
+            <div className="collab-calendar-grid" role="table" aria-label="Weekly task calendar">
+              <div className="collab-calendar-header-row" role="row">
+                <div className="collab-calendar-time-heading" role="columnheader">Time</div>
+                {weekDays.map((day) => {
+                  const iso = dateKey(day);
+                  const workers = workerTagsByDay.get(iso) ?? [];
+                  const dayTasks = visibleTasks.filter((task) => (
+                    task.dueAt !== null && dateKey(new Date(task.dueAt)) === iso
+                  ));
+                  const today = iso === dateKey(new Date());
+                  return (
+                    <div className={`collab-calendar-day-header ${today ? 'is-today' : ''}`} role="columnheader" key={iso}>
+                      <div className="collab-calendar-day-title">
+                        <span>{day.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                        <strong>{day.getDate()}</strong>
+                        <small>{day.toLocaleDateString(undefined, { month: 'short' })}</small>
+                        {today && <em>Today</em>}
+                      </div>
+                      <div className="collab-calendar-workers">
+                        <button
+                          type="button"
+                          className="collab-calendar-workers-trigger"
+                          aria-label={`${workers.length} people working ${day.toLocaleDateString()}. Focus or hover to view roster.`}
+                          aria-haspopup="true"
+                          title="View working roster"
+                        >
+                          <Users className="size-3" />
+                          <span>{workers.length} working</span>
+                        </button>
+                        <div className="collab-calendar-workers-popover" aria-label={`People working ${day.toLocaleDateString()}`}>
+                          <strong>{workers.length} people working</strong>
+                          {workers.length ? (
+                            <ul>
+                              {workers.map((worker) => (
+                                <li key={worker.name}>
+                                  <span>{worker.name}</span>
+                                  <b>{worker.code}</b>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : <small>No roster shifts</small>}
+                        </div>
+                      </div>
+                      <span className="collab-calendar-day-count">{dayTasks.length} scheduled</span>
                     </div>
-                    <div className="collab-calendar-workers" aria-label={`${workers.length} people working`}>
-                      {workers.slice(0, 6).map((worker) => (
-                        <span key={worker.name} title={`${worker.name} · ${worker.code}`}>
-                          {worker.name.split(/\s+/)[0]} <b>{worker.code}</b>
-                        </span>
-                      ))}
-                      {workers.length > 6 && <small>+{workers.length - 6}</small>}
-                      {!workers.length && <small>No roster shifts</small>}
-                    </div>
-                    <span className="collab-calendar-day-count">{dayTasks.length} scheduled</span>
-                  </header>
-                  <div className="collab-calendar-time-grid">
-                    {DAY_HOURS.map((hour) => {
-                      const slotTasks = tasksBySlot.get(`${iso}|${hour}`) ?? [];
-                      return (
-                        <div className="collab-calendar-time-row" key={hour}>
-                          <time>{hourLabel(hour)}</time>
-                          <div className="collab-calendar-slot">
-                            {slotTasks.map((task) => (
-                              <article
-                                className={`collab-calendar-entry ${task.completedAt ? 'is-complete' : ''} ${task.kind === 'reminder' ? 'is-reminder' : ''}`}
-                                key={task.id}
-                                title={task.description || task.title}
-                              >
-                                <button
-                                  type="button"
-                                  aria-label={task.completedAt ? 'Mark incomplete' : 'Complete'}
-                                  onClick={() => void toggleComplete(task)}
-                                >
-                                  {task.completedAt
-                                    ? <CheckCircle2 className="size-3.5" />
-                                    : task.kind === 'reminder'
-                                      ? <Bell className="size-3.5" />
-                                      : <Circle className="size-3.5" />}
-                                </button>
-                                <span><strong>{task.title}</strong><small>{task.kind === 'reminder' ? 'Reminder' : 'Task'} · {task.assignee}</small></span>
-                                {task.owner.toLowerCase() === username.toLowerCase() && (
-                                  <button type="button" aria-label={`Delete ${task.title}`} onClick={() => void removeTask(task)}>
-                                    <X className="size-3" />
-                                  </button>
-                                )}
-                              </article>
-                            ))}
+                  );
+                })}
+              </div>
+              {DAY_HOURS.map((hour) => (
+                <div className="collab-calendar-time-row" role="row" key={hour}>
+                  <time role="rowheader">{hourLabel(hour)}</time>
+                  {weekDays.map((day) => {
+                    const iso = dateKey(day);
+                    const slotTasks = tasksBySlot.get(`${iso}|${hour}`) ?? [];
+                    return (
+                      <div className="collab-calendar-slot" role="cell" key={iso}>
+                        {slotTasks.map((task) => (
+                          <article
+                            className={`collab-calendar-entry ${task.completedAt ? 'is-complete' : ''} ${task.kind === 'reminder' ? 'is-reminder' : ''}`}
+                            key={task.id}
+                            title={task.description || task.title}
+                          >
                             <button
                               type="button"
-                              className="collab-calendar-add-slot"
-                              aria-label={`Add a task or reminder on ${day.toLocaleDateString()} at ${hourLabel(hour)}`}
-                              title="Add a task or reminder"
-                              onClick={() => openCalendarSlot(day, hour)}
-                            ><Plus className="size-3.5" /><span>Add</span></button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
+                              aria-label={task.completedAt ? 'Mark incomplete' : 'Complete'}
+                              onClick={() => void toggleComplete(task)}
+                            >
+                              {task.completedAt
+                                ? <CheckCircle2 className="size-3.5" />
+                                : task.kind === 'reminder'
+                                  ? <Bell className="size-3.5" />
+                                  : <Circle className="size-3.5" />}
+                            </button>
+                            <span><strong>{task.title}</strong><small>{task.kind === 'reminder' ? 'Reminder' : 'Task'} · {task.assignee}</small></span>
+                            {task.owner.toLowerCase() === username.toLowerCase() && (
+                              <button type="button" aria-label={`Delete ${task.title}`} onClick={() => void removeTask(task)}>
+                                <X className="size-3" />
+                              </button>
+                            )}
+                          </article>
+                        ))}
+                        <button
+                          type="button"
+                          className="collab-calendar-add-slot"
+                          aria-label={`Add a task or reminder on ${day.toLocaleDateString()} at ${hourLabel(hour)}`}
+                          title="Add a task or reminder"
+                          onClick={() => openCalendarSlot(day, hour)}
+                        ><Plus className="size-3.5" /></button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
           {visibleTasks.some((task) => task.dueAt === null) && (
             <p className="collab-calendar-unscheduled">
@@ -549,14 +569,14 @@ export default function CollabTasksPage({ username, initialTaskId = null }: Coll
                 <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
               </label>
               <label>Assignee
-                <select value={assignee} onChange={(event) => setAssignee(event.target.value)} disabled={scope === 'personal'}>
+                <select value={assignee} onChange={(event) => setAssignee(event.target.value)}>
                   <option value={username}>{username} (me)</option>
                   {userResults.map((person) => <option key={person.username} value={person.username}>{person.username}</option>)}
                 </select>
               </label>
             </div>
             <label className="collab-task-assignee-search">Find another assignee
-              <input value={assigneeQuery} onChange={(event) => setAssigneeQuery(event.target.value)} placeholder={scope === 'personal' ? 'Personal tasks stay with you' : 'Search teammates'} disabled={scope === 'personal'} />
+              <input value={assigneeQuery} onChange={(event) => setAssigneeQuery(event.target.value)} placeholder="Search registered teammates" />
               {assigneeQuery && userResults.length > 0 && (
                 <div className="collab-task-assignee-options">
                   {userResults.map((person) => (
@@ -571,7 +591,11 @@ export default function CollabTasksPage({ username, initialTaskId = null }: Coll
               <button type="button" aria-pressed={scope === 'personal'} onClick={() => { setScope('personal'); setAssignee(username); setAssigneeQuery(''); }}>Personal</button>
               <button type="button" aria-pressed={scope === 'team'} onClick={() => setScope('team')}>Shared with team</button>
             </div>
-            <p className="collab-task-form-hint">Use @username in the details to notify teammates mentioned in this task.</p>
+            <p className="collab-task-form-hint">
+              {scope === 'personal'
+                ? 'Private tasks stay with the creator, assignee, and @mentioned people.'
+                : 'Team tasks are visible to everyone. Use @username to notify specific teammates.'}
+            </p>
             <footer>
               <button type="button" className="collab-tool-secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
               <button type="submit" className="collab-tool-primary" disabled={!title.trim() || saving}>

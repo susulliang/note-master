@@ -718,30 +718,68 @@
   scrollbar-gutter: stable;
 }
 
-.collab-calendar-day {
-  margin-bottom: 8px;
-  overflow: hidden;
+.collab-calendar-grid {
+  display: grid;
+  min-width: 824px;
+  grid-template-columns: 54px repeat(7, minmax(110px, 1fr));
   border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
   border-radius: 11px;
   background: color-mix(in srgb, var(--card) 60%, transparent);
 }
 
+.collab-calendar-header-row,
+.collab-calendar-time-row {
+  display: contents;
+}
+
+.collab-calendar-time-heading,
+.collab-calendar-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  min-width: 0;
+  min-height: 84px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent);
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+}
+
+.collab-calendar-time-heading {
+  left: 0;
+  z-index: 7;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  color: var(--muted-foreground);
+  padding: 8px 3px;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
 .collab-calendar-day-header {
   display: flex;
-  min-height: 48px;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
-  padding: 6px 10px;
-  background: color-mix(in srgb, var(--foreground) 2%, transparent);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 8px 7px 6px;
+}
+
+.collab-calendar-day-header.is-today {
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+
+.collab-calendar-day-header:focus-within,
+.collab-calendar-day-header:hover {
+  z-index: 20;
 }
 
 .collab-calendar-day-title {
   display: flex;
-  min-width: 96px;
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
   align-items: baseline;
-  gap: 5px;
+  gap: 4px;
 }
 
 .collab-calendar-day-title > span {
@@ -749,11 +787,12 @@
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
+  margin-right: auto;
 }
 
 .collab-calendar-day-title > strong {
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
 }
 
@@ -764,94 +803,165 @@
 
 .collab-calendar-day-title > em {
   border-radius: 5px;
-  padding: 2px 5px;
+  padding: 2px 4px;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  font-size: 7px;
+  font-size: 6px;
   font-style: normal;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .collab-calendar-workers {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   min-width: 0;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  overflow: hidden;
+  max-width: 100%;
 }
 
-.collab-calendar-workers > span {
-  max-width: 110px;
-  overflow: hidden;
+.collab-calendar-workers-trigger {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 22px;
+  align-items: center;
+  gap: 4px;
   border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
   border-radius: 5px;
-  padding: 3px 5px;
-  color: var(--foreground);
+  padding: 2px 5px;
+  color: color-mix(in srgb, var(--primary) 85%, var(--foreground));
   background: color-mix(in srgb, var(--primary) 8%, transparent);
+  font: inherit;
+  font-size: 7px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.collab-calendar-workers-trigger:hover,
+.collab-calendar-workers-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 42%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 2px;
+}
+
+.collab-calendar-workers-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  display: none;
+  width: min(250px, 72vw);
+  max-height: min(55vh, 420px);
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 9px;
+  padding: 9px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  box-shadow: 0 12px 32px #0008;
+  backdrop-filter: blur(16px);
+}
+
+.collab-calendar-workers:hover .collab-calendar-workers-popover,
+.collab-calendar-workers:focus-within .collab-calendar-workers-popover {
+  display: block;
+}
+
+.collab-calendar-workers-popover > strong {
+  display: block;
+  position: sticky;
+  top: -9px;
+  margin: -1px -1px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding: 2px 1px 7px;
+  background: color-mix(in srgb, var(--card) 98%, transparent);
+  font-size: 9px;
+}
+
+.collab-calendar-workers-popover ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.collab-calendar-workers-popover li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 5px;
+  padding: 4px 5px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
   font-size: 8px;
+}
+
+.collab-calendar-workers-popover li > span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.collab-calendar-workers > span b {
-  margin-left: 2px;
+.collab-calendar-workers-popover li > b {
+  flex: 0 0 auto;
   color: var(--primary);
   font-size: 7px;
 }
 
-.collab-calendar-workers > small {
+.collab-calendar-workers-popover > small {
   color: var(--muted-foreground);
   font-size: 8px;
 }
 
 .collab-calendar-day-count {
-  flex: 0 0 auto;
+  margin-top: auto;
   color: var(--muted-foreground);
-  font-size: 8px;
+  font-size: 7px;
 }
 
 .collab-calendar-time-row {
-  display: grid;
-  min-height: 31px;
-  grid-template-columns: 54px minmax(0, 1fr);
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.collab-calendar-time-row:last-child {
-  border-bottom: 0;
+  min-height: 54px;
 }
 
 .collab-calendar-time-row > time {
-  padding: 8px 7px 0 9px;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-height: 54px;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
+  padding: 8px 5px 0 2px;
   color: var(--muted-foreground);
   font-size: 8px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
 }
 
 .collab-calendar-slot {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  border-left: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-  padding: 2px 5px;
+  min-height: 54px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  border-right: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
+  padding: 3px;
 }
 
 .collab-calendar-entry {
   display: flex;
-  min-width: 120px;
-  max-width: min(420px, 100%);
-  min-height: 25px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 28px;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
   border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 6px;
-  padding: 2px 5px;
+  padding: 2px 3px;
   color: var(--foreground);
   background: color-mix(in srgb, var(--accent) 8%, var(--card));
 }
@@ -867,8 +977,8 @@
 
 .collab-calendar-entry > button {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 18px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
@@ -891,6 +1001,7 @@
 }
 
 .collab-calendar-entry strong {
+  display: block;
   overflow: hidden;
   font-size: 8px;
   font-weight: 650;
@@ -908,19 +1019,20 @@
 }
 
 .collab-calendar-add-slot {
-  display: inline-flex;
-  min-width: 24px;
-  height: 24px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  align-self: flex-start;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  place-items: center;
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 0 5px;
+  padding: 0;
   color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
   background: transparent;
   font: inherit;
-  font-size: 8px;
   cursor: pointer;
 }
 
@@ -1360,31 +1472,8 @@
     flex: 1;
   }
 
-  .collab-calendar-day-header {
-    flex-wrap: wrap;
-    gap: 5px 8px;
-  }
-
-  .collab-calendar-workers {
-    order: 3;
-    flex-basis: 100%;
-  }
-
-  .collab-calendar-day-count {
-    margin-left: auto;
-  }
-
-  .collab-calendar-time-row {
-    grid-template-columns: 46px minmax(0, 1fr);
-  }
-
   .collab-calendar-entry {
     max-width: 100%;
-    flex: 1 1 100%;
-  }
-
-  .collab-calendar-add-slot span {
-    display: none;
   }
 
   .collab-tasks-count {

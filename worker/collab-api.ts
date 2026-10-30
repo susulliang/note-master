@@ -532,12 +532,16 @@ async function listTasks(env: Env, username: string, url: URL): Promise<Response
            t.due_at, t.kind, t.completed_at, t.created_at, t.updated_at
     FROM collab_tasks t
     WHERE (t.scope = 'team' AND (?1 IS NULL OR ?1 = 'team'))
-       OR ((t.owner = ?2 COLLATE NOCASE OR t.assignee = ?2 COLLATE NOCASE)
-           AND (?1 IS NULL OR ?1 = 'personal'))
-       OR EXISTS (
-         SELECT 1 FROM collab_task_mentions mention
-         WHERE mention.task_id = t.id AND mention.username = ?2 COLLATE NOCASE
-       )
+       OR (t.scope = 'personal'
+           AND (?1 IS NULL OR ?1 = 'personal')
+           AND (
+             t.owner = ?2 COLLATE NOCASE
+             OR t.assignee = ?2 COLLATE NOCASE
+             OR EXISTS (
+               SELECT 1 FROM collab_task_mentions mention
+               WHERE mention.task_id = t.id AND mention.username = ?2 COLLATE NOCASE
+             )
+           ))
     ORDER BY CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
              CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END, t.due_at, t.updated_at DESC
     LIMIT 300
@@ -575,7 +579,7 @@ async function createTask(request: Request, env: Env, username: string): Promise
   const kind = payload?.kind === 'reminder' ? 'reminder' : 'task';
   if (!title) return collabJson({ error: 'Add a task title.' }, 400);
   let assignee = username;
-  if (scope === 'team' && typeof payload?.assignee === 'string') {
+  if (typeof payload?.assignee === 'string' && payload.assignee.trim()) {
     const person = await env.DB.prepare(
       'SELECT username FROM auth_users WHERE username = ? COLLATE NOCASE',
     ).bind(payload.assignee.trim()).first<{ username: string }>();
