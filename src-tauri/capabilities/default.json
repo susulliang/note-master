@@ -16,6 +16,10 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-ignore-cursor-events",
     "opener:default",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install"
   ]
 }

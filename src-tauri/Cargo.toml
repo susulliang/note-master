@@ -1,6 +1,6 @@
 [package]
 name = "ecovacs-ticket-notes"
-version = "0.3.0"
+version = "0.7.27"
 description = "Ecovacs Ticket Notes — flowchart-driven call script desktop app"
 authors = ["Ecovacs NA Ops"]
 license = "UNLICENSED"
@@ -26,6 +26,7 @@ log = "0.4"
 tauri = { version = "2.12.1", features = ["macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
 cpal = "0.15"
 
 # macOS-only: ScreenCaptureKit system-audio capture (no virtual driver needed)

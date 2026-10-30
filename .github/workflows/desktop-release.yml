@@ -91,9 +91,32 @@ jobs:
           fi
         shell: bash
 
+      - name: Import Apple signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        shell: bash
+        run: |
+          # Step-level `if:` cannot read secrets, so skip here instead.
+          if [ -z "$MACOS_CERTIFICATE" ]; then
+            echo "MACOS_CERTIFICATE not configured — skipping keychain import (ad-hoc signing)"
+            exit 0
+          fi
+          # Decode the base64 .p12 (Developer ID Application) and import it into
+          # a temporary keychain so codesign can find it during tauri build.
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          KC_PASSWORD=$(openssl rand -hex 16)
+          security create-keychain -p "$KC_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KC_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASSWORD" build.keychain
+          rm certificate.p12
+
       - name: Build Tauri app
         env:
-          TAURI_SIGNING_IDENTITY: ${{ secrets.TAURI_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -104,26 +127,40 @@ jobs:
           # GitHub renders unset secrets as EMPTY-STRING env vars, and
           # tauri-bundler treats a present-but-empty APPLE_ID as "notarize".
           # Without Apple credentials that fails with "Team ID must be at
-          # least 3 characters" — so drop any empty credential vars first
-          # and build ad-hoc signed only.
-          for v in TAURI_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_KEYSTORE_PASSWORD; do
+          # least 3 characters" — so drop any empty credential vars first.
+          for v in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_KEYSTORE_PASSWORD; do
             if [ -z "${!v:-}" ]; then
               unset "$v"
               echo "secret not configured — building without $v"
             fi
           done
-          npx tauri build --target ${{ matrix.target }}
+
+          # Override the ad-hoc signingIdentity ("-") in tauri.conf.json when a
+          # real Developer ID identity is provided — env var alone does not win
+          # over the config value.
+          CONFIG_ARGS=""
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            CONFIG_ARGS="--config {\"bundle\":{\"macOS\":{\"signingIdentity\":\"$APPLE_SIGNING_IDENTITY\"}}}"
+            echo "signing with: $APPLE_SIGNING_IDENTITY"
+          fi
+          npx tauri build --target ${{ matrix.target }} $CONFIG_ARGS
 
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p release
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
           if [ "$RUNNER_OS" = "macOS" ]; then
-            cp -r "src-tauri/target/${{ matrix.target }}/release/bundle/macos/"*.app release/ 2>/dev/null || true
-            cp "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/"*.dmg release/ 2>/dev/null || true
+            cp -r "$BUNDLE/macos/"*.app release/ 2>/dev/null || true
+            cp "$BUNDLE/dmg/"*.dmg release/ 2>/dev/null || true
+            # Updater artifacts: the macOS updater installs from .app.tar.gz
+            # (NOT the .dmg) — produced by bundle.createUpdaterArtifacts.
+            cp "$BUNDLE/macos/"*.app.tar.gz release/ 2>/dev/null || true
+            cp "$BUNDLE"/**/*.sig release/ 2>/dev/null || true
           else
-            cp "src-tauri/target/${{ matrix.target }}/release/bundle/msi/"*.msi release/ 2>/dev/null || true
-            cp "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/"*.exe release/ 2>/dev/null || true
+            cp "$BUNDLE/msi/"*.msi release/ 2>/dev/null || true
+            cp "$BUNDLE/nsis/"*.exe release/ 2>/dev/null || true
+            cp "$BUNDLE"/**/*.sig release/ 2>/dev/null || true
           fi
           ls -lh release/
 
@@ -150,7 +187,9 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.msi" -o -name "*.exe" \) -exec cp -r {} release/ \;
+          # .app.tar.gz + .sig are the UPDATER artifacts; .dmg/.app/.msi/.exe
+          # are for manual downloads from the release page.
+          find artifacts -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.msi" -o -name "*.exe" -o -name "*.app.tar.gz" -o -name "*.sig" \) -exec cp -r {} release/ \;
           ls -lh release/
 
       - name: Get version
@@ -159,6 +198,53 @@ jobs:
           VER=$(node -p "require('./package.json').version")
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Generate updater manifest
+        shell: bash
+        run: |
+          # The updater platform URLs must point at the artifacts the plugin
+          # knows how to install: .app.tar.gz on macOS (NOT the .dmg), the
+          # NSIS -setup.exe on Windows. Signatures come from the .sig files
+          # tauri-bundler emits next to each updater artifact when
+          # TAURI_SIGNING_PRIVATE_KEY is configured (empty string = unsigned).
+          TARGZ=$(ls release/*.app.tar.gz 2>/dev/null | head -1)
+          EXE=$(ls release/*-setup.exe 2>/dev/null | head -1)
+          TAG="${{ steps.version.outputs.tag }}"
+          VER="${{ steps.version.outputs.version }}"
+
+          TARGZ_BASENAME=$(basename "$TARGZ" 2>/dev/null || echo "")
+          EXE_BASENAME=$(basename "$EXE" 2>/dev/null || echo "")
+          TARGZ_URL="https://github.com/susulliang/note-master/releases/download/${TAG}/${TARGZ_BASENAME}"
+          EXE_URL="https://github.com/susulliang/note-master/releases/download/${TAG}/${EXE_BASENAME}"
+
+          # .sig content is a single-line minisign signature — safe to embed
+          # directly as a JSON string value.
+          TARGZ_SIG=""
+          [ -n "$TARGZ_BASENAME" ] && TARGZ_SIG=$(tr -d '\n' < "release/${TARGZ_BASENAME}.sig" 2>/dev/null || echo "")
+          EXE_SIG=""
+          [ -n "$EXE_BASENAME" ] && EXE_SIG=$(tr -d '\n' < "release/${EXE_BASENAME}.sig" 2>/dev/null || echo "")
+
+          PLATFORMS='{'
+          if [ -n "$TARGZ_BASENAME" ]; then
+            PLATFORMS="$PLATFORMS \"darwin-aarch64\": { \"signature\": \"${TARGZ_SIG}\", \"url\": \"$TARGZ_URL\" },"
+          fi
+          if [ -n "$EXE_BASENAME" ]; then
+            PLATFORMS="$PLATFORMS \"windows-x86_64\": { \"signature\": \"${EXE_SIG}\", \"url\": \"$EXE_URL\" },"
+          fi
+          # Remove trailing comma and close
+          PLATFORMS="${PLATFORMS%,} }"
+
+          cat > release/latest.json <<EOF
+          {
+            "version": "${VER}",
+            "notes": "Auto-update release of Econote v${VER}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": ${PLATFORMS}
+          }
+          EOF
+          echo "--- latest.json ---"
+          cat release/latest.json
+          echo "-------------------"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

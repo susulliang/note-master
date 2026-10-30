@@ -95,6 +95,13 @@ export default function CatDesktopOverlay() {
   // JS API has no forwarded-mouse-events option (Tauri 1 did), so while the
   // window ignores the cursor it receives no pointer events at all — the
   // poll is the only way to notice re-entry. 80ms is imperceptible.
+  //
+  // `menu` is a dependency so the poll restarts with an IMMEDIATE tick every
+  // time the context menu opens or closes. This eliminates the 80ms window
+  // where ignoring could be stale after menu close — the bug where right-
+  // clicking the cat and then dragging would silently fail because the poll
+  // hadn't yet re-set ignoring=false (and had in fact set it true, since the
+  // cursor had moved off the sprite to click a menu button).
   useEffect(() => {
     if (!isTauri) return;
     const win = getCurrentWindow();
@@ -142,7 +149,7 @@ export default function CatDesktopOverlay() {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [isTauri]);
+  }, [isTauri, menu]);
 
   // Main-app state mirror (identity, nap, growth scale). The hello handshake
   // asks the main app to (re-)emit sync — events fired before this webview
@@ -287,10 +294,16 @@ export default function CatDesktopOverlay() {
   }, [isTauri]);
 
   // Sprite interaction: short click = pet, drag = move the window.
+  // IMPORTANT: always reset drag state FIRST, before the button check.
+  // A right-click leaves button !== 0 and returns early, but we still need
+  // to clear any stale dragStartRef / draggedRef so the next left-click
+  // starts clean. Without this, a right-click can leave the refs in a
+  // broken state that makes the cat "unmovable" until the next reset.
   const onPointerDown = useCallback((event: React.PointerEvent) => {
+    dragStartRef.current = null;
+    draggedRef.current = false;
     if (event.button !== 0) return;
     dragStartRef.current = { x: event.clientX, y: event.clientY };
-    draggedRef.current = false;
   }, []);
 
   const onPointerMove = useCallback((event: React.PointerEvent) => {

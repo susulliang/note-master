@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "msi", "nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -46,6 +47,14 @@
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0QjIxMkE5NDRDN0RDMjQKUldRazNNZEVxUkt5SkVWVHlWU1hGZ1JaT01MWVk4OTBwN0RnemYvb0V5M01IQ1dXUGxuSVJZa3EK",
+      "endpoints": [
+        "https://github.com/susulliang/note-master/releases/latest/download/latest.json"
+      ]
     }
   }
 }

@@ -1,4 +1,4 @@
-import { Check, KeyRound, Monitor, RotateCw, Settings, Type } from 'lucide-react';
+import { Check, ExternalLink, KeyRound, Monitor, RotateCw, Settings, Type, Download, RefreshCcw, Sparkles, AlertTriangle } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import EngineSettingsPanel, { type EngineSettingsPanelProps } from '@/components/EngineSettingsPanel';
@@ -8,6 +8,16 @@ import { changeAccountPassword } from '@/lib/auth-client';
 import { fetchChatProfile, updateChatAvatarRotation, type ChatAvatarProfile } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 import { THEMES, type ThemeId, type UiScale } from '@/lib/themes';
+import { isTauriEnv } from '@/lib/tauri-env';
+import {
+  checkForUpdate,
+  downloadUpdate,
+  installUpdate,
+  subscribeUpdater,
+  getUpdaterSnapshot,
+  type UpdaterSnapshot,
+} from '@/lib/updater';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 interface SettingsPageProps extends Omit<EngineSettingsPanelProps, 'presentation' | 'onClose'> {
   theme: ThemeId;
@@ -28,6 +38,16 @@ export default function SettingsPage({
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [updaterState, setUpdaterState] = useState<UpdaterSnapshot>(() =>
+    isTauriEnv() ? getUpdaterSnapshot() : { status: 'up-to-date' }
+  );
+
+  // Subscribe to updater state changes. Only runs in Tauri desktop builds.
+  useEffect(() => {
+    if (!isTauriEnv()) return;
+    const unsubscribe = subscribeUpdater((snapshot) => setUpdaterState(snapshot));
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -263,6 +283,158 @@ export default function SettingsPage({
         <section aria-label="Account, fonts, cat, canvas, keywords, engines, and debug">
           <EngineSettingsPanel {...engineSettings} presentation="page" />
         </section>
+
+        {/* About / Updates section — desktop Tauri builds only. */}
+        {isTauriEnv() && (
+          <section className="rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+            <div className="mb-4 flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                <Sparkles className="size-4" />
+              </span>
+              <div className="flex-1">
+                <h2 className="text-sm font-semibold text-foreground">About Econote</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Keep your desktop app up to date with the latest features and fixes.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Left: Version info + actions */}
+              <div className="space-y-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Current version
+                  </span>
+                  <span className="text-sm font-mono font-semibold text-foreground">
+                    {updaterState.info?.currentVersion ?? '—'}
+                  </span>
+                </div>
+
+                {updaterState.info && updaterState.status === 'available' && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    <strong>v{updaterState.info.availableVersion}</strong> is available
+                    {updaterState.info.date && (
+                      <span className="text-amber-300/70"> · published {updaterState.info.date.slice(0, 10)}</span>
+                    )}
+                  </div>
+                )}
+
+                {updaterState.status === 'up-to-date' && (
+                  <div className="flex items-center gap-1.5 text-xs text-primary">
+                    <Check className="size-3.5" />
+                    You're running the latest version.
+                  </div>
+                )}
+
+                {updaterState.status === 'checking' && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <RefreshCcw className="size-3.5 animate-spin" />
+                    Checking for updates…
+                  </div>
+                )}
+
+                {updaterState.status === 'error' && (
+                  <div className="flex items-start gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{updaterState.error ?? 'Something went wrong. Try again later.'}</span>
+                  </div>
+                )}
+
+                {updaterState.lastCheckedAt && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Last checked {new Date(updaterState.lastCheckedAt).toLocaleString()}
+                  </p>
+                )}
+
+                {/* Download progress */}
+                {updaterState.status === 'downloading' && updaterState.progress && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>Downloading v{updaterState.info?.availableVersion}…</span>
+                      <span className="font-mono">
+                        {updaterState.progress.total
+                          ? `${Math.round((updaterState.progress.downloaded / updaterState.progress.total) * 100)}%`
+                          : `${(updaterState.progress.downloaded / 1_000_000).toFixed(1)} MB`}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-150"
+                        style={{
+                          width: updaterState.progress.total
+                            ? `${(updaterState.progress.downloaded / updaterState.progress.total) * 100}%`
+                            : '20%',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {updaterState.status === 'downloaded' && (
+                  <div className="flex items-center gap-1.5 text-xs text-primary">
+                    <Download className="size-3.5" />
+                    Download ready — install to update.
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Action buttons */}
+              <div className="flex flex-col gap-2">
+                {updaterState.status !== 'downloading' && updaterState.status !== 'installing' && updaterState.status !== 'available' && updaterState.status !== 'downloaded' && (
+                  <button
+                    type="button"
+                    onClick={() => { void checkForUpdate(); }}
+                    disabled={updaterState.status === 'checking'}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                  >
+                    <RefreshCcw className={cn('size-3.5', updaterState.status === 'checking' && 'animate-spin')} />
+                    {updaterState.status === 'checking' ? 'Checking…' : 'Check for Updates'}
+                  </button>
+                )}
+
+                {updaterState.status === 'available' && (
+                  <button
+                    type="button"
+                    onClick={() => { void downloadUpdate(); }}
+                    disabled={updaterState.status !== 'available'}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-xs font-semibold text-primary-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                  >
+                    <Download className="size-3.5" />
+                    Download v{updaterState.info?.availableVersion}
+                  </button>
+                )}
+
+                {updaterState.status === 'downloaded' && (
+                  <button
+                    type="button"
+                    onClick={() => { void installUpdate(); }}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-accent px-3 text-xs font-semibold text-accent-foreground transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    <RefreshCcw className="size-3.5" />
+                    Install & Restart
+                  </button>
+                )}
+
+                {updaterState.info?.body && updaterState.status === 'available' && (
+                  <div className="mt-1 rounded-lg border border-border/50 bg-background/40 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="mb-1 font-semibold text-foreground">Release notes</p>
+                    <p className="line-clamp-6 whitespace-pre-wrap">{updaterState.info.body}</p>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => { void openUrl('https://github.com/susulliang/note-master/releases').catch(() => undefined); }}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <ExternalLink className="size-3.5" />
+                  View all releases
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );
