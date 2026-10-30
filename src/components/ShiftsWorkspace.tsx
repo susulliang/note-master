@@ -6,7 +6,7 @@ import { getRoster } from '@/data/roster-index';
 import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
 import { useAuth } from '@/lib/auth-context';
-import { isWorkedShift, STANDARD_SHIFT_HOURS } from '@/lib/roster-shifts';
+import { isTrainingShift, isWorkedShift, STANDARD_SHIFT_HOURS } from '@/lib/roster-shifts';
 import { setLiveLayer } from '@/lib/roster-live';
 import { fetchRosterMonth, pushRosterCell, pushRosterFull, subscribeRosterMonth } from '@/lib/roster-sync';
 import type { RosterCell } from '@/lib/roster-sync';
@@ -400,9 +400,12 @@ export default function ShiftsWorkspace() {
   const noteOf = (a: RosterAgent, iso: string): string =>
     noteEdits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.note ?? a.offNote?.[iso] ?? '';
 
-  /** Billable hours for one cell: worked shifts are 8h minus extra off-time. */
+  /** Billable hours for one cell: worked shifts are 8h minus extra off-time;
+   *  training shifts (TR-A**) carry 0 billable hours. */
   const billableOf = (a: RosterAgent, iso: string): number =>
-    isWorkedShift(shiftOf(a, iso)) ? Math.max(0, STANDARD_SHIFT_HOURS - offOf(a, iso)) : 0;
+    isWorkedShift(shiftOf(a, iso)) && !isTrainingShift(shiftOf(a, iso))
+      ? Math.max(0, STANDARD_SHIFT_HOURS - offOf(a, iso))
+      : 0;
 
   /* ---------------- D1 backup (admin logins) ----------------
    * The first edit of a month uploads the entire table to the eco-data D1
@@ -831,8 +834,15 @@ function RosterGrid({
     setOffInput('');
   };
 
-  /** Off-time comment input for the selection toolbar (empty = clear). */
+  /** Off-time comment input for the selection toolbar (empty = clear).
+   *  Prefills with the cell's existing comment when a single cell is picked. */
   const [noteInput, setNoteInput] = useState('');
+  const singleSelection = selectedCells.length === 1
+    ? { a: visibleAgents[selectedCells[0]!.row], iso: isoOf(year, month, dayList[selectedCells[0]!.col]) }
+    : null;
+  useEffect(() => {
+    setNoteInput(singleSelection ? noteOf(singleSelection.a, singleSelection.iso) : '');
+  }, [singleSelection?.a.en, singleSelection?.iso]); // eslint-disable-line react-hooks/exhaustive-deps -- re-prefill only on selection change
   const applySelectedNote = () => {
     if (selectedCells.length === 0) return;
     const note = noteInput.trim().slice(0, 300);
@@ -1371,11 +1381,11 @@ function NightCoverageChart({
 
   return (
     <div
-      className="shrink-0 cursor-default rounded-xl border border-border/70 bg-card/40 p-2.5"
+      className="shrink-0 cursor-default rounded-xl border border-border/70 bg-card/40 p-1.5"
       onDoubleClick={onToggleBreakPanel}
       title="Double-click to open / collapse the break time scheduler"
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
           Night coverage · 21:00 → 10:00 · {MONTH_SHORT[month - 1]} {day} ({wd})
         </div>
@@ -1394,7 +1404,7 @@ function NightCoverageChart({
         </div>
       </div>
       <div className="flex items-stretch gap-1.5">
-        <div className="flex h-20 w-7 shrink-0 flex-col items-end justify-between font-mono text-[8px] leading-none text-muted-foreground">
+        <div className="flex h-14 w-7 shrink-0 flex-col items-end justify-between font-mono text-[8px] leading-none text-muted-foreground">
           <span>{yMax}</span>
           <span>{yMax / 2}</span>
           <span>0</span>
@@ -1404,7 +1414,7 @@ function NightCoverageChart({
           onMouseMove={onPlotMove}
           onMouseLeave={() => setHoverIdx(null)}
         >
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-20 w-full">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-14 w-full">
             {[0, 25, 50, 75, 100].map((t) => (
               <line
                 key={t}
@@ -1487,7 +1497,7 @@ function NightCoverageChart({
       {/* Hour labels — absolutely positioned at the exact x of their data
           points (slot i*2 of n), so ticks and points are vertically aligned.
           GMT+8 row on top, ET/EST row in amber underneath. */}
-      <div className="relative ml-[34px] mt-1 h-6">
+      <div className="relative ml-[34px] mt-0.5 h-5">
         {hourLabels.map((h, i) => (
           <span
             key={h}
@@ -1500,7 +1510,7 @@ function NightCoverageChart({
         {hourLabels.map((h, i) => (
           <span
             key={`et-${h}`}
-            className="absolute top-3 -translate-x-1/2 font-mono text-[8px] font-semibold leading-3 text-amber-400/90"
+            className="absolute top-2.5 -translate-x-1/2 font-mono text-[8px] font-semibold leading-3 text-amber-400/90"
             style={{ left: `${(((i * 2) / (n - 1)) * 100).toFixed(3)}%` }}
           >
             {etLabel((21 + i) * 60, etOff)}

@@ -94,9 +94,9 @@ export function DateBelt({
   };
 
   return (
-    <div className="relative shrink-0 rounded-xl border border-border/70 bg-card/40 py-1.5">
+    <div className="relative shrink-0 rounded-xl border border-border/70 bg-card/40 py-0.5">
       {/* Fixed center slot marker — the day under it is the selected one. */}
-      <div className="pointer-events-none absolute inset-y-1.5 left-1/2 z-10 w-14 -translate-x-1/2">
+      <div className="pointer-events-none absolute inset-y-0.5 left-1/2 z-10 w-14 -translate-x-1/2">
         <div className="h-full rounded-lg border-2 border-primary/70 bg-primary/[0.06]" />
       </div>
       <div
@@ -121,7 +121,7 @@ export function DateBelt({
                 if (!dragRef.current.moved) onSelect(d);
               }}
               className={cn(
-                'flex w-14 shrink-0 select-none flex-col items-center justify-center gap-0.5 rounded-lg border py-1 transition-colors',
+                'flex w-14 shrink-0 select-none flex-col items-center justify-center gap-0 rounded-lg border py-0.5 transition-colors',
                 d === selected
                   ? 'border-primary/60 bg-primary/15'
                   : weekend

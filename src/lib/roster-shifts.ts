@@ -15,6 +15,11 @@ export function isWorkedShift(code: string): boolean {
   return !!code && !OFF_SHIFT_CODES.has(code);
 }
 
+/** Training shifts (TR-A**) are worked but carry no billable hours. */
+export function isTrainingShift(code: string): boolean {
+  return code.startsWith('TR');
+}
+
 /** Standard shift = 9h on-site with a 1h break → 8 billable hours. */
 export const STANDARD_SHIFT_HOURS = 8;
 
@@ -270,7 +275,8 @@ export function countMtdShifts(
       const live = getLiveCell(month, `${a.en}|${date}`);
       const code = live?.code ?? bakedCode;
       if (!isWorkedShift(code)) continue;
-      const off = typeof live?.off === 'number' ? live.off : (a.offHours?.[date] ?? 0);
+      // Training shifts (TR-A**) count toward attendance but 0 billable hours.
+      const off = isTrainingShift(code) ? STANDARD_SHIFT_HOURS : (typeof live?.off === 'number' ? live.off : (a.offHours?.[date] ?? 0));
       n++;
       hours += Math.max(0, STANDARD_SHIFT_HOURS - off);
     }
