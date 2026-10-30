@@ -30,17 +30,29 @@ export interface CachedMindmapSnapshot {
   savedAt: number;
 }
 
+export interface CachedSmartDocSnapshot {
+  cacheKey: string;
+  username: string;
+  id: string;
+  markdown: string;
+  revision: number;
+  savedAt: number;
+}
+
+export type CollabDirectoryType = 'sheet' | 'mindmap' | 'smartdoc';
+
 const DB_NAME = 'econote-collab-cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SHEET_STORE = 'sheets';
 const MINDMAP_STORE = 'mindmaps';
+const SMARTDOC_STORE = 'smartdocs';
 let databasePromise: Promise<IDBDatabase> | null = null;
 
-function directoryKey(username: string, type: 'sheet' | 'mindmap'): string {
+function directoryKey(username: string, type: CollabDirectoryType): string {
   return `econote:collab-directory:${type}:${encodeURIComponent(username.toLowerCase())}`;
 }
 
-export function loadCollabDirectoryCache<T>(username: string, type: 'sheet' | 'mindmap'): T[] {
+export function loadCollabDirectoryCache<T>(username: string, type: CollabDirectoryType): T[] {
   try {
     const raw = window.localStorage.getItem(directoryKey(username, type));
     if (!raw) return [];
@@ -51,7 +63,7 @@ export function loadCollabDirectoryCache<T>(username: string, type: 'sheet' | 'm
   }
 }
 
-export function saveCollabDirectoryCache<T>(username: string, type: 'sheet' | 'mindmap', documents: T[]): void {
+export function saveCollabDirectoryCache<T>(username: string, type: CollabDirectoryType, documents: T[]): void {
   try {
     window.localStorage.setItem(directoryKey(username, type), JSON.stringify(documents.slice(0, 200)));
   } catch {
@@ -70,6 +82,9 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!database.objectStoreNames.contains(MINDMAP_STORE)) {
         database.createObjectStore(MINDMAP_STORE, { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains(SMARTDOC_STORE)) {
+        database.createObjectStore(SMARTDOC_STORE, { keyPath: 'cacheKey' });
       }
     };
     request.onsuccess = () => {
@@ -137,4 +152,47 @@ export async function loadMindmapSnapshot(id: string): Promise<CachedMindmapSnap
 
 export function saveMindmapSnapshot(snapshot: Omit<CachedMindmapSnapshot, 'savedAt'>): Promise<void> {
   return writeSnapshot(MINDMAP_STORE, { ...snapshot, savedAt: Date.now() });
+}
+
+function smartDocCacheKey(username: string, id: string): string {
+  return `${encodeURIComponent(username.toLowerCase())}:${id}`;
+}
+
+export async function loadSmartDocSnapshot(
+  username: string,
+  id: string,
+): Promise<CachedSmartDocSnapshot | null> {
+  const key = smartDocCacheKey(username, id);
+  const snapshot = await readSnapshot<CachedSmartDocSnapshot>(SMARTDOC_STORE, key);
+  if (
+    !snapshot ||
+    snapshot.cacheKey !== key ||
+    snapshot.username !== username.toLowerCase() ||
+    snapshot.id !== id ||
+    typeof snapshot.markdown !== 'string' ||
+    !Number.isSafeInteger(snapshot.revision)
+  ) return null;
+  return snapshot;
+}
+
+export function saveSmartDocSnapshot(
+  snapshot: Omit<CachedSmartDocSnapshot, 'cacheKey' | 'savedAt'>,
+): Promise<void> {
+  return writeSnapshot(SMARTDOC_STORE, {
+    ...snapshot,
+    username: snapshot.username.toLowerCase(),
+    cacheKey: smartDocCacheKey(snapshot.username, snapshot.id),
+    savedAt: Date.now(),
+  });
+}
+
+export async function deleteSmartDocSnapshot(username: string, id: string): Promise<void> {
+  const database = await openDatabase();
+  const transaction = database.transaction(SMARTDOC_STORE, 'readwrite');
+  transaction.objectStore(SMARTDOC_STORE).delete(smartDocCacheKey(username, id));
+  await new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error('Could not clear cached document.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('Cached document deletion was aborted.'));
+  });
 }

@@ -3,6 +3,7 @@ import {
   getSmartDocPermission,
   grantSmartDocPermission,
   type CollabPermission,
+  type SmartDocVisibility,
 } from './collab-access';
 
 const SMART_DOC_ID_RE = /^[0-9a-f-]{36}$/i;
@@ -24,6 +25,7 @@ interface SmartDocRow {
   title: string;
   owner: string;
   banner_asset_id: string | null;
+  visibility: SmartDocVisibility;
   created_at: number;
   updated_at: number;
 }
@@ -50,14 +52,14 @@ async function parseJson(request: Request): Promise<Record<string, unknown> | nu
 
 async function getSmartDoc(env: Env, id: string): Promise<SmartDocRow | null> {
   return env.DB.prepare(
-    `SELECT id, title, owner, banner_asset_id, created_at, updated_at
+    `SELECT id, title, owner, banner_asset_id, visibility, created_at, updated_at
      FROM collab_smartdocs WHERE id = ?`,
   ).bind(id).first<SmartDocRow>();
 }
 
 async function listSmartDocs(env: Env, username: string): Promise<Response> {
   const result = await env.DB.prepare(
-    `SELECT id, title, owner, banner_asset_id, created_at, updated_at
+    `SELECT id, title, owner, banner_asset_id, visibility, created_at, updated_at
      FROM collab_smartdocs ORDER BY updated_at DESC, title COLLATE NOCASE`,
   ).all<SmartDocRow>();
   const documents = await Promise.all((result.results ?? []).map(async (row) => {
@@ -68,6 +70,7 @@ async function listSmartDocs(env: Env, username: string): Promise<Response> {
       title: row.title,
       owner: row.owner,
       bannerAssetId: row.banner_asset_id,
+      visibility: row.visibility,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       permission,
@@ -98,6 +101,7 @@ async function createSmartDoc(request: Request, env: Env, username: string): Pro
       title,
       owner: username,
       bannerAssetId: null,
+      visibility: 'private',
       createdAt: now,
       updatedAt: now,
       permission: 'edit',
@@ -211,13 +215,22 @@ async function updateSmartDoc(
       return smartDocsJson({ error: 'Choose a valid banner image.' }, 400);
     }
   }
+  let visibility = document.visibility;
+  if (Object.hasOwn(payload, 'visibility')) {
+    if (!owner) return smartDocsJson({ error: 'Only the owner can change document visibility.' }, 403);
+    if (payload.visibility !== 'private' && payload.visibility !== 'registered') {
+      return smartDocsJson({ error: 'Choose private or visible to registered users.' }, 400);
+    }
+    visibility = payload.visibility as SmartDocVisibility;
+  }
   const updatedAt = Date.now();
   await env.DB.prepare(
     `UPDATE collab_smartdocs
-     SET title = ?, banner_asset_id = ?, updated_at = ? WHERE id = ?`,
-  ).bind(title, bannerAssetId, updatedAt, id).run();
+     SET title = ?, banner_asset_id = ?, visibility = ?, updated_at = ? WHERE id = ?`,
+  ).bind(title, bannerAssetId, visibility, updatedAt, id).run();
   if (title !== document.title) await env.SMARTDOC_ROOM.getByName(id).broadcastTitle(title);
-  return smartDocsJson({ id, title, owner: document.owner, bannerAssetId, updatedAt, permission });
+  if (visibility !== document.visibility) await env.SMARTDOC_ROOM.getByName(id).revalidatePermissions();
+  return smartDocsJson({ id, title, owner: document.owner, bannerAssetId, visibility, updatedAt, permission });
 }
 
 async function uploadMedia(
@@ -409,6 +422,20 @@ async function deleteSmartDoc(
 }
 
 export async function handleSmartDocsApi(request: Request, env: Env, username: string): Promise<Response> {
+  try {
+    return await routeSmartDocsApi(request, env, username);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'smartdoc_request_failed',
+      method: request.method,
+      path: new URL(request.url).pathname,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return smartDocsJson({ error: 'Smart Docs request failed. Please try again.' }, 500);
+  }
+}
+
+async function routeSmartDocsApi(request: Request, env: Env, username: string): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === 'OPTIONS') {
     return new Response(null, {

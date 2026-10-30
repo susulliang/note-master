@@ -360,8 +360,10 @@ async function revalidateCollabDocument(
   try {
     if (type === 'sheet') {
       await env.SHEETS_ROOM.getByName(documentId).revalidatePermissions();
-    } else {
+    } else if (type === 'mindmap') {
       await env.MINDMAP_ROOM.getByName(documentId).revalidatePermissions();
+    } else {
+      await env.SMARTDOC_ROOM.getByName(documentId).revalidatePermissions();
     }
   } catch (error) {
     console.error(JSON.stringify({
@@ -461,15 +463,18 @@ async function handlePinDocument(
   if (request.method !== 'POST') return chatJson({ error: 'Method not allowed.' }, 405);
   const type = payload.documentType;
   const id = typeof payload.documentId === 'string' ? payload.documentId : '';
-  if ((type !== 'sheet' && type !== 'mindmap') || !/^[0-9a-f-]{36}$/i.test(id)) {
+  if ((type !== 'sheet' && type !== 'mindmap' && type !== 'smartdoc') || !/^[0-9a-f-]{36}$/i.test(id)) {
     return chatJson({ error: 'Choose a valid Collab Space document.' }, 400);
   }
   const document = await getCollabDocument(env, type, id);
   if (!document) return chatJson({ error: 'That document no longer exists.' }, 404);
   const permission = await getCollabPermission(env, user.username, type, id);
   if (!permission) return chatJson({ error: 'You do not have access to that document.' }, 403);
-  if (permission !== 'edit') {
-    return chatJson({ error: 'You need edit access to pin or share this document.' }, 403);
+  if (
+    permission !== 'edit' &&
+    !(type === 'smartdoc' && document.visibility === 'registered')
+  ) {
+    return chatJson({ error: 'You need edit access to pin a private document.' }, 403);
   }
   const current = await env.DB.prepare(
     'SELECT document_type, document_id, pinned_by FROM chat_pinned_documents WHERE room_id = ?',

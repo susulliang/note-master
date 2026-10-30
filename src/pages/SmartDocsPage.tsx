@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   useId,
+  type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
@@ -24,11 +25,11 @@ import {
   ChevronRight,
   CircleHelp,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   Heading1,
   Heading2,
+  Heading3,
+  Heading4,
   ImagePlus,
   Italic,
   Link2,
@@ -48,6 +49,13 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  deleteSmartDocSnapshot,
+  loadCollabDirectoryCache,
+  loadSmartDocSnapshot,
+  saveCollabDirectoryCache,
+  saveSmartDocSnapshot,
+} from '@/lib/collab-document-cache';
 import {
   findChatUsers,
   listCollabDrive,
@@ -84,7 +92,15 @@ interface OutlineHeading {
   text: string;
 }
 
+interface FloatingMediaProgress {
+  left: number;
+  top: number;
+  label: string;
+  progress: number | null;
+}
+
 const MAX_DOCUMENT_CHARACTERS = 500_000;
+const DOCUMENT_SAVE_DEBOUNCE_MS = 2_500;
 let mermaidInitialized = false;
 
 function MermaidDiagram({ source }: { source: string }) {
@@ -128,8 +144,8 @@ function MermaidDiagram({ source }: { source: string }) {
   );
 }
 
-function localDraftKey(documentId: string): string {
-  return `econote:smartdoc-draft:${documentId}`;
+function localDraftKey(username: string, documentId: string): string {
+  return `econote:smartdoc-draft:${encodeURIComponent(username.toLowerCase())}:${documentId}`;
 }
 
 function escapeHtml(value: string): string {
@@ -518,8 +534,12 @@ function SmartDocInlineMedia({
 }
 
 export default function SmartDocsPage({ username, initialDocumentId }: SmartDocsPageProps) {
-  const [documents, setDocuments] = useState<SmartDoc[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [documents, setDocuments] = useState<SmartDoc[]>(
+    () => loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc'),
+  );
+  const [loading, setLoading] = useState(
+    () => loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc').length === 0,
+  );
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(initialDocumentId ?? null);
   const [markdown, setMarkdown] = useState('');
   const markdownRef = useRef('');
@@ -537,6 +557,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const [titleDraft, setTitleDraft] = useState('');
   const [accessOpen, setAccessOpen] = useState(false);
   const [members, setMembers] = useState<SmartDocMember[]>([]);
+  const [savingVisibility, setSavingVisibility] = useState(false);
   const [memberPermission, setMemberPermission] = useState<SmartDocPermission>('view');
   const [memberQuery, setMemberQuery] = useState('');
   const [userResults, setUserResults] = useState<ChatUser[]>([]);
@@ -548,20 +569,28 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const [mediaUploading, setMediaUploading] = useState(false);
   const [mediaProgress, setMediaProgress] = useState<number | null>(null);
   const [mediaStage, setMediaStage] = useState('');
+  const [floatingMediaProgress, setFloatingMediaProgress] = useState<FloatingMediaProgress | null>(null);
   const [mediaDropActive, setMediaDropActive] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
   const [hydrateVersion, setHydrateVersion] = useState(0);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const cacheTimerRef = useRef<number | null>(null);
   const selectionRangeRef = useRef<Range | null>(null);
+  const mediaInsertionPendingRef = useRef(false);
   const mentionRangeRef = useRef<Range | null>(null);
   const editorObjectUrlsRef = useRef(new Map<string, string>());
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
+  const directoryOwnerRef = useRef(username);
+  const releaseMediaInsertion = useCallback(() => {
+    mediaInsertionPendingRef.current = false;
+    setHydrateVersion((value) => value + 1);
+  }, []);
 
   const activeDocument = documents.find((document) => document.id === activeDocumentId) ?? null;
   const outline = useMemo(() => headingList(markdown), [markdown]);
@@ -571,17 +600,37 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
 
   const refreshDocuments = useCallback(async () => {
     try {
-      setDocuments(await listSmartDocs());
+      const owner = username.toLowerCase();
+      const nextDocuments = await listSmartDocs();
+      if (directoryOwnerRef.current.toLowerCase() === owner) setDocuments(nextDocuments);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not load Smart Docs.');
+      if (directoryOwnerRef.current.toLowerCase() === username.toLowerCase()) {
+        toast.error(error instanceof Error ? error.message : 'Could not load Smart Docs.');
+      }
     } finally {
-      setLoading(false);
+      if (directoryOwnerRef.current.toLowerCase() === username.toLowerCase()) setLoading(false);
     }
-  }, []);
+  }, [username]);
 
   useEffect(() => {
     void refreshDocuments();
   }, [refreshDocuments]);
+
+  useEffect(() => {
+    if (directoryOwnerRef.current.toLowerCase() !== username.toLowerCase()) {
+      directoryOwnerRef.current = username;
+      const cached = loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc');
+      setDocuments(cached);
+      setLoading(cached.length === 0);
+      setActiveDocumentId(initialDocumentId ?? null);
+      setMarkdown('');
+      markdownRef.current = '';
+      setSnapshotReady(false);
+      setCanEdit(false);
+      return;
+    }
+    saveCollabDirectoryCache(username, 'smartdoc', documents);
+  }, [documents, initialDocumentId, username]);
 
   useEffect(() => {
     if (initialDocumentId && documents.some((document) => document.id === initialDocumentId)) {
@@ -603,16 +652,31 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     setCanEdit(false);
     setSaveState('saved');
     setMentionQuery(null);
-    setPreviewMode(false);
     setContextMenu(null);
     setMediaDropActive(false);
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+    if (cacheTimerRef.current !== null) {
+      window.clearTimeout(cacheTimerRef.current);
+      cacheTimerRef.current = null;
+    }
     editorObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     editorObjectUrlsRef.current.clear();
     return () => {
+      if (cacheTimerRef.current !== null) {
+        window.clearTimeout(cacheTimerRef.current);
+        cacheTimerRef.current = null;
+      }
+      if (activeDocumentId && dirtyRef.current) {
+        void saveSmartDocSnapshot({
+          username,
+          id: activeDocumentId,
+          markdown: markdownRef.current,
+          revision: revisionRef.current,
+        }).catch(() => undefined);
+      }
       if (saveTimerRef.current !== null) {
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
@@ -628,7 +692,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       editorObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       editorObjectUrlsRef.current.clear();
     };
-  }, [activeDocumentId]);
+  }, [activeDocumentId, username]);
 
   useEffect(() => {
     setTitleDraft(activeDocument?.title ?? '');
@@ -641,12 +705,16 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     let heartbeatTimer = 0;
     let attempt = 0;
     let currentSocket: WebSocket | null = null;
+    let serverSnapshotReceived = false;
     const leaveRevokedDocument = () => {
       dirtyRef.current = false;
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
+      if (cacheTimerRef.current !== null) window.clearTimeout(cacheTimerRef.current);
+      cacheTimerRef.current = null;
+      void deleteSmartDocSnapshot(username, activeDocumentId).catch(() => undefined);
       try {
-        window.localStorage.removeItem(localDraftKey(activeDocumentId));
+        window.localStorage.removeItem(localDraftKey(username, activeDocumentId));
       } catch {
         /* Keep access handling independent of local storage. */
       }
@@ -678,6 +746,24 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         setDocuments((current) => current.map((item) => (
           item.id === activeDocumentId ? { ...item, permission: ticket.permission } : item
         )));
+        void loadSmartDocSnapshot(username, activeDocumentId).then((cached) => {
+          if (stopped || serverSnapshotReceived || !cached) return;
+          let localDraft = '';
+          if (ticket.permission === 'edit') {
+            try {
+              localDraft = window.localStorage.getItem(localDraftKey(username, activeDocumentId)) ?? '';
+            } catch {
+              /* IndexedDB remains available when local storage is blocked. */
+            }
+          }
+          const cachedMarkdown = localDraft || cached.markdown;
+          markdownRef.current = cachedMarkdown;
+          setMarkdown(cachedMarkdown);
+          revisionRef.current = cached.revision;
+          setRevision(cached.revision);
+          setSnapshotReady(true);
+          setHydrateVersion((value) => value + 1);
+        }).catch(() => undefined);
         const socket = new WebSocket(smartDocSocketUrl(ticket));
         currentSocket = socket;
         socketRef.current = socket;
@@ -704,16 +790,26 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
           }
           if (payload.type === 'smartdoc:snapshot' || payload.type === 'document:updated') {
             if (typeof payload.markdown !== 'string') return;
+            serverSnapshotReceived = true;
             const nextRevision = Number(payload.revision) || 0;
             revisionRef.current = nextRevision;
             setRevision(nextRevision);
             if (payload.type === 'smartdoc:snapshot') {
               let localDraft = '';
               try {
-                localDraft = window.localStorage.getItem(localDraftKey(activeDocumentId)) ?? '';
+                localDraft = window.localStorage.getItem(localDraftKey(username, activeDocumentId)) ?? '';
               } catch {
                 /* Continue with the Durable Object snapshot if local storage is blocked. */
               }
+              const snapshotMarkdown = ticket.permission === 'edit' && localDraft && localDraft !== payload.markdown
+                ? localDraft
+                : payload.markdown;
+              void saveSmartDocSnapshot({
+                username,
+                id: activeDocumentId,
+                markdown: snapshotMarkdown,
+                revision: nextRevision,
+              }).catch(() => undefined);
               if (ticket.permission === 'edit' && localDraft && localDraft !== payload.markdown) {
                 markdownRef.current = localDraft;
                 setMarkdown(localDraft);
@@ -735,16 +831,22 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                 setSaveState('saved');
                 if (!localDraft || ticket.permission === 'edit') {
                   try {
-                    window.localStorage.removeItem(localDraftKey(activeDocumentId));
+                    window.localStorage.removeItem(localDraftKey(username, activeDocumentId));
                   } catch {
                     /* The saved snapshot remains authoritative. */
                   }
                 }
               }
             } else if (payload.by === username) {
+              void saveSmartDocSnapshot({
+                username,
+                id: activeDocumentId,
+                markdown: payload.markdown,
+                revision: nextRevision,
+              }).catch(() => undefined);
               dirtyRef.current = false;
               try {
-                window.localStorage.removeItem(localDraftKey(activeDocumentId));
+                window.localStorage.removeItem(localDraftKey(username, activeDocumentId));
               } catch {
                 /* The Durable Object save succeeded. */
               }
@@ -752,6 +854,12 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
             } else if (dirtyRef.current || document.activeElement === editorRef.current) {
               toast.info('A collaborator edited this document. Your open draft will sync when you save.');
             } else {
+              void saveSmartDocSnapshot({
+                username,
+                id: activeDocumentId,
+                markdown: payload.markdown,
+                revision: nextRevision,
+              }).catch(() => undefined);
               markdownRef.current = payload.markdown;
               setMarkdown(payload.markdown);
               setHydrateVersion((value) => value + 1);
@@ -898,6 +1006,13 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     };
   }, [contextMenu]);
 
+  useEffect(() => {
+    const input = mediaInputRef.current;
+    if (!input) return undefined;
+    input.addEventListener('cancel', releaseMediaInsertion);
+    return () => input.removeEventListener('cancel', releaseMediaInsertion);
+  }, [activeDocumentId, releaseMediaInsertion]);
+
   const handleEditorInput = useCallback(() => {
     const editor = editorRef.current;
     if (!editor || !canEdit) return;
@@ -907,10 +1022,21 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     dirtyRef.current = true;
     if (activeDocumentId) {
       try {
-        window.localStorage.setItem(localDraftKey(activeDocumentId), nextMarkdown);
+        window.localStorage.setItem(localDraftKey(username, activeDocumentId), nextMarkdown);
       } catch {
         /* Keep editing even when local storage is unavailable. */
       }
+      if (cacheTimerRef.current !== null) window.clearTimeout(cacheTimerRef.current);
+      const cacheSnapshot = {
+        username,
+        id: activeDocumentId,
+        markdown: nextMarkdown,
+        revision: revisionRef.current,
+      };
+      cacheTimerRef.current = window.setTimeout(() => {
+        cacheTimerRef.current = null;
+        void saveSmartDocSnapshot(cacheSnapshot).catch(() => undefined);
+      }, 120);
     }
     setSaveState('saving');
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
@@ -926,7 +1052,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         markdown: markdownRef.current,
         baseRevision: revisionRef.current,
       }));
-    }, 550);
+    }, DOCUMENT_SAVE_DEBOUNCE_MS);
 
     const selection = window.getSelection();
     const anchor = selection?.anchorNode;
@@ -957,12 +1083,26 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     if (!editor || !canEditNow) return;
     editor.focus();
     const selection = window.getSelection();
-    if (selectionRangeRef.current && selection) {
+    const savedRange = selectionRangeRef.current;
+    if (selection) {
       selection.removeAllRanges();
-      selection.addRange(selectionRangeRef.current);
+      if (
+        savedRange &&
+        editor.contains(savedRange.startContainer) &&
+        editor.contains(savedRange.endContainer)
+      ) {
+        selection.addRange(savedRange);
+      } else {
+        const endRange = document.createRange();
+        endRange.selectNodeContents(editor);
+        endRange.collapse(false);
+        selection.addRange(endRange);
+      }
     }
     document.execCommand('insertHTML', false, html);
-    selectionRangeRef.current = null;
+    selectionRangeRef.current = selection?.rangeCount && editor.contains(selection.anchorNode)
+      ? selection.getRangeAt(0).cloneRange()
+      : null;
     handleEditorInput();
   };
 
@@ -1032,6 +1172,25 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     event.preventDefault();
   };
 
+  const openMediaPicker = () => {
+    if (!canEditNow || mediaUploading) return;
+    captureSelection();
+    mediaInsertionPendingRef.current = true;
+    mediaInputRef.current?.click();
+  };
+
+  const openDrivePicker = () => {
+    if (!canEditNow) return;
+    captureSelection();
+    mediaInsertionPendingRef.current = true;
+    setDrivePickerOpen(true);
+  };
+
+  const closeDrivePicker = () => {
+    setDrivePickerOpen(false);
+    releaseMediaInsertion();
+  };
+
   const insertCodeBlock = () => {
     if (!canEditNow) return;
     const selection = selectionRangeRef.current?.toString() ?? '';
@@ -1060,8 +1219,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     event.preventDefault();
     captureSelection();
     const width = 250;
-    const canFormat = canEditNow && !previewMode;
-    const height = canFormat ? 500 : 100;
+    const height = canEditNow ? 600 : 100;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
       y: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
@@ -1094,12 +1252,68 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     const editor = editorRef.current;
     const doc = document as Document & {
       caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => {
+        offsetNode: Node;
+        offset: number;
+      } | null;
     };
-    const dropRange = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    let dropRange = doc.caretRangeFromPoint?.(event.clientX, event.clientY) ?? null;
+    if (!dropRange) {
+      const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+      if (caret) {
+        dropRange = document.createRange();
+        dropRange.setStart(caret.offsetNode, caret.offset);
+        dropRange.collapse(true);
+      }
+    }
     if (editor && dropRange && editor.contains(dropRange.startContainer)) {
       selectionRangeRef.current = dropRange;
     }
+    mediaInsertionPendingRef.current = true;
     void onMediaFiles(files);
+  };
+
+  const getFloatingMediaPosition = (range: Range | null) => {
+    const container = editorScrollRef.current;
+    if (!container) return { left: 12, top: 12 };
+    const containerRect = container.getBoundingClientRect();
+    const rangeRect = range?.getBoundingClientRect();
+    const hasCaretRect = !!rangeRect && (rangeRect.width > 0 || rangeRect.height > 0);
+    const left = hasCaretRect
+      ? rangeRect.left - containerRect.left + container.scrollLeft
+      : container.scrollLeft + 12;
+    const top = hasCaretRect
+      ? rangeRect.bottom - containerRect.top + container.scrollTop + 10
+      : container.scrollTop + 12;
+    return {
+      left: Math.max(
+        container.scrollLeft + 8,
+        Math.min(left, container.scrollLeft + Math.max(8, container.clientWidth - 218)),
+      ),
+      top: Math.max(container.scrollTop + 8, top),
+    };
+  };
+
+  const handleEditorPaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    if (!canEditNow) return;
+    const itemFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    const files = itemFiles.length
+      ? itemFiles
+      : Array.from(event.clipboardData.files).filter((file) => file.type.toLowerCase().startsWith('image/'));
+    if (!files.length) return;
+
+    event.preventDefault();
+    captureSelection();
+    mediaInsertionPendingRef.current = true;
+    setFloatingMediaProgress({
+      ...getFloatingMediaPosition(selectionRangeRef.current),
+      label: 'Preparing pasted image…',
+      progress: null,
+    });
+    void onMediaFiles(files, false, true);
   };
 
   const insertMention = (user: ChatUser) => {
@@ -1125,7 +1339,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     }
   };
 
-  const onMediaFile = async (file: File | undefined, asBanner = false) => {
+  const onMediaFile = async (file: File | undefined, asBanner = false, showFloatingProgress = false) => {
     if (!file || !activeDocumentId || !canEditNow) return;
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
       toast.error('Choose an image or video file.');
@@ -1141,13 +1355,28 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       if (file.type.startsWith('image/') && file.type.toLowerCase() !== 'image/gif' && !/\.gif$/i.test(file.name)) {
         setMediaStage('Converting image to WebP…');
         setMediaProgress(0);
+        if (showFloatingProgress) {
+          setFloatingMediaProgress((current) => current
+            ? { ...current, label: 'Converting image to WebP…', progress: 0 }
+            : current);
+        }
         uploadFile = await compressSmartDocImage(file);
         setMediaProgress(100);
+        if (showFloatingProgress) {
+          setFloatingMediaProgress((current) => current
+            ? { ...current, label: 'Converting image to WebP…', progress: 100 }
+            : current);
+        }
       } else if (file.type.startsWith('video/')) {
         setMediaStage('Compressing video…');
         try {
           uploadFile = await compressSmartDocVideo(file, (progress) => {
             setMediaProgress(Math.round(progress * 100));
+            if (showFloatingProgress) {
+              setFloatingMediaProgress((current) => current
+                ? { ...current, label: 'Compressing video…', progress: Math.round(progress * 100) }
+                : current);
+            }
           });
         } catch {
           uploadFile = file;
@@ -1163,6 +1392,15 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       }
       setMediaStage('Uploading media…');
       setMediaProgress(null);
+      if (showFloatingProgress) {
+        setFloatingMediaProgress((current) => current
+          ? {
+              ...current,
+              label: uploadFile.type.startsWith('video/') ? 'Uploading video…' : 'Uploading image…',
+              progress: null,
+            }
+          : current);
+      }
       const asset = await uploadSmartDocMedia(activeDocumentId, uploadFile);
       const kind = asset.mimeType.startsWith('video/') ? 'video' : undefined;
       const source = smartDocMediaUrl(activeDocumentId, asset.id, kind);
@@ -1194,8 +1432,13 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     }
   };
 
-  const onMediaFiles = async (files: File[], asBanner = false) => {
-    for (const file of files) await onMediaFile(file, asBanner);
+  const onMediaFiles = async (files: File[], asBanner = false, showFloatingProgress = false) => {
+    try {
+      for (const file of files) await onMediaFile(file, asBanner, showFloatingProgress);
+    } finally {
+      releaseMediaInsertion();
+      if (showFloatingProgress) setFloatingMediaProgress(null);
+    }
   };
 
   const insertDriveFile = async (file: CollabDriveFile) => {
@@ -1212,7 +1455,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       } else {
         insertHtml(`<img alt="${label}" data-smartdoc-source="${source}" src="${previewUrl}" contenteditable="false" />`);
       }
-      setDrivePickerOpen(false);
+      closeDrivePicker();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not insert this Drive media.');
     }
@@ -1253,6 +1496,26 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     }
   };
 
+  const saveVisibility = async (visibility: SmartDoc['visibility']) => {
+    if (!activeDocument || !isOwner || savingVisibility) return;
+    try {
+      setSavingVisibility(true);
+      const updated = await updateSmartDoc(activeDocument.id, { visibility });
+      setDocuments((current) => current.map((item) => (
+        item.id === activeDocument.id
+          ? { ...item, visibility: updated.visibility, updatedAt: updated.updatedAt }
+          : item
+      )));
+      toast.success(visibility === 'registered'
+        ? 'Anyone with a registered account can view this Smart Doc.'
+        : 'This Smart Doc is private to invited collaborators.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update document visibility.');
+    } finally {
+      setSavingVisibility(false);
+    }
+  };
+
   const submitCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!newTitle.trim()) return;
@@ -1275,6 +1538,12 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     if (!window.confirm(`Delete “${activeDocument.title}” and its uploaded media?`)) return;
     try {
       await deleteSmartDoc(activeDocument.id);
+      void deleteSmartDocSnapshot(username, activeDocument.id).catch(() => undefined);
+      try {
+        window.localStorage.removeItem(localDraftKey(username, activeDocument.id));
+      } catch {
+        /* Keep delete behavior independent of local storage. */
+      }
       setDocuments((current) => current.filter((item) => item.id !== activeDocument.id));
       setActiveDocumentId(null);
       toast.success('Smart Doc deleted.');
@@ -1444,6 +1713,8 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
           <div className="smart-doc-toolbar" aria-label="Formatting tools">
             <button type="button" disabled={!canEditNow} aria-label="Heading 1" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('formatBlock', 'H1')}><Heading1 className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Heading 2" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('formatBlock', 'H2')}><Heading2 className="size-4" /></button>
+            <button type="button" disabled={!canEditNow} aria-label="Heading 3" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('formatBlock', 'H3')}><Heading3 className="size-4" /></button>
+            <button type="button" disabled={!canEditNow} aria-label="Heading 4" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('formatBlock', 'H4')}><Heading4 className="size-4" /></button>
             <span className="smart-doc-toolbar-divider" />
             <button type="button" disabled={!canEditNow} aria-label="Bold" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('bold')}><Bold className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Italic" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('italic')}><Italic className="size-4" /></button>
@@ -1456,23 +1727,25 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
               if (url) runCommand('createLink', url);
             }}><Link2 className="size-4" /></button>
             <span className="smart-doc-toolbar-divider" />
-            <button type="button" disabled={!canEditNow || mediaUploading} aria-label="Upload image or video" title="Upload image or video" onMouseDown={onToolbarMouseDown} onClick={() => mediaInputRef.current?.click()}>
+            <button type="button" disabled={!canEditNow || mediaUploading} aria-label="Upload image or video" title="Upload image or video" onMouseDown={onToolbarMouseDown} onClick={openMediaPicker}>
               {mediaUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             </button>
-            <button type="button" disabled={!canEditNow} aria-label="Insert media from Drive" title="Insert media from Drive" onMouseDown={onToolbarMouseDown} onClick={() => setDrivePickerOpen(true)}><ImagePlus className="size-4" /></button>
-            <button
-              type="button"
-              disabled={!canEditNow}
-              aria-label={previewMode ? 'Return to editor' : 'Preview Markdown'}
-              title={previewMode ? 'Return to editor' : 'Preview Markdown'}
-              aria-pressed={previewMode}
-              onMouseDown={onToolbarMouseDown}
-              onClick={() => setPreviewMode((current) => !current)}
-            >{previewMode ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
-            <input ref={mediaInputRef} hidden type="file" multiple accept="image/*,video/mp4,video/webm,video/quicktime" onChange={(event) => void onMediaFiles(Array.from(event.target.files ?? []))} />
+            <button type="button" disabled={!canEditNow} aria-label="Insert media from Drive" title="Insert media from Drive" onMouseDown={onToolbarMouseDown} onClick={openDrivePicker}><ImagePlus className="size-4" /></button>
+            <input
+              ref={mediaInputRef}
+              hidden
+              type="file"
+              multiple
+              accept="image/*,video/mp4,video/webm,video/quicktime"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) void onMediaFiles(files);
+                else releaseMediaInsertion();
+              }}
+            />
             <span className="smart-doc-toolbar-hint">Markdown supported</span>
           </div>
-          {mediaUploading && (
+          {mediaUploading && !floatingMediaProgress && (
             <div className="smart-doc-media-progress" role="status" aria-live="polite">
               <span>{mediaStage || 'Processing media…'}</span>
               {mediaProgress === null
@@ -1484,15 +1757,47 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
 
           {!snapshotReady ? (
             <div className="smart-doc-editor-loading"><Loader2 className="size-4 animate-spin" />Connecting to the shared document…</div>
-          ) : canEditNow && !previewMode ? (
+          ) : canEditNow ? (
             <div
               className={`smart-doc-editor-scroll ${mediaDropActive ? 'is-media-dragging' : ''}`}
+              ref={editorScrollRef}
               onDragOver={handleEditorDragOver}
               onDragLeave={handleEditorDragLeave}
               onDrop={handleEditorDrop}
               onContextMenu={showEditorContextMenu}
             >
               {mediaDropActive && <div className="smart-doc-drop-overlay"><Upload className="size-5" />Drop images or videos to insert</div>}
+              {floatingMediaProgress && (
+                <div
+                  className="smart-doc-media-floating-progress"
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    left: floatingMediaProgress.left,
+                    top: floatingMediaProgress.top,
+                  }}
+                >
+                  <span>{floatingMediaProgress.label}</span>
+                  <div
+                    className="smart-doc-media-floating-track"
+                    role="progressbar"
+                    aria-label={floatingMediaProgress.label}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={floatingMediaProgress.progress ?? undefined}
+                  >
+                    <i
+                      className={floatingMediaProgress.progress === null ? 'is-indeterminate' : ''}
+                      style={floatingMediaProgress.progress === null
+                        ? undefined
+                        : { width: `${floatingMediaProgress.progress}%` }}
+                    />
+                  </div>
+                  {floatingMediaProgress.progress !== null && (
+                    <small>{floatingMediaProgress.progress}%</small>
+                  )}
+                </div>
+              )}
               <div
                 key={activeDocument.id}
                 ref={editorRef}
@@ -1504,12 +1809,15 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                 aria-multiline="true"
                 spellCheck
                 onInput={handleEditorInput}
+                onPaste={handleEditorPaste}
                 onKeyUp={captureSelection}
                 onMouseUp={captureSelection}
                 onFocus={() => setMentionQuery(null)}
                 onBlur={() => {
                   setMentionQuery(null);
-                  setHydrateVersion((value) => value + 1);
+                  if (!mediaInsertionPendingRef.current) {
+                    setHydrateVersion((value) => value + 1);
+                  }
                 }}
               />
               {!markdown.trim() && <span className="smart-doc-editor-placeholder">Write in Markdown or use the formatting toolbar…</span>}
@@ -1532,7 +1840,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                   style={{ left: contextMenu.x, top: contextMenu.y }}
                 >
                   <span className="smart-doc-context-menu-title">Markdown editor</span>
-                  {canEditNow && !previewMode && (
+                  {canEditNow && (
                     <>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void copySelection(); })}><ClipboardCopy className="size-4" />Copy selection</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void cutSelection(); })}><Scissors className="size-4" />Cut selection</button>
@@ -1540,6 +1848,8 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                       <span className="smart-doc-context-menu-divider" />
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('formatBlock', 'H1'))}><Heading1 className="size-4" />Heading 1</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('formatBlock', 'H2'))}><Heading2 className="size-4" />Heading 2</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('formatBlock', 'H3'))}><Heading3 className="size-4" />Heading 3</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('formatBlock', 'H4'))}><Heading4 className="size-4" />Heading 4</button>
                       <span className="smart-doc-context-menu-divider" />
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('bold'))}><Bold className="size-4" />Bold</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => runCommand('italic'))}><Italic className="size-4" />Italic</button>
@@ -1552,8 +1862,8 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                         if (url) runCommand('createLink', url);
                       })}><Link2 className="size-4" />Insert link</button>
                       <span className="smart-doc-context-menu-divider" />
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => mediaInputRef.current?.click())}><Upload className="size-4" />Upload image or video</button>
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => setDrivePickerOpen(true))}><ImagePlus className="size-4" />Insert media from Drive</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(openMediaPicker)}><Upload className="size-4" />Upload image or video</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(openDrivePicker)}><ImagePlus className="size-4" />Insert media from Drive</button>
                     </>
                   )}
                   <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(exportMarkdown)}><Download className="size-4" />Export as Markdown</button>
@@ -1604,6 +1914,18 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         }}>
           <section className="smart-doc-modal smart-doc-access-modal">
             <header><div><p className="collab-tool-eyebrow">Document permissions</p><h3>Share “{activeDocument.title}”</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={() => setAccessOpen(false)}><X className="size-4" /></button></header>
+            <div className="smart-doc-visibility-control">
+              <span><strong>Who can view?</strong><small>Registered users always get view-only access.</small></span>
+              <select
+                value={activeDocument.visibility ?? 'private'}
+                aria-label="Document visibility"
+                disabled={!isOwner || savingVisibility}
+                onChange={(event) => void saveVisibility(event.target.value as SmartDoc['visibility'])}
+              >
+                <option value="private">Only invited people</option>
+                <option value="registered">Anyone registered</option>
+              </select>
+            </div>
             <div className="smart-doc-access-list">
               {members.map((member) => (
                 <div className="smart-doc-access-row" key={member.username}>
@@ -1655,10 +1977,10 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
 
       {drivePickerOpen && (
         <div className="smart-doc-modal-backdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setDrivePickerOpen(false);
+          if (event.target === event.currentTarget) closeDrivePicker();
         }}>
           <section className="smart-doc-modal smart-doc-drive-modal">
-            <header><div><p className="collab-tool-eyebrow">Insert media</p><h3>Choose from Drive</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={() => setDrivePickerOpen(false)}><X className="size-4" /></button></header>
+            <header><div><p className="collab-tool-eyebrow">Insert media</p><h3>Choose from Drive</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={closeDrivePicker}><X className="size-4" /></button></header>
             <div className="smart-doc-drive-scopes">
               {(['team', 'personal'] as const).map((scope) => (
                 <button type="button" key={scope} aria-pressed={driveScope === scope} onClick={() => setDriveScope(scope)}>
@@ -1681,5 +2003,131 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         </div>
       )}
     </section>
+  );
+}
+
+export function SmartDocPinnedPreview({
+  username,
+  documentId,
+}: {
+  username: string;
+  documentId: string;
+}) {
+  const [markdown, setMarkdown] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const components = useMemo(() => markdownComponents(), []);
+
+  useEffect(() => {
+    let stopped = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer = 0;
+    let heartbeatTimer = 0;
+    let attempt = 0;
+    let serverSnapshotReceived = false;
+    let accessRevoked = false;
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, Math.min(30_000, 1_000 * 2 ** attempt++));
+    };
+
+    const connect = async () => {
+      if (stopped) return;
+      try {
+        const ticket = await requestSmartDocSocketTicket(documentId);
+        if (stopped) return;
+        const currentSocket = new WebSocket(smartDocSocketUrl(ticket));
+        socket = currentSocket;
+        void loadSmartDocSnapshot(username, documentId).then((cached) => {
+          if (stopped || accessRevoked || serverSnapshotReceived || !cached) return;
+          setMarkdown(cached.markdown);
+          setLoading(false);
+        }).catch(() => undefined);
+        currentSocket.onopen = () => {
+          if (stopped) return;
+          attempt = 0;
+          heartbeatTimer = window.setInterval(() => {
+            if (currentSocket.readyState === WebSocket.OPEN) {
+              currentSocket.send(JSON.stringify({ type: 'heartbeat' }));
+            }
+          }, 15_000);
+        };
+        currentSocket.onmessage = (event) => {
+          let payload: Record<string, unknown>;
+          try {
+            payload = JSON.parse(String(event.data)) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (
+            (payload.type !== 'smartdoc:snapshot' && payload.type !== 'document:updated') ||
+            typeof payload.markdown !== 'string'
+          ) return;
+          serverSnapshotReceived = true;
+          setMarkdown(payload.markdown);
+          setLoading(false);
+          setError('');
+          void saveSmartDocSnapshot({
+            username,
+            id: documentId,
+            markdown: payload.markdown,
+            revision: Number(payload.revision) || 0,
+          }).catch(() => undefined);
+        };
+        currentSocket.onclose = (event) => {
+          window.clearInterval(heartbeatTimer);
+          heartbeatTimer = 0;
+          if (stopped) return;
+          if (event.code === 1008) {
+            accessRevoked = true;
+            setMarkdown('');
+            void deleteSmartDocSnapshot(username, documentId).catch(() => undefined);
+            setError('You no longer have access to this Smart Doc.');
+            setLoading(false);
+            return;
+          }
+          scheduleReconnect();
+        };
+        currentSocket.onerror = () => currentSocket.close();
+      } catch (cause) {
+        if (stopped) return;
+        if (cause instanceof Error && /access|permission|not found/i.test(cause.message)) {
+          accessRevoked = true;
+          setMarkdown('');
+          void deleteSmartDocSnapshot(username, documentId).catch(() => undefined);
+          setError('You do not have access to this Smart Doc.');
+          setLoading(false);
+          return;
+        }
+        scheduleReconnect();
+      }
+    };
+
+    void connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(heartbeatTimer);
+      socket?.close(1000, 'Pinned Smart Doc closed');
+    };
+  }, [documentId, username]);
+
+  return (
+    <div className="smart-doc-pinned-preview">
+      {loading && !markdown && <div className="smart-doc-editor-loading">Loading pinned document…</div>}
+      {error && <div className="smart-doc-offline-note">{error}</div>}
+      {!loading && !error && !markdown.trim() && (
+        <p className="smart-doc-preview-empty">This document is empty.</p>
+      )}
+      {markdown && (
+        <article className="smart-doc-preview" aria-label="Pinned Smart Doc">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{markdown}</ReactMarkdown>
+        </article>
+      )}
+    </div>
   );
 }

@@ -30,7 +30,7 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   const initialFileId = params.get('file');
   const initialDriveScope = params.get('scope') === 'personal' ? 'personal' : 'team';
   const [activeTab, setActiveTab] = useState<CollabTab>(
-    params.get('type') === 'smartdocs'
+    params.get('type') === 'smartdocs' || params.get('type') === 'smartdoc'
       ? 'smartdocs'
       : params.get('type') === 'mindmap'
       ? 'mindmaps'
@@ -42,7 +42,7 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
   );
   useEffect(() => {
     const requested = new URLSearchParams(location.search).get('type');
-    setActiveTab(requested === 'smartdocs'
+    setActiveTab(requested === 'smartdocs' || requested === 'smartdoc'
       ? 'smartdocs'
       : requested === 'mindmap'
       ? 'mindmaps'
@@ -57,7 +57,7 @@ export default function CollabSpacePage({ username }: CollabSpacePageProps) {
     { id: 'mindmaps' as const, label: 'Mind maps', icon: GitBranch, group: 'Documents' },
     { id: 'smartdocs' as const, label: 'Smart Docs', icon: FileText, group: 'Documents' },
     { id: 'drive' as const, label: 'Team Drive', icon: FolderOpen, group: 'Workspace' },
-    { id: 'tasks' as const, label: 'Tasks', icon: ListTodo, group: 'Workspace' },
+    { id: 'tasks' as const, label: 'Tasks and Calendar', icon: ListTodo, group: 'Workspace' },
   ];
 
   return (

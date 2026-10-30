@@ -69,7 +69,7 @@ export interface ChatSticker {
   scope: 'public' | 'private';
 }
 
-export type CollabDocumentType = 'sheet' | 'mindmap';
+export type CollabDocumentType = 'sheet' | 'mindmap' | 'smartdoc';
 export type CollabPermission = 'view' | 'edit';
 
 export interface CollabDocument {
@@ -80,6 +80,7 @@ export interface CollabDocument {
   createdAt: number;
   updatedAt: number;
   permission: CollabPermission;
+  visibility?: 'private' | 'registered';
 }
 
 export interface PinnedCollabDocument extends CollabDocument {
@@ -128,6 +129,7 @@ export interface CollabTask {
   owner: string;
   assignee: string;
   dueAt: number | null;
+  kind: 'task' | 'reminder';
   completedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -336,6 +338,7 @@ export async function createCollabTask(payload: {
   scope: 'team' | 'personal';
   assignee: string;
   dueAt: number | null;
+  kind?: 'task' | 'reminder';
 }): Promise<CollabTask> {
   const result = await requestJson<{ task: CollabTask }>('/api/collab/tasks', {
     method: 'POST',

@@ -1,12 +1,14 @@
 import { getApiBase, getStoredToken } from '@/lib/auth-client';
 
 export type SmartDocPermission = 'view' | 'edit';
+export type SmartDocVisibility = 'private' | 'registered';
 
 export interface SmartDoc {
   id: string;
   title: string;
   owner: string;
   bannerAssetId: string | null;
+  visibility: SmartDocVisibility;
   createdAt: number;
   updatedAt: number;
   permission: SmartDocPermission;
@@ -71,8 +73,8 @@ export async function createSmartDoc(title: string): Promise<SmartDoc> {
 
 export async function updateSmartDoc(
   id: string,
-  settings: { title?: string; bannerAssetId?: string | null },
-): Promise<Pick<SmartDoc, 'id' | 'title' | 'owner' | 'bannerAssetId' | 'updatedAt' | 'permission'>> {
+  settings: { title?: string; bannerAssetId?: string | null; visibility?: SmartDocVisibility },
+): Promise<Pick<SmartDoc, 'id' | 'title' | 'owner' | 'bannerAssetId' | 'visibility' | 'updatedAt' | 'permission'>> {
   return requestJson(`/api/collab/smartdocs/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },

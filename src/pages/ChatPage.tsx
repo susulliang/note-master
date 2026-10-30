@@ -106,6 +106,8 @@ import './ChatPage.css';
 
 const EmbeddedSheetsPage = lazy(() => import('@/pages/SheetsPage'));
 const EmbeddedMindmapPage = lazy(() => import('@/pages/MindmapPage'));
+const EmbeddedSmartDocPreview = lazy(() => import('@/pages/SmartDocsPage')
+  .then((module) => ({ default: module.SmartDocPinnedPreview })));
 
 const CHAT_HISTORY_WIDTH_KEY = 'econote_chat_history_width';
 const MIN_CHAT_HISTORY_WIDTH = 190;
@@ -183,13 +185,19 @@ function PinnedDocumentPane({
                 embedded
               />
             )
-            : (
+            : document.type === 'mindmap' ? (
               <EmbeddedMindmapPage
                 key={`mindmap:${document.id}`}
                 username={username}
                 initialDocumentId={document.id}
                 initialDocument={document}
                 embedded
+              />
+            ) : (
+              <EmbeddedSmartDocPreview
+                key={`smartdoc:${document.id}`}
+                username={username}
+                documentId={document.id}
               />
             )}
         </Suspense>
@@ -2408,7 +2416,7 @@ export default function ChatPage({
       ]);
       setCollabDocuments(documents);
       setPinnedDocument(pin);
-      setPinDocumentId(pin?.id ?? '');
+      setPinDocumentId(pin ? `${pin.type}:${pin.id}` : '');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not load Collab Space documents.');
     } finally {
@@ -2417,13 +2425,13 @@ export default function ChatPage({
   }, [activeRoom.roomId]);
 
   const savePinnedDocument = useCallback(async () => {
-    const document = collabDocuments.find((item) => item.id === pinDocumentId);
+    const document = collabDocuments.find((item) => `${item.type}:${item.id}` === pinDocumentId);
     if (!document || savingPin) return;
     try {
       setSavingPin(true);
       const pin = await pinChatDocument(activeRoom.roomId, document.type, document.id);
       setPinnedDocument(pin);
-      setPinDocumentId(pin.id);
+      setPinDocumentId(`${pin.type}:${pin.id}`);
       toast.success('Document pinned · chat members can now view it.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not pin this document.');
@@ -3015,7 +3023,15 @@ export default function ChatPage({
     () => threadMessages.filter((message) => !message.quickReply),
     [threadMessages],
   );
-  const selectedPinDocument = collabDocuments.find((document) => document.id === pinDocumentId);
+  const selectedPinDocument = collabDocuments.find((document) => `${document.type}:${document.id}` === pinDocumentId);
+  const pinnableDocuments = collabDocuments.filter((document) => (
+    document.permission === 'edit' ||
+    (document.type === 'smartdoc' && document.visibility === 'registered')
+  ));
+  const selectedPinDocumentCanPin = !!selectedPinDocument && (
+    selectedPinDocument.permission === 'edit' ||
+    (selectedPinDocument.type === 'smartdoc' && selectedPinDocument.visibility === 'registered')
+  );
   const canUnpinCurrent = !!pinnedDocument && (
     pinnedDocument.pinnedBy.toLowerCase() === username.toLowerCase() ||
     pinnedDocument.owner.toLowerCase() === username.toLowerCase() ||
@@ -3413,7 +3429,9 @@ export default function ChatPage({
                     >
                       {pinnedDocument.type === 'sheet'
                         ? <FileSpreadsheet className="size-3 shrink-0" />
-                        : <GitBranch className="size-3 shrink-0" />}
+                        : pinnedDocument.type === 'mindmap'
+                          ? <GitBranch className="size-3 shrink-0" />
+                          : <FileText className="size-3 shrink-0" />}
                       <span className="truncate">{pinnedDocument.title}</span>
                       <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
                         {pinnedDocument.permission === 'edit' ? 'Edit' : 'View'}
@@ -4535,12 +4553,15 @@ export default function ChatPage({
                       <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
                         {pinnedDocument.type === 'sheet'
                           ? <FileSpreadsheet className="size-4" />
-                          : <GitBranch className="size-4" />}
+                          : pinnedDocument.type === 'mindmap'
+                            ? <GitBranch className="size-4" />
+                            : <FileText className="size-4" />}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-semibold">{pinnedDocument.title}</p>
                         <p className="mt-1 text-[10px] text-muted-foreground">
                           You have {pinnedDocument.permission} access · {pinnedDocument.owner} owns this document
+                          {pinnedDocument.visibility === 'registered' ? ' · Visible to registered users' : ''}
                         </p>
                       </div>
                       <button
@@ -4607,7 +4628,11 @@ export default function ChatPage({
                                 )}
                               </div>
                             ))}
-                            {pinnedDocument.members.length === 0 && (
+                            {pinnedDocument.visibility === 'registered' ? (
+                              <p className="py-2 text-[10px] text-muted-foreground">
+                                Anyone with a registered account can view this Smart Doc.
+                              </p>
+                            ) : pinnedDocument.members.length === 0 && (
                               <p className="py-2 text-[10px] text-muted-foreground">
                                 Everyone in the global chat can view the pinned document.
                               </p>
@@ -4616,7 +4641,9 @@ export default function ChatPage({
                         </>
                       ) : (
                         <p className="text-[10px] leading-relaxed text-muted-foreground">
-                          Everyone in this chat has view access. The document owner can promote specific people to edit.
+                          {pinnedDocument.visibility === 'registered'
+                            ? 'Anyone registered can view this Smart Doc. The document owner controls edit access.'
+                            : 'Everyone in this chat has view access. The document owner can promote specific people to edit.'}
                         </p>
                       )}
                     </div>
@@ -4634,15 +4661,16 @@ export default function ChatPage({
                     className="h-10 w-full rounded-lg border border-border bg-background/75 px-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">Select a Collab Space document…</option>
-                    {collabDocuments.filter((document) => document.permission === 'edit').map((document) => (
-                      <option key={`${document.type}:${document.id}`} value={document.id}>
-                        {document.type === 'sheet' ? 'Sheet' : 'Mind map'} · {document.title}
+                    {pinnableDocuments.map((document) => (
+                      <option key={`${document.type}:${document.id}`} value={`${document.type}:${document.id}`}>
+                        {document.type === 'sheet' ? 'Sheet' : document.type === 'mindmap' ? 'Mind map' : 'Smart Doc'}
+                        {document.visibility === 'registered' ? ' · Public' : ''} · {document.title}
                       </option>
                     ))}
                   </select>
-                  {collabDocuments.filter((document) => document.permission === 'edit').length === 0 && (
+                  {pinnableDocuments.length === 0 && (
                     <p className="mt-2 text-[10px] text-muted-foreground">
-                      You need edit access to pin a document. Create one or ask its owner to grant edit access.
+                      You need edit access for private documents. Registered-visible Smart Docs can be pinned by any chat member.
                       <button
                         type="button"
                         onClick={() => {
@@ -4679,9 +4707,8 @@ export default function ChatPage({
                 <button
                   type="button"
                   disabled={
-                    !selectedPinDocument ||
-                    selectedPinDocument.permission !== 'edit' ||
-                    (!!pinnedDocument && !canUnpinCurrent && selectedPinDocument.id !== pinnedDocument.id) ||
+                    !selectedPinDocumentCanPin ||
+                    (!!pinnedDocument && !canUnpinCurrent && `${selectedPinDocument?.type}:${selectedPinDocument?.id}` !== `${pinnedDocument.type}:${pinnedDocument.id}`) ||
                     savingPin ||
                     loadingPin
                   }

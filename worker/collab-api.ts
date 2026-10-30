@@ -12,6 +12,7 @@ interface CollabDocumentRow {
   owner: string;
   created_at: number;
   updated_at: number;
+  visibility?: 'private' | 'registered';
 }
 
 const MAX_BODY_BYTES = 8 * 1024;
@@ -528,7 +529,7 @@ async function listTasks(env: Env, username: string, url: URL): Promise<Response
   const scope = url.searchParams.get('scope');
   const result = await env.DB.prepare(`
     SELECT t.id, t.title, t.description, t.scope, t.owner, t.assignee,
-           t.due_at, t.completed_at, t.created_at, t.updated_at
+           t.due_at, t.kind, t.completed_at, t.created_at, t.updated_at
     FROM collab_tasks t
     WHERE (t.scope = 'team' AND (?1 IS NULL OR ?1 = 'team'))
        OR ((t.owner = ?2 COLLATE NOCASE OR t.assignee = ?2 COLLATE NOCASE)
@@ -542,7 +543,7 @@ async function listTasks(env: Env, username: string, url: URL): Promise<Response
     LIMIT 300
   `).bind(scope === 'personal' || scope === 'team' ? scope : null, username).all<{
     id: string; title: string; description: string; scope: string; owner: string; assignee: string;
-    due_at: number | null; completed_at: number | null; created_at: number; updated_at: number;
+    due_at: number | null; kind: 'task' | 'reminder'; completed_at: number | null; created_at: number; updated_at: number;
   }>();
   const tasks = await Promise.all((result.results ?? []).map(async (task) => {
     const mentions = await env.DB.prepare(
@@ -556,6 +557,7 @@ async function listTasks(env: Env, username: string, url: URL): Promise<Response
       owner: task.owner,
       assignee: task.assignee,
       dueAt: task.due_at,
+      kind: task.kind,
       completedAt: task.completed_at,
       createdAt: task.created_at,
       updatedAt: task.updated_at,
@@ -570,6 +572,7 @@ async function createTask(request: Request, env: Env, username: string): Promise
   const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : '';
   const description = typeof payload?.description === 'string' ? payload.description.trim().slice(0, 8_000) : '';
   const scope = payload?.scope === 'personal' ? 'personal' : 'team';
+  const kind = payload?.kind === 'reminder' ? 'reminder' : 'task';
   if (!title) return collabJson({ error: 'Add a task title.' }, 400);
   let assignee = username;
   if (scope === 'team' && typeof payload?.assignee === 'string') {
@@ -585,9 +588,9 @@ async function createTask(request: Request, env: Env, username: string): Promise
   const mentions = await resolveMentionedUsers(env, `${title}\n${description}`);
   await env.DB.prepare(
     `INSERT INTO collab_tasks
-     (id, title, description, scope, owner, assignee, due_at, completed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-  ).bind(id, title, description, scope, username, assignee, dueAt, now, now).run();
+     (id, title, description, scope, owner, assignee, due_at, kind, completed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+  ).bind(id, title, description, scope, username, assignee, dueAt, kind, now, now).run();
   if (mentions.length) {
     await env.DB.batch(mentions.map((mentioned) => env.DB.prepare(
       'INSERT OR IGNORE INTO collab_task_mentions (task_id, username, created_at) VALUES (?, ?, ?)',
@@ -601,7 +604,7 @@ async function createTask(request: Request, env: Env, username: string): Promise
   }
   return collabJson({
     task: {
-      id, title, description, scope, owner: username, assignee, dueAt, completedAt: null,
+      id, title, description, scope, owner: username, assignee, dueAt, kind, completedAt: null,
       createdAt: now, updatedAt: now, mentions,
     },
   }, 201);
@@ -797,17 +800,21 @@ async function readPayload(request: Request): Promise<Record<string, unknown> | 
 }
 
 async function listDocuments(env: Env, username: string): Promise<Response> {
-  const [sheets, mindmaps] = await Promise.all([
+  const [sheets, mindmaps, smartDocs] = await Promise.all([
     env.DB.prepare(
       'SELECT id, title, owner, created_at, updated_at FROM collaborative_sheets ORDER BY updated_at DESC',
     ).all<CollabDocumentRow>(),
     env.DB.prepare(
       'SELECT id, title, owner, created_at, updated_at FROM collab_mindmaps ORDER BY updated_at DESC',
     ).all<CollabDocumentRow>(),
+    env.DB.prepare(
+      'SELECT id, title, owner, created_at, updated_at, visibility FROM collab_smartdocs ORDER BY updated_at DESC',
+    ).all<CollabDocumentRow>(),
   ]);
   const rows = [
     ...(sheets.results ?? []).map((row) => ({ ...row, type: 'sheet' as const })),
     ...(mindmaps.results ?? []).map((row) => ({ ...row, type: 'mindmap' as const })),
+    ...(smartDocs.results ?? []).map((row) => ({ ...row, type: 'smartdoc' as const })),
   ];
   const accessible = await Promise.all(rows.map(async (row) => {
     const permission = await getCollabPermission(env, username, row.type, row.id);
@@ -820,6 +827,7 @@ async function listDocuments(env: Env, username: string): Promise<Response> {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       permission,
+      ...(row.type === 'smartdoc' ? { visibility: row.visibility ?? 'private' } : {}),
     };
   }));
   return collabJson({

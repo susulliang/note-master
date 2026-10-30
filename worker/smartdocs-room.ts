@@ -60,6 +60,11 @@ export class SmartDocsRoom extends DurableObject<Env> {
     });
   }
 
+  async initialize(): Promise<void> {
+    // The constructor's blockConcurrencyWhile initializes the SQL state before
+    // this RPC is served. This method lets document creation force that setup.
+  }
+
   async createTicket(username: string, permission: 'view' | 'edit'): Promise<string> {
     const now = Date.now();
     const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;

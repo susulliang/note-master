@@ -1,7 +1,8 @@
 import { getChatRoomMembers, isChatRoomMember } from './chat-access';
 
-export type CollabDocumentType = 'sheet' | 'mindmap';
+export type CollabDocumentType = 'sheet' | 'mindmap' | 'smartdoc';
 export type CollabPermission = 'view' | 'edit';
+export type SmartDocVisibility = 'private' | 'registered';
 
 export interface CollabDocumentRecord {
   id: string;
@@ -10,6 +11,7 @@ export interface CollabDocumentRecord {
   owner: string;
   createdAt: number;
   updatedAt: number;
+  visibility?: SmartDocVisibility;
 }
 
 export async function ensureCollabSchema(env: Env): Promise<void> {
@@ -77,6 +79,7 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
       title TEXT NOT NULL,
       owner TEXT NOT NULL,
       banner_asset_id TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'registered')),
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
@@ -109,7 +112,7 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS chat_pinned_documents (
       room_id TEXT PRIMARY KEY,
-      document_type TEXT NOT NULL CHECK (document_type IN ('sheet', 'mindmap')),
+      document_type TEXT NOT NULL CHECK (document_type IN ('sheet', 'mindmap', 'smartdoc')),
       document_id TEXT NOT NULL,
       pinned_by TEXT NOT NULL,
       pinned_at INTEGER NOT NULL
@@ -179,6 +182,7 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
       owner TEXT NOT NULL,
       assignee TEXT NOT NULL,
       due_at INTEGER,
+      kind TEXT NOT NULL DEFAULT 'task' CHECK (kind IN ('task', 'reminder')),
       completed_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -208,6 +212,54 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
     CREATE INDEX IF NOT EXISTS collab_notifications_user_idx
     ON collab_notifications (username, read_at, created_at DESC)
   `).run();
+  await ensureColumn(env, 'collab_smartdocs', 'visibility',
+    "ALTER TABLE collab_smartdocs ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'registered'))");
+  await ensureColumn(env, 'collab_tasks', 'kind',
+    "ALTER TABLE collab_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'task' CHECK (kind IN ('task', 'reminder'))");
+  await ensurePinnedDocumentTypeSchema(env);
+}
+
+async function ensureColumn(env: Env, table: string, column: string, alterSql: string): Promise<void> {
+  const columns = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+  if ((columns.results ?? []).some((item) => item.name === column)) return;
+  try {
+    await env.DB.prepare(alterSql).run();
+  } catch (error) {
+    const refreshed = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    if (!(refreshed.results ?? []).some((item) => item.name === column)) throw error;
+  }
+}
+
+async function ensurePinnedDocumentTypeSchema(env: Env): Promise<void> {
+  const readSchema = () => env.DB.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chat_pinned_documents'`,
+  ).first<{ sql: string | null }>();
+  const current = await readSchema();
+  if (!current?.sql || current.sql.toLowerCase().includes("'smartdoc'")) return;
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS chat_pinned_documents_next (
+          room_id TEXT PRIMARY KEY,
+          document_type TEXT NOT NULL CHECK (document_type IN ('sheet', 'mindmap', 'smartdoc')),
+          document_id TEXT NOT NULL,
+          pinned_by TEXT NOT NULL,
+          pinned_at INTEGER NOT NULL
+        )
+      `),
+      env.DB.prepare(`
+        INSERT OR IGNORE INTO chat_pinned_documents_next
+          (room_id, document_type, document_id, pinned_by, pinned_at)
+        SELECT room_id, document_type, document_id, pinned_by, pinned_at
+        FROM chat_pinned_documents
+      `),
+      env.DB.prepare('DROP TABLE chat_pinned_documents'),
+      env.DB.prepare('ALTER TABLE chat_pinned_documents_next RENAME TO chat_pinned_documents'),
+    ]);
+  } catch (error) {
+    const refreshed = await readSchema();
+    if (!refreshed?.sql?.toLowerCase().includes("'smartdoc'")) throw error;
+  }
 }
 
 export async function getCollabDocument(
@@ -226,6 +278,28 @@ export async function getCollabDocument(
       owner: row.owner,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    } : null;
+  }
+  if (type === 'smartdoc') {
+    const row = await env.DB.prepare(
+      `SELECT id, title, owner, created_at, updated_at, visibility
+       FROM collab_smartdocs WHERE id = ?`,
+    ).bind(id).first<{
+      id: string;
+      title: string;
+      owner: string;
+      created_at: number;
+      updated_at: number;
+      visibility: SmartDocVisibility;
+    }>();
+    return row ? {
+      id: row.id,
+      type,
+      title: row.title,
+      owner: row.owner,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      visibility: row.visibility,
     } : null;
   }
   const row = await env.DB.prepare(
@@ -247,6 +321,7 @@ export async function getCollabPermission(
   type: CollabDocumentType,
   id: string,
 ): Promise<CollabPermission | null> {
+  if (type === 'smartdoc') return getSmartDocPermission(env, username, id);
   const document = await getCollabDocument(env, type, id);
   if (!document) return null;
   if (document.owner.toLowerCase() === username.toLowerCase()) return 'edit';
@@ -296,17 +371,24 @@ export async function getSmartDocPermission(
   id: string,
 ): Promise<CollabPermission | null> {
   const document = await env.DB.prepare(
-    'SELECT owner FROM collab_smartdocs WHERE id = ?',
-  ).bind(id).first<{ owner: string }>();
+    'SELECT owner, visibility FROM collab_smartdocs WHERE id = ?',
+  ).bind(id).first<{ owner: string; visibility: SmartDocVisibility }>();
   if (!document) return null;
   if (document.owner.toLowerCase() === username.toLowerCase()) return 'edit';
   const explicit = await env.DB.prepare(
     `SELECT permission FROM collab_document_permissions
      WHERE document_type = 'smartdoc' AND document_id = ? AND username = ? COLLATE NOCASE`,
   ).bind(id, username).first<{ permission: CollabPermission }>();
-  return explicit?.permission === 'view' || explicit?.permission === 'edit'
-    ? explicit.permission
-    : null;
+  if (explicit?.permission === 'view' || explicit?.permission === 'edit') return explicit.permission;
+  if (document.visibility === 'registered') return 'view';
+  const pins = await env.DB.prepare(
+    `SELECT room_id FROM chat_pinned_documents
+     WHERE document_type = 'smartdoc' AND document_id = ?`,
+  ).bind(id).all<{ room_id: string }>();
+  for (const pin of pins.results ?? []) {
+    if (await isChatRoomMember(env, username, pin.room_id)) return 'view';
+  }
+  return null;
 }
 
 export async function grantSmartDocPermission(
