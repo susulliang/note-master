@@ -842,7 +842,8 @@ function RosterGrid({
     : null;
   useEffect(() => {
     setNoteInput(singleSelection ? noteOf(singleSelection.a, singleSelection.iso) : '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-prefill only on selection change
+    // Deliberately keyed on the selection's identity, not on noteOf's closure —
+    // the field should re-prefill only when a different cell is picked.
   }, [singleSelection?.a.en, singleSelection?.iso]);
   const applySelectedNote = () => {
     if (selectedCells.length === 0) return;
