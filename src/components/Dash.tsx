@@ -1396,7 +1396,7 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       start,
     };
   }, [data]);
-  const total = data && frontline ? frontline.call + frontline.email + frontline.chat : null;
+  const total = data ? data.call.handled + data.email.total + data.chat.total : null;
   const shiftStats = useMemo(() => {
     if (!data || !frontline) return null;
     const { start, end } = frontline;
@@ -1415,10 +1415,10 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
     };
   }, [data, frontline, rosterLiveVersion]);
   const volumes = [
-    { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, hours: shiftStats?.total.hours ?? null, color: 'text-foreground', accent: 'bg-accent' },
-    { name: 'Call', value: frontline?.call ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
-    { name: 'Email', value: frontline?.email ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, hours: shiftStats?.email.hours ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
-    { name: 'Chat', value: frontline?.chat ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, hours: shiftStats?.chat.hours ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
+    { name: 'Total processed', value: total, frontline: frontline ? frontline.call + frontline.email + frontline.chat : null, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, hours: shiftStats?.total.hours ?? null, color: 'text-foreground', accent: 'bg-accent' },
+    { name: 'Call', value: data?.call.handled ?? null, frontline: frontline?.call ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
+    { name: 'Email', value: data?.email.total ?? null, frontline: frontline?.email ?? null, detail: 'MTD cases', average: shiftStats?.email.average ?? null, shifts: shiftStats?.email.shifts ?? null, hours: shiftStats?.email.hours ?? null, color: 'text-violet-300', accent: 'bg-violet-400' },
+    { name: 'Chat', value: data?.chat.total ?? null, frontline: frontline?.chat ?? null, detail: 'MTD cases', average: shiftStats?.chat.average ?? null, shifts: shiftStats?.chat.shifts ?? null, hours: shiftStats?.chat.hours ?? null, color: 'text-sky-300', accent: 'bg-sky-400' },
   ];
   return (
     <section className={cn(PANEL, 'p-4 sm:p-5')}>
@@ -1439,6 +1439,7 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
               {volume.name}
             </div>
             <div className={cn('mt-1 truncate font-mono text-xl font-semibold tabular-nums', volume.color)}>{volume.value === null ? '—' : formatNumber(volume.value)}</div>
+            <div className="text-[10px] text-muted-foreground">{volume.frontline === null ? '' : <span title="Processed by frontline Call/Chat agents only (TL/T2/SV/DTC excluded)">◎ frontline: <span className="font-mono tabular-nums text-accent">{formatNumber(volume.frontline)}</span></span>}</div>
             <div className="mt-1 text-[10px] text-muted-foreground">{volume.detail}</div>
             <div className="mt-2 text-[11px] text-muted-foreground">AVG / shift <span className="font-mono tabular-nums text-foreground">{volume.average === null ? '—' : volume.average.toFixed(1)}</span></div>
             <div className="text-[10px] text-muted-foreground">{volume.shifts === null ? 'Roster hours unavailable' : `${volume.hours?.toFixed(1)}h billable (≈${volume.shifts.toFixed(1)} shifts)`}</div>
