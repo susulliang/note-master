@@ -39,7 +39,7 @@ export interface CachedSmartDocSnapshot {
   savedAt: number;
 }
 
-export type CollabDirectoryType = 'sheet' | 'mindmap' | 'smartdoc';
+export type CollabDirectoryType = 'sheet' | 'mindmap' | 'smartdoc' | 'smarttodo';
 
 const DB_NAME = 'econote-collab-cache';
 const DB_VERSION = 2;

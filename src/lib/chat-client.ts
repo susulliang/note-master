@@ -59,6 +59,7 @@ export interface ChatSocketTicket {
 export interface ChatAvatarProfile {
   seed: number;
   rotation: number;
+  avatarAssetId?: string | null;
 }
 
 export interface ChatSticker {
@@ -69,7 +70,7 @@ export interface ChatSticker {
   scope: 'public' | 'private';
 }
 
-export type CollabDocumentType = 'sheet' | 'mindmap' | 'smartdoc';
+export type CollabDocumentType = 'sheet' | 'mindmap' | 'smartdoc' | 'smarttodo';
 export type CollabPermission = 'view' | 'edit';
 
 export interface CollabDocument {
@@ -81,6 +82,7 @@ export interface CollabDocument {
   updatedAt: number;
   permission: CollabPermission;
   visibility?: 'private' | 'registered';
+  kind?: 'smartdoc' | 'smarttodo';
 }
 
 export interface PinnedCollabDocument extends CollabDocument {
@@ -489,6 +491,31 @@ export async function updateChatAvatarRotation(rotation: number): Promise<ChatAv
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rotation }),
   });
+}
+
+export async function uploadChatAvatar(image: Blob): Promise<ChatAvatarProfile> {
+  const response = await fetch(endpoint('/api/chat/profile/avatar'), {
+    method: 'POST',
+    headers: headers({ 'content-type': 'image/webp' }),
+    body: image,
+  });
+  const result = await response.json().catch(() => ({})) as ChatAvatarProfile & { error?: string };
+  if (!response.ok) throw new Error(result.error || `Avatar upload failed (${response.status})`);
+  return result;
+}
+
+export async function removeChatAvatar(): Promise<ChatAvatarProfile> {
+  return requestJson<ChatAvatarProfile>('/api/chat/profile/avatar', { method: 'DELETE' });
+}
+
+export async function fetchChatAvatarImage(username: string): Promise<Blob | null> {
+  const response = await fetch(endpoint(`/api/chat/avatar/${encodeURIComponent(username)}`), {
+    headers: headers(),
+    cache: 'no-store',
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Avatar request failed (${response.status})`);
+  return response.blob();
 }
 
 export async function createChatGroup(

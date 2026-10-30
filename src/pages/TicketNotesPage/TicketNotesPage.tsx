@@ -130,6 +130,7 @@ import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/componen
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import { useAuth } from '@/lib/auth-context';
 import { searchCollab, type CollabSearchResult } from '@/lib/chat-client';
+import { readRecentChatRoom, readRecentCollabSearch } from '@/lib/workspace-recent';
 import {
   getStoredToken,
   saveGeneratedTicketNote,
@@ -353,9 +354,9 @@ const NODES: NodeConfig[] = [
     accent: 'default',
     width: 200,
     icon: Package,
-    // "Eshop" tag — opens the Ecovacs intl SSO (e-shop orders) in a new
+    // "ESHOP" tag — opens the Ecovacs intl SSO (e-shop orders) in a new
     // window. Visibility is toggleable from the Boxes rail panel.
-    headerTag: { label: 'Eshop', href: 'https://eco-intl-sso.ecovacs.com/login' },
+    headerTag: { label: 'ESHOP', href: 'https://eco-intl-sso.ecovacs.com/login' },
   },
   {
     id: NODE_IDS.PURCHASE_INFO,
@@ -981,8 +982,17 @@ export default function TicketNotesPage() {
   const navigateToView = useCallback((view: WorkView) => {
     setWorkView(view);
     const path = WORKSPACE_PATHS[view];
-    if (location.pathname !== path) navigate(path);
-  }, [location.pathname, navigate]);
+    const rememberedSearch = view === 'chat' && signedInUsername
+      ? (() => {
+          const roomId = readRecentChatRoom(signedInUsername);
+          return roomId ? `?roomId=${encodeURIComponent(roomId)}` : '';
+        })()
+      : view === 'collab' && signedInUsername
+        ? readRecentCollabSearch(signedInUsername)
+        : '';
+    const target = `${path}${rememberedSearch}`;
+    if (`${location.pathname}${location.search}` !== target) navigate(target);
+  }, [location.pathname, location.search, navigate, signedInUsername]);
   const [notificationRoomId, setNotificationRoomId] = useState<string | null>(null);
   const openChatNotification = useCallback((roomId: string) => {
     if (roomId.startsWith('collab-task:')) {

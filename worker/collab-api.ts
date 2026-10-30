@@ -13,6 +13,7 @@ interface CollabDocumentRow {
   created_at: number;
   updated_at: number;
   visibility?: 'private' | 'registered';
+  kind?: 'smartdoc' | 'smarttodo';
 }
 
 const MAX_BODY_BYTES = 8 * 1024;
@@ -812,13 +813,16 @@ async function listDocuments(env: Env, username: string): Promise<Response> {
       'SELECT id, title, owner, created_at, updated_at FROM collab_mindmaps ORDER BY updated_at DESC',
     ).all<CollabDocumentRow>(),
     env.DB.prepare(
-      'SELECT id, title, owner, created_at, updated_at, visibility FROM collab_smartdocs ORDER BY updated_at DESC',
+      'SELECT id, title, owner, created_at, updated_at, visibility, kind FROM collab_smartdocs ORDER BY updated_at DESC',
     ).all<CollabDocumentRow>(),
   ]);
   const rows = [
     ...(sheets.results ?? []).map((row) => ({ ...row, type: 'sheet' as const })),
     ...(mindmaps.results ?? []).map((row) => ({ ...row, type: 'mindmap' as const })),
-    ...(smartDocs.results ?? []).map((row) => ({ ...row, type: 'smartdoc' as const })),
+    ...(smartDocs.results ?? []).map((row) => ({
+      ...row,
+      type: row.kind === 'smarttodo' ? 'smarttodo' as const : 'smartdoc' as const,
+    })),
   ];
   const accessible = await Promise.all(rows.map(async (row) => {
     const permission = await getCollabPermission(env, username, row.type, row.id);

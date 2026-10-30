@@ -51,6 +51,7 @@ interface CollabDrivePageProps {
   username: string;
   initialFileId?: string | null;
   initialScope?: DriveScope;
+  onFileChange?: (fileId: string | null, scope: DriveScope) => void;
 }
 
 type DriveScope = 'team' | 'personal';
@@ -190,6 +191,7 @@ export default function CollabDrivePage({
   username,
   initialFileId = null,
   initialScope = 'team',
+  onFileChange,
 }: CollabDrivePageProps) {
   const [scope, setScope] = useState<DriveScope>(initialScope);
   const [presence, setPresence] = useState<CollaboratorPresence[]>([]);
@@ -355,9 +357,33 @@ export default function CollabDrivePage({
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
-    if (!initialFileId || loading) return;
-    requestAnimationFrame(() => document.getElementById(`drive-file-${initialFileId}`)?.scrollIntoView({ block: 'center' }));
-  }, [files, initialFileId, loading]);
+    if (loading) return;
+    if (!initialFileId) {
+      setPreviewFile(null);
+      return;
+    }
+    let alive = true;
+    const file = files.find((item) => item.id === initialFileId);
+    if (file) {
+      requestAnimationFrame(() => document.getElementById(`drive-file-${initialFileId}`)?.scrollIntoView({ block: 'center' }));
+      if (isPreviewableDriveFile(file)) setPreviewFile(file);
+    } else {
+      void listCollabDrive(scope, null, { allFiles: true })
+        .then((directory) => {
+          if (!alive) return;
+          const match = directory.files.find((item) => item.id === initialFileId);
+          if (match && isPreviewableDriveFile(match)) setPreviewFile(match);
+          else onFileChange?.(null, scope);
+        })
+        .catch(() => undefined);
+    }
+    return () => { alive = false; };
+  }, [files, initialFileId, loading, onFileChange, scope]);
+
+  const openPreview = (file: CollabDriveFile) => {
+    setPreviewFile(file);
+    onFileChange?.(file.id, scope);
+  };
 
   const visibleFiles = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -698,7 +724,7 @@ export default function CollabDrivePage({
               <DriveFilePreview
                 file={file}
                 cacheKey={previewCacheKey}
-                onOpenPreview={() => setPreviewFile(file)}
+                onOpenPreview={() => openPreview(file)}
               />
               <span className="collab-drive-file-name">
                 {renameTarget?.kind === 'file' && renameTarget.id === file.id ? (
@@ -733,7 +759,7 @@ export default function CollabDrivePage({
                     type="button"
                     className="collab-drive-preview-name"
                     title={file.name}
-                    onClick={() => setPreviewFile(file)}
+                    onClick={() => openPreview(file)}
                   >
                     {file.name}
                   </button>
@@ -752,7 +778,10 @@ export default function CollabDrivePage({
       <DriveMediaPreviewDialog
         open={previewFile !== null}
         onOpenChange={(open) => {
-          if (!open) setPreviewFile(null);
+          if (!open) {
+            setPreviewFile(null);
+            onFileChange?.(null, scope);
+          }
         }}
         fileId={previewFile?.id}
         fileName={previewFile?.name ?? ''}

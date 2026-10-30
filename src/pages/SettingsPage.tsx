@@ -1,11 +1,32 @@
-import { Check, ExternalLink, KeyRound, Monitor, RotateCw, Settings, Type, Download, RefreshCcw, Sparkles, AlertTriangle } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  Monitor,
+  RefreshCcw,
+  RotateCw,
+  Settings,
+  Sparkles,
+  Trash2,
+  Type,
+  Upload,
+} from 'lucide-react';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import EngineSettingsPanel, { type EngineSettingsPanelProps } from '@/components/EngineSettingsPanel';
-import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
+import ChatAvatar, { invalidateChatAvatarCache } from '@/components/ChatAvatar';
 import { useAuth } from '@/lib/auth-context';
 import { changeAccountPassword } from '@/lib/auth-client';
-import { fetchChatProfile, updateChatAvatarRotation, type ChatAvatarProfile } from '@/lib/chat-client';
+import {
+  fetchChatProfile,
+  removeChatAvatar,
+  updateChatAvatarRotation,
+  uploadChatAvatar,
+  type ChatAvatarProfile,
+} from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 import { THEMES, type ThemeId, type UiScale } from '@/lib/themes';
 import { isTauriEnv } from '@/lib/tauri-env';
@@ -26,6 +47,32 @@ interface SettingsPageProps extends Omit<EngineSettingsPanelProps, 'presentation
   onUiScaleChange: (scale: UiScale) => void;
 }
 
+async function compressAvatar(file: File): Promise<Blob> {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file for your avatar.');
+  if (file.size > 20 * 1024 * 1024) throw new Error('Choose an image smaller than 20 MB.');
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser could not prepare this image.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const compressed = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error('WebP compression is not supported by this browser.')),
+        'image/webp',
+        0.84,
+      );
+    });
+    if (compressed.size > 128 * 1024) throw new Error('This image is still too large after compression. Choose another image.');
+    return compressed;
+  } finally {
+    bitmap.close();
+  }
+}
+
 export default function SettingsPage({
   theme,
   onThemeChange,
@@ -35,6 +82,11 @@ export default function SettingsPage({
 }: SettingsPageProps) {
   const { user } = useAuth();
   const [avatar, setAvatar] = useState<ChatAvatarProfile | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarDragActive, setAvatarDragActive] = useState(false);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+  const avatarPreviewUrlRef = useRef<string | null>(null);
+  const avatarFileRef = useRef<HTMLInputElement | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordBusy, setPasswordBusy] = useState(false);
@@ -49,12 +101,22 @@ export default function SettingsPage({
     return unsubscribe;
   }, []);
 
+  const setAvatarPreview = (url: string | null) => {
+    if (avatarPreviewUrlRef.current) URL.revokeObjectURL(avatarPreviewUrlRef.current);
+    avatarPreviewUrlRef.current = url;
+    setAvatarPreviewUrl(url);
+  };
+
   useEffect(() => {
     let alive = true;
     fetchChatProfile()
       .then((profile) => { if (alive) setAvatar(profile); })
       .catch(() => { if (alive) setAvatar({ seed: 0, rotation: 0 }); });
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => () => {
+    if (avatarPreviewUrlRef.current) URL.revokeObjectURL(avatarPreviewUrlRef.current);
   }, []);
 
   const rotateAvatar = () => {
@@ -64,6 +126,46 @@ export default function SettingsPage({
     updateChatAvatarRotation(rotation).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'Could not save avatar rotation.');
     });
+  };
+
+  const uploadAvatarFile = async (file?: File) => {
+    if (!file || !user || avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      const webp = await compressAvatar(file);
+      setAvatarPreview(URL.createObjectURL(webp));
+      const profile = await uploadChatAvatar(webp);
+      setAvatar(profile);
+      invalidateChatAvatarCache(user.username);
+      toast.success('Avatar updated.');
+    } catch (error) {
+      setAvatarPreview(null);
+      toast.error(error instanceof Error ? error.message : 'Could not upload your avatar.');
+    } finally {
+      setAvatarBusy(false);
+      if (avatarFileRef.current) avatarFileRef.current.value = '';
+    }
+  };
+
+  const removeAvatarImage = async () => {
+    if (!user || avatarBusy || !avatar?.avatarAssetId) return;
+    setAvatarBusy(true);
+    try {
+      setAvatar(await removeChatAvatar());
+      setAvatarPreview(null);
+      invalidateChatAvatarCache(user.username);
+      toast.success('Custom avatar removed.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not remove the custom avatar.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const handleAvatarDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setAvatarDragActive(false);
+    void uploadAvatarFile(event.dataTransfer.files[0]);
   };
 
   const submitPasswordChange = async (event: FormEvent<HTMLFormElement>) => {
@@ -105,39 +207,85 @@ export default function SettingsPage({
           </div>
         </header>
 
-        <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+        <section
+          onDragOver={(event) => {
+            if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+            event.preventDefault();
+            setAvatarDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAvatarDragActive(false);
+          }}
+          onDrop={handleAvatarDrop}
+          className={cn(
+            'flex flex-wrap items-center gap-4 rounded-2xl border bg-card/45 p-4 shadow-sm backdrop-blur-sm transition-colors sm:p-5',
+            avatarDragActive ? 'border-accent bg-accent/10 ring-2 ring-accent/30' : 'border-border/60',
+          )}
+        >
           <div className="w-full">
             <h2 className="text-sm font-semibold text-foreground">Chat Avatar</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Your shared identity in direct and group chats.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Drop an image here to use it as your shared chat avatar.</p>
           </div>
           <button
             type="button"
             onClick={rotateAvatar}
-            disabled={!avatar}
+            disabled={!avatar || avatarBusy || !!avatar.avatarAssetId}
             aria-label="Rotate your pixel avatar"
-            title="Click to rotate"
+            title={avatar?.avatarAssetId ? 'Remove the custom image to rotate your pixel avatar' : 'Click to rotate'}
             className="grid size-[76px] shrink-0 place-items-center rounded-2xl border border-accent/20 bg-accent/10 transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
           >
-            {avatar
-              ? <PixelHumanoidAvatar seed={avatar.seed} rotation={avatar.rotation} size={64} />
-              : <span className="size-8 animate-pulse rounded-lg bg-muted" />}
+            {avatarPreviewUrl ? (
+              <img src={avatarPreviewUrl} alt="" className="size-16 object-contain" />
+            ) : user ? (
+              <ChatAvatar username={user.username} profile={avatar} size={64} className="object-contain" />
+            ) : (
+              <span className="size-8 animate-pulse rounded-lg bg-muted" />
+            )}
           </button>
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-accent">Profile</p>
             <h2 className="mt-1 text-sm font-semibold text-foreground">{user?.username ?? 'Your avatar'}</h2>
             <p className="mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
-              Your 64 × 64 pixel avatar is randomized once and shown beside your name in chat. Click it to rotate; the change syncs to your account.
+              Images are compressed to WebP at a maximum 256 px dimension. The whole image stays visible without stretching or cropping.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={rotateAvatar}
-            disabled={!avatar}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-          >
-            <RotateCw className="size-3.5" />
-            Rotate
-          </button>
+          <input
+            ref={avatarFileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => void uploadAvatarFile(event.currentTarget.files?.[0])}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => avatarFileRef.current?.click()}
+              disabled={!avatar || avatarBusy}
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              {avatarBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+              {avatarBusy ? 'Saving…' : avatar?.avatarAssetId ? 'Replace image' : 'Upload image'}
+            </button>
+            {avatar?.avatarAssetId ? (
+              <button
+                type="button"
+                onClick={() => void removeAvatarImage()}
+                disabled={avatarBusy}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              >
+                <Trash2 className="size-3.5" /> Remove
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={rotateAvatar}
+                disabled={!avatar || avatarBusy}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              >
+                <RotateCw className="size-3.5" /> Rotate
+              </button>
+            )}
+          </div>
         </section>
 
         <section className="rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm backdrop-blur-sm sm:p-5">

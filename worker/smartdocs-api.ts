@@ -3,6 +3,7 @@ import {
   getSmartDocPermission,
   grantSmartDocPermission,
   type CollabPermission,
+  type SmartDocKind,
   type SmartDocVisibility,
 } from './collab-access';
 
@@ -26,6 +27,7 @@ interface SmartDocRow {
   owner: string;
   banner_asset_id: string | null;
   visibility: SmartDocVisibility;
+  kind: SmartDocKind;
   created_at: number;
   updated_at: number;
 }
@@ -52,16 +54,16 @@ async function parseJson(request: Request): Promise<Record<string, unknown> | nu
 
 async function getSmartDoc(env: Env, id: string): Promise<SmartDocRow | null> {
   return env.DB.prepare(
-    `SELECT id, title, owner, banner_asset_id, visibility, created_at, updated_at
+    `SELECT id, title, owner, banner_asset_id, visibility, kind, created_at, updated_at
      FROM collab_smartdocs WHERE id = ?`,
   ).bind(id).first<SmartDocRow>();
 }
 
-async function listSmartDocs(env: Env, username: string): Promise<Response> {
+async function listSmartDocs(env: Env, username: string, kind: SmartDocKind): Promise<Response> {
   const result = await env.DB.prepare(
-    `SELECT id, title, owner, banner_asset_id, visibility, created_at, updated_at
-     FROM collab_smartdocs ORDER BY updated_at DESC, title COLLATE NOCASE`,
-  ).all<SmartDocRow>();
+    `SELECT id, title, owner, banner_asset_id, visibility, kind, created_at, updated_at
+     FROM collab_smartdocs WHERE kind = ? ORDER BY updated_at DESC, title COLLATE NOCASE`,
+  ).bind(kind).all<SmartDocRow>();
   const documents = await Promise.all((result.results ?? []).map(async (row) => {
     const permission = await getSmartDocPermission(env, username, row.id);
     if (!permission) return null;
@@ -71,6 +73,7 @@ async function listSmartDocs(env: Env, username: string): Promise<Response> {
       owner: row.owner,
       bannerAssetId: row.banner_asset_id,
       visibility: row.visibility,
+      kind: row.kind,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       permission,
@@ -87,14 +90,20 @@ async function createSmartDoc(request: Request, env: Env, username: string): Pro
     ? payload.title.trim().replace(/\s+/g, ' ').slice(0, 100)
     : '';
   if (!title) return smartDocsJson({ error: 'Add a title for this Smart Doc.' }, 400);
+  const kind: SmartDocKind = payload?.kind === 'smarttodo' ? 'smarttodo' : 'smartdoc';
   const id = crypto.randomUUID();
   const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO collab_smartdocs (id, title, owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(id, title, username, now, now).run();
-  await grantSmartDocPermission(env, id, username, 'edit');
+    `INSERT INTO collab_smartdocs (id, title, owner, kind, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(id, title, username, kind, now, now).run();
+  await grantSmartDocPermission(env, id, username, 'edit', kind);
   await env.SMARTDOC_ROOM.getByName(id).initialize();
+  if (kind === 'smarttodo') {
+    await env.SMARTDOC_ROOM.getByName(id).initializeMarkdown(
+      `# ${title}\n\n> Personal todo notes. Pin this document in a chat to let everyone in that chat edit it.\n\n## To-do list\n\n- [ ] **Task** — Owner: ${username} · Priority: Normal · Due: YYYY-MM-DD\n\n## Post notes\n\nCapture context, links, decisions, and reference details here.\n\n## Follow-up\n\n- Next action:\n- Owner:\n- Target date:\n`,
+    );
+  }
   return smartDocsJson({
     document: {
       id,
@@ -102,6 +111,7 @@ async function createSmartDoc(request: Request, env: Env, username: string): Pro
       owner: username,
       bannerAssetId: null,
       visibility: 'private',
+      kind,
       createdAt: now,
       updatedAt: now,
       permission: 'edit',
@@ -126,9 +136,9 @@ async function listAccess(env: Env, username: string, id: string): Promise<Respo
   }
   const members = await env.DB.prepare(
     `SELECT username, permission FROM collab_document_permissions
-     WHERE document_type = 'smartdoc' AND document_id = ?
+     WHERE document_type = ? AND document_id = ?
      ORDER BY username COLLATE NOCASE`,
-  ).bind(id).all<{ username: string; permission: CollabPermission }>();
+  ).bind(document.kind, id).all<{ username: string; permission: CollabPermission }>();
   return smartDocsJson({
     members: [
       { username: document.owner, permission: 'edit' as const, owner: true },
@@ -165,12 +175,12 @@ async function updateAccess(
   if (!account) return smartDocsJson({ error: 'That account was not found.' }, 404);
 
   if (permission === 'view' || permission === 'edit') {
-    await grantSmartDocPermission(env, id, account.username, permission);
+    await grantSmartDocPermission(env, id, account.username, permission, document.kind);
   } else if (permission === 'remove') {
     await env.DB.prepare(
       `DELETE FROM collab_document_permissions
-       WHERE document_type = 'smartdoc' AND document_id = ? AND username = ? COLLATE NOCASE`,
-    ).bind(id, account.username).run();
+       WHERE document_type = ? AND document_id = ? AND username = ? COLLATE NOCASE`,
+    ).bind(document.kind, id, account.username).run();
   } else {
     return smartDocsJson({ error: 'Choose view or edit access.' }, 400);
   }
@@ -410,7 +420,7 @@ async function deleteSmartDoc(
   await env.DB.batch([
     env.DB.prepare('DELETE FROM collab_smartdoc_media WHERE document_id = ?').bind(id),
     env.DB.prepare(
-      `DELETE FROM collab_document_permissions WHERE document_type = 'smartdoc' AND document_id = ?`,
+      `DELETE FROM collab_document_permissions WHERE document_type IN ('smartdoc', 'smarttodo') AND document_id = ?`,
     ).bind(id),
     env.DB.prepare('DELETE FROM collab_smartdoc_drive_assets WHERE document_id = ?').bind(id),
     env.DB.prepare('DELETE FROM collab_smartdocs WHERE id = ?').bind(id),
@@ -449,7 +459,7 @@ async function routeSmartDocsApi(request: Request, env: Env, username: string): 
   }
   await ensureCollabSchema(env);
   if (url.pathname === '/api/collab/smartdocs' && request.method === 'GET') {
-    return listSmartDocs(env, username);
+    return listSmartDocs(env, username, url.searchParams.get('kind') === 'smarttodo' ? 'smarttodo' : 'smartdoc');
   }
   if (url.pathname === '/api/collab/smartdocs' && request.method === 'POST') {
     return createSmartDoc(request, env, username);

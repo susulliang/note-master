@@ -196,6 +196,7 @@ export interface FlowNodeProps {
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
+  disabled?: boolean;
   /** Visible textarea rows (defaults to 2) */
   textareaRows?: number;
   /** Focus this node's input once on mount (initial page focus target) */
@@ -616,6 +617,7 @@ function FlowNodeComponent({
   enablePinBubble = false,
   phonetic = false,
   headerTag,
+  disabled = false,
   panelContent,
   hangUpLoading = false,
   addressCount,
@@ -1061,6 +1063,7 @@ function FlowNodeComponent({
             ref={textareaRef}
             data-field-id={id}
             value={strValue}
+            disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
             onFocus={handleFocus}
             onBlur={onBlur}
@@ -1080,6 +1083,7 @@ function FlowNodeComponent({
               type={inputType}
               data-field-id={id}
               value={strValue}
+              disabled={disabled}
               onChange={(e) => onChange(e.target.value)}
               onFocus={handleFocus}
               onBlur={onBlur}

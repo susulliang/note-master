@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { COMMUNE_HANGOUTS } from '@shared/commune-hangouts';
 
 const WORLD_W = 3200;
 const WORLD_H = 2400;
@@ -43,6 +44,7 @@ type RenderActor = {
   says?: { text: string; until: number } | null;
   carId?: string | null;
   carSeat?: number | null;
+  hangoutId?: string | null;
 };
 
 type RenderCar = {
@@ -248,6 +250,50 @@ function addBuilding(
   roof.receiveShadow = true;
   parent.add(roof);
   addBox(parent, x, 4, z + depth * 0.505, width * 0.22, height * 0.58, 3, '#654a36');
+}
+
+function addTent(parent: THREE.Object3D, x: number, z: number, color: string): void {
+  addGroundDisc(parent, x, z, 66, 54, '#55764e', 3, 8);
+  const canopy = new THREE.Mesh(
+    new THREE.ConeGeometry(62, 82, 4),
+    material(color),
+  );
+  canopy.rotation.y = Math.PI / 4;
+  canopy.position.set(x, 43, z);
+  canopy.castShadow = true;
+  canopy.receiveShadow = true;
+  parent.add(canopy);
+  addBox(parent, x, 3, z + 44, 25, 37, 4, '#443a30');
+  addBox(parent, x - 28, 5, z + 27, 3, 52, 3, '#d6bd8d');
+  addBox(parent, x + 28, 5, z + 27, 3, 52, 3, '#d6bd8d');
+}
+
+function drawHangoutLabel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  title: string,
+  occupants: readonly string[],
+  capacity: number,
+): void {
+  const lines = [`${title} · ${occupants.length}/${capacity}`, ...(occupants.length ? occupants : ['E · ENTER TO CHILL'])];
+  ctx.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
+  const width = Math.min(232, Math.max(118, ...lines.map((line) => Math.ceil(ctx.measureText(line).width) + 16)));
+  const height = lines.length * 14 + 6;
+  const left = Math.round(x - width / 2);
+  const top = Math.round(y - height);
+  ctx.fillStyle = 'rgba(36, 28, 19, 0.72)';
+  ctx.fillRect(left + 2, top + 3, width, height);
+  ctx.fillStyle = '#785a3c';
+  ctx.fillRect(left, top, width, height);
+  ctx.fillStyle = '#f0dfb9';
+  ctx.fillRect(left + 2, top + 2, width - 4, height - 4);
+  ctx.fillStyle = '#493927';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, index) => {
+    ctx.fillText(line, Math.round(x), top + 8 + index * 14, width - 10);
+  });
 }
 
 function addTreeInstances(scene: THREE.Scene, positions: readonly [number, number][]): void {
@@ -912,7 +958,11 @@ export class CommuneThreeRenderer {
     addPath(this.scene, [[940, 680], [1350, 680], [1700, 680], [2110, 720], [2440, 790]], 40, pathColor);
     addPath(this.scene, [[1510, 680], [1630, 1000], [1830, 1280]], 38, pathColor);
     addPath(this.scene, [[1900, 1380], [2250, 1500], [2660, 1760]], 38, pathColor);
-    addPath(this.scene, [[1440, 1050], [1460, 1420], [1580, 1770], [1840, 2040]], 38, pathColor);
+    addPath(this.scene, [[1440, 1050], [1460, 1420], [1580, 1770]], 38, pathColor);
+    addPath(this.scene, [[1580, 1770], [1630, 1782], [1680, 1780]], 34, pathColor);
+    addPath(this.scene, [[1680, 1780], [1810, 1774], [1940, 1795]], 34, pathColor);
+    addPath(this.scene, [[1940, 1795], [2035, 1810], [2130, 1795]], 34, pathColor);
+    addPath(this.scene, [[2130, 1795], [2255, 1770], [2370, 1710]], 34, pathColor);
     addPath(this.scene, [[800, 1180], [900, 1540], [1065, 1815]], 34, pathColor);
     addPath(this.scene, [[1870, 1350], [2040, 1440], [2250, 1460]], 32, pathColor);
     addPath(this.scene, [[2490, 850], [2670, 1000], [2790, 1150]], 32, pathColor);
@@ -925,6 +975,16 @@ export class CommuneThreeRenderer {
     addBuilding(this.scene, 2420, 680, 112, 84, '#d0bd91', '#817c69', 60);
     addBuilding(this.scene, 1855, 1328, 98, 86, '#b6bd91', '#7e8b62', 54);
     addBuilding(this.scene, 2700, 1768, 98, 86, '#bdc4d0', '#657b8f', 58);
+    const villa = COMMUNE_HANGOUTS.find((hangout) => hangout.kind === 'villa');
+    if (villa) {
+      addBuilding(this.scene, villa.x, villa.y, villa.width, villa.depth, '#e0c99b', '#647e91', 100);
+      addBox(this.scene, villa.x - 22, 5, villa.y + villa.depth * 0.55, 44, 9, 54, '#785a3c');
+      addBox(this.scene, villa.x - 58, 52, villa.y + villa.depth * 0.51, 27, 28, 4, '#78a8b0');
+      addBox(this.scene, villa.x + 58, 52, villa.y + villa.depth * 0.51, 27, 28, 4, '#78a8b0');
+    }
+    const tents = COMMUNE_HANGOUTS.filter((hangout) => hangout.kind === 'tent');
+    if (tents[0]) addTent(this.scene, tents[0].x, tents[0].y, '#c88757');
+    if (tents[1]) addTent(this.scene, tents[1].x, tents[1].y, '#7e9a68');
 
     this.addFountain();
     this.addBoardAndStall();
@@ -1292,6 +1352,7 @@ export class CommuneThreeRenderer {
       const headingX = actor.headingX ?? 0;
       const headingY = actor.headingY ?? 1;
       const heading = Math.atan2(headingX, headingY);
+      const hideActor = !!actor.hangoutId;
       const shirtColor = actor.avatar?.shirt ?? actor.hue;
       const hairColor = actor.avatar?.hair ?? '#493a33';
       const bottomColor = actor.avatar?.bottomColor ?? '#424a4e';
@@ -1330,22 +1391,27 @@ export class CommuneThreeRenderer {
       this.transform.position.set(x, 25 + bob, z);
       this.transform.rotation.set(0, heading, 0);
       const hideFirstPersonHead = index === 0 && frame.zoom >= 5;
-      this.transform.scale.set(hideFirstPersonHead ? 0 : car ? 0.74 : 1, hideFirstPersonHead ? 0 : car ? 0.74 : 1, hideFirstPersonHead ? 0 : car ? 0.74 : 1);
+      const visibleScale = hideActor || hideFirstPersonHead ? 0 : car ? 0.74 : 1;
+      this.transform.scale.set(visibleScale, visibleScale, visibleScale);
       setInstance(this.actorBody, index, this.transform);
 
       this.transform.position.set(x, 43 + bob, z);
       this.transform.rotation.set(0, heading, 0);
-      this.transform.scale.setScalar(hideFirstPersonHead ? 0 : 1);
+      this.transform.scale.setScalar(hideActor || hideFirstPersonHead ? 0 : 1);
       setInstance(this.actorHead, index, this.transform);
 
       this.transform.position.set(x - headingX, 51 + bob, z - headingY);
       this.transform.rotation.set(0, heading, 0);
-      this.transform.scale.set(hideFirstPersonHead ? 0 : 1.02, hideFirstPersonHead ? 0 : 0.34, hideFirstPersonHead ? 0 : 0.92);
+      this.transform.scale.set(
+        hideActor || hideFirstPersonHead ? 0 : 1.02,
+        hideActor || hideFirstPersonHead ? 0 : 0.34,
+        hideActor || hideFirstPersonHead ? 0 : 0.92,
+      );
       setInstance(this.actorHair, index, this.transform);
 
       this.transform.position.set(x, 2, z);
       this.transform.rotation.set(-Math.PI / 2, 0, 0);
-      this.transform.scale.set(1, 1, 1);
+      this.transform.scale.setScalar(hideActor ? 0 : 1);
       setInstance(this.actorShadows, index, this.transform);
 
       for (let leg = 0; leg < 2; leg++) {
@@ -1358,7 +1424,7 @@ export class CommuneThreeRenderer {
           z + headingX * side + headingY * step
         );
         this.transform.rotation.set(0, heading, 0);
-        this.transform.scale.set(1, 1, 1);
+        this.transform.scale.setScalar(hideActor ? 0 : 1);
         setInstance(this.actorArms, limbIndex, this.transform);
         this.transform.position.y = 16 + bob + Math.abs(step) * 0.35;
         setInstance(this.actorHands, limbIndex, this.transform);
@@ -1368,7 +1434,7 @@ export class CommuneThreeRenderer {
           9 + bob,
           z + headingX * (leg ? 4 : -4) + headingY * step
         );
-        this.transform.scale.set(1, 1, 1);
+        this.transform.scale.setScalar(hideActor ? 0 : 1);
         setInstance(this.actorLegs, limbIndex, this.transform);
       }
     }
@@ -1680,7 +1746,7 @@ export class CommuneThreeRenderer {
       }
     }
     const drawActorLabel = (actor: RenderActor) => {
-      if (actor.carId) return;
+      if (actor.carId || actor.hangoutId) return;
       const visual = this.visualPositions.get(actor.name);
       const actorX = visual?.x ?? actor.x;
       const actorZ = visual?.z ?? actor.y;
@@ -1705,5 +1771,23 @@ export class CommuneThreeRenderer {
     drawActorLabel(frame.player);
     for (const npc of frame.npcs) drawActorLabel(npc);
     for (const remote of frame.remotes) drawActorLabel(remote);
+    for (const hangout of COMMUNE_HANGOUTS) {
+      const occupants = [frame.player, ...frame.remotes]
+        .filter((actor) => actor.hangoutId === hangout.id)
+        .map((actor) => actor.name)
+        .slice(0, hangout.capacity);
+      const height = hangout.kind === 'villa' ? 122 : 90;
+      this.projectedPoint.set(hangout.x, height, hangout.y).project(this.activeCamera);
+      const point = this.projectedPoint;
+      if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
+      drawHangoutLabel(
+        ctx,
+        (point.x * 0.5 + 0.5) * this.width,
+        (-point.y * 0.5 + 0.5) * this.height,
+        hangout.label.toUpperCase(),
+        occupants,
+        hangout.capacity,
+      );
+    }
   }
 }

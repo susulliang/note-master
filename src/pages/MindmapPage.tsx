@@ -41,6 +41,7 @@ interface MindmapPageProps {
   initialDocumentId?: string;
   initialDocument?: CollabDocument;
   embedded?: boolean;
+  onDocumentChange?: (documentId: string | null) => void;
 }
 
 interface MindmapNode {
@@ -91,6 +92,7 @@ export default function MindmapPage({
   initialDocumentId,
   initialDocument,
   embedded = false,
+  onDocumentChange,
 }: MindmapPageProps) {
   const [maps, setMaps] = useState<CollabDocument[]>(() => {
     const cached = loadCollabDirectoryCache<CollabDocument>(username, 'mindmap');
@@ -179,10 +181,19 @@ export default function MindmapPage({
   }, [initialDocument, maps, username]);
 
   useEffect(() => {
-    if (!initialDocumentId || activeMap?.id === initialDocumentId) return;
+    if (loadingMaps) return;
+    if (!initialDocumentId) {
+      if (!embedded && !initialDocument) setActiveMap(null);
+      return;
+    }
+    if (activeMap?.id === initialDocumentId) return;
     const match = maps.find((map) => map.id === initialDocumentId);
     if (match) setActiveMap(match);
-  }, [activeMap, initialDocumentId, maps]);
+    else {
+      setActiveMap(null);
+      onDocumentChange?.(null);
+    }
+  }, [activeMap, embedded, initialDocument, initialDocumentId, loadingMaps, maps, onDocumentChange]);
 
   useEffect(() => {
     if (!activeMap) return;
@@ -578,6 +589,7 @@ export default function MindmapPage({
       const document = await createCollabMindmap(title.trim());
       setMaps((current) => [document, ...current]);
       setActiveMap(document);
+      onDocumentChange?.(document.id);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create this mind map.');
     } finally {
@@ -621,7 +633,10 @@ export default function MindmapPage({
         ) : maps.length ? (
           <div className="mindmap-list">
             {maps.map((map) => (
-              <button key={map.id} type="button" className="mindmap-list-card" onClick={() => setActiveMap(map)}>
+              <button key={map.id} type="button" className="mindmap-list-card" onClick={() => {
+                setActiveMap(map);
+                onDocumentChange?.(map.id);
+              }}>
                 <span className="mindmap-list-icon"><GitBranch className="size-5" /></span>
                 <span><strong>{map.title}</strong><small>{map.owner === username ? 'You own this map' : `Shared by ${map.owner}`}</small></span>
                 <small className="mindmap-date">{new Date(map.updatedAt).toLocaleDateString()}</small>
@@ -650,6 +665,7 @@ export default function MindmapPage({
           {!embedded && (
             <button type="button" className="mindmap-icon-button" aria-label="Back to mind maps" onClick={() => {
               setActiveMap(null);
+              onDocumentChange?.(null);
               void refreshMaps();
             }}><ArrowLeft className="size-4" /></button>
           )}

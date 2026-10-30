@@ -5,6 +5,7 @@ import {
   Bold,
   BarChart3,
   Check,
+  CheckSquare2,
   ClipboardPaste,
   Copy,
   Download,
@@ -45,13 +46,13 @@ import {
   FileSpreadsheet,
   GitBranch,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from 'react';
 import { toast } from 'sonner';
-import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
+import ChatAvatar from '@/components/ChatAvatar';
 import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import DriveMediaPreviewDialog from '@/components/DriveMediaPreviewDialog';
 import {
@@ -102,12 +103,14 @@ import {
 } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
+import { readRecentChatRoom, rememberRecentChatRoom } from '@/lib/workspace-recent';
 import './ChatPage.css';
 
 const EmbeddedSheetsPage = lazy(() => import('@/pages/SheetsPage'));
 const EmbeddedMindmapPage = lazy(() => import('@/pages/MindmapPage'));
 const EmbeddedSmartDocPreview = lazy(() => import('@/pages/SmartDocsPage')
   .then((module) => ({ default: module.SmartDocPinnedPreview })));
+const EmbeddedSmartTodosPage = lazy(() => import('@/pages/SmartTodosPage'));
 
 const CHAT_HISTORY_WIDTH_KEY = 'econote_chat_history_width';
 const MIN_CHAT_HISTORY_WIDTH = 190;
@@ -191,6 +194,13 @@ function PinnedDocumentPane({
                 username={username}
                 initialDocumentId={document.id}
                 initialDocument={document}
+                embedded
+              />
+            ) : document.type === 'smarttodo' ? (
+              <EmbeddedSmartTodosPage
+                key={`smarttodo:${document.id}`}
+                username={username}
+                initialDocumentId={document.id}
                 embedded
               />
             ) : (
@@ -1190,19 +1200,40 @@ export default function ChatPage({
   onNotificationRoomHandled,
 }: ChatPageProps) {
   const navigate = useNavigate();
-  const [activeRoom, setActiveRoom] = useState<ActiveRoom>({
-    roomId: 'global',
-    title: 'Ecovacs crew',
-    kind: 'global',
-  });
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  const roomRouteLoadRef = useRef('');
+  const initialRoomId = notificationRoomId
+    || new URLSearchParams(location.search).get('roomId')
+    || readRecentChatRoom(username)
+    || 'global';
+  const cachedConversations = useMemo(() => loadChatConversationCache(username), [username]);
+  const initialConversation = cachedConversations.find((item) => item.roomId === initialRoomId);
+  const [activeRoom, setActiveRoom] = useState<ActiveRoom>(initialRoomId === 'global'
+    ? { roomId: 'global', title: 'Ecovacs crew', kind: 'global' }
+    : initialConversation
+      ? {
+          roomId: initialConversation.roomId,
+          title: initialConversation.title,
+          kind: initialConversation.kind,
+          peerUsername: initialConversation.peerUsername,
+          memberCount: initialConversation.memberCount,
+          peerAvatar: initialConversation.peerAvatar,
+        }
+      : {
+          roomId: initialRoomId,
+          title: 'Loading conversation…',
+          kind: initialRoomId.startsWith('dm-') ? 'direct' : 'group',
+        });
   const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>(
-    () => peekChatRoomCache(username, 'global')?.messages ?? [],
+    () => peekChatRoomCache(username, initialRoomId)?.messages ?? [],
   );
   const [conversations, setConversations] = useState<ChatConversation[]>(
-    () => loadChatConversationCache(username),
+    () => cachedConversations,
   );
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'offline'>('connecting');
   const [hasDraft, setHasDraft] = useState(false);
@@ -1217,7 +1248,7 @@ export default function ChatPage({
   const [linkUrl, setLinkUrl] = useState('');
   const [mobileRoomOpen, setMobileRoomOpen] = useState(true);
   const [hasOlderMessages, setHasOlderMessages] = useState(
-    () => peekChatRoomCache(username, 'global')?.hasOlder ?? false,
+    () => peekChatRoomCache(username, initialRoomId)?.hasOlder ?? false,
   );
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [newChatMode, setNewChatMode] = useState<'direct' | 'group'>('direct');
@@ -1341,6 +1372,16 @@ export default function ChatPage({
     message.source === 'chat' && message.username.toLowerCase() === username.toLowerCase()
   ), [username]);
 
+  const syncRoomUrl = useCallback((roomId: string) => {
+    rememberRecentChatRoom(username, roomId);
+    const current = locationRef.current;
+    if (current.pathname !== '/chat') return;
+    const params = new URLSearchParams(current.search);
+    if (params.get('roomId') === roomId) return;
+    params.set('roomId', roomId);
+    navigate(`/chat?${params.toString()}`, { replace: current.search.length === 0 });
+  }, [navigate, username]);
+
   const selectChatRoom = useCallback((room: ActiveRoom) => {
     const cached = peekChatRoomCache(username, room.roomId);
     setMessages(cached?.messages ?? []);
@@ -1363,7 +1404,82 @@ export default function ChatPage({
       : current);
     setActiveRoom(room);
     setMobileRoomOpen(true);
-  }, [username]);
+    syncRoomUrl(room.roomId);
+  }, [syncRoomUrl, username]);
+
+  useEffect(() => {
+    if (location.pathname !== '/chat' || notificationRoomId) return undefined;
+    const params = new URLSearchParams(location.search);
+    const requestedRoomId = notificationRoomId
+      || params.get('roomId')
+      || readRecentChatRoom(username)
+      || 'global';
+    if (!params.has('roomId') && !notificationRoomId) syncRoomUrl(requestedRoomId);
+    if (requestedRoomId === 'global') {
+      if (activeRoom.roomId !== 'global') {
+        selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
+      }
+      return undefined;
+    }
+    const conversation = conversations.find((item) => item.roomId === requestedRoomId);
+    if (conversation) {
+      if (activeRoom.roomId !== conversation.roomId) {
+        selectChatRoom({
+          roomId: conversation.roomId,
+          title: conversation.title,
+          kind: conversation.kind,
+          peerUsername: conversation.peerUsername,
+          memberCount: conversation.memberCount,
+          peerAvatar: conversation.peerAvatar,
+        });
+      }
+      roomRouteLoadRef.current = '';
+      return undefined;
+    }
+    if (roomRouteLoadRef.current === requestedRoomId) return undefined;
+    roomRouteLoadRef.current = requestedRoomId;
+    let alive = true;
+    void fetchChatConversations()
+      .then((items) => {
+        if (!alive) return;
+        setConversations(items);
+        const match = items.find((item) => item.roomId === requestedRoomId);
+        if (match) {
+          selectChatRoom({
+            roomId: match.roomId,
+            title: match.title,
+            kind: match.kind,
+            peerUsername: match.peerUsername,
+            memberCount: match.memberCount,
+            peerAvatar: match.peerAvatar,
+          });
+        } else {
+          roomRouteLoadRef.current = '';
+          rememberRecentChatRoom(username, 'global');
+          syncRoomUrl('global');
+          selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
+        }
+      })
+      .catch(() => {
+        if (!alive) return;
+        roomRouteLoadRef.current = '';
+        selectChatRoom({ roomId: 'global', title: globalTitle, kind: 'global' });
+      });
+    return () => {
+      alive = false;
+      if (roomRouteLoadRef.current === requestedRoomId) roomRouteLoadRef.current = '';
+    };
+  }, [
+    activeRoom.roomId,
+    conversations,
+    globalTitle,
+    location.pathname,
+    location.search,
+    notificationRoomId,
+    selectChatRoom,
+    syncRoomUrl,
+    username,
+  ]);
 
   useEffect(() => {
     if (!('Notification' in window) || Notification.permission !== 'default') return;
@@ -3134,9 +3250,9 @@ export default function ChatPage({
             </div>
           )
           : (
-            <PixelHumanoidAvatar
-              seed={conversation.peerAvatar?.seed ?? avatarSeed(directPeer ?? conversation.title)}
-              rotation={conversation.peerAvatar?.rotation ?? 0}
+            <ChatAvatar
+              username={directPeer ?? conversation.title}
+              profile={conversation.peerAvatar}
               size={chatListPreferences.density === 'compact' ? 32 : 40}
               className="shrink-0 rounded-full border border-border/70 bg-background/70"
             />
@@ -3279,9 +3395,9 @@ export default function ChatPage({
           </div>
 
           <div className="mt-auto flex items-center gap-3 border-t border-border/60 px-4 py-3">
-            <PixelHumanoidAvatar
-              seed={avatarProfile?.seed ?? avatarSeed(username)}
-              rotation={avatarProfile?.rotation ?? 0}
+            <ChatAvatar
+              username={username}
+              profile={avatarProfile}
               size={32}
               className="shrink-0 rounded-full border border-border/60"
             />
@@ -3351,9 +3467,9 @@ export default function ChatPage({
                 ? <Globe2 className="size-[18px]" />
                 : activeRoom.kind === 'group'
                   ? <Group className="size-[18px]" />
-                  : <PixelHumanoidAvatar
-                    seed={activeRoom.peerAvatar?.seed ?? avatarSeed(activeRoom.title)}
-                    rotation={activeRoom.peerAvatar?.rotation ?? 0}
+                  : <ChatAvatar
+                    username={activeRoom.peerUsername ?? activeRoom.title}
+                    profile={activeRoom.peerAvatar}
                     size={34}
                     className="rounded-lg"
                   />}
@@ -3431,7 +3547,9 @@ export default function ChatPage({
                         ? <FileSpreadsheet className="size-3 shrink-0" />
                         : pinnedDocument.type === 'mindmap'
                           ? <GitBranch className="size-3 shrink-0" />
-                          : <FileText className="size-3 shrink-0" />}
+                          : pinnedDocument.type === 'smarttodo'
+                            ? <CheckSquare2 className="size-3 shrink-0" />
+                            : <FileText className="size-3 shrink-0" />}
                       <span className="truncate">{pinnedDocument.title}</span>
                       <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
                         {pinnedDocument.permission === 'edit' ? 'Edit' : 'View'}
@@ -3599,9 +3717,9 @@ export default function ChatPage({
                       )}>
                         {news
                           ? <Globe2 className="size-3.5" />
-                          : <PixelHumanoidAvatar
-                            seed={message.avatar?.seed ?? avatarSeed(message.username)}
-                            rotation={message.avatar?.rotation ?? 0}
+                          : <ChatAvatar
+                            username={message.username}
+                            profile={message.avatar}
                             size={32}
                             className="rounded-full"
                           />}
@@ -4555,6 +4673,8 @@ export default function ChatPage({
                           ? <FileSpreadsheet className="size-4" />
                           : pinnedDocument.type === 'mindmap'
                             ? <GitBranch className="size-4" />
+                          : pinnedDocument.type === 'smarttodo'
+                            ? <CheckSquare2 className="size-4" />
                             : <FileText className="size-4" />}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -4575,7 +4695,11 @@ export default function ChatPage({
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Chat access</p>
                         {pinnedDocument.owner === username && (
-                          <span className="text-[9px] text-muted-foreground">View by default · choose edit when needed</span>
+                          <span className="text-[9px] text-muted-foreground">
+                            {pinnedDocument.type === 'smarttodo'
+                              ? 'Everyone in this chat can edit'
+                              : 'View by default · choose edit when needed'}
+                          </span>
                         )}
                       </div>
                       {pinnedDocument.owner === username ? (
@@ -4612,6 +4736,8 @@ export default function ChatPage({
                                 <span className="min-w-0 flex-1 truncate text-xs">{member.username}{member.owner ? ' · owner' : ''}</span>
                                 {member.owner ? (
                                   <span className="text-[10px] text-accent">Edit</span>
+                                ) : pinnedDocument.type === 'smarttodo' ? (
+                                  <span className="text-[10px] text-accent">Edit</span>
                                 ) : (
                                   <select
                                     value={member.permission}
@@ -4641,7 +4767,9 @@ export default function ChatPage({
                         </>
                       ) : (
                         <p className="text-[10px] leading-relaxed text-muted-foreground">
-                          {pinnedDocument.visibility === 'registered'
+                          {pinnedDocument.type === 'smarttodo'
+                            ? 'Everyone in this chat has edit access while this Smart Todo is pinned.'
+                            : pinnedDocument.visibility === 'registered'
                             ? 'Anyone registered can view this Smart Doc. The document owner controls edit access.'
                             : 'Everyone in this chat has view access. The document owner can promote specific people to edit.'}
                         </p>
@@ -4663,14 +4791,20 @@ export default function ChatPage({
                     <option value="">Select a Collab Space document…</option>
                     {pinnableDocuments.map((document) => (
                       <option key={`${document.type}:${document.id}`} value={`${document.type}:${document.id}`}>
-                        {document.type === 'sheet' ? 'Sheet' : document.type === 'mindmap' ? 'Mind map' : 'Smart Doc'}
+                        {document.type === 'sheet'
+                          ? 'Sheet'
+                          : document.type === 'mindmap'
+                            ? 'Mind map'
+                            : document.type === 'smarttodo'
+                              ? 'Smart Todo'
+                              : 'Smart Doc'}
                         {document.visibility === 'registered' ? ' · Public' : ''} · {document.title}
                       </option>
                     ))}
                   </select>
                   {pinnableDocuments.length === 0 && (
                     <p className="mt-2 text-[10px] text-muted-foreground">
-                      You need edit access for private documents. Registered-visible Smart Docs can be pinned by any chat member.
+                      You need edit access for private documents. Registered-visible Smart Docs can be pinned by any chat member. Smart Todos become editable by everyone in the chat while pinned.
                       <button
                         type="button"
                         onClick={() => {
@@ -4682,7 +4816,9 @@ export default function ChatPage({
                     </p>
                   )}
                   <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    Pinning automatically gives chat members view access. Editing stays limited to document collaborators you promote.
+                    {pinnedDocument?.type === 'smarttodo'
+                      ? 'Everyone in this chat can edit a pinned Smart Todo. Unpinning removes that inherited access.'
+                      : 'Pinning automatically gives chat members view access. Editing stays limited to document collaborators you promote.'}
                   </p>
                 </section>
               </div>
@@ -4828,9 +4964,9 @@ export default function ChatPage({
                       selected && newChatMode === 'group' && 'bg-accent/10',
                     )}
                   >
-                    <PixelHumanoidAvatar
-                      seed={person.avatar?.seed ?? avatarSeed(person.username)}
-                      rotation={person.avatar?.rotation ?? 0}
+                    <ChatAvatar
+                      username={person.username}
+                      profile={person.avatar}
                       size={40}
                       className="rounded-full border border-border/70"
                     />

@@ -19,6 +19,7 @@ export interface NotesFieldConfig {
   options?: string[];
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
+  disabled?: boolean;
   width?: number;
   textareaRows?: number;
   icon?: LucideIcon;
@@ -210,6 +211,7 @@ export function StructuredNotesWorkspace({
                       options={node.options}
                       accent={node.accent}
                       inputType={node.inputType}
+                      disabled={node.disabled || node.id === NODE_IDS.CONTACT_NUMBER || node.id === NODE_IDS.EMAIL_ADDRESS}
                       width={node.width}
                       textareaRows={node.textareaRows}
                       autoFocus={false}

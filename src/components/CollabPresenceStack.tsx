@@ -1,4 +1,4 @@
-import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
+import ChatAvatar from '@/components/ChatAvatar';
 
 export interface CollaboratorPresence {
   username: string;
@@ -10,14 +10,6 @@ export interface CollaboratorPresence {
 interface CollabPresenceStackProps {
   members: CollaboratorPresence[];
   viewer: string;
-}
-
-function fallbackSeed(username: string): number {
-  let hash = 2166136261;
-  for (const character of username.toLowerCase()) {
-    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  }
-  return hash >>> 0;
 }
 
 export default function CollabPresenceStack({ members, viewer }: CollabPresenceStackProps) {
@@ -45,9 +37,9 @@ export default function CollabPresenceStack({ members, viewer }: CollabPresenceS
             key={member.username}
             style={{ zIndex: 4 - index }}
           >
-            <PixelHumanoidAvatar
-              seed={member.seed ?? fallbackSeed(member.username)}
-              rotation={member.rotation ?? 0}
+            <ChatAvatar
+              username={member.username}
+              profile={{ seed: member.seed ?? 0, rotation: member.rotation ?? 0 }}
               size={24}
               className="rounded-full"
             />

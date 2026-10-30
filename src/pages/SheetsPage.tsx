@@ -70,6 +70,7 @@ interface SheetsPageProps {
   initialDocumentId?: string;
   initialDocument?: CollaborativeSheet;
   embedded?: boolean;
+  onDocumentChange?: (documentId: string | null) => void;
 }
 
 interface SheetRange {
@@ -168,6 +169,7 @@ export default function SheetsPage({
   initialDocumentId,
   initialDocument,
   embedded = false,
+  onDocumentChange,
 }: SheetsPageProps) {
   const [sheets, setSheets] = useState<CollaborativeSheet[]>(
     () => loadCollabDirectoryCache<CollaborativeSheet>(username, 'sheet'),
@@ -268,10 +270,19 @@ export default function SheetsPage({
   }, [initialDocument, sheets, username]);
 
   useEffect(() => {
-    if (!initialDocumentId || loadingSheets || activeSheet?.id === initialDocumentId) return;
+    if (loadingSheets) return;
+    if (!initialDocumentId) {
+      if (!embedded && !initialDocument) setActiveSheet(null);
+      return;
+    }
+    if (activeSheet?.id === initialDocumentId) return;
     const requested = sheets.find((sheet) => sheet.id === initialDocumentId);
     if (requested) setActiveSheet(requested);
-  }, [activeSheet, initialDocumentId, loadingSheets, sheets]);
+    else {
+      setActiveSheet(null);
+      onDocumentChange?.(null);
+    }
+  }, [activeSheet, embedded, initialDocument, initialDocumentId, loadingSheets, onDocumentChange, sheets]);
 
   useEffect(() => {
     if (!activeSheet) return;
@@ -948,6 +959,7 @@ export default function SheetsPage({
         const sheet = await createCollaborativeSheet(dialogTitle, selectedUsers);
         setSheets((current) => [sheet, ...current]);
         setActiveSheet(sheet);
+        onDocumentChange?.(sheet.id);
         toast.success('Collaborative sheet created');
       } else if (dialogMode === 'share' && activeSheet) {
         const members = await addSheetMembers(activeSheet.id, selectedUsers);
@@ -1096,7 +1108,10 @@ export default function SheetsPage({
                 type="button"
                 key={sheet.id}
                 className="sheets-list-card"
-                onClick={() => setActiveSheet(sheet)}
+                onClick={() => {
+                  setActiveSheet(sheet);
+                  onDocumentChange?.(sheet.id);
+                }}
               >
                 <span className="sheets-list-card-icon"><Grid2X2 className="size-5" /></span>
                 <span className="sheets-list-card-copy">
@@ -1243,6 +1258,7 @@ export default function SheetsPage({
           {!embedded && (
             <button type="button" className="sheets-icon-button" aria-label="Back to all sheets" onClick={() => {
               setActiveSheet(null);
+              onDocumentChange?.(null);
               void reloadSheets();
             }}>
               <ArrowLeft className="size-4" />

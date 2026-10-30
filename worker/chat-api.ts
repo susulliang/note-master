@@ -42,6 +42,7 @@ interface ChatProfileRow {
   username: string;
   avatar_seed: number;
   avatar_rotation: number;
+  avatar_asset_id: string | null;
 }
 
 interface GroupRow {
@@ -56,6 +57,8 @@ const MAX_IMAGE_BYTES = 512 * 1024;
 const MAX_CHAT_MEDIA_BYTES = 50 * 1024 * 1024;
 const CHAT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_STICKER_BYTES = 512 * 1024;
+const MAX_CHAT_AVATAR_BYTES = 128 * 1024;
+const MAX_CHAT_AVATAR_DIMENSION = 256;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
 const MEDIA_ID_RE = /^[0-9a-f-]{36}$/i;
 const STICKER_ID_RE = /^[0-9a-f-]{36}$/i;
@@ -117,9 +120,19 @@ async function ensureChatSchema(env: Env): Promise<void> {
       username TEXT PRIMARY KEY,
       avatar_seed INTEGER NOT NULL,
       avatar_rotation INTEGER NOT NULL DEFAULT 0,
+      avatar_asset_id TEXT,
       updated_at INTEGER NOT NULL
     )
   `).run();
+  const profileColumns = await env.DB.prepare('PRAGMA table_info(chat_profiles)').all<{ name: string }>();
+  if (!(profileColumns.results ?? []).some((column) => column.name === 'avatar_asset_id')) {
+    try {
+      await env.DB.prepare('ALTER TABLE chat_profiles ADD COLUMN avatar_asset_id TEXT').run();
+    } catch (error) {
+      const refreshed = await env.DB.prepare('PRAGMA table_info(chat_profiles)').all<{ name: string }>();
+      if (!(refreshed.results ?? []).some((column) => column.name === 'avatar_asset_id')) throw error;
+    }
+  }
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS chat_groups (
       room_id TEXT PRIMARY KEY,
@@ -200,16 +213,24 @@ async function registerConversation(
   ]);
 }
 
-async function getOrCreateProfile(env: Env, username: string): Promise<{ seed: number; rotation: number }> {
+async function getOrCreateProfile(env: Env, username: string): Promise<{
+  seed: number;
+  rotation: number;
+  avatarAssetId: string | null;
+}> {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
   await env.DB.prepare(
     `INSERT OR IGNORE INTO chat_profiles (username, avatar_seed, avatar_rotation, updated_at)
      VALUES (?, ?, 0, ?)`,
   ).bind(username, seed, Date.now()).run();
   const profile = await env.DB.prepare(
-    'SELECT username, avatar_seed, avatar_rotation FROM chat_profiles WHERE username = ?',
+    'SELECT username, avatar_seed, avatar_rotation, avatar_asset_id FROM chat_profiles WHERE username = ?',
   ).bind(username).first<ChatProfileRow>();
-  return { seed: Number(profile?.avatar_seed ?? seed), rotation: Number(profile?.avatar_rotation ?? 0) };
+  return {
+    seed: Number(profile?.avatar_seed ?? seed),
+    rotation: Number(profile?.avatar_rotation ?? 0),
+    avatarAssetId: profile?.avatar_asset_id ?? null,
+  };
 }
 
 async function handleProfileGet(env: Env, user: ChatUser): Promise<Response> {
@@ -236,6 +257,92 @@ async function handleProfileUpdate(request: Request, env: Env, user: ChatUser): 
     'UPDATE chat_profiles SET avatar_rotation = ?, updated_at = ? WHERE username = ?',
   ).bind(rotation, Date.now(), user.username).run();
   return chatJson({ ...profile, rotation });
+}
+
+async function handleProfileAvatarUpload(
+  request: Request,
+  env: Env,
+  user: ChatUser,
+): Promise<Response> {
+  const contentType = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+  if (contentType !== 'image/webp') {
+    return chatJson({ error: 'Avatar images must be uploaded as WebP.' }, 415);
+  }
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_CHAT_AVATAR_BYTES) {
+    return chatJson({ error: 'The compressed avatar must be 128 KB or smaller.' }, 413);
+  }
+  const bytes = await readLimitedBody(request, MAX_CHAT_AVATAR_BYTES);
+  if (!bytes) return chatJson({ error: 'The compressed avatar must be 128 KB or smaller.' }, 413);
+  const dimensions = readWebpDimensions(bytes);
+  if (
+    !dimensions ||
+    dimensions.width < 1 ||
+    dimensions.height < 1 ||
+    dimensions.width > MAX_CHAT_AVATAR_DIMENSION ||
+    dimensions.height > MAX_CHAT_AVATAR_DIMENSION
+  ) {
+    return chatJson({ error: 'Avatar images must be valid WebP and no larger than 256 × 256 pixels.' }, 415);
+  }
+
+  const profile = await getOrCreateProfile(env, user.username);
+  const avatarAssetId = crypto.randomUUID();
+  const objectKey = `chat-avatars/${user.username.toLowerCase()}/${avatarAssetId}.webp`;
+  try {
+    await env.CHAT_MEDIA_BUCKET.put(objectKey, bytes, {
+      httpMetadata: {
+        contentType: 'image/webp',
+        cacheControl: 'private, max-age=60',
+      },
+    });
+    await env.DB.prepare(
+      'UPDATE chat_profiles SET avatar_asset_id = ?, updated_at = ? WHERE username = ?',
+    ).bind(avatarAssetId, Date.now(), user.username).run();
+  } catch (error) {
+    await env.CHAT_MEDIA_BUCKET.delete(objectKey).catch(() => undefined);
+    console.error(JSON.stringify({ event: 'chat_avatar_upload_failed', error: String(error) }));
+    return chatJson({ error: 'Could not save your avatar.' }, 500);
+  }
+  if (profile.avatarAssetId) {
+    await env.CHAT_MEDIA_BUCKET.delete(
+      `chat-avatars/${user.username.toLowerCase()}/${profile.avatarAssetId}.webp`,
+    ).catch(() => undefined);
+  }
+  return chatJson({ ...profile, avatarAssetId }, 201);
+}
+
+async function handleProfileAvatarRemove(env: Env, user: ChatUser): Promise<Response> {
+  const profile = await getOrCreateProfile(env, user.username);
+  if (!profile.avatarAssetId) return chatJson(profile);
+  await env.DB.prepare(
+    'UPDATE chat_profiles SET avatar_asset_id = NULL, updated_at = ? WHERE username = ?',
+  ).bind(Date.now(), user.username).run();
+  await env.CHAT_MEDIA_BUCKET.delete(
+    `chat-avatars/${user.username.toLowerCase()}/${profile.avatarAssetId}.webp`,
+  ).catch(() => undefined);
+  return chatJson({ ...profile, avatarAssetId: null });
+}
+
+async function handleChatAvatarImage(
+  env: Env,
+  requestedUsername: string,
+): Promise<Response> {
+  const profile = await env.DB.prepare(
+    'SELECT username, avatar_asset_id FROM chat_profiles WHERE username = ? COLLATE NOCASE',
+  ).bind(requestedUsername).first<{ username: string; avatar_asset_id: string | null }>();
+  if (!profile?.avatar_asset_id) return chatJson({ error: 'Avatar not found.' }, 404);
+  const object = await env.CHAT_MEDIA_BUCKET.get(
+    `chat-avatars/${profile.username.toLowerCase()}/${profile.avatar_asset_id}.webp`,
+  );
+  if (!object) return chatJson({ error: 'Avatar not found.' }, 404);
+  return new Response(object.body, {
+    headers: {
+      'content-type': 'image/webp',
+      'cache-control': 'private, max-age=60',
+      'x-content-type-options': 'nosniff',
+      'access-control-allow-origin': '*',
+      ...(object.size ? { 'content-length': String(object.size) } : {}),
+    },
+  });
 }
 
 async function handleUsers(request: Request, env: Env, user: ChatUser): Promise<Response> {
@@ -463,7 +570,10 @@ async function handlePinDocument(
   if (request.method !== 'POST') return chatJson({ error: 'Method not allowed.' }, 405);
   const type = payload.documentType;
   const id = typeof payload.documentId === 'string' ? payload.documentId : '';
-  if ((type !== 'sheet' && type !== 'mindmap' && type !== 'smartdoc') || !/^[0-9a-f-]{36}$/i.test(id)) {
+  if (
+    (type !== 'sheet' && type !== 'mindmap' && type !== 'smartdoc' && type !== 'smarttodo') ||
+    !/^[0-9a-f-]{36}$/i.test(id)
+  ) {
     return chatJson({ error: 'Choose a valid Collab Space document.' }, 400);
   }
   const document = await getCollabDocument(env, type, id);
@@ -717,6 +827,48 @@ async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint
     offset += chunk.byteLength;
   }
   return body;
+}
+
+function readWebpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (
+    bytes.byteLength < 30 ||
+    new TextDecoder().decode(bytes.subarray(0, 4)) !== 'RIFF' ||
+    new TextDecoder().decode(bytes.subarray(8, 12)) !== 'WEBP'
+  ) return null;
+
+  for (let offset = 12; offset + 8 <= bytes.byteLength;) {
+    const type = new TextDecoder().decode(bytes.subarray(offset, offset + 4));
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset + 4, 4).getUint32(0, true);
+    const data = offset + 8;
+    if (data + length > bytes.byteLength) return null;
+    if (type === 'VP8X' && length >= 10) {
+      return {
+        width: 1 + bytes[data + 4]! + (bytes[data + 5]! << 8) + (bytes[data + 6]! << 16),
+        height: 1 + bytes[data + 7]! + (bytes[data + 8]! << 8) + (bytes[data + 9]! << 16),
+      };
+    }
+    if (type === 'VP8L' && length >= 5 && bytes[data] === 0x2f) {
+      const bits = new DataView(bytes.buffer, bytes.byteOffset + data + 1, 4).getUint32(0, true);
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >>> 14) & 0x3fff) + 1,
+      };
+    }
+    if (
+      type === 'VP8 ' &&
+      length >= 10 &&
+      bytes[data + 3] === 0x9d &&
+      bytes[data + 4] === 0x01 &&
+      bytes[data + 5] === 0x2a
+    ) {
+      return {
+        width: (bytes[data + 6]! | (bytes[data + 7]! << 8)) & 0x3fff,
+        height: (bytes[data + 8]! | (bytes[data + 9]! << 8)) & 0x3fff,
+      };
+    }
+    offset = data + length + (length & 1);
+  }
+  return null;
 }
 
 async function handleMediaUpload(
@@ -978,6 +1130,22 @@ export async function handleChatApi(
   }
   if (url.pathname === '/api/chat/profile' && request.method === 'POST') {
     return handleProfileUpdate(request, env, user);
+  }
+  if (url.pathname === '/api/chat/profile/avatar' && request.method === 'POST') {
+    return handleProfileAvatarUpload(request, env, user);
+  }
+  if (url.pathname === '/api/chat/profile/avatar' && request.method === 'DELETE') {
+    return handleProfileAvatarRemove(env, user);
+  }
+  const avatarMatch = /^\/api\/chat\/avatar\/([^/]+)$/.exec(url.pathname);
+  if (avatarMatch && request.method === 'GET') {
+    let username: string;
+    try {
+      username = decodeURIComponent(avatarMatch[1]);
+    } catch {
+      return chatJson({ error: 'Avatar not found.' }, 404);
+    }
+    return handleChatAvatarImage(env, username);
   }
   if (url.pathname === '/api/chat/groups' && request.method === 'POST') {
     return handleCreateGroup(request, env, user);

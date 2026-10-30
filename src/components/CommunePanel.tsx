@@ -44,6 +44,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import {
+  COMMUNE_HANGOUTS,
+  COMMUNE_HANGOUT_ENTER_RANGE,
+  COMMUNE_HANGOUT_EXIT_OFFSET,
+  type CommuneHangout,
+  type CommuneHangoutId,
+} from '@shared/commune-hangouts';
 import CommuneBoardSketchPad, { CommuneBoardSketchPreview } from '@/components/CommuneBoardSketchPad';
 import {
   communeSocketUrl,
@@ -371,6 +378,8 @@ type CommuneAction =
   | { type: 'release-hands'; key: 'H'; label: string; username: string }
   | { type: 'enter-car'; key: 'E'; label: string; carId: CommuneCarId }
   | { type: 'exit-car'; key: 'E'; label: string }
+  | { type: 'enter-hangout'; key: 'E'; label: string; hangoutId: CommuneHangoutId }
+  | { type: 'exit-hangout'; key: 'E'; label: string }
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
   | { type: 'pond'; key: 'E'; label: string; pondId: (typeof PONDS)[number]['id'] }
@@ -385,6 +394,8 @@ function touchActionIcon(action: CommuneAction) {
   switch (action.type) {
     case 'enter-car': return <CarFront className="size-6" />;
     case 'exit-car': return <DoorOpen className="size-6" />;
+    case 'enter-hangout': return <Building2 className="size-6" />;
+    case 'exit-hangout': return <DoorOpen className="size-6" />;
     case 'sit':
     case 'stand': return <Armchair className="size-6" />;
     case 'challenge': return <Gamepad2 className="size-6" />;
@@ -406,6 +417,8 @@ function touchActionLabel(action: CommuneAction): string {
   switch (action.type) {
     case 'enter-car': return 'Drive';
     case 'exit-car': return 'Leave car';
+    case 'enter-hangout': return 'Go inside';
+    case 'exit-hangout': return 'Step outside';
     case 'sit': return 'Sit';
     case 'stand': return 'Stand';
     case 'challenge': return 'Talk';
@@ -482,6 +495,12 @@ const SOLID_RECTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 90, y: 1062, w: 246, h: 18 }, // west fence
   { x: 1310, y: 1062, w: 216, h: 18 }, // east fence
   { x: TREEHOLE.x - 26, y: TREEHOLE.y - 54, w: 52, h: 54 }, // treehole oak trunk
+  ...COMMUNE_HANGOUTS.map((hangout) => ({
+    x: hangout.x - hangout.width / 2,
+    y: hangout.y - hangout.depth / 2,
+    w: hangout.width,
+    h: hangout.depth,
+  })),
 ];
 /** Oaks drawn dynamically (y-sorted with agents). */
 const TREES: [number, number][] = [
@@ -592,6 +611,11 @@ interface DuckIncident { id: number; x: number; y: number; anchorX: number; vx: 
 const DUCK_LIFE_MS = 20_000;
 const DUCK_INCIDENT_LIFETIME_MS = 13_000;
 const SPEED = 240; // player px/s
+const AFK_AFTER_MS = 5 * 60_000;
+const PRESENCE_HEARTBEAT_MS = 15_000;
+const PRESENCE_ACK_TIMEOUT_MS = 50_000;
+const REMOTE_INTERPOLATION_DELAY_MS = 100;
+const REMOTE_MAX_EXTRAPOLATION_MS = 180;
 const CAR_MOVE_INTERVAL_MS = 80;
 const NPC_SPEED = 90;
 interface Banner extends CommuneBanner {
@@ -890,6 +914,7 @@ interface Agent {
   says: Speech | null;
   /** Status line rendered under the name tag (remote agents). */
   status?: string;
+  isAfk?: boolean;
   /** Admin badge (gold star). */
   admin?: boolean;
   /** Public root marker reserved for the Super Admin. */
@@ -900,6 +925,8 @@ interface Agent {
   avatar?: CommuneAvatar | null;
   carId?: string | null;
   carSeat?: number | null;
+  hangoutId?: CommuneHangoutId | null;
+  hangoutSeat?: number | null;
   /** NPC-only: current waypoint + pause state. */
   target?: { x: number; y: number };
   pauseUntil?: number;
@@ -926,6 +953,8 @@ interface RemoteView {
   moving: boolean;
   bobPhase: number;
   carId?: string | null;
+  hangoutId?: CommuneHangoutId | null;
+  hangoutSeat?: number | null;
 }
 
 interface CommuneRoomIncoming {
@@ -1144,7 +1173,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const faqRequestRef = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [squareMessages, setSquareMessages] = useState<SquareChatMessage[]>([]);
-  const [carChatMessages, setCarChatMessages] = useState<CarChatMessage[]>([]);
+  const [interiorChatMessages, setInteriorChatMessages] = useState<CarChatMessage[]>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   /* ── agent→agent interactions ──────────────────────────────────────────────── */
   /** Direct-chat target (selected from a profile or bump interaction). */
@@ -1154,6 +1183,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [carSeat, setCarSeat] = useState<{ carId: CommuneCarId; seat: number } | null>(null);
   const carSeatRef = useRef(carSeat);
   carSeatRef.current = carSeat;
+  const [hangout, setHangout] = useState<{ id: CommuneHangoutId; seat: number } | null>(null);
+  const hangoutRef = useRef(hangout);
+  hangoutRef.current = hangout;
   /** Banners popped by direct messages from other agents. */
   const [inbox, setInbox] = useState<{ from: string; message: string }[]>([]);
   /** Hand-holding: { partner, lead } — the first agent to press H leads. */
@@ -1311,6 +1343,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   playerRef.current.hue = hueOf(username);
   playerRef.current.carId = carSeat?.carId ?? null;
   playerRef.current.carSeat = carSeat?.seat ?? null;
+  playerRef.current.hangoutId = hangout?.id ?? null;
+  playerRef.current.hangoutSeat = hangout?.seat ?? null;
   const npcsRef = useRef<Agent[]>([
     ...NPCS.map((n) => ({ x: n.home.x, y: n.home.y, name: n.name, hue: n.hue, says: null, target: { ...n.home }, pauseUntil: 0, nextLineAt: Date.now() + 4000 + Math.random() * 6000, bobPhase: Math.random() * 10 })),
     // Challenge NPCs stand in place (no target/line timer).
@@ -1355,13 +1389,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const socketRef = useRef<WebSocket | null>(null);
   const lastPositionSentAtRef = useRef(0);
   const lastPositionStatusRef = useRef('');
+  const lastPresenceReceivedAtRef = useRef(new Map<string, number>());
+  const [presenceNow, setPresenceNow] = useState(Date.now());
   /** Interpolated remote walkers, keyed by username. */
   const remoteRef = useRef(
     new Map<string, {
       rx: number;
       ry: number;
-      tx: number;
-      ty: number;
+      samples: Array<{ x: number; y: number; at: number }>;
       headingX: number;
       headingY: number;
       agent: CommuneAgent;
@@ -1372,6 +1407,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   );
   /** My current status, updated by the draw loop and sent over the room socket. */
   const statusRef = useRef('hanging out');
+  const lastInputAtRef = useRef(Date.now());
   const sendRoomEvent = useCallback((event: Record<string, unknown>): boolean => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -1382,6 +1418,34 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       return false;
     }
   }, []);
+
+  const getViewRadius = useCallback(() => {
+    const view = wrapRef.current;
+    const width = view?.clientWidth ?? 1_024;
+    const height = view?.clientHeight ?? 768;
+    const zoom = Math.max(0.25, mapZoomRef.current);
+    return Math.max(600, Math.min(4_000, Math.round(Math.hypot(width, height) / (2 * zoom) + 300)));
+  }, []);
+
+  useEffect(() => {
+    const markActive = () => {
+      lastInputAtRef.current = Date.now();
+    };
+    window.addEventListener('pointerdown', markActive, { passive: true });
+    window.addEventListener('keydown', markActive);
+    window.addEventListener('input', markActive, true);
+    return () => {
+      window.removeEventListener('pointerdown', markActive);
+      window.removeEventListener('keydown', markActive);
+      window.removeEventListener('input', markActive, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return undefined;
+    const timer = window.setInterval(() => setPresenceNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [selected]);
 
   const publishNearbyActions = useCallback((actions: CommuneAction[]) => {
     const signature = (items: CommuneAction[]) => JSON.stringify(items);
@@ -1651,6 +1715,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     let reconnectTimer = 0;
     let reconnectAttempt = 0;
     let dropRefreshTimer = 0;
+    let heartbeatTimer = 0;
+    let heartbeatWatchdogTimer = 0;
+    let lastHeartbeatAckAt = 0;
     let activeSocket: WebSocket | null = null;
 
     const refreshDrops = async () => {
@@ -1674,12 +1741,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
     const applySnapshot = (agents: CommuneAgent[]) => {
       remoteRef.current.clear();
+      lastPresenceReceivedAtRef.current.clear();
       for (const agent of agents) {
+        const at = performance.now();
         remoteRef.current.set(agent.username, {
           rx: agent.x,
           ry: agent.y,
-          tx: agent.x,
-          ty: agent.y,
+          samples: [{ x: agent.x, y: agent.y, at }],
           headingX: 0,
           headingY: 1,
           agent,
@@ -1687,6 +1755,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           bobPhase: Math.random() * 10,
           says: null,
         });
+        lastPresenceReceivedAtRef.current.set(agent.username, Date.now() - Math.max(0, agent.seenAgo));
       }
       setOthers(agents);
       const selectedAgent = selectedRef.current;
@@ -1697,19 +1766,27 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
     };
 
-    const upsertAgent = (agent: CommuneAgent) => {
+    const upsertAgent = (agent: CommuneAgent, compactMove = false) => {
       if (agent.username === username) return;
+      lastPresenceReceivedAtRef.current.set(agent.username, Date.now() - Math.max(0, agent.seenAgo));
       const remote = remoteRef.current.get(agent.username);
+      const previousAgent = remote?.agent;
       if (remote) {
-        remote.tx = agent.x;
-        remote.ty = agent.y;
+        const at = performance.now();
+        const lastSample = remote.samples[remote.samples.length - 1];
+        if (lastSample && lastSample.x === agent.x && lastSample.y === agent.y) {
+          lastSample.at = at;
+        } else {
+          remote.samples.push({ x: agent.x, y: agent.y, at });
+          if (remote.samples.length > 8) remote.samples.shift();
+        }
         remote.agent = agent;
       } else {
+        const at = performance.now();
         remoteRef.current.set(agent.username, {
           rx: agent.x,
           ry: agent.y,
-          tx: agent.x,
-          ty: agent.y,
+          samples: [{ x: agent.x, y: agent.y, at }],
           headingX: 0,
           headingY: 1,
           agent,
@@ -1718,12 +1795,24 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           says: null,
         });
       }
-      setOthers((current) => [...current.filter((item) => item.username !== agent.username), agent]);
-      if (selectedRef.current?.username === agent.username) setSelected(agent);
+      if (!compactMove) {
+        setOthers((current) => [...current.filter((item) => item.username !== agent.username), agent]);
+      }
+      if (
+        selectedRef.current?.username === agent.username &&
+        (!compactMove ||
+          previousAgent?.status !== agent.status ||
+          previousAgent?.isAfk !== agent.isAfk ||
+          previousAgent?.carId !== agent.carId ||
+          previousAgent?.carSeat !== agent.carSeat ||
+          previousAgent?.hangoutId !== agent.hangoutId ||
+          previousAgent?.hangoutSeat !== agent.hangoutSeat)
+      ) setSelected(agent);
     };
 
     const removeAgent = (agentName: string) => {
       remoteRef.current.delete(agentName);
+      lastPresenceReceivedAtRef.current.delete(agentName);
       setOthers((current) => current.filter((agent) => agent.username !== agentName));
       if (selectedRef.current?.username === agentName) {
         setSelected(null);
@@ -1772,12 +1861,22 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const scheduleReconnect = () => {
       if (stopped || reconnectTimer) return;
       setConnectionState('reconnecting');
+      const cap = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt, 5));
+      const delay = Math.round(cap * (0.5 + Math.random() * 0.5));
       reconnectAttempt += 1;
-      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt - 1, 5));
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = 0;
         void connect();
       }, delay);
+    };
+
+    const sendPresenceHeartbeat = () => {
+      const now = Date.now();
+      return sendRoomEvent({
+        type: 'heartbeat',
+        isAfk: document.visibilityState === 'hidden' || now - lastInputAtRef.current >= AFK_AFTER_MS,
+        viewRadius: getViewRadius(),
+      });
     };
 
     const connect = async () => {
@@ -1793,6 +1892,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           Math.round(player.x),
           Math.round(player.y),
           statusRef.current,
+          getViewRadius(),
         );
         if (stopped) return;
         dropsRef.current = bootstrap.drops.filter((drop) => !pickingRef.current.has(drop.id));
@@ -1815,8 +1915,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         socket.onopen = () => {
           if (stopped || activeSocket !== socket) return;
           reconnectAttempt = 0;
+          lastHeartbeatAckAt = Date.now();
           setConnectionState('connected');
           sendRoomEvent({ type: 'loadout', loadout: initialLoadout });
+          sendPresenceHeartbeat();
         };
         socket.onmessage = (messageEvent) => {
           if (stopped || activeSocket !== socket || typeof messageEvent.data !== 'string') return;
@@ -1826,7 +1928,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           } catch {
             return;
           }
-          if (event.type === 'welcome') {
+          if (event.type === 'heartbeat_ack') {
+            lastHeartbeatAckAt = Date.now();
+            return;
+          } else if (event.type === 'position_correction') {
+            const x = Number(event.x);
+            const y = Number(event.y);
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              playerRef.current.x = x;
+              playerRef.current.y = y;
+              clickTargetRef.current = null;
+              playerRef.current.moving = false;
+            }
+          } else if (event.type === 'welcome') {
             mowerClientIdRef.current = typeof event.mowerClientId === 'string' ? event.mowerClientId : null;
             mowerAuthorityClientIdRef.current = typeof event.mowerAuthorityClientId === 'string'
               ? event.mowerAuthorityClientId
@@ -1915,7 +2029,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               }
             }
           } else if (event.type === 'agent_join' || event.type === 'agent_update') {
-            if (event.agent && typeof event.agent === 'object') upsertAgent(event.agent as CommuneAgent);
+            if (event.agent && typeof event.agent === 'object') {
+              upsertAgent(
+                event.agent as CommuneAgent,
+                event.type === 'agent_update' && event.positionOnly === true,
+              );
+            }
           } else if (event.type === 'agent_leave' && typeof event.username === 'string') {
             removeAgent(event.username);
           } else if (event.type === 'banners') {
@@ -1958,6 +2077,44 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             }
           } else if (event.type === 'public_chat_delete' && typeof event.id === 'string') {
             setSquareMessages((items) => items.filter((item) => item.id !== event.id));
+          } else if (event.type === 'hangout_state') {
+            const placeId = typeof event.hangoutId === 'string'
+              && COMMUNE_HANGOUTS.some((item) => item.id === event.hangoutId)
+              ? event.hangoutId as CommuneHangoutId
+              : null;
+            const seat = Number(event.seat);
+            const nextHangout = placeId && Number.isInteger(seat) && seat >= 0
+              ? { id: placeId, seat }
+              : null;
+            hangoutRef.current = nextHangout;
+            setHangout(nextHangout);
+            playerRef.current.hangoutId = nextHangout?.id ?? null;
+            playerRef.current.hangoutSeat = nextHangout?.seat ?? null;
+            playerRef.current.x = Number.isFinite(Number(event.x)) ? Number(event.x) : playerRef.current.x;
+            playerRef.current.y = Number.isFinite(Number(event.y)) ? Number(event.y) : playerRef.current.y;
+            clickTargetRef.current = null;
+            keysRef.current.clear();
+            movementInputRef.current = { x: 0, y: 0 };
+            setInteriorChatMessages([]);
+            if (nextHangout) {
+              if (mapZoomRef.current >= 5) {
+                if (document.pointerLockElement === canvasRef.current) document.exitPointerLock();
+                mapZoomRef.current = 4;
+                setMapZoom(4);
+              }
+              setCarSeat(null);
+              carSeatRef.current = null;
+              playerRef.current.carId = null;
+              playerRef.current.carSeat = null;
+              setMessaging(null);
+              focusedNpcRef.current = null;
+              setFocusedNpc(null);
+              if (handsRef.current) {
+                sendRoomEvent({ type: 'interaction', target: handsRef.current.partner, kind: 'hands_release' });
+                handsRef.current = null;
+                setHands(null);
+              }
+            }
           } else if (
             event.type === 'car_state'
             && (event.carId === null || event.carId === 'meadow-cruiser' || event.carId === 'orchard-wagon')
@@ -1966,6 +2123,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               ? { carId: event.carId as CommuneCarId, seat: Number(event.seat) }
               : null;
             setCarSeat(nextCar && Number.isInteger(nextCar.seat) ? nextCar : null);
+            hangoutRef.current = null;
+            setHangout(null);
+            playerRef.current.hangoutId = null;
+            playerRef.current.hangoutSeat = null;
             playerRef.current.carId = nextCar?.carId ?? null;
             playerRef.current.carSeat = nextCar?.seat ?? null;
             playerRef.current.x = Number(event.x) || playerRef.current.x;
@@ -1984,16 +2145,26 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             clickTargetRef.current = null;
             keysRef.current.clear();
             if (nextCar) {
-              setCarChatMessages([]);
+              setInteriorChatMessages([]);
               setMessaging(null);
             }
           } else if (event.type === 'car_chat' && typeof event.message === 'string' && typeof event.from === 'string') {
             if (event.carId === carSeatRef.current?.carId) {
-              setCarChatMessages((items) => [
+              setInteriorChatMessages((items) => [
                 ...items.slice(-19),
                 { from: event.from as string, message: event.message as string, at: Number(event.sentAt) || Date.now() },
               ]);
             }
+          } else if (
+            event.type === 'hangout_chat'
+            && event.hangoutId === hangoutRef.current?.id
+            && typeof event.message === 'string'
+            && typeof event.from === 'string'
+          ) {
+            setInteriorChatMessages((items) => [
+              ...items.slice(-19),
+              { from: event.from as string, message: event.message as string, at: Number(event.sentAt) || Date.now() },
+            ]);
           } else if (event.type === 'private_chat') {
             if (typeof event.from === 'string' && typeof event.message === 'string') {
               setInbox((items) => [...items.slice(-4), { from: event.from as string, message: event.message as string }]);
@@ -2033,6 +2204,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             playerRef.current.carId = null;
             playerRef.current.carSeat = null;
           }
+          if (hangoutRef.current) {
+            const place = COMMUNE_HANGOUTS.find((item) => item.id === hangoutRef.current?.id);
+            if (place) {
+              playerRef.current.x = place.doorX;
+              playerRef.current.y = place.doorY - COMMUNE_HANGOUT_EXIT_OFFSET;
+            }
+            hangoutRef.current = null;
+            setHangout(null);
+            playerRef.current.hangoutId = null;
+            playerRef.current.hangoutSeat = null;
+          }
           scheduleReconnect();
         };
         socket.onerror = () => socket.close();
@@ -2042,16 +2224,39 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     };
     void connect();
     scheduleDropRefresh();
-    const heartbeat = window.setInterval(() => sendRoomEvent({ type: 'heartbeat' }), 20_000);
+    heartbeatTimer = window.setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_MS);
+    heartbeatWatchdogTimer = window.setInterval(() => {
+      if (
+        !document.hidden &&
+        activeSocket?.readyState === WebSocket.OPEN &&
+        Date.now() - lastHeartbeatAckAt > PRESENCE_ACK_TIMEOUT_MS
+      ) {
+        activeSocket.close(4000, 'Presence heartbeat timed out');
+      }
+    }, 5_000);
+    const onPresenceVisibilityChange = () => {
+      if (!document.hidden) lastHeartbeatAckAt = Date.now();
+      sendPresenceHeartbeat();
+    };
+    document.addEventListener('visibilitychange', onPresenceVisibilityChange);
     return () => {
       stopped = true;
-      window.clearInterval(heartbeat);
+      window.clearInterval(heartbeatTimer);
+      window.clearInterval(heartbeatWatchdogTimer);
       window.clearTimeout(dropRefreshTimer);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      document.removeEventListener('visibilitychange', onPresenceVisibilityChange);
+      if (activeSocket?.readyState === WebSocket.OPEN) {
+        try {
+          activeSocket.send(JSON.stringify({ type: 'leave' }));
+        } catch {
+          /* The close event and presence timeout remain the fallback. */
+        }
+      }
       activeSocket?.close(1000, 'Leaving the Commune');
       if (socketRef.current === activeSocket) socketRef.current = null;
     };
-  }, [sendRoomEvent, user, username]);
+  }, [getViewRadius, sendRoomEvent, user, username]);
 
   useEffect(() => {
     if (!loadoutDirtyRef.current) return;
@@ -2234,12 +2439,28 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           case 'enter-car': {
             const car = PARKED_CARS.find((item) => item.id === action.carId);
             return !carSeatRef.current
+              && !hangoutRef.current
               && !!car
               && Math.hypot(player.x - car.x, player.y - car.y) < 118
               && [...remoteRef.current.values()].filter((remote) => remote.agent.carId === action.carId).length < 2;
           }
           case 'exit-car':
             return !!carSeatRef.current;
+          case 'enter-hangout': {
+            const place = COMMUNE_HANGOUTS.find((item) => item.id === action.hangoutId);
+            const occupants = new Set(
+              [...remoteRef.current.values()]
+                .filter((remote) => remote.agent.hangoutId === action.hangoutId)
+                .map((remote) => remote.agent.username),
+            );
+            return !carSeatRef.current
+              && !hangoutRef.current
+              && !!place
+              && Math.hypot(player.x - place.doorX, player.y - place.doorY) <= COMMUNE_HANGOUT_ENTER_RANGE
+              && occupants.size < place.capacity;
+          }
+          case 'exit-hangout':
+            return !!hangoutRef.current;
           case 'sit':
             return BENCHES.some(([x, y]) => x === action.x && y === action.y)
               && Math.hypot(player.x - action.x, player.y - action.y) < BENCH_RANGE;
@@ -2329,6 +2550,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       case 'exit-car':
         sendRoomEvent({ type: 'car_exit' });
         return;
+      case 'enter-hangout':
+        if (!sendRoomEvent({ type: 'hangout_enter', hangoutId: action.hangoutId })) {
+          setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: 'The building connection is unavailable. Try again.' }]);
+        }
+        return;
+      case 'exit-hangout':
+        sendRoomEvent({ type: 'hangout_exit' });
+        return;
       case 'sit':
         sittingRef.current = { x: action.x, y: action.y - 2 };
         return;
@@ -2409,6 +2638,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const receiver = [...remoteRef.current.values()]
           .filter((remote) => (
             !remote.agent.carId
+            && !remote.agent.hangoutId
             && remote.rx >= field.left && remote.rx <= field.right
             && remote.ry >= field.top && remote.ry <= field.bottom
           ))
@@ -2481,6 +2711,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           keysRef.current.add(e.code);
           return;
         }
+        if (playerRef.current.hangoutId) return;
         if (sittingRef.current) sittingRef.current = null; // moving stands up
         if (focusedNpcRef.current) {
           focusedNpcRef.current = null;
@@ -2636,6 +2867,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           sendRoomEvent({ type: 'car_move', dx, dy });
           lastCarMoveSentAt = wallNow;
         }
+      } else if (player.hangoutId) {
+        player.moving = false;
+        keysRef.current.clear();
+        movementInputRef.current = { x: 0, y: 0 };
+        clickTargetRef.current = null;
       } else if (sitting) {
         // Pinned to the bench seat; E or a move key stands up.
         player.x = sitting.x;
@@ -2870,7 +3106,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       let nearAgent: { username: string; distance: number } | null = null;
       let handAgent: { username: string; distance: number } | null = null;
       for (const remote of remoteRef.current.values()) {
-        if (remote.agent.carId) continue;
+        if (remote.agent.carId || remote.agent.hangoutId) continue;
         const distance = Math.hypot(player.x - remote.rx, player.y - remote.ry);
         if (distance < 64 && (!nearAgent || distance < nearAgent.distance)) {
           nearAgent = { username: remote.agent.username, distance };
@@ -2889,6 +3125,22 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }))
           .filter(({ distance, occupied }) => distance < 118 && occupied < 2)
           .sort((a, b) => a.distance - b.distance)[0]?.car ?? null
+        : null;
+      const nearHangout = !carSeatRef.current && !hangoutRef.current
+        ? COMMUNE_HANGOUTS
+          .map((place) => ({
+            place,
+            distance: Math.hypot(player.x - place.doorX, player.y - place.doorY),
+            occupants: new Set(
+              [...remoteRef.current.values()]
+                .filter((remote) => remote.agent.hangoutId === place.id)
+                .map((remote) => remote.agent.username),
+            ).size,
+          }))
+          .filter(({ place, distance, occupants }) =>
+            distance <= COMMUNE_HANGOUT_ENTER_RANGE && occupants < place.capacity
+          )
+          .sort((a, b) => a.distance - b.distance)[0]?.place ?? null
         : null;
       const nearBench = !sittingRef.current
         ? BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE)
@@ -2937,8 +3189,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
       if (carSeatRef.current) {
         actions.push({ type: 'exit-car', key: 'E', label: 'Leave car' });
+      } else if (hangoutRef.current) {
+        actions.push({ type: 'exit-hangout', key: 'E', label: 'Step outside' });
       } else if (nearCar) {
         actions.push({ type: 'enter-car', key: 'E', label: `Get in ${nearCar.label}`, carId: nearCar.id });
+      } else if (nearHangout) {
+        actions.push({
+          type: 'enter-hangout',
+          key: 'E',
+          label: `Enter ${nearHangout.label}`,
+          hangoutId: nearHangout.id,
+        });
       } else if (sittingRef.current) {
         actions.push({ type: 'stand', key: 'E', label: 'Stand up' });
       } else if (nearChallengeNpc) {
@@ -2973,6 +3234,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         const receiver = [...remoteRef.current.values()]
           .filter((remote) => (
             !remote.agent.carId
+            && !remote.agent.hangoutId
             && remote.rx >= soccerField.left && remote.rx <= soccerField.right
             && remote.ry >= soccerField.top && remote.ry <= soccerField.bottom
           ))
@@ -3011,7 +3273,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         actions.push({ type: 'prop', key: 'E', label: nearProp.label, panel: nearProp.kind });
       }
 
-      if (!carSeatRef.current) {
+      if (!carSeatRef.current && !hangoutRef.current) {
         if (held) {
           actions.push({
             type: 'release-hands',
@@ -3032,6 +3294,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       const nearKind = nearProp?.kind ?? null;
       statusRef.current = player.carId
         ? 'in a private car conversation'
+        : player.hangoutId
+          ? `chilling at ${COMMUNE_HANGOUTS.find((place) => place.id === player.hangoutId)?.label ?? 'a building'}`
         : player.says
         ? 'chatting'
         : nearChallengeNpc
@@ -3053,11 +3317,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               : 'hanging out';
 
       const statusChanged = statusRef.current !== lastPositionStatusRef.current;
-      if (!player.carId && (
+      if (!player.carId && !player.hangoutId && (
         (player.moving && wallNow - lastPositionSentAtRef.current >= 100) ||
         statusChanged
       )) {
-        if (sendRoomEvent({ type: 'move', x: Math.round(player.x), y: Math.round(player.y), status: statusRef.current })) {
+        if (sendRoomEvent({
+          type: 'move',
+          x: Math.round(player.x),
+          y: Math.round(player.y),
+          status: statusRef.current,
+          viewRadius: getViewRadius(),
+        })) {
           lastPositionSentAtRef.current = wallNow;
           lastPositionStatusRef.current = statusRef.current;
         }
@@ -3068,17 +3338,34 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       const heldHands = handsRef.current;
       const remoteViews: RemoteView[] = [];
       for (const r of remoteRef.current.values()) {
-        const dx = r.tx - r.rx;
-        const dy = r.ty - r.ry;
-        const d = Math.hypot(dx, dy);
-        r.moving = d > 3;
-        if (d > 0.5) {
-          r.headingX = dx / d;
-          r.headingY = dy / d;
-          const k = Math.min(1, dt * 3.5);
-          r.rx += dx * k;
-          r.ry += dy * k;
+        const renderAt = now - REMOTE_INTERPOLATION_DELAY_MS;
+        while (r.samples.length > 2 && r.samples[1].at <= renderAt) r.samples.shift();
+        const first = r.samples[0];
+        const second = r.samples[1];
+        let nextX = first?.x ?? r.rx;
+        let nextY = first?.y ?? r.ry;
+        if (first && second && renderAt > first.at) {
+          const sampleDuration = Math.max(1, second.at - first.at);
+          if (renderAt <= second.at) {
+            const amount = Math.max(0, Math.min(1, (renderAt - first.at) / sampleDuration));
+            nextX = first.x + (second.x - first.x) * amount;
+            nextY = first.y + (second.y - first.y) * amount;
+          } else {
+            const extrapolationMs = Math.min(REMOTE_MAX_EXTRAPOLATION_MS, renderAt - second.at);
+            nextX = second.x + ((second.x - first.x) / sampleDuration) * extrapolationMs;
+            nextY = second.y + ((second.y - first.y) / sampleDuration) * extrapolationMs;
+          }
         }
+        const dx = nextX - r.rx;
+        const dy = nextY - r.ry;
+        const distance = Math.hypot(dx, dy);
+        r.moving = distance > 0.4;
+        if (distance > 0.1) {
+          r.headingX = dx / distance;
+          r.headingY = dy / distance;
+        }
+        r.rx = nextX;
+        r.ry = nextY;
         if (r.moving) r.bobPhase += dt * 9;
         let vx = r.rx;
         let vy = r.ry;
@@ -3100,7 +3387,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           name: r.agent.username,
           hue: hueOf(r.agent.username),
           phrase: r.agent.loadout?.phrase || null,
-          status: r.agent.status,
+          status: r.agent.isAfk ? 'AFK' : r.agent.status,
           admin: r.agent.isAdmin && !r.agent.isManagement && !r.agent.isSuperAdmin,
           superAdmin: r.agent.isSuperAdmin,
           pet: r.agent.loadout?.pet ?? null,
@@ -3109,15 +3396,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           moving: vmoving,
           bobPhase: r.bobPhase,
           carId: r.agent.carId,
+          hangoutId: r.agent.hangoutId,
+          hangoutSeat: r.agent.hangoutSeat,
         });
       }
 
       const petViews = updatePetFollowers(
         [
-          ...(!player.carId
+          ...(!player.carId && !player.hangoutId
             ? [{ ownerId: player.name, x: player.x, y: player.y, moving: !!player.moving, pet: player.pet ?? null }]
             : []),
-          ...remoteViews.filter((remote) => !remote.carId).map((remote) => ({
+          ...remoteViews.filter((remote) => !remote.carId && !remote.hangoutId).map((remote) => ({
             ownerId: remote.name,
             x: remote.x,
             y: remote.y,
@@ -3182,6 +3471,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     reduceMotionQuery.addEventListener('change', onMotionChange);
     const onVisibilityChange = () => {
       if (document.hidden) {
+        keysRef.current.clear();
+        movementInputRef.current = { x: 0, y: 0 };
+        joystickPointerIdRef.current = null;
+        clickTargetRef.current = null;
+        joystickKnobRef.current?.style.setProperty('--stick-x', '0px');
+        joystickKnobRef.current?.style.setProperty('--stick-y', '0px');
+        setJoystickActive(false);
         cancelAnimationFrame(raf);
         cancelAnimationFrame(renderRaf);
         raf = 0;
@@ -3204,12 +3500,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (communeRendererRef.current === threeRenderer) communeRendererRef.current = null;
       threeRenderer?.dispose();
     };
-  }, [banners, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, upsertLaserShot, user?.isAdmin, username]);
+  }, [banners, getViewRadius, isSuperAdmin, publishNearbyActions, sendRoomEvent, setSpice, upsertLaserShot, user?.isAdmin, username]);
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
   const handleCanvasTap = (clientX: number, clientY: number) => {
-    if (panelRef.current || playerRef.current.carId || mapZoomRef.current >= 5) return;
+    if (panelRef.current || playerRef.current.carId || playerRef.current.hangoutId || mapZoomRef.current >= 5) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -3265,6 +3561,31 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         });
       } else {
         clickTargetRef.current = approachPoint(tappedCar.x, tappedCar.y, player.x, player.y, 100);
+      }
+      return;
+    }
+    const tappedHangout = COMMUNE_HANGOUTS.find((place) =>
+      Math.abs(wx - place.x) < place.width / 2 + 24
+      && Math.abs(wy - place.y) < place.depth / 2 + (place.kind === 'villa' ? 74 : 48)
+    );
+    if (tappedHangout) {
+      const player = playerRef.current;
+      const distance = Math.hypot(player.x - tappedHangout.doorX, player.y - tappedHangout.doorY);
+      if (distance <= COMMUNE_HANGOUT_ENTER_RANGE) {
+        executeInteraction({
+          type: 'enter-hangout',
+          key: 'E',
+          label: `Enter ${tappedHangout.label}`,
+          hangoutId: tappedHangout.id,
+        });
+      } else {
+        clickTargetRef.current = approachPoint(
+          tappedHangout.doorX,
+          tappedHangout.doorY,
+          player.x,
+          player.y,
+          22,
+        );
       }
       return;
     }
@@ -3355,7 +3676,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     // Clicking another agent opens their card (loadout: phrase, cards, pet).
     for (const r of remoteRef.current.values()) {
       if (Math.hypot(wx - r.rx, wy - (r.ry - 30)) < 42) {
-        const agent = others.find((o) => o.username === r.agent.username) ?? r.agent;
+        const agent = r.agent;
         clickTargetRef.current = null;
         focusedNpcRef.current = null;
         setFocusedNpc(null);
@@ -3435,7 +3756,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const fireLaser = async () => {
-    if (mapZoomRef.current < 5 || panelRef.current || playerRef.current.carId) return;
+    if (mapZoomRef.current < 5 || panelRef.current || playerRef.current.carId || playerRef.current.hangoutId) return;
     const now = performance.now();
     if (now - lastLaserFiredAtRef.current < 500) return;
     lastLaserFiredAtRef.current = now;
@@ -3567,7 +3888,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const changeMapZoom = (value: number) => {
-    const zoom = Number(Math.min(5, Math.max(1, value)).toFixed(2));
+    const maxZoom = hangoutRef.current ? 4.95 : 5;
+    const zoom = Number(Math.min(maxZoom, Math.max(1, value)).toFixed(2));
     const wasFirstPerson = mapZoomRef.current >= 5;
     if (zoom >= 5 && !wasFirstPerson) {
       const player = playerRef.current;
@@ -3599,9 +3921,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     if (!text) return;
     const recipient = messagingRef.current;
     const car = carSeatRef.current;
+    const place = hangoutRef.current;
     const sent = sendRoomEvent(
-      car
-        ? { type: 'car_chat', message: text }
+      place
+        ? { type: 'hangout_chat', message: text }
+        : car
+          ? { type: 'car_chat', message: text }
         : recipient
           ? { type: 'private_chat', target: recipient, message: text }
           : { type: 'public_chat', message: text },
@@ -3610,7 +3935,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       setInbox((items) => [...items.slice(-4), { from: 'COMMUNE', message: 'Reconnecting; your message was not sent.' }]);
       return;
     }
-    if (!car) playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
+    if (!car && !place) playerRef.current.says = { text: text.slice(0, 90), until: Date.now() + 6000 };
     setChatDraft('');
   };
 
@@ -3623,8 +3948,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const latestBanner = banners[banners.length - 1] ?? null;
   const activeProp = panel ? COMMUNE_PROPS.find((prop) => prop.kind === panel) ?? null : null;
   const currentCar = carSeat ? PARKED_CARS.find((car) => car.id === carSeat.carId) ?? null : null;
+  const currentHangout = hangout ? COMMUNE_HANGOUTS.find((place) => place.id === hangout.id) ?? null : null;
   const carOccupants = carSeat
     ? others.filter((agent) => agent.carId === carSeat.carId).sort((a, b) => (a.carSeat ?? 0) - (b.carSeat ?? 0))
+    : [];
+  const hangoutOccupants = hangout
+    ? others
+      .filter((agent) => agent.hangoutId === hangout.id)
+      .sort((a, b) => (a.hangoutSeat ?? 0) - (b.hangoutSeat ?? 0))
+      .map((agent) => agent.username)
     : [];
   const widePanel = panel === 'townhall' || panel === 'arcade' || panel === 'banners' || panel === 'quiz' || panel === 'treehole';
   const paperPanel = panel === 'banners' || panel === 'agent';
@@ -3822,7 +4154,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       )}
 
       {/* Dota-style thumb zones: a shared walk/drive stick and contextual actions. */}
-      {touchControls && !panel && !chatFocused && (
+      {touchControls && !panel && !chatFocused && !hangout && (
         <div
           ref={joystickBaseRef}
           role="group"
@@ -4013,13 +4345,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 {touchControls ? 'Left joystick to drive · action button to leave' : 'WASD / arrow keys to drive · E to leave'}
               </p>
               <div className="flex max-h-24 flex-col gap-1 overflow-hidden">
-                {carChatMessages.slice(-4).map((item, index) => (
+                {interiorChatMessages.slice(-4).map((item, index) => (
                   <p key={`${item.at}-${item.from}-${index}`} className="truncate text-[11px] leading-snug text-white/90">
                     <span className="mr-1.5 font-bold text-sky-200">{item.from}</span>
                     {item.message}
                   </p>
                 ))}
-                {carChatMessages.length === 0 && (
+                {interiorChatMessages.length === 0 && (
                   <p className="text-[10px] text-white/55">Just the two of you. Start a private conversation.</p>
                 )}
               </div>
@@ -4027,7 +4359,39 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           </div>
         )}
       {/* Short-lived shared history lets everyone remove inappropriate chat. */}
-        {!carSeat && squareMessages.length > 0 && (
+        {hangout && (
+          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+            <div
+              role="log"
+              aria-label={`Private ${currentHangout?.label ?? 'building'} conversation`}
+              aria-live="polite"
+              className="pointer-events-auto overflow-hidden rounded-xl border border-amber-200/30 bg-slate-950/85 px-3 py-2 shadow-lg backdrop-blur-md"
+            >
+              <div className="mb-1 flex items-center justify-between gap-2 border-b border-white/10 pb-1">
+                <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-amber-200">
+                  Private · {currentHangout?.label ?? 'Hangout'} · {hangoutOccupants.length + 1}/{currentHangout?.capacity ?? 2}
+                </span>
+                <span className="truncate text-[9px] text-white/55">
+                  {[username, ...hangoutOccupants].join(' · ')}
+                </span>
+              </div>
+              <p className="mb-1 text-[9px] text-amber-100/60">Chill here and chat privately · E to step outside</p>
+              <div className="flex max-h-24 flex-col gap-1 overflow-hidden">
+                {interiorChatMessages.slice(-4).map((item, index) => (
+                  <p key={`${item.at}-${item.from}-${index}`} className="truncate text-[11px] leading-snug text-white/90">
+                    <span className="mr-1.5 font-bold text-amber-200">{item.from}</span>
+                    {item.message}
+                  </p>
+                ))}
+                {interiorChatMessages.length === 0 && (
+                  <p className="text-[10px] text-white/55">A quiet place to catch up. Say hello.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      {/* Short-lived shared history lets everyone remove inappropriate chat. */}
+        {!carSeat && !hangout && squareMessages.length > 0 && (
         <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
           <div
             role="log"
@@ -4077,6 +4441,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             ? 'border-primary/70 bg-card/95'
             : carSeat
               ? 'border-sky-200/40 bg-slate-950/90'
+              : hangout
+                ? 'border-amber-200/40 bg-slate-950/90'
               : chatFocused || chatDraft
               ? 'border-white/30 bg-card/95'
               : 'border-white/35 bg-transparent'
@@ -4110,7 +4476,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             e.stopPropagation();
           }}
           placeholder={
-            carSeat
+            hangout
+              ? 'Private building chat · only people inside can hear'
+              : carSeat
               ? 'Private conversation · only car occupants can hear'
               : messaging
                 ? `Send a message to ${messaging}…`
@@ -5134,7 +5502,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 </h3>
               </div>
               <p className="inline-block border border-[#a88a5f] bg-[#ead6ad] px-2 py-1 font-['Schoolbell'] text-xs text-[#715b3e]">
-                {selected.status || 'hanging out'} · seen {Math.max(1, Math.round(selected.seenAgo / 1000))}s ago
+                {selected.isAfk ? 'AFK' : selected.status || 'hanging out'} · seen {
+                  Math.max(1, Math.round((
+                    presenceNow -
+                    (lastPresenceReceivedAtRef.current.get(selected.username) ?? (presenceNow - selected.seenAgo))
+                  ) / 1000))
+                }s ago
               </p>
               <button
                 type="button"
@@ -5840,7 +6213,7 @@ function followMowerPath(
 function updateTRex(
   mower: TRexState,
   player: Agent,
-  remotes: Iterable<{ rx: number; ry: number; agent: { carId?: string | null } }>,
+  remotes: Iterable<{ rx: number; ry: number; agent: { carId?: string | null; hangoutId?: string | null } }>,
   dt: number,
   now: number,
   tracks: MowerTrack[],
@@ -5850,6 +6223,7 @@ function updateTRex(
   let nearestDistance = Math.hypot(player.x - mower.x, player.y - mower.y);
   if (nearestDistance < 150) nearestThreat = player;
   for (const remote of remotes) {
+    if (remote.agent.carId || remote.agent.hangoutId) continue;
     const distance = Math.hypot(remote.rx - mower.x, remote.ry - mower.y);
     if (distance < nearestDistance) {
       nearestDistance = distance;
@@ -6002,6 +6376,22 @@ function draw(
       ...remotes.filter((remote) => remote.carId === car.id).map((remote) => remote.name),
     ].slice(0, 2);
     items.push({ y: car.y + 72, fn: () => drawParkedCar(ctx, car, occupants) });
+  }
+  for (const place of COMMUNE_HANGOUTS) {
+    if (!isVisible(place.x, place.y, place.width / 2 + 42, place.depth / 2 + 112)) continue;
+    const occupants = [
+      ...(player.hangoutId === place.id ? [{ name: player.name, seat: player.hangoutSeat ?? 0 }] : []),
+      ...remotes
+        .filter((remote) => remote.hangoutId === place.id)
+        .map((remote) => ({ name: remote.name, seat: remote.hangoutSeat ?? 0 })),
+    ]
+      .sort((a, b) => a.seat - b.seat)
+      .map((occupant) => occupant.name)
+      .slice(0, place.capacity);
+    items.push({
+      y: place.y + place.depth / 2,
+      fn: () => drawCommuneHangout(ctx, place, occupants),
+    });
   }
   for (const object of WORLD_OBJECTS) {
     if (!isVisible(object.x, object.y, 72, object.id === 'treehole' ? 360 : 90)) continue;
@@ -6240,7 +6630,7 @@ function draw(
     if (isVisible(npc.x, npc.y, 72, 132)) items.push({ y: npc.y, bright: true, fn: () => drawAgent(ctx, npc, t) });
   }
   for (const r of remotes) {
-    if (r.carId || !isVisible(r.x, r.y, 88, 150)) continue;
+    if (r.carId || r.hangoutId || !isVisible(r.x, r.y, 88, 150)) continue;
     items.push({
       y: r.y,
       bright: true,
@@ -6259,7 +6649,7 @@ function draw(
       },
     });
   }
-  if (!player.carId && isVisible(player.x, player.y, 88, 150)) {
+  if (!player.carId && !player.hangoutId && isVisible(player.x, player.y, 88, 150)) {
     items.push({ y: player.y, bright: true, fn: () => drawAgent(ctx, player, t, true) });
   }
   for (const pet of pets) {
@@ -6481,6 +6871,100 @@ function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants:
     ? `${occupants.map((name) => name.slice(0, 6)).join(' + ')} · ${occupants.length}/2`
     : `${car.label} · E`;
   ctx.fillText(occupantsLabel, x, y + 72);
+}
+
+function drawCommuneHangout(ctx: CanvasRenderingContext2D, place: CommuneHangout, occupants: string[]): void {
+  const { x, y } = place;
+  drawGroundShadow(ctx, x + 5, y + place.depth * 0.35, place.width * 0.58, place.depth * 0.3, 0.25);
+  if (place.kind === 'villa') {
+    ctx.fillStyle = '#8d7453';
+    ctx.fillRect(x - 102, y - 24, 204, 94);
+    ctx.fillStyle = '#ead6ad';
+    ctx.fillRect(x - 90, y - 35, 180, 90);
+    ctx.fillStyle = '#c8b38c';
+    ctx.fillRect(x - 90, y + 40, 180, 18);
+    ctx.fillStyle = '#61788a';
+    ctx.beginPath();
+    ctx.moveTo(x - 126, y - 34);
+    ctx.lineTo(x, y - 112);
+    ctx.lineTo(x + 126, y - 34);
+    ctx.lineTo(x + 96, y - 48);
+    ctx.lineTo(x, y - 100);
+    ctx.lineTo(x - 96, y - 48);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#485f70';
+    ctx.fillRect(x - 84, y - 43, 168, 12);
+    ctx.fillStyle = '#82a8ad';
+    ctx.fillRect(x - 70, y - 14, 34, 28);
+    ctx.fillRect(x + 36, y - 14, 34, 28);
+    ctx.fillStyle = '#f0dfb9';
+    ctx.fillRect(x - 66, y - 10, 26, 20);
+    ctx.fillRect(x + 40, y - 10, 26, 20);
+    ctx.fillStyle = '#785a3c';
+    ctx.fillRect(x - 15, y + 2, 30, 56);
+    ctx.fillStyle = '#d6b875';
+    ctx.fillRect(x + 8, y + 28, 3, 3);
+    ctx.fillStyle = '#5d432d';
+    ctx.fillRect(x - 43, y + 58, 86, 8);
+  } else {
+    const cloth = place.id === 'west-tent' ? '#c88757' : '#7f9b68';
+    ctx.fillStyle = '#d9c49b';
+    ctx.fillRect(x - 2, y - 67, 4, 94);
+    ctx.fillStyle = '#594a39';
+    ctx.beginPath();
+    ctx.moveTo(x - 64, y + 25);
+    ctx.lineTo(x, y - 70);
+    ctx.lineTo(x + 64, y + 25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(x - 58, y + 20);
+    ctx.lineTo(x, y - 60);
+    ctx.lineTo(x + 58, y + 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#f0dfb9';
+    ctx.beginPath();
+    ctx.moveTo(x - 21, y + 20);
+    ctx.lineTo(x, y - 8);
+    ctx.lineTo(x + 21, y + 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#443a30';
+    ctx.beginPath();
+    ctx.moveTo(x - 15, y + 20);
+    ctx.lineTo(x, y - 1);
+    ctx.lineTo(x + 15, y + 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#d6bd8d';
+    ctx.fillRect(x - 66, y + 19, 5, 16);
+    ctx.fillRect(x + 61, y + 19, 5, 16);
+  }
+
+  const lines = [
+    `${place.label.toUpperCase()} · ${occupants.length}/${place.capacity}`,
+    ...(occupants.length ? occupants : ['E · ENTER TO CHILL']),
+  ];
+  ctx.font = "bold 10px 'Schoolbell', ui-monospace, monospace";
+  const width = Math.min(236, Math.max(142, ...lines.map((line) => Math.ceil(ctx.measureText(line).width) + 18)));
+  const lineHeight = 14;
+  const height = lines.length * lineHeight + 8;
+  const top = y - (place.kind === 'villa' ? 120 : 79) - height;
+  ctx.fillStyle = 'rgba(36,28,19,0.75)';
+  ctx.fillRect(x - width / 2 + 2, top + 3, width, height);
+  ctx.fillStyle = '#785a3c';
+  ctx.fillRect(x - width / 2, top, width, height);
+  ctx.fillStyle = '#f0dfb9';
+  ctx.fillRect(x - width / 2 + 2, top + 2, width - 4, height - 4);
+  ctx.fillStyle = '#493927';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, index) => {
+    ctx.fillText(line, x, top + 9 + index * lineHeight, width - 10);
+  });
 }
 
 function drawWhatTheDuck(ctx: CanvasRenderingContext2D, incident: DuckIncident, t: number, reduceMotion: boolean) {
@@ -7205,6 +7689,11 @@ function getTownLayer(): HTMLCanvasElement {
     [1870, 1350, 2040, 1440, 2250, 1460], // bowling lane approach
     [1530, 1600, 1810, 1700, 2110, 1710],
     [2110, 1710, 2370, 1710, 2700, 1790], // star overlook
+    [1440, 1050, 1460, 1420, 1580, 1770],
+    [1580, 1770, 1630, 1782, 1680, 1780], // villa entrance
+    [1680, 1780, 1810, 1774, 1940, 1795],
+    [1940, 1795, 2035, 1810, 2130, 1795], // tent entrances
+    [2130, 1795, 2255, 1770, 2370, 1710],
     [2490, 850, 2670, 1000, 2790, 1150], // golf green entrance
   ];
   const pathPts: [number, number][] = [];

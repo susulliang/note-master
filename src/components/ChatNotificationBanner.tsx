@@ -13,7 +13,7 @@ import {
   type CollabNotification,
 } from '@/lib/chat-client';
 import { upsertCachedChatMessage } from '@/lib/chat-message-cache';
-import PixelHumanoidAvatar from '@/components/PixelHumanoidAvatar';
+import ChatAvatar from '@/components/ChatAvatar';
 import { cn } from '@/lib/utils';
 
 interface ChatNotificationBannerProps {
@@ -365,9 +365,9 @@ export default function ChatNotificationBanner({
       >
         {task
           ? <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><ListTodo className="size-5" /></span>
-          : <PixelHumanoidAvatar
-            seed={message?.avatar?.seed ?? 0}
-            rotation={message?.avatar?.rotation ?? 0}
+          : <ChatAvatar
+            username={message?.username ?? ''}
+            profile={message?.avatar}
             size={40}
             className="shrink-0 rounded-xl bg-muted/60"
           />}

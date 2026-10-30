@@ -19,6 +19,7 @@ import {
 import {
   ArrowLeft,
   Bold,
+  CheckSquare2,
   ClipboardCopy,
   ClipboardPaste,
   Code2,
@@ -35,6 +36,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  ListTodo,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -45,6 +47,7 @@ import {
   Scissors,
   Trash2,
   Upload,
+  UsersRound,
   Video,
   X,
 } from 'lucide-react';
@@ -77,6 +80,7 @@ import {
   updateSmartDoc,
   uploadSmartDocMedia,
   type SmartDoc,
+  type SmartDocKind,
   type SmartDocMember,
   type SmartDocPermission,
 } from '@/lib/smartdocs-client';
@@ -85,6 +89,9 @@ import './SmartDocsPage.css';
 interface SmartDocsPageProps {
   username: string;
   initialDocumentId?: string;
+  documentKind?: SmartDocKind;
+  onDocumentChange?: (documentId: string | null) => void;
+  embedded?: boolean;
 }
 
 interface OutlineHeading {
@@ -533,13 +540,22 @@ function SmartDocInlineMedia({
   return <img className="smart-doc-embedded-image" src={mediaUrl} alt={title} loading="lazy" />;
 }
 
-export default function SmartDocsPage({ username, initialDocumentId }: SmartDocsPageProps) {
+export default function SmartDocsPage({
+  username,
+  initialDocumentId,
+  documentKind = 'smartdoc',
+  onDocumentChange,
+  embedded = false,
+}: SmartDocsPageProps) {
+  const isTodoMode = documentKind === 'smarttodo';
+  const directoryType = isTodoMode ? 'smarttodo' : 'smartdoc';
   const [documents, setDocuments] = useState<SmartDoc[]>(
-    () => loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc'),
+    () => loadCollabDirectoryCache<SmartDoc>(username, directoryType),
   );
   const [loading, setLoading] = useState(
-    () => loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc').length === 0,
+    () => loadCollabDirectoryCache<SmartDoc>(username, directoryType).length === 0,
   );
+  const [directoryLoaded, setDirectoryLoaded] = useState(false);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(initialDocumentId ?? null);
   const [markdown, setMarkdown] = useState('');
   const markdownRef = useRef('');
@@ -572,6 +588,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const [floatingMediaProgress, setFloatingMediaProgress] = useState<FloatingMediaProgress | null>(null);
   const [mediaDropActive, setMediaDropActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [todoContextText, setTodoContextText] = useState('');
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
   const [hydrateVersion, setHydrateVersion] = useState(0);
@@ -601,16 +618,19 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const refreshDocuments = useCallback(async () => {
     try {
       const owner = username.toLowerCase();
-      const nextDocuments = await listSmartDocs();
+      const nextDocuments = await listSmartDocs(documentKind);
       if (directoryOwnerRef.current.toLowerCase() === owner) setDocuments(nextDocuments);
     } catch (error) {
       if (directoryOwnerRef.current.toLowerCase() === username.toLowerCase()) {
-        toast.error(error instanceof Error ? error.message : 'Could not load Smart Docs.');
+        toast.error(error instanceof Error ? error.message : `Could not load ${isTodoMode ? 'Smart Todos' : 'Smart Docs'}.`);
       }
     } finally {
-      if (directoryOwnerRef.current.toLowerCase() === username.toLowerCase()) setLoading(false);
+      if (directoryOwnerRef.current.toLowerCase() === username.toLowerCase()) {
+        setLoading(false);
+        setDirectoryLoaded(true);
+      }
     }
-  }, [username]);
+  }, [documentKind, isTodoMode, username]);
 
   useEffect(() => {
     void refreshDocuments();
@@ -619,9 +639,10 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   useEffect(() => {
     if (directoryOwnerRef.current.toLowerCase() !== username.toLowerCase()) {
       directoryOwnerRef.current = username;
-      const cached = loadCollabDirectoryCache<SmartDoc>(username, 'smartdoc');
+      const cached = loadCollabDirectoryCache<SmartDoc>(username, directoryType);
       setDocuments(cached);
       setLoading(cached.length === 0);
+      setDirectoryLoaded(false);
       setActiveDocumentId(initialDocumentId ?? null);
       setMarkdown('');
       markdownRef.current = '';
@@ -629,14 +650,25 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       setCanEdit(false);
       return;
     }
-    saveCollabDirectoryCache(username, 'smartdoc', documents);
-  }, [documents, initialDocumentId, username]);
+    saveCollabDirectoryCache(username, directoryType, documents);
+  }, [directoryType, documents, initialDocumentId, username]);
 
   useEffect(() => {
-    if (initialDocumentId && documents.some((document) => document.id === initialDocumentId)) {
-      setActiveDocumentId(initialDocumentId);
+    if (embedded) {
+      if (initialDocumentId) setActiveDocumentId(initialDocumentId);
+      return;
     }
-  }, [documents, initialDocumentId]);
+    if (!initialDocumentId) {
+      setActiveDocumentId(null);
+      return;
+    }
+    if (documents.some((document) => document.id === initialDocumentId)) {
+      setActiveDocumentId(initialDocumentId);
+    } else if (directoryLoaded) {
+      setActiveDocumentId(null);
+      onDocumentChange?.(null);
+    }
+  }, [directoryLoaded, documents, embedded, initialDocumentId, onDocumentChange]);
 
   useEffect(() => {
     markdownRef.current = markdown;
@@ -723,6 +755,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       setSnapshotReady(false);
       setCanEdit(false);
       setActiveDocumentId(null);
+      onDocumentChange?.(null);
       void refreshDocuments();
       toast.error('Your access to this Smart Doc was removed.');
     };
@@ -1218,6 +1251,9 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const showEditorContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
     captureSelection();
+    if (isTodoMode) {
+      setTodoContextText((event.target as HTMLElement).closest('li')?.textContent?.trim() ?? '');
+    }
     const width = 250;
     const height = canEditNow ? 600 : 100;
     setContextMenu({
@@ -1229,6 +1265,64 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   const handleContextAction = (action: () => void) => {
     setContextMenu(null);
     action();
+  };
+
+  const replaceTodoMarkdown = (nextMarkdown: string) => {
+    if (!canEditNow) return;
+    const editor = editorRef.current;
+    if (editor) editor.innerHTML = markdownToEditorHtml(nextMarkdown);
+    handleEditorInput();
+  };
+
+  const findTodoLineIndex = (lines: string[]) => {
+    const selected = (todoContextText || selectionRangeRef.current?.toString() || '')
+      .replace(/^\s*(?:☐|☑|□|■)?\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim()
+      .toLocaleLowerCase();
+    if (!selected) return -1;
+    return lines.findIndex((line) => (
+      /^\s*-\s+\[[ xX]\]\s+/.test(line) &&
+      line.replace(/^\s*-\s+\[[ xX]\]\s+/, '').replace(/\*\*/g, '').toLocaleLowerCase().includes(selected)
+    ));
+  };
+
+  const addTodoItem = () => {
+    const title = window.prompt('Todo item');
+    if (!title?.trim()) return;
+    const lines = markdownRef.current.split('\n');
+    const headingIndex = lines.findIndex((line) => /^##\s+To-do list\s*$/i.test(line));
+    if (headingIndex < 0) {
+      lines.push('', '## To-do list', '', `- [ ] ${title.trim()}`);
+    } else {
+      let insertAt = headingIndex + 1;
+      while (insertAt < lines.length && !/^#{1,2}\s+/.test(lines[insertAt])) insertAt += 1;
+      lines.splice(insertAt, 0, `- [ ] ${title.trim()}`);
+    }
+    replaceTodoMarkdown(lines.join('\n'));
+  };
+
+  const updateSelectedTodo = (update: (line: string) => string | null) => {
+    const lines = markdownRef.current.split('\n');
+    const index = findTodoLineIndex(lines);
+    if (index < 0) {
+      toast.info('Right-click a todo item first.');
+      return;
+    }
+    const nextLine = update(lines[index]);
+    if (nextLine === null) lines.splice(index, 1);
+    else lines[index] = nextLine;
+    replaceTodoMarkdown(lines.join('\n'));
+  };
+
+  const addTodoNote = () => {
+    const note = window.prompt('Post-call note or reference');
+    if (!note?.trim()) return;
+    const lines = markdownRef.current.split('\n');
+    const headingIndex = lines.findIndex((line) => /^##\s+Post notes\s*$/i.test(line));
+    if (headingIndex < 0) lines.push('', '## Post notes', '', note.trim());
+    else lines.splice(headingIndex + 1, 0, '', note.trim());
+    replaceTodoMarkdown(lines.join('\n'));
   };
 
   const handleEditorDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
@@ -1521,13 +1615,14 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
     if (!newTitle.trim()) return;
     try {
       setCreating(true);
-      const document = await createSmartDoc(newTitle);
+      const document = await createSmartDoc(newTitle, documentKind);
       setDocuments((current) => [document, ...current]);
       setNewTitle('');
       setCreateOpen(false);
       setActiveDocumentId(document.id);
+      onDocumentChange?.(document.id);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not create this Smart Doc.');
+      toast.error(error instanceof Error ? error.message : `Could not create this ${isTodoMode ? 'Smart Todo' : 'Smart Doc'}.`);
     } finally {
       setCreating(false);
     }
@@ -1546,7 +1641,8 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
       }
       setDocuments((current) => current.filter((item) => item.id !== activeDocument.id));
       setActiveDocumentId(null);
-      toast.success('Smart Doc deleted.');
+      onDocumentChange?.(null);
+      toast.success(`${isTodoMode ? 'Smart Todo' : 'Smart Doc'} deleted.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not delete this Smart Doc.');
     }
@@ -1566,7 +1662,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   }, [activeDocumentId, canEdit, markdown, snapshotReady]);
 
   if (loading) {
-    return <section className="smart-docs-page"><div className="smart-docs-loading"><Loader2 className="size-5 animate-spin" />Loading Smart Docs…</div></section>;
+    return <section className="smart-docs-page"><div className="smart-docs-loading"><Loader2 className="size-5 animate-spin" />Loading {isTodoMode ? 'Smart Todos' : 'Smart Docs'}…</div></section>;
   }
 
   if (!activeDocument) {
@@ -1575,17 +1671,22 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         <header className="collab-tool-header">
           <div>
             <p className="collab-tool-eyebrow">Documents</p>
-            <h2>Smart Docs</h2>
-            <p className="collab-tool-subtitle">Shared, live-updating documents for your team.</p>
+            <h2>{isTodoMode ? 'Smart Todos' : 'Smart Docs'}</h2>
+            <p className="collab-tool-subtitle">{isTodoMode
+              ? 'Personal action lists and post-call notes. Pin one in chat to give everyone there edit access.'
+              : 'Shared, live-updating documents for your team.'}</p>
           </div>
           <button type="button" className="collab-tool-primary" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" /> New document
+            <Plus className="size-4" /> {isTodoMode ? 'New todo' : 'New document'}
           </button>
         </header>
         {documents.length ? (
           <div className="smart-docs-library">
             {documents.map((item) => (
-              <button type="button" className="smart-doc-card" key={item.id} onClick={() => setActiveDocumentId(item.id)}>
+              <button type="button" className="smart-doc-card" key={item.id} onClick={() => {
+                setActiveDocumentId(item.id);
+                onDocumentChange?.(item.id);
+              }}>
                 <span className="smart-doc-card-icon"><FileText className="size-5" /></span>
                 <span className="smart-doc-card-copy">
                   <strong>{item.title}</strong>
@@ -1601,11 +1702,13 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
           </div>
         ) : (
           <div className="smart-docs-empty">
-            <span><FileText className="size-7" /></span>
-            <h3>Start a shared document</h3>
-            <p>Write together in a live Markdown document, add media, and choose who can view or edit.</p>
+            <span>{isTodoMode ? <CheckSquare2 className="size-7" /> : <FileText className="size-7" />}</span>
+            <h3>{isTodoMode ? 'Start a Smart Todo' : 'Start a shared document'}</h3>
+            <p>{isTodoMode
+              ? 'Capture tasks, owners, priorities, due dates, post-call notes, and follow-ups. Keep it personal or share it in a chat.'
+              : 'Write together in a live Markdown document, add media, and choose who can view or edit.'}</p>
             <button type="button" className="collab-tool-primary" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" /> Create Smart Doc
+              <Plus className="size-4" /> {isTodoMode ? 'Create Smart Todo' : 'Create Smart Doc'}
             </button>
           </div>
         )}
@@ -1614,9 +1717,9 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
             if (event.target === event.currentTarget) setCreateOpen(false);
           }}>
             <form className="smart-doc-modal" onSubmit={(event) => void submitCreate(event)}>
-              <header><div><p className="collab-tool-eyebrow">New document</p><h3>Create a Smart Doc</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={() => setCreateOpen(false)}><X className="size-4" /></button></header>
-              <label className="smart-doc-field">Document title
-                <input autoFocus maxLength={100} value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="e.g. Team playbook" required />
+              <header><div><p className="collab-tool-eyebrow">New {isTodoMode ? 'todo' : 'document'}</p><h3>Create a {isTodoMode ? 'Smart Todo' : 'Smart Doc'}</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={() => setCreateOpen(false)}><X className="size-4" /></button></header>
+              <label className="smart-doc-field">{isTodoMode ? 'Todo title' : 'Document title'}
+                <input autoFocus maxLength={100} value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={isTodoMode ? 'e.g. Replacement follow-up' : 'e.g. Team playbook'} required />
               </label>
               <footer><button type="button" className="collab-tool-secondary" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit" className="collab-tool-primary" disabled={creating}>{creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Create</button></footer>
             </form>
@@ -1628,7 +1731,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
 
   const saveStatusText = connection !== 'connected'
     ? 'Reconnecting…'
-    : saveState === 'saving' ? 'Saving to Smart Docs…' : 'All changes saved';
+    : saveState === 'saving' ? `Saving to ${isTodoMode ? 'Smart Todos' : 'Smart Docs'}…` : 'All changes saved';
   const bannerSource = activeDocument.bannerAssetId
     ? smartDocMediaUrl(activeDocument.id, activeDocument.bannerAssetId)
     : '';
@@ -1636,10 +1739,13 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
   return (
     <section className="smart-docs-page smart-doc-editor-page">
       <header className="smart-doc-editor-header">
-        <button type="button" className="collab-tool-icon" aria-label="Back to Smart Docs" onClick={() => {
-          setActiveDocumentId(null);
-          void refreshDocuments();
-        }}><ArrowLeft className="size-4" /></button>
+        {!embedded && (
+          <button type="button" className="collab-tool-icon" aria-label={`Back to ${isTodoMode ? 'Smart Todos' : 'Smart Docs'}`} onClick={() => {
+            setActiveDocumentId(null);
+            onDocumentChange?.(null);
+            void refreshDocuments();
+          }}><ArrowLeft className="size-4" /></button>
+        )}
         <div className="smart-doc-title-wrap">
           <input
             value={titleDraft}
@@ -1731,6 +1837,11 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
               {mediaUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             </button>
             <button type="button" disabled={!canEditNow} aria-label="Insert media from Drive" title="Insert media from Drive" onMouseDown={onToolbarMouseDown} onClick={openDrivePicker}><ImagePlus className="size-4" /></button>
+            {isTodoMode && (
+              <button type="button" disabled={!canEditNow} className="smart-doc-todo-add" onMouseDown={(event) => event.preventDefault()} onClick={addTodoItem}>
+                <Plus className="size-3.5" /> Add todo
+              </button>
+            )}
             <input
               ref={mediaInputRef}
               hidden
@@ -1805,7 +1916,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                 contentEditable
                 suppressContentEditableWarning
                 role="textbox"
-                aria-label="Smart Doc editor"
+                aria-label={isTodoMode ? 'Smart Todo editor' : 'Smart Doc editor'}
                 aria-multiline="true"
                 spellCheck
                 onInput={handleEditorInput}
@@ -1820,7 +1931,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                   }
                 }}
               />
-              {!markdown.trim() && <span className="smart-doc-editor-placeholder">Write in Markdown or use the formatting toolbar…</span>}
+              {!markdown.trim() && <span className="smart-doc-editor-placeholder">{isTodoMode ? 'Add a todo, owner, priority, due date, or post-call note…' : 'Write in Markdown or use the formatting toolbar…'}</span>}
               {mentionQuery !== null && mentionUsers.length > 0 && (
                 <div className="smart-doc-mention-menu">
                   <span>Mention a teammate</span>
@@ -1839,8 +1950,41 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                   aria-label="Markdown editor actions"
                   style={{ left: contextMenu.x, top: contextMenu.y }}
                 >
-                  <span className="smart-doc-context-menu-title">Markdown editor</span>
-                  {canEditNow && (
+                  <span className="smart-doc-context-menu-title">{isTodoMode ? 'Todo list controls' : 'Markdown editor'}</span>
+                  {canEditNow && isTodoMode && (
+                    <>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(addTodoItem)}><ListTodo className="size-4" />Add todo item</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => line.replace(/^(\s*-\s+)\[ \]/, '$1[x]')))}><CheckSquare2 className="size-4" />Mark complete</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => line.replace(/^(\s*-\s+)\[[xX]\]/, '$1[ ]')))}><CheckSquare2 className="size-4" />Mark incomplete</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
+                        const priority = window.prompt('Priority (High, Normal, or Low)', 'Normal');
+                        if (!priority?.trim()) return line;
+                        return /Priority:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Priority:\s*[^·|]+/i, `Priority: ${priority.trim()}`)
+                          : `${line} · Priority: ${priority.trim()}`;
+                      }))}><ListTodo className="size-4" />Set priority</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
+                        const owner = window.prompt('Task owner', '');
+                        if (!owner?.trim()) return line;
+                        return /Owner:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Owner:\s*[^·|]+/i, `Owner: ${owner.trim()}`)
+                          : `${line} · Owner: ${owner.trim()}`;
+                      }))}><UsersRound className="size-4" />Assign owner</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
+                        const dueDate = window.prompt('Due date (YYYY-MM-DD)', '');
+                        if (!dueDate?.trim()) return line;
+                        return /Due:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Due:\s*[^·|]+/i, `Due: ${dueDate.trim()}`)
+                          : `${line} · Due: ${dueDate.trim()}`;
+                      }))}><ListTodo className="size-4" />Set due date</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo(() => null))}><Trash2 className="size-4" />Delete todo item</button>
+                      <span className="smart-doc-context-menu-divider" />
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(addTodoNote)}><FileText className="size-4" />Add post-call note</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void copySelection(); })}><ClipboardCopy className="size-4" />Copy selection</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void pasteFromClipboard(); })}><ClipboardPaste className="size-4" />Paste</button>
+                    </>
+                  )}
+                  {canEditNow && !isTodoMode && (
                     <>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void copySelection(); })}><ClipboardCopy className="size-4" />Copy selection</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void cutSelection(); })}><Scissors className="size-4" />Cut selection</button>
@@ -1870,7 +2014,7 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
                 </div>
               )}
               <div className="smart-doc-editor-footer">
-                <span>Markdown document · {markdown.length.toLocaleString()} characters</span>
+                <span>{isTodoMode ? 'Todo list and notes' : 'Markdown document'} · {markdown.length.toLocaleString()} characters</span>
                 <span>Rev {revision}</span>
               </div>
             </div>
@@ -1914,18 +2058,24 @@ export default function SmartDocsPage({ username, initialDocumentId }: SmartDocs
         }}>
           <section className="smart-doc-modal smart-doc-access-modal">
             <header><div><p className="collab-tool-eyebrow">Document permissions</p><h3>Share “{activeDocument.title}”</h3></div><button type="button" className="collab-tool-icon" aria-label="Close" onClick={() => setAccessOpen(false)}><X className="size-4" /></button></header>
-            <div className="smart-doc-visibility-control">
-              <span><strong>Who can view?</strong><small>Registered users always get view-only access.</small></span>
-              <select
-                value={activeDocument.visibility ?? 'private'}
-                aria-label="Document visibility"
-                disabled={!isOwner || savingVisibility}
-                onChange={(event) => void saveVisibility(event.target.value as SmartDoc['visibility'])}
-              >
-                <option value="private">Only invited people</option>
-                <option value="registered">Anyone registered</option>
-              </select>
-            </div>
+            {isTodoMode ? (
+              <div className="smart-doc-visibility-control">
+                <span><strong>Personal unless shared</strong><small>Pin this todo into a chat to give every chat member edit access.</small></span>
+              </div>
+            ) : (
+              <div className="smart-doc-visibility-control">
+                <span><strong>Who can view?</strong><small>Registered users always get view-only access.</small></span>
+                <select
+                  value={activeDocument.visibility ?? 'private'}
+                  aria-label="Document visibility"
+                  disabled={!isOwner || savingVisibility}
+                  onChange={(event) => void saveVisibility(event.target.value as SmartDoc['visibility'])}
+                >
+                  <option value="private">Only invited people</option>
+                  <option value="registered">Anyone registered</option>
+                </select>
+              </div>
+            )}
             <div className="smart-doc-access-list">
               {members.map((member) => (
                 <div className="smart-doc-access-row" key={member.username}>

@@ -4,6 +4,8 @@
  * localStorage; the Worker validates them against the auth_sessions table.
  */
 
+import type { CommuneHangoutId } from '@shared/commune-hangouts';
+
 export interface AuthUser {
   username: string;
   isAdmin: boolean;
@@ -443,9 +445,12 @@ export interface CommuneAgent {
   y: number;
   status: string;
   seenAgo: number;
+  isAfk?: boolean;
   loadout: CommuneLoadout | null;
   carId?: string | null;
   carSeat?: number | null;
+  hangoutId?: CommuneHangoutId | null;
+  hangoutSeat?: number | null;
 }
 
 export type CommuneBannerKind = 'pin' | 'priority' | 'sketch';
@@ -485,12 +490,13 @@ export interface CommuneConnectionBootstrap {
 export async function createCommuneSocketTicket(
   x: number,
   y: number,
-  status: string
+  status: string,
+  viewRadius?: number,
 ): Promise<CommuneConnectionBootstrap> {
   const token = getStoredToken();
   return call<CommuneConnectionBootstrap>('/api/commune/socket-ticket', {
     method: 'POST',
-    body: JSON.stringify({ x, y, status }),
+    body: JSON.stringify({ x, y, status, viewRadius }),
     token,
   });
 }

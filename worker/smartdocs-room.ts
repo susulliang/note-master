@@ -65,6 +65,17 @@ export class SmartDocsRoom extends DurableObject<Env> {
     // this RPC is served. This method lets document creation force that setup.
   }
 
+  async initializeMarkdown(markdown: string): Promise<void> {
+    if (markdown.length > MAX_MARKDOWN_LENGTH) throw new Error('Initial document content is too large.');
+    this.ctx.storage.sql.exec(
+      `UPDATE smartdoc_state
+       SET markdown = ?, revision = 1, updated_at = ?
+       WHERE id = 1 AND revision = 0 AND markdown = ''`,
+      markdown.replace(/\u0000/g, ''),
+      Date.now(),
+    );
+  }
+
   async createTicket(username: string, permission: 'view' | 'edit'): Promise<string> {
     const now = Date.now();
     const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;

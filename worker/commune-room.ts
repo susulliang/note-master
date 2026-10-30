@@ -1,4 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
+import {
+  COMMUNE_HANGOUTS,
+  COMMUNE_HANGOUT_ENTER_RANGE,
+  COMMUNE_HANGOUT_EXIT_OFFSET,
+  type CommuneHangoutId,
+} from '../shared/commune-hangouts';
 
 type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
 
@@ -25,9 +31,12 @@ export interface CommuneRoomAgent {
   y: number;
   status: string;
   seenAgo: number;
+  isAfk?: boolean;
   loadout: CommuneRoomLoadout | null;
   carId?: string | null;
   carSeat?: number | null;
+  hangoutId?: CommuneHangoutId | null;
+  hangoutSeat?: number | null;
 }
 
 export interface CommuneRoomDrop {
@@ -67,6 +76,8 @@ interface Presence extends CommuneRoomAgent {
   seenAt: number;
   lastMoveAt: number;
   lastChatAt: number;
+  viewRadius?: number;
+  visibleUsers?: string[];
   mowerClientId?: string;
 }
 
@@ -135,14 +146,20 @@ interface CommuneLaserShotResult {
 type RoomEvent = Record<string, unknown>;
 
 const ROOM_TICKET_TTL_MS = 60_000;
-const PRESENCE_TTL_MS = 60_000;
+const PRESENCE_TTL_MS = 90_000;
 const MOVE_THROTTLE_MS = 80;
+const MAX_AGENT_SPEED = 240;
+const MAX_MOVE_ELAPSED_MS = 1_000;
+const MOVE_DISTANCE_TOLERANCE = 18;
 const MOWER_UPDATE_THROTTLE_MS = 100;
 const CHAT_THROTTLE_MS = 500;
 const MAX_MESSAGE_LENGTH = 90;
 const MAX_SOCKET_MESSAGE_LENGTH = 16_384;
 const COMMUNE_WORLD_W = 3_200;
 const COMMUNE_WORLD_H = 2_400;
+const DEFAULT_VIEW_RADIUS = 1_500;
+const MIN_VIEW_RADIUS = 600;
+const MAX_VIEW_RADIUS = 4_000;
 const SOCCER_FIELD = { left: 850, right: 1280, top: 1820, bottom: 2120 };
 const SOCCER_BALL_START = { x: 1065, y: 1970 };
 const SOCCER_KICK_RANGE = 104;
@@ -172,6 +189,12 @@ const CAR_STATIC_BLOCKERS: { x: number; y: number; w: number; h: number }[] = [
   { x: 90, y: 1062, w: 246, h: 18 },
   { x: 1310, y: 1062, w: 216, h: 18 },
   { x: 1454, y: 1386, w: 52, h: 54 },
+  ...COMMUNE_HANGOUTS.map((hangout) => ({
+    x: hangout.x - hangout.width / 2,
+    y: hangout.y - hangout.depth / 2,
+    w: hangout.width,
+    h: hangout.depth,
+  })),
 ];
 const CAR_BLOCKING_TREES: [number, number][] = [
   [1740, 250], [1830, 310], [1940, 235], [2070, 285], [2180, 220],
@@ -495,6 +518,12 @@ export class CommuneRoom extends DurableObject<Env> {
       seenAt: now,
       lastMoveAt: 0,
       lastChatAt: 0,
+      isAfk: false,
+      viewRadius: Math.max(
+        MIN_VIEW_RADIUS,
+        Math.min(MAX_VIEW_RADIUS, Number(profile.viewRadius) || DEFAULT_VIEW_RADIUS),
+      ),
+      visibleUsers: [],
     };
     this.ctx.storage.sql.exec('DELETE FROM commune_ws_tickets WHERE expires_at < ?', now);
     this.ctx.storage.sql.exec(
@@ -513,7 +542,7 @@ export class CommuneRoom extends DurableObject<Env> {
       if (!current) continue;
       const updated = { ...current, loadout, seenAt: now };
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) });
+      this.publishAgentUpdate(updated);
     }
   }
 
@@ -526,7 +555,7 @@ export class CommuneRoom extends DurableObject<Env> {
       if (!current) continue;
       const updated: Presence = { ...current, ...roles, seenAt: Date.now() };
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) });
+      this.publishAgentUpdate(updated);
     }
   }
 
@@ -578,9 +607,26 @@ export class CommuneRoom extends DurableObject<Env> {
     const mowerClientId = crypto.randomUUID();
     const connectedProfile: Presence = {
       ...profile,
+      carId: null,
+      carSeat: null,
+      hangoutId: null,
+      hangoutSeat: null,
       seenAt: Date.now(),
+      lastMoveAt: Date.now(),
+      isAfk: false,
+      viewRadius: Math.max(
+        MIN_VIEW_RADIUS,
+        Math.min(MAX_VIEW_RADIUS, Number(profile.viewRadius) || DEFAULT_VIEW_RADIUS),
+      ),
       mowerClientId,
     };
+    const initialAgents = this.listAgents(
+      profile.username,
+      connectedProfile.x,
+      connectedProfile.y,
+      connectedProfile.viewRadius,
+    );
+    connectedProfile.visibleUsers = initialAgents.map((agent) => agent.username);
     this.ctx.acceptWebSocket(server, [profile.username]);
     server.serializeAttachment(connectedProfile);
     const authority = this.electMowerAuthority(mowerClientId);
@@ -588,7 +634,7 @@ export class CommuneRoom extends DurableObject<Env> {
     send(server, {
       type: 'welcome',
       self: profile.username,
-      others: this.listAgents(profile.username),
+      others: initialAgents,
       cars: this.listCarPositions(),
       soccerBall: this.getSoccerBall(),
       mowerClientId,
@@ -615,7 +661,7 @@ export class CommuneRoom extends DurableObject<Env> {
         sentAt: row.sent_at,
       })),
     });
-    this.broadcast({ type: 'agent_join', agent: this.toAgent(connectedProfile) }, profile.username);
+    this.publishAgentUpdate(connectedProfile);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -626,7 +672,7 @@ export class CommuneRoom extends DurableObject<Env> {
     const game = payload?.game;
     const current = this.ctx.getWebSockets(username)
       .map((socket) => attachment(socket))
-      .find((presence): presence is Presence => !!presence && !presence.carId);
+      .find((presence): presence is Presence => !!presence && !presence.carId && !presence.hangoutId);
     if (!username || !current) {
       return Response.json({ ok: false, error: 'Join the town square to play.' }, { status: 403 });
     }
@@ -676,7 +722,7 @@ export class CommuneRoom extends DurableObject<Env> {
 
     const current = this.ctx.getWebSockets(username)
       .map((socket) => attachment(socket))
-      .find((presence): presence is Presence => !!presence && !presence.carId);
+      .find((presence): presence is Presence => !!presence && !presence.carId && !presence.hangoutId);
     if (!current) {
       return Response.json({ accepted: false, error: 'soccer_out_of_bounds' } satisfies CommuneSoccerKickResult, { status: 403 });
     }
@@ -782,7 +828,7 @@ export class CommuneRoom extends DurableObject<Env> {
     const current = this.ctx.getWebSockets(username)
       .map((socket) => attachment(socket))
       .find((presence): presence is Presence => (
-        !!presence && !presence.carId && now - presence.seenAt <= PRESENCE_TTL_MS
+        !!presence && !presence.carId && !presence.hangoutId && now - presence.seenAt <= PRESENCE_TTL_MS
       ));
     if (!current) {
       return Response.json({ accepted: false, error: 'laser_shooter_unavailable' } satisfies CommuneLaserShotResult, { status: 403 });
@@ -857,6 +903,7 @@ export class CommuneRoom extends DurableObject<Env> {
         !presence
         || presence.username === username
         || presence.carId
+        || presence.hangoutId
         || now - presence.seenAt > PRESENCE_TTL_MS
       ) continue;
       const existing = candidates.get(presence.username);
@@ -966,7 +1013,7 @@ export class CommuneRoom extends DurableObject<Env> {
         JSON.stringify(mower),
         now,
       );
-      ws.serializeAttachment({ ...current, seenAt: now });
+      ws.serializeAttachment({ ...current, seenAt: now, isAfk: false });
       this.broadcastExceptSocket({
         type: 'mower_state',
         clientId: current.mowerClientId,
@@ -976,12 +1023,85 @@ export class CommuneRoom extends DurableObject<Env> {
       return;
     }
 
+    if (event.type === 'hangout_enter') {
+      const hangoutId = typeof event.hangoutId === 'string' ? event.hangoutId : '';
+      const hangout = COMMUNE_HANGOUTS.find((item) => item.id === hangoutId);
+      if (
+        !hangout ||
+        current.carId ||
+        current.hangoutId ||
+        Math.hypot(current.x - hangout.doorX, current.y - hangout.doorY) > COMMUNE_HANGOUT_ENTER_RANGE
+      ) {
+        send(ws, { type: 'error', code: 'hangout_unavailable', message: 'Walk up to the building entrance before entering.' });
+        return;
+      }
+      const occupiedSeats = new Set<number>();
+      const occupantNames = new Set<string>();
+      for (const otherSocket of this.ctx.getWebSockets()) {
+        const other = attachment(otherSocket);
+        if (otherSocket.readyState !== WebSocket.OPEN || other?.hangoutId !== hangout.id) continue;
+        if (other.username === current.username) {
+          send(ws, { type: 'error', code: 'hangout_already_inside', message: 'You are already inside this building.' });
+          return;
+        }
+        if (occupantNames.has(other.username)) continue;
+        occupantNames.add(other.username);
+        if (Number.isInteger(other.hangoutSeat)) occupiedSeats.add(other.hangoutSeat as number);
+      }
+      const seat = Array.from({ length: hangout.capacity }, (_, index) => index)
+        .find((index) => !occupiedSeats.has(index));
+      if (seat === undefined) {
+        send(ws, { type: 'error', code: 'hangout_full', message: `${hangout.label} is full.` });
+        return;
+      }
+      const updated: Presence = {
+        ...current,
+        carId: null,
+        carSeat: null,
+        hangoutId: hangout.id,
+        hangoutSeat: seat,
+        x: hangout.x,
+        y: hangout.y,
+        status: `chilling at ${hangout.label}`,
+        seenAt: now,
+        lastMoveAt: now,
+        isAfk: false,
+      };
+      ws.serializeAttachment(updated);
+      this.publishAgentUpdate(updated);
+      this.refreshVisibleAgents(ws, updated);
+      send(ws, { type: 'hangout_state', hangoutId: hangout.id, seat, x: hangout.x, y: hangout.y });
+      return;
+    }
+
+    if (event.type === 'hangout_exit') {
+      if (!current.hangoutId || current.hangoutSeat === null || current.hangoutSeat === undefined) return;
+      const hangout = COMMUNE_HANGOUTS.find((item) => item.id === current.hangoutId);
+      if (!hangout) return;
+      const updated: Presence = {
+        ...current,
+        hangoutId: null,
+        hangoutSeat: null,
+        x: hangout.doorX,
+        y: hangout.doorY - COMMUNE_HANGOUT_EXIT_OFFSET,
+        status: `leaving ${hangout.label}`,
+        seenAt: now,
+        lastMoveAt: now,
+        isAfk: false,
+      };
+      ws.serializeAttachment(updated);
+      this.publishAgentUpdate(updated);
+      this.refreshVisibleAgents(ws, updated);
+      send(ws, { type: 'hangout_state', hangoutId: null, seat: null, x: updated.x, y: updated.y });
+      return;
+    }
+
     if (event.type === 'car_enter') {
       const carId = typeof event.carId === 'string' ? event.carId : '';
       const car = Object.prototype.hasOwnProperty.call(PARKED_CARS, carId)
         ? this.getCarPosition(carId)
         : null;
-      if (!car || current.carId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
+      if (!car || current.carId || current.hangoutId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
         send(ws, { type: 'error', code: 'car_unavailable', message: 'You cannot enter that car right now.' });
         return;
       }
@@ -1006,15 +1126,19 @@ export class CommuneRoom extends DurableObject<Env> {
         ...current,
         carId,
         carSeat: seat,
+        hangoutId: null,
+        hangoutSeat: null,
         x: car.x,
         y: car.y,
         status: 'having a private car conversation',
         seenAt: now,
         lastMoveAt: now,
+        isAfk: false,
       };
       this.ctx.storage.sql.exec('UPDATE commune_parked_cars SET last_move_at = ? WHERE id = ?', now, carId);
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      this.publishAgentUpdate(updated);
+      this.refreshVisibleAgents(ws, updated);
       send(ws, { type: 'car_state', carId, seat, x: car.x, y: car.y, heading: car.heading });
       return;
     }
@@ -1034,9 +1158,12 @@ export class CommuneRoom extends DurableObject<Env> {
         y,
         status: 'stepping out of a parked car',
         seenAt: now,
+        lastMoveAt: now,
+        isAfk: false,
       };
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      this.publishAgentUpdate(updated);
+      this.refreshVisibleAgents(ws, updated);
       send(ws, { type: 'car_state', carId: null, seat: null, x, y });
       return;
     }
@@ -1063,7 +1190,7 @@ export class CommuneRoom extends DurableObject<Env> {
           now,
           current.carId,
         );
-        const updated = { ...current, seenAt: now, lastMoveAt: now };
+        const updated = { ...current, seenAt: now, lastMoveAt: now, isAfk: false };
         ws.serializeAttachment(updated);
         return;
       }
@@ -1085,9 +1212,11 @@ export class CommuneRoom extends DurableObject<Env> {
           y,
           seenAt: now,
           lastMoveAt: now,
+          isAfk: false,
         };
         occupantSocket.serializeAttachment(updated);
-        this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+        this.publishAgentUpdate(updated, true);
+        this.refreshVisibleAgents(occupantSocket, updated);
       }
       this.broadcast({ type: 'car_update', carId: current.carId, x, y, heading, at: now });
       return;
@@ -1115,22 +1244,39 @@ export class CommuneRoom extends DurableObject<Env> {
         ...current,
         loadout: normalizeLoadout(event.loadout),
         seenAt: now,
+        isAfk: false,
       };
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      this.publishAgentUpdate(updated);
+      return;
+    }
+
+    if (event.type === 'leave') {
+      ws.close(1000, 'Leaving Commune');
       return;
     }
 
     if (event.type === 'heartbeat') {
-      const updated = { ...current, seenAt: now };
+      const isAfk = typeof event.isAfk === 'boolean' ? event.isAfk : current.isAfk === true;
+      const viewRadius = Number.isFinite(Number(event.viewRadius))
+        ? Math.max(MIN_VIEW_RADIUS, Math.min(MAX_VIEW_RADIUS, Number(event.viewRadius)))
+        : current.viewRadius ?? DEFAULT_VIEW_RADIUS;
+      const updated = { ...current, seenAt: now, isAfk, viewRadius };
       ws.serializeAttachment(updated);
       this.pruneStaleConnections();
+      if (isAfk !== (current.isAfk === true)) {
+        this.publishAgentUpdate(updated);
+      }
+      if (
+        !Array.isArray(current.visibleUsers) ||
+        viewRadius !== (current.viewRadius ?? DEFAULT_VIEW_RADIUS)
+      ) this.refreshVisibleAgents(ws, updated);
       send(ws, { type: 'heartbeat_ack', at: now });
       return;
     }
 
     if (event.type === 'move') {
-      if (current.carId) return;
+      if (current.carId || current.hangoutId) return;
       if (now - current.lastMoveAt < MOVE_THROTTLE_MS) return;
       const x = Number(event.x);
       const y = Number(event.y);
@@ -1138,21 +1284,40 @@ export class CommuneRoom extends DurableObject<Env> {
         send(ws, { type: 'error', code: 'invalid_position', message: 'Invalid position.' });
         return;
       }
+      const targetX = Math.max(24, Math.min(COMMUNE_WORLD_W - 24, x));
+      const targetY = Math.max(144, Math.min(COMMUNE_WORLD_H - 24, y));
+      const elapsedMs = Math.min(MAX_MOVE_ELAPSED_MS, Math.max(0, now - current.lastMoveAt));
+      const maxDistance = MAX_AGENT_SPEED * elapsedMs / 1_000 + MOVE_DISTANCE_TOLERANCE;
+      const distance = Math.hypot(targetX - current.x, targetY - current.y);
+      if (distance > maxDistance) {
+        ws.serializeAttachment({ ...current, seenAt: now, isAfk: false });
+        send(ws, {
+          type: 'position_correction',
+          x: current.x,
+          y: current.y,
+        });
+        return;
+      }
       const updated: Presence = {
         ...current,
-        x: Math.max(24, Math.min(COMMUNE_WORLD_W - 24, x)),
-        y: Math.max(144, Math.min(COMMUNE_WORLD_H - 24, y)),
+        x: targetX,
+        y: targetY,
         status: typeof event.status === 'string' ? event.status.slice(0, 40) : current.status,
         seenAt: now,
         lastMoveAt: now,
+        isAfk: false,
+        viewRadius: Number.isFinite(Number(event.viewRadius))
+          ? Math.max(MIN_VIEW_RADIUS, Math.min(MAX_VIEW_RADIUS, Number(event.viewRadius)))
+          : current.viewRadius ?? DEFAULT_VIEW_RADIUS,
       };
       ws.serializeAttachment(updated);
-      this.broadcast({ type: 'agent_update', agent: this.toAgent(updated) }, updated.username);
+      this.publishAgentUpdate(updated, true);
+      this.refreshVisibleAgents(ws, updated);
       return;
     }
 
     if (event.type === 'car_chat') {
-      if (!current.carId) {
+      if (!current.carId || current.hangoutId) {
         send(ws, { type: 'error', code: 'not_in_car', message: 'Get into a parked car to use its private chat.' });
         return;
       }
@@ -1167,8 +1332,11 @@ export class CommuneRoom extends DurableObject<Env> {
         send(ws, { type: 'error', code: 'empty_message', message: 'Type a message first.' });
         return;
       }
-      const updated = { ...current, seenAt: now, lastChatAt: now };
+      const updated = { ...current, seenAt: now, lastChatAt: now, isAfk: false };
       ws.serializeAttachment(updated);
+      if (current.isAfk) {
+        this.publishAgentUpdate(updated);
+      }
       const chatEvent = {
         type: 'car_chat',
         carId: current.carId,
@@ -1182,7 +1350,43 @@ export class CommuneRoom extends DurableObject<Env> {
       return;
     }
 
+    if (event.type === 'hangout_chat') {
+      if (!current.hangoutId) {
+        send(ws, { type: 'error', code: 'not_in_hangout', message: 'Enter a villa or tent to use its private chat.' });
+        return;
+      }
+      if (now - current.lastChatAt < CHAT_THROTTLE_MS) {
+        send(ws, { type: 'error', code: 'chat_rate_limited', message: 'Please wait a moment before sending again.' });
+        return;
+      }
+      const messageText = typeof event.message === 'string'
+        ? event.message.trim().slice(0, MAX_MESSAGE_LENGTH)
+        : '';
+      if (!messageText) {
+        send(ws, { type: 'error', code: 'empty_message', message: 'Type a message first.' });
+        return;
+      }
+      const updated = { ...current, seenAt: now, lastChatAt: now, isAfk: false };
+      ws.serializeAttachment(updated);
+      if (current.isAfk) this.publishAgentUpdate(updated);
+      const chatEvent = {
+        type: 'hangout_chat',
+        hangoutId: current.hangoutId,
+        from: current.username,
+        message: messageText,
+        sentAt: now,
+      };
+      for (const recipient of this.ctx.getWebSockets()) {
+        if (attachment(recipient)?.hangoutId === current.hangoutId) send(recipient, chatEvent);
+      }
+      return;
+    }
+
     if (event.type === 'public_chat' || event.type === 'private_chat') {
+      if (current.hangoutId) {
+        send(ws, { type: 'error', code: 'hangout_chat_required', message: 'Use the private building conversation while inside.' });
+        return;
+      }
       if (event.type === 'public_chat' && current.carId) {
         send(ws, { type: 'error', code: 'car_chat_required', message: 'Use the private car conversation while inside a car.' });
         return;
@@ -1196,7 +1400,11 @@ export class CommuneRoom extends DurableObject<Env> {
         send(ws, { type: 'error', code: 'empty_message', message: 'Type a message first.' });
         return;
       }
-      ws.serializeAttachment({ ...current, seenAt: now, lastChatAt: now });
+      const updated = { ...current, seenAt: now, lastChatAt: now, isAfk: false };
+      ws.serializeAttachment(updated);
+      if (current.isAfk) {
+        this.publishAgentUpdate(updated);
+      }
       if (event.type === 'public_chat') {
         const id = crypto.randomUUID();
         this.ctx.storage.sql.exec(
@@ -1234,6 +1442,7 @@ export class CommuneRoom extends DurableObject<Env> {
         send(ws, { type: 'error', code: 'recipient_offline', message: 'That agent is no longer in the square.' });
         return;
       }
+      ws.serializeAttachment({ ...current, seenAt: now, isAfk: false });
       for (const recipient of recipients) {
         send(recipient, { type: 'private_chat', from: current.username, message: messageText, sentAt: now });
       }
@@ -1242,6 +1451,7 @@ export class CommuneRoom extends DurableObject<Env> {
     }
 
     if (event.type === 'interaction') {
+      if (current.hangoutId) return;
       const target = typeof event.target === 'string' ? event.target.trim() : '';
       const kind = event.kind;
       if (!['bump', 'hands', 'hands_release'].includes(String(kind))) {
@@ -1265,7 +1475,7 @@ export class CommuneRoom extends DurableObject<Env> {
     const authority = this.electMowerAuthority();
     if (authority.changed) this.broadcastMowerAuthority(authority.clientId, authority.state);
     if (this.ctx.getWebSockets(current.username).some((socket) => socket.readyState === WebSocket.OPEN)) return;
-    this.broadcast({ type: 'agent_leave', username: current.username });
+    this.publishAgentLeave(current.username);
   }
 
   webSocketError(ws: WebSocket): void {
@@ -1273,7 +1483,15 @@ export class CommuneRoom extends DurableObject<Env> {
   }
 
   private toAgent(presence: Presence): CommuneRoomAgent {
-    const { seenAt, lastMoveAt: _lastMoveAt, lastChatAt: _lastChatAt, ...agent } = presence;
+    const {
+      seenAt,
+      lastMoveAt: _lastMoveAt,
+      lastChatAt: _lastChatAt,
+      viewRadius: _viewRadius,
+      visibleUsers: _visibleUsers,
+      mowerClientId: _mowerClientId,
+      ...agent
+    } = presence;
     return { ...agent, seenAgo: Math.max(0, Date.now() - seenAt) };
   }
 
@@ -1365,7 +1583,7 @@ export class CommuneRoom extends DurableObject<Env> {
     ).toArray();
   }
 
-  private listAgents(exceptUsername?: string): CommuneRoomAgent[] {
+  private listPresences(exceptUsername?: string): Presence[] {
     const latest = new Map<string, Presence>();
     for (const ws of this.ctx.getWebSockets()) {
       const presence = attachment(ws);
@@ -1373,7 +1591,102 @@ export class CommuneRoom extends DurableObject<Env> {
       const previous = latest.get(presence.username);
       if (!previous || previous.seenAt < presence.seenAt) latest.set(presence.username, presence);
     }
-    return [...latest.values()].map((presence) => this.toAgent(presence));
+    return [...latest.values()];
+  }
+
+  private listAgents(
+    exceptUsername?: string,
+    centerX?: number,
+    centerY?: number,
+    viewRadius = DEFAULT_VIEW_RADIUS,
+  ): CommuneRoomAgent[] {
+    const nearby = this.listPresences(exceptUsername).filter((presence) => (
+      !Number.isFinite(centerX) ||
+      !Number.isFinite(centerY) ||
+      Math.hypot(presence.x - Number(centerX), presence.y - Number(centerY)) <= viewRadius
+    ));
+    return nearby.map((presence) => this.toAgent(presence));
+  }
+
+  private publishAgentUpdate(
+    presence: Presence,
+    positionOnly = false,
+  ): void {
+    const online = this.listPresences();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const recipient = attachment(socket);
+      if (!recipient || recipient.username === presence.username) continue;
+      const tracked = Array.isArray(recipient.visibleUsers);
+      const radius = recipient.viewRadius ?? DEFAULT_VIEW_RADIUS;
+      const visible = tracked
+        ? new Set(recipient.visibleUsers)
+        : new Set(online
+            .filter((agent) => agent.username !== recipient.username)
+            .filter((agent) => Math.hypot(agent.x - recipient.x, agent.y - recipient.y) <= radius)
+            .map((agent) => agent.username));
+      const wasVisible = tracked ? visible.has(presence.username) : true;
+      const isVisible = Math.hypot(presence.x - recipient.x, presence.y - recipient.y) <= radius;
+      let changed = false;
+      if (!isVisible && wasVisible) {
+        visible.delete(presence.username);
+        send(socket, { type: 'agent_leave', username: presence.username });
+        changed = true;
+      } else if (isVisible && !wasVisible) {
+        visible.add(presence.username);
+        send(socket, { type: 'agent_join', agent: this.toAgent(presence) });
+        changed = true;
+      } else if (isVisible) {
+        send(socket, {
+          type: 'agent_update',
+          positionOnly,
+          agent: this.toAgent(presence),
+        });
+      }
+      if (!tracked || changed) {
+        socket.serializeAttachment({ ...recipient, visibleUsers: [...visible] });
+      }
+    }
+  }
+
+  private refreshVisibleAgents(socket: WebSocket, presence: Presence): void {
+    const radius = presence.viewRadius ?? DEFAULT_VIEW_RADIUS;
+    const nextAgents = this.listPresences(presence.username)
+      .filter((agent) => Math.hypot(agent.x - presence.x, agent.y - presence.y) <= radius);
+    const next = new Set(nextAgents.map((agent) => agent.username));
+    const current = attachment(socket) ?? presence;
+    const previous = new Set(
+      current.visibleUsers ?? this.listPresences(presence.username).map((agent) => agent.username),
+    );
+    for (const username of previous) {
+      if (!next.has(username)) send(socket, { type: 'agent_leave', username });
+    }
+    for (const agent of nextAgents) {
+      if (!previous.has(agent.username)) {
+        send(socket, { type: 'agent_join', agent: this.toAgent(agent) });
+      }
+    }
+    socket.serializeAttachment({ ...current, ...presence, visibleUsers: [...next] });
+  }
+
+  private publishAgentLeave(username: string): void {
+    const online = this.listPresences();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const recipient = attachment(socket);
+      if (!recipient || recipient.username === username) continue;
+      const tracked = Array.isArray(recipient.visibleUsers);
+      const visible = new Set(
+        recipient.visibleUsers ?? online
+          .filter((agent) => agent.username !== recipient.username)
+          .map((agent) => agent.username),
+      );
+      if (!tracked || visible.has(username)) {
+        visible.delete(username);
+        socket.serializeAttachment({ ...recipient, visibleUsers: [...visible] });
+        send(socket, { type: 'agent_leave', username });
+      }
+    }
   }
 
   private broadcast(event: RoomEvent, exceptUsername?: string): void {
@@ -1404,7 +1717,7 @@ export class CommuneRoom extends DurableObject<Env> {
     }
     for (const username of staleUsers) {
       if (!this.ctx.getWebSockets(username).some((ws) => ws.readyState === WebSocket.OPEN)) {
-        this.broadcast({ type: 'agent_leave', username });
+        this.publishAgentLeave(username);
       }
     }
   }

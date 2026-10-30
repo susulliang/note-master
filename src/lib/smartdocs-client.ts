@@ -2,6 +2,7 @@ import { getApiBase, getStoredToken } from '@/lib/auth-client';
 
 export type SmartDocPermission = 'view' | 'edit';
 export type SmartDocVisibility = 'private' | 'registered';
+export type SmartDocKind = 'smartdoc' | 'smarttodo';
 
 export interface SmartDoc {
   id: string;
@@ -9,6 +10,7 @@ export interface SmartDoc {
   owner: string;
   bannerAssetId: string | null;
   visibility: SmartDocVisibility;
+  kind: SmartDocKind;
   createdAt: number;
   updatedAt: number;
   permission: SmartDocPermission;
@@ -57,16 +59,18 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return result;
 }
 
-export async function listSmartDocs(): Promise<SmartDoc[]> {
-  const result = await requestJson<{ documents?: SmartDoc[] }>('/api/collab/smartdocs');
+export async function listSmartDocs(kind: SmartDocKind = 'smartdoc'): Promise<SmartDoc[]> {
+  const result = await requestJson<{ documents?: SmartDoc[] }>(
+    `/api/collab/smartdocs?kind=${kind}`,
+  );
   return result.documents ?? [];
 }
 
-export async function createSmartDoc(title: string): Promise<SmartDoc> {
+export async function createSmartDoc(title: string, kind: SmartDocKind = 'smartdoc'): Promise<SmartDoc> {
   const result = await requestJson<{ document: SmartDoc }>('/api/collab/smartdocs', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, kind }),
   });
   return result.document;
 }
