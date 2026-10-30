@@ -1,0 +1,14 @@
+# macOS link workarounds
+#
+# Xcode 27 (Swift 6.x toolchain) no longer ships `libswiftCompatibility56` /
+# `libswiftCompatibilityPacks`, but the Swift-bridged crates compiled with
+# swift-tools-version 5.9 (apple-metal → AppleMetalSwiftBridge, used by
+# screencapturekit) still emit force-load markers referencing them. Those
+# markers only pull in back-deployment stubs for macOS runtimes older than
+# 12 — this app targets macOS 13+ (ScreenCaptureKit), so letting the linker
+# leave them undefined is safe and unblocks the link on Xcode 27.
+[target.'cfg(target_os = "macos")']
+rustflags = [
+  "-C", "link-arg=-Wl,-U,___swift_FORCE_LOAD_$_swiftCompatibility56",
+  "-C", "link-arg=-Wl,-U,___swift_FORCE_LOAD_$_swiftCompatibilityPacks",
+]

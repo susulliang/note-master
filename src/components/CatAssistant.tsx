@@ -391,7 +391,7 @@ export function CatAssistant({
         tabIndex={0}
         aria-label={`${catName} cat assistant${napping ? ', napping' : ''}${isThinking ? ', thinking' : ''}${isCapturing ? ', listening' : ''} — drag to move, click or press Enter to pet${askEnabled ? ', long-press or Shift+C to ask, double-click for Kitty Help' : ''}`}
         className={cn(
-          'pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-2xl',
+          'group pointer-events-auto relative flex h-32 w-32 touch-none overscroll-contain cursor-grab items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-2xl',
           dragging && 'cursor-grabbing',
           petCooldown && 'cursor-default'
         )}

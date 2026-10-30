@@ -252,11 +252,11 @@ export interface CcpExtensionBridge {
 }
 
 /** Map the flat field shape produced by the background's
- *  buildMergedFields() into the node ids used by the React form. */
+ *  buildMergedFields() into the node ids used by the React form.
+ *  COMPLIANCE: contactNumber / emailAddress are NOT mapped — the customer's
+ *  phone + email are collected directly in Salesforce, never auto-filled. */
 export const EXT_TO_NODE_ID: Readonly<Record<string, string>> = {
   customerName: NODE_IDS.CUSTOMER_NAME,
-  contactNumber: NODE_IDS.CONTACT_NUMBER,
-  emailAddress: NODE_IDS.EMAIL_ADDRESS,
   shippingAddress: NODE_IDS.SHIPPING_ADDRESS,
   serialNumber: NODE_IDS.SERIAL_NUMBER,
   skuNumber: NODE_IDS.SKU_NUMBER,
@@ -271,13 +271,13 @@ export const EXT_TO_NODE_ID: Readonly<Record<string, string>> = {
   // clear prefix so agents can still copy them out easily.
 };
 
-/** The 4 identity fields + aliases auto-pushed from the extension and shown
+/** The identity fields + aliases auto-pushed from the extension and shown
  *  in the bottom-right confirm popup. Defensive mirror of background.js's
  *  KEY_PUSH_FIELDS / KEY_PUSH_FALLBACKS so any older extension that still
- *  pushes full fields still ends up showing only these 4. */
-const KEY_FIELD_KEYS = ['contactNumber', 'customerName', 'deebotModel', 'serialNumber'] as const;
+ *  pushes full fields still ends up showing only these. COMPLIANCE:
+ *  contactNumber excluded — phone numbers are never auto-pushed. */
+const KEY_FIELD_KEYS = ['customerName', 'deebotModel', 'serialNumber'] as const;
 const KEY_FIELD_FALLBACKS: Readonly<Record<string, string[]>> = {
-  contactNumber: ['phone'],
   customerName: ['accountName', 'contactName'],
   deebotModel: [],
   serialNumber: [],

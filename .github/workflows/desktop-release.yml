@@ -164,12 +164,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Ecovacs Ticket Notes ${{ steps.version.outputs.version }}
+          name: Econote ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
           files: release/*
           body: |
-            Desktop release of Ecovacs Ticket Notes v${{ steps.version.outputs.version }}.
+            Desktop release of Econote v${{ steps.version.outputs.version }}.
 
             ## Downloads
             - **macOS (Apple Silicon)**: `.dmg` file

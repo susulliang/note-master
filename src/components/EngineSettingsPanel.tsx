@@ -142,6 +142,11 @@ export interface EngineSettingsPanelProps {
   onPet?: () => void;
   /** Manual nap toggle from the bloom's Energy petal. */
   onToggleNap?: () => void;
+  /** Desktop-cat mode control (Tauri desktop only; undefined hides the toggle). */
+  catDesktop?: {
+    enabled: boolean;
+    onToggle: (enabled: boolean) => void;
+  };
 }
 
 /**
@@ -301,6 +306,7 @@ export default function EngineSettingsPanel({
   petCooldown,
   onPet,
   onToggleNap,
+  catDesktop,
 }: EngineSettingsPanelProps) {
   const aiParserAvailable = Boolean(parser?.enabled || cloud?.isAvailable);
   const toggleNap = onToggleNap;
@@ -625,6 +631,36 @@ export default function EngineSettingsPanel({
               );
             })}
           </div>
+
+          {/* ---- Desktop cat toggle (Tauri desktop only) ---- */}
+          {catDesktop && (
+            <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-border/40 bg-background/35 px-2 py-1.5">
+              <span className="min-w-0">
+                <span className="block truncate text-[10px] font-semibold text-foreground">Desktop cat</span>
+                <span className="block truncate text-[9px] text-muted-foreground">
+                  Let {CAT_CHOICES.find((c) => c.id === selectedCat)?.name ?? 'the cat'} roam the desktop (hides the in-app cat)
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={catDesktop.enabled}
+                aria-label="Toggle desktop cat"
+                onClick={() => catDesktop.onToggle(!catDesktop.enabled)}
+                className={cn(
+                  'relative h-4 w-8 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                  catDesktop.enabled ? 'bg-primary' : 'bg-foreground/20'
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 size-3 rounded-full bg-background shadow transition-all',
+                    catDesktop.enabled ? 'left-4.5' : 'left-0.5'
+                  )}
+                />
+              </button>
+            </div>
+          )}
 
           {/* ---- Companion profile (bond / care meters) ---- */}
           {pet && (

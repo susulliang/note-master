@@ -533,44 +533,10 @@ export const FIELD_PATTERNS: FieldPatternEntry[] = [
       /\b(?:calling|registered) (?:as|under)\s+([A-Za-z][A-Za-z\s'-]*?)(?:\.|,|$)/i,
     ],
   },
-  {
-    fieldId: 'contactNumber',
-    label: 'Contact Number',
-    // Every pattern CAPTURES just the digits — without a group the whole
-    // phrase ("your phone number is 310-173-4037") lands in the field.
-    customer: [
-      /\bmy (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /\bmy number'?s?\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /(?:\bcall|\btext|\breach)\s+(?:me|us)\s+(?:at|on|back at)\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /\bit'?s\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-    ],
-    agent: [
-      /\b(?:customer'?s?|their|his|her|your) (?:phone|contact|cell|telephone|best) (?:number )?(?:is|at)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /\b(?:customer'?s?|their|his|her) number'?s?\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /\bis\s+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s+(?:the|a good|the best) (?:number|one) to (?:reach|call|get)\b/i,
-      /\b(?:best|good) (?:number|way) to (?:reach|call|get) (?:you |him |her |them )?(?:at|is|on)?\s*(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
-    ],
-    any: [
-      /(\(?\b\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b)/,
-    ],
-  },
-  {
-    fieldId: 'emailAddress',
-    label: 'Email Address',
-    customer: [
-      /\bmy (?:email|email address)'?s?\s+(?:is|at)?\s*([a-zA-Z0-9._%+-]+(?:\s+at\s+|@)[a-zA-Z0-9.-]+(?:\s+dot\s+|\.)[a-zA-Z]{2,6})/i,
-      /\bemail'?s?\s+(?:is|at)?\s*([a-zA-Z0-9._%+-]+(?:\s+at\s+|@)[a-zA-Z0-9.-]+(?:\s+dot\s+|\.)[a-zA-Z]{2,6})/i,
-      /([a-zA-Z0-9][a-zA-Z0-9._%+-]*\s+at\s+[a-zA-Z0-9.-]+?\s+dot\s+[a-zA-Z]{2,6})/i,
-    ],
-    agent: [
-      /\b(?:customer'?s?|their|his|her|your) (?:email|email address)\s+(?:is|at)?\s*([a-zA-Z0-9._%+-]+(?:\s+at\s+|@)[a-zA-Z0-9.-]+(?:\s+dot\s+|\.)[a-zA-Z]{2,6})/i,
-      /\b(?:let me|i'?ll) (?:confirm|verify|read|repeat|double[- ]?check)[^.]{0,30}?([a-zA-Z0-9._%+-]+(?:\s+at\s+|@)[a-zA-Z0-9.-]+(?:\s+dot\s+|\.)[a-zA-Z]{2,6})/i,
-    ],
-    any: [
-      /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/,
-    ],
-  },
+  // contactNumber / emailAddress removed for COMPLIANCE (until further
+  // notice): customer phone + email are collected directly in Salesforce.
+  // Neither the regex layer nor the LLM may extract them — the form's
+  // Contact Number / Email Address boxes are greyed out.
   {
     fieldId: 'deebotModel',
     label: 'Robot Model',
@@ -750,11 +716,6 @@ function cleanValue(raw: string): string {
     .replace(/[.,!?;:]+$/, '')
     .replace(/^[,;:]+/, '')
     .trim();
-}
-
-/** Spoken email addresses: "john at gmail dot com" → john@gmail.com */
-function normalizeSpokenEmail(value: string): string {
-  return value.replace(/\s+at\s+/gi, '@').replace(/\s+dot\s+/gi, '.');
 }
 
 /** Extract a spoken model from pattern match groups (brand + token) */
@@ -954,19 +915,13 @@ export function extractFields(entries: TranscriptEntry[]): ExtractedField[] {
         }
         value = cleanValue(value);
 
-        if (entry.fieldId === 'emailAddress') {
-          value = cleanValue(normalizeSpokenEmail(value));
-        }
         if (entry.fieldId === 'deebotModel') {
           value = matchCanonicalModel(value) ?? value;
         }
         if (value.length <= 2) continue;
 
         const confidence: ExtractedField['confidence'] =
-          entry.fieldId === 'emailAddress' ||
-          entry.fieldId === 'contactNumber' ||
-          entry.fieldId === 'serialNumber' ||
-          entry.fieldId === 'skuNumber'
+          entry.fieldId === 'serialNumber' || entry.fieldId === 'skuNumber'
             ? 'high'
             : 'medium';
 

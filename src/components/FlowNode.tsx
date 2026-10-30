@@ -9,7 +9,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Plus, X, ChevronDown, Check, PhoneOff, Loader2, ChevronLeft } from 'lucide-react';
+import { Plus, X, ChevronDown, Check, PhoneOff, Loader2, ChevronLeft, ShieldBan } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
@@ -269,6 +269,10 @@ export interface FlowNodeProps {
   onMinimize?: () => void;
   /** Monospace input (serial numbers etc.) — disambiguates 0/O, 1/I. */
   mono?: boolean;
+  /** COMPLIANCE lock: grey the input out and forbid typing (email/phone) */
+  disabled?: boolean;
+  /** Short helper line shown under a locked input (e.g. "Fill directly in Salesforce") */
+  tip?: string;
   /** Robot Model node: when a model is selected, the gridbox expands with
    *  the model's newest firmware version + update notes (v0.2.1). */
   showFirmware?: boolean;
@@ -619,6 +623,8 @@ function FlowNodeComponent({
   emailGlow,
   onMinimize,
   mono = false,
+  disabled = false,
+  tip,
   showFirmware = false,
   showSkuLookup = false,
   skuRobotModel,
@@ -1059,7 +1065,8 @@ function FlowNodeComponent({
             onFocus={handleFocus}
             onBlur={onBlur}
             rows={textareaRows}
-            className="resize-none text-sm"
+            disabled={disabled}
+            className={cn('resize-none text-sm', disabled && 'cursor-not-allowed opacity-55 grayscale')}
             placeholder="Type here..."
           />
         ) : (
@@ -1076,7 +1083,8 @@ function FlowNodeComponent({
               onChange={(e) => onChange(e.target.value)}
               onFocus={handleFocus}
               onBlur={onBlur}
-              className={cn('h-9 text-sm', mono && 'font-mono tracking-wide')}
+              disabled={disabled}
+              className={cn('h-9 text-sm', mono && 'font-mono tracking-wide', disabled && 'cursor-not-allowed opacity-55 grayscale')}
               placeholder="Type here..."
             />
             {/* HIDDEN PIN bubble — press-and-hold the field to reveal */}
@@ -1094,6 +1102,14 @@ function FlowNodeComponent({
               </div>
             )}
           </div>
+        )}
+        {/* COMPLIANCE tip — why the field is locked (e.g. "Fill directly in
+            Salesforce") */}
+        {disabled && tip && (
+          <p className="mt-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-amber-500/90">
+            <ShieldBan className="size-3 shrink-0" aria-hidden="true" />
+            {tip}
+          </p>
         )}
         {/* Phonetic table — the node box expands downwards in place (no
             popover). The 0fr→1fr grid-rows trick animates height smoothly;

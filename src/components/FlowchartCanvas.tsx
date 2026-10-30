@@ -43,6 +43,10 @@ export interface NodeConfig {
   collapsedLabel?: string;
   /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
+  /** COMPLIANCE lock: grey the input out and forbid typing (email/phone) */
+  disabled?: boolean;
+  /** Short helper line shown under a locked input (e.g. "Fill directly in Salesforce") */
+  tip?: string;
   /** Small tag pinned to the top right of the label row. Either an external
    *  link (`href`, opens in a new window) or an in-app action (`onClick`). */
   headerTag?: { label: string; href?: string; onClick?: () => void };
@@ -1145,6 +1149,8 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
             emailGlow={node.id === NODE_IDS.EMAIL_ADDRESS ? emailGlow : undefined}
             mono={node.mono}
             phonetic={node.phonetic}
+            disabled={node.disabled}
+            tip={node.tip}
             headerTag={node.headerTag}
             showFirmware={node.firmwareModel}
             showSkuLookup={node.skuLookup}

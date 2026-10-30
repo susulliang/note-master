@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Ecovacs Ticket Notes",
+  "productName": "Econote",
   "version": "../package.json",
   "identifier": "com.ecovacs.ticketnotes",
   "build": {
@@ -10,9 +10,10 @@
     "beforeBuildCommand": "npx vite build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Ecovacs Ticket Notes",
+        "title": "Econote",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

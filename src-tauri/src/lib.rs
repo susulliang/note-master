@@ -5,7 +5,7 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use tauri::ipc::Response;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Serialize, Clone)]
 struct AudioDevice {
@@ -714,6 +714,56 @@ fn write_wav(pcm: &[f32], channels: u16, sample_rate: u32) -> Vec<u8> {
     out
 }
 
+/// Show or hide the desktop-cat overlay window: a small transparent,
+/// always-on-top, frameless webview that floats the cat sprite above the
+/// desktop (macOS + Windows). Idempotent — creating when `show` is true and
+/// the window already exists (or closing when it doesn't) is a no-op, so
+/// the Settings toggle can drive it from a persisted boolean flag.
+/// `x`/`y` are LOGICAL coordinates for the restored window position
+/// (the overlay reports them back through `cat-desktop:position` events).
+///
+/// macOS transparency needs `app.macOSPrivateApi` in tauri.conf.json;
+/// Windows needs no extra flag. `shadow(false)` avoids an opaque square
+/// shadow around the transparent window on both platforms.
+#[tauri::command]
+fn set_cat_overlay(app: AppHandle, show: bool, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
+    let existing = app.get_webview_window("cat-overlay");
+    match (show, existing) {
+        (false, Some(win)) => {
+            let _ = win.close();
+        }
+        (true, None) => {
+            let mut builder = WebviewWindowBuilder::new(
+                &app,
+                "cat-overlay",
+                WebviewUrl::App("index.html?window=cat-overlay".into()),
+            )
+            .title("Cat")
+            .inner_size(220.0, 264.0)
+            .decorations(false)
+            .resizable(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .focused(false);
+            if let (Some(x), Some(y)) = (x, y) {
+                builder = builder.position(x, y);
+            }
+            builder.build().map_err(|e| e.to_string())?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Quit the whole application (desktop-cat context menu → "Quit App").
+/// A command instead of the process plugin keeps the capability list minimal.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -737,7 +787,9 @@ pub fn run() {
       stop_audio_capture,
       start_mic_capture,
       stop_mic_capture,
-      start_system_audio_capture
+      start_system_audio_capture,
+      set_cat_overlay,
+      quit_app
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");

@@ -493,16 +493,15 @@ export function buildParsePrompt(
   // Seed the skeleton with prior values. Evolving free-text fields
   // (issueDescription / resolutionSummary) are carried forward as
   // append-only clauses. Identity + device fields (customerName,
-  // contactNumber, emailAddress, deebotModel, …) are also seeded when
-  // the form already knows them — the model must echo them EXACTLY as
-  // given and MUST NOT mask / annotate / invent variants (the previous
-  // "John -> ****" bug came from handing the model an empty skeleton for
-  // fields the form had already filled from SF scrape).
-  const priorIdentity = prior && (prior.customerName || prior.contactNumber || prior.emailAddress)
+  // deebotModel, …) are also seeded when the form already knows them —
+  // the model must echo them EXACTLY as given and MUST NOT mask /
+  // annotate / invent variants (the previous "John -> ****" bug came from
+  // handing the model an empty skeleton for fields the form had already
+  // filled from SF scrape). COMPLIANCE: contactNumber / emailAddress are
+  // never seeded — the model is told to leave them empty.
+  const priorIdentity = prior && (prior.customerName || prior.deebotModel)
     ? {
         ...(prior.customerName ? { customerName: prior.customerName } : {}),
-        ...(prior.contactNumber ? { contactNumber: prior.contactNumber } : {}),
-        ...(prior.emailAddress ? { emailAddress: prior.emailAddress } : {}),
         ...(prior.deebotModel ? { deebotModel: prior.deebotModel } : {}),
         ...(prior.skuNumber ? { skuNumber: prior.skuNumber } : {}),
         ...(prior.serialNumber ? { serialNumber: prior.serialNumber } : {}),
@@ -559,8 +558,8 @@ export function buildParsePrompt(
           ]
         : []),
       'customerName: <the customer\'s own name, or empty>',
-      'contactNumber: <their phone number, or empty>',
-      'emailAddress: <their email, or empty>',
+      'contactNumber: <COMPLIANCE: always leave empty — do NOT extract phone numbers>',
+      'emailAddress: <COMPLIANCE: always leave empty — do NOT extract email addresses>',
       'deebotModel: <the robot model, e.g. T30S / X2 OMNI / GOAT O1000 RTK, or empty>',
       'skuNumber: <SKU as spoken, or empty>',
       'serialNumber: <serial as spoken, or empty>',
@@ -575,7 +574,7 @@ export function buildParsePrompt(
       // Identity fields the form already knows (SF scrape / CCP capture).
       // The model MUST echo them EXACTLY and never add masking.
       priorIdentity
-        ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
+        ? 'CRITICAL FOR PRE-FILLED FIELDS: customerName, deebotModel, skuNumber, serialNumber, purchaseInfo — WHEN ANY OF THESE ARE GIVEN BELOW, ECHO THEM WORD-FOR-WORD. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
         : null,
       ...(strict
         ? [
@@ -618,7 +617,7 @@ export function buildParsePrompt(
     'LANGUAGE: the transcript may be in FRENCH (or another language) when the caller speaks it. Understand it whatever the language, but WRITE EVERY VALUE IN ENGLISH — translate French speech into natural English ticket wording. Keep VERBATIM, never translated or re-spelled: the customer name, phone/email/serial/SKU identifiers, and robot model names.',
     recordingRule,
     'Reply with ONE JSON object only — no markdown fences around the JSON body, no explanations. Every value in condensed note style, "" when unknown, never invented. VALUES MAY CONTAIN **markdown double-asterisk bold** markers inside strings (only on issueDescription and resolutionSummary) — keep them as literal characters, do NOT strip, rewrite or escape them.',
-    '1. customerName / contactNumber / emailAddress: the CUSTOMER\'S own details (stated by the customer, or the agent reading them back) — never the agent\'s.',
+    '1. customerName: the CUSTOMER\'S own name (stated by the customer, or the agent reading it back) — never the agent\'s. COMPLIANCE: contactNumber and emailAddress must ALWAYS be "" — never extract the customer\'s phone number or email address (they are collected directly in Salesforce).',
     '2. deebotModel: the robot the call is about, as the speakers name it. Names look like "T30S", "X2 OMNI", "GOAT O1000 RTK", "Winbot W2", "ULTRAMARINE P1".',
     '3. skuNumber / serialNumber: identifiers either speaker read out, exactly as spoken.',
     '4. purchaseInfo: where + when the unit was acquired — store/site first (Amazon, Best Buy, eBay, Target, Walmart, Costco, Home Depot, ecovacs.com / official store, ...), then when ("Amazon · March 2025", "Ecovacs official store · ~1 year ago").',
@@ -638,7 +637,7 @@ export function buildParsePrompt(
       : []),
     // Identity fields already known from SF / CCP — echo verbatim, never mask
     priorIdentity
-      ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, contactNumber, emailAddress, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
+      ? 'CRITICAL FOR PRE-FILLED FIELDS: when the JSON skeleton below already has values for customerName, deebotModel, skuNumber, serialNumber, or purchaseInfo — ECHO THEM EXACTLY in your output. Do NOT add masking ("John -> ****"), dashes, prefixes, or alternate spellings. The form already knows these values; your only job is to restate them unchanged.'
       : null,
     ...(strict
       ? [
@@ -777,8 +776,6 @@ export function validateParaphraseReply(raw: Record<string, unknown>): Extracted
  *  AND its markup. */
 const FIELD_VALUE_CAPS: Record<string, number> = {
   customerName: 60,
-  contactNumber: 24,
-  emailAddress: 80,
   deebotModel: 40,
   skuNumber: 32,
   serialNumber: 40,
@@ -959,50 +956,19 @@ export function extractTldr(raw: string): { en: string; zh: string } {
 //  silently erased.
 // ---------------------------------------------------------------------------
 
-/** English digit word → digit. Covers 0–19, decades, and the common "oh"/"o"
- *  ASR spelling for zero inside digit sequences ("two one oh" → 210). */
-const NUMBER_WORDS: Readonly<Record<string, string>> = {
-  zero: '0', oh: '0', o: '0',
-  one: '1', two: '2', three: '3', four: '4', five: '5',
-  six: '6', seven: '7', eight: '8', nine: '9',
-  ten: '10', eleven: '11', twelve: '12', thirteen: '13', fourteen: '14',
-  fifteen: '15', sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19',
-  twenty: '20', thirty: '30', forty: '40', fifty: '50',
-  sixty: '60', seventy: '70', eighty: '80', ninety: '90',
-};
-
-/** Replace standalone English number-words with their digits. Existing digits
- *  and non-number words pass through untouched. */
-function wordsToDigits(text: string): string {
-  return text.replace(/[A-Za-z]+/g, (word) => {
-    const hit = NUMBER_WORDS[word.toLowerCase()];
-    return hit ?? word;
-  });
-}
-
 /**
  * Pure CATEGORY-LABEL placeholders — the LLM wrote what KIND of info goes
  * here, instead of the info itself. Each pattern matches WHOLE values only
- * (^…$) — a real phone number that coincidentally contains the word
+ * (^…$) — a real value that coincidentally contains the word
  * "number" must NOT be caught. Scoped per field so a complaint that
  * legitimately mentions "serial" (in context) never gets stripped.
  *
  * These are the ONLY "hard drop" rules; format regex (digit counts, email
  * shape, letter/digit mix) never blocks — it only cleans.
+ * (contactNumber / emailAddress entries removed for compliance — those
+ * fields are hard-dropped before placeholder checks.)
  */
 const PLACEHOLDER_PATTERNS: Readonly<Record<string, readonly RegExp[]>> = {
-  contactNumber: [
-    /^(?:the )?(?:customer(?:'s|s)? )?(?:phone|contact|telephone|cell|mobile|best)?\s*(?:number|no\.?|#)?(?: is)?\.?$/i,
-    /^(?:call|reach|text|contact)\s+(?:me|us|them|you|him|her)(?:\s+(?:at|on|back))?\.?$/i,
-    /^(?:provided )?over (?:the )?phone$/i,
-    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
-  ],
-  emailAddress: [
-    /^(?:the )?(?:customer(?:'s|s)? )?(?:e-?mail|e-?mail address)(?: is)?\.?$/i,
-    /^(?:contacted|reached)(?: them)? (?:by|via|over) (?:phone|call|message)\.?$/i,
-    /^no (?:e-?mail|address)(?: (?:on file|provided|available))?\.?$/i,
-    /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
-  ],
   skuNumber: [
     /^(?:the )?(?:sku|part)(?: number| code| no\.?)?(?: is)?\.?$/i,
     /^not (?:provided|given|on file|available)(?: yet)?\.?$/i,
@@ -1021,53 +987,6 @@ function isPlaceholderFor(fieldId: string, value: string): boolean {
   if (!patterns) return false;
   const trimmed = value.trim();
   return patterns.some((re) => re.test(trimmed));
-}
-
-/** Normalize a phone number.
- *
- * Strategy: wordsToDigits first (spoken "two one two five" → 2125), then
- * strip everything that isn't a digit, then take the FIRST contiguous digit
- * run and pull out exactly 10 meaningful US digits (area + exchange + line).
- *
- * A leading `1` or `+1` country code is recognised and stripped so we land
- * on 10 real subscriber digits — if the raw has ≥11 digits and starts with
- * `1`, we skip index 0 and grab the next 10. Any trailing garbage (extension
- * digits, "after 3pm", "please call") is silently dropped — we only keep
- * what fits a US number shape.
- *
- * Formatted output: `+1 XXX-XXX-XXXX`. If fewer than 7 real digits exist we
- * still return a cleaned digit run (no words, no garbage) so the agent can
- * see what the LLM read instead of a silent erasure. */
-function sanitizePhone(value: string): string {
-  const converted = wordsToDigits(value);
-  // Grab the first contiguous digit run — everything after it (extensions,
-  // "after 3pm", etc.) is dropped by construction.
-  const firstRunMatch = converted.match(/\d+/);
-  if (!firstRunMatch) return converted.replace(/\s+/g, ' ').trim();
-  let digits = firstRunMatch[0];
-
-  // Trim a leading US country code `1` — "+1 203-843-8744" or
-  // "1-203-843-8744" both collapse to the same 10 subscriber digits.
-  if (digits.length >= 11 && digits.startsWith('1')) {
-    digits = digits.slice(1);
-  }
-
-  if (digits.length >= 10) {
-    const d = digits.slice(0, 10);
-    return `+1 ${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
-  }
-  // Short — still return plain digits (cleaned of letters/garbage) so the
-  // agent sees something useful instead of a blank.
-  return digits;
-}
-
-/** Normalize a spoken email ("john at gmail dot com") */
-function sanitizeEmail(value: string): string {
-  return value
-    .replace(/\s+at\s+/gi, '@')
-    .replace(/\s+dot\s+/gi, '.')
-    .replace(/\s+/g, '')
-    .toLowerCase();
 }
 
 /** True when a value is empty/placeholder-ish ("", "n/a", "unknown") */
@@ -1102,11 +1021,14 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
   const out: ExtractedField[] = [];
 
   for (const fieldId of LLM_FIELD_IDS) {
+    // COMPLIANCE hard drop: customer phone / email are collected directly
+    // in Salesforce — no extraction path (LLM or regex) may fill them, no
+    // matter what the model replies.
+    if (fieldId === 'contactNumber' || fieldId === 'emailAddress') continue;
     const value = raw[fieldId];
     if (typeof value !== 'string') continue;
     let cleaned = value.replace(/\s+/g, ' ').trim();
     if (isBlank(cleaned)) continue;
-    const rawBeforeClean = cleaned; // used by placeholder checks against the unmolested value
 
     // --- Strip masking the model sometimes adds despite prompt rules ------
     // "John Smith -> ****"  /  "+1 437-922-9504 -> ***"  /  "(masked)"
@@ -1129,35 +1051,6 @@ export function validateLlmFields(raw: Record<string, unknown>): ExtractedField[
         // all real model identifiers have letter+digit pairs (≥ 2).
         if (cleaned.length < 2) continue;
         cleaned = matchCanonicalModel(cleaned) ?? cleaned;
-        break;
-      }
-      case 'contactNumber': {
-        // LLM-first: wordsToDigits FIRST converts spoken words → digits
-        // (the number the model actually read), then US 10-digit format
-        // applies on top if it fits. FORMAT REGEX IS NOT A GATE. If the
-        // cleaned value is a pure CATEGORY LABEL placeholder ("number",
-        // "customer's phone", "not provided"), drop it — otherwise keep
-        // whatever the LLM produced (partial, international, extension…)
-        // so the agent can proofread it. A value they can correct beats a
-        // value silently erased.
-        cleaned = sanitizePhone(cleaned);
-        const digitCount = cleaned.replace(/\D/g, '').length;
-        if (digitCount < 7 && isPlaceholderFor('contactNumber', rawBeforeClean)) continue;
-        break;
-      }
-      case 'emailAddress': {
-        // Sanitize spoken ("john at gmail dot com") → john@gmail.com.
-        // Regex SHAPE is NOT a hard gate: if the result fits the pattern,
-        // great; if not, only drop it when it's a pure no-content
-        // placeholder ("no email", "contacted by phone", "the customer's
-        // email address"). Anything else — odd TLDs, odd formatting — is
-        // kept so the agent can proofread, not silently lose.
-        const beforeEmail = cleaned;
-        cleaned = sanitizeEmail(cleaned);
-        if (
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) &&
-          isPlaceholderFor('emailAddress', beforeEmail)
-        ) continue;
         break;
       }
       case 'purchaseInfo': {

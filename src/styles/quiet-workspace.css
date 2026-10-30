@@ -853,12 +853,48 @@
   background: var(--qw-field);
 }
 
+/* Auth form fields — theme-proof overrides.
+ * The login page (`.auth-page`) is a HARDCODED-DARK design (its own gradient
+ * + #0b121c card), so its fields must NOT inherit theme colors: a light
+ * theme's `glass-field` background (--field-bg ≈ white) turned these boxes
+ * white while the dark card + forced light text produced white-on-white.
+ * Scoped to .auth-page (not .quiet-shell) so the fix holds whether or not
+ * the shell wraps the login gate. */
+.auth-page {
+  /* Native <select> popups (username dropdown) follow color-scheme — force
+   * dark so the option list can't render as white bg + inherited light text. */
+  color-scheme: dark;
+}
+
+.auth-page .auth-form-field {
+  border-color: rgb(255 255 255 / 12%) !important;
+  color: #f1f5f9 !important;
+  background: rgb(255 255 255 / 5%) !important;
+  /* Keep webkit autofill from painting an opaque white box over the glass */
+}
+.auth-page .auth-form-field::placeholder {
+  color: rgb(241 245 249 / 55%) !important;
+}
+.auth-page .auth-form-field:-webkit-autofill,
+.auth-page .auth-form-field:-webkit-autofill:hover,
+.auth-page .auth-form-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f1f5f9 !important;
+  -webkit-box-shadow: 0 0 0 1000px #141c26 inset !important;
+  transition: background-color 9999s ease-in-out 0s;
+}
+.auth-page select.auth-form-field option {
+  background: #0b121c;
+  color: #f1f5f9;
+}
+
 .quiet-shell .auth-form-field {
   border-color: var(--border) !important;
   color: var(--foreground) !important;
   background: var(--input) !important;
 }
 
+/* Page-presentation auth fields win over the theme-mirrored rule above —
+ * the login page is always dark regardless of the active app theme. */
 .quiet-shell .auth-page .auth-form-field {
   border-color: rgb(255 255 255 / 12%) !important;
   color: #f1f5f9 !important;

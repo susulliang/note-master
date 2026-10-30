@@ -113,6 +113,19 @@ import ChatNotificationBanner from '@/components/ChatNotificationBanner';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/open-external';
 import { isTauriEnv, SYSTEM_AUDIO_DEVICE } from '@/lib/tauri-env';
+import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  CAT_DESKTOP_ENABLED_EVENT,
+  CAT_DESKTOP_EVENTS,
+  catDesktopEnabled,
+  loadCatDesktopPosition,
+  saveCatDesktopPosition,
+  setCatDesktopEnabled,
+  setCatDesktopOverlay,
+  type CatDesktopPosition,
+  type CatDesktopSyncPayload,
+} from '@/lib/cat-desktop';
 import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/components/FlowchartCanvas';
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import { useAuth } from '@/lib/auth-context';
@@ -245,6 +258,10 @@ interface NodeConfig {
   collapsedLabel?: string;
   /** Field shows the "Az" phonetic-alphabet callout next to its label (Email node) */
   phonetic?: boolean;
+  /** COMPLIANCE lock: grey the input out and forbid typing (email/phone) */
+  disabled?: boolean;
+  /** Short helper line shown under a locked input (e.g. "Fill directly in Salesforce") */
+  tip?: string;
   /** Small tag pinned to the top right of the label row. Either an external
    *  link (`href`, opens in a new window — SKU "BSD", Order Number "Eshop")
    *  or an in-app action (`onClick` — e.g. the Robot Model "GBU" lookup
@@ -274,6 +291,11 @@ const NODES: NodeConfig[] = [
     inputType: 'tel',
     accent: 'default',
     icon: Phone,
+    // COMPLIANCE (until further notice): the customer's phone number is
+    // collected directly in Salesforce. The box is greyed out and the
+    // extraction layers (regex + LLM) are told to skip it.
+    disabled: true,
+    tip: 'Fill directly in Salesforce',
   },
   {
     id: NODE_IDS.TRANSITION,
@@ -374,6 +396,11 @@ const NODES: NodeConfig[] = [
     width: 400,
     icon: Mail,
     phonetic: true,
+    // COMPLIANCE (until further notice): the customer's email is collected
+    // directly in Salesforce. The box is greyed out and the extraction
+    // layers (regex + LLM) are told to skip it.
+    disabled: true,
+    tip: 'Fill directly in Salesforce',
   },
   {
     id: NODE_IDS.SHIPPING_ADDRESS,
@@ -763,36 +790,10 @@ export default function TicketNotesPage() {
     'ecovacs_ticket_customer_address_count',
     0
   );
-  // Email prompt: when the resolution summary mentions "email", the email
-  // address node glows — blue (needs filling) or green (already filled).
-  // Scanned every 3s. When "need", auto-scroll the agent to the email node.
-  const [emailGlow, setEmailGlow] = useState<'none' | 'need' | 'done'>('none');
-  const lastEmailGlowRef = useRef<'none' | 'need' | 'done'>('none');
-  useEffect(() => {
-    const tick = () => {
-      const resolution = String(formData[NODE_IDS.RESOLUTION_SUMMARY] ?? '').toLowerCase();
-      const hasEmail = /\bemail\b/.test(resolution);
-      const next: 'none' | 'need' | 'done' = !hasEmail
-        ? 'none'
-        : String(formData[NODE_IDS.EMAIL_ADDRESS] ?? '').trim().length > 0
-          ? 'done'
-          : 'need';
-      const prev = lastEmailGlowRef.current;
-      if (prev !== next) {
-        lastEmailGlowRef.current = next;
-        setEmailGlow(next);
-        // Auto-scroll to the email node ONLY on the transition into 'need'
-        // so we don't yank the agent's scroll every 3 seconds.
-        if (next === 'need') {
-          const el = document.querySelector(`[data-node-id="${NODE_IDS.EMAIL_ADDRESS}"]`);
-          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
-    };
-    tick();
-    const id = window.setInterval(tick, 3000);
-    return () => window.clearInterval(id);
-  }, [formData]);
+  // Email prompt (REMOVED for compliance): the "resolution mentions email →
+  // glow + auto-scroll to the email node" nudge used to push agents toward
+  // collecting the customer's email here. Customer email/phone are now
+  // collected directly in Salesforce only — the nodes stay greyed out.
   // Node positions are stored as per-node drag overrides — nodes without an
   // override follow the responsive default layout computed from canvas size.
   // Resizing the window clears the overrides so the grid re-aligns.
@@ -1550,8 +1551,6 @@ export default function TicketNotesPage() {
       return `**Notes**
 
 Customer Name: ${getStr(NODE_IDS.CUSTOMER_NAME) || 'N/A'}
-Contact number: ${getStr(NODE_IDS.CONTACT_NUMBER) || 'N/A'}
-Email address: ${getStr(NODE_IDS.EMAIL_ADDRESS) || 'N/A'}
 Current shipping address: ${getStr(NODE_IDS.SHIPPING_ADDRESS) || 'N/A'}
 Serial Number: ${getStr(NODE_IDS.SERIAL_NUMBER) || 'N/A'}
 Order Number: ${getStr(NODE_IDS.ORDER_NUMBER) || 'N/A'}
@@ -1626,11 +1625,11 @@ Additional information (if needed): ${additional}`;
   //  the form via mergeAutoFill().
   // ---------------------------------------------------------------------
 
-  /** Extracted field id → canvas node id */
+  /** Extracted field id → canvas node id. contactNumber / emailAddress are
+   *  deliberately ABSENT (compliance): the LLM and regex layers no longer
+   *  extract customer phone/email, and those boxes stay greyed out. */
   const FIELD_TO_NODE: Record<string, string> = {
     customerName: NODE_IDS.CUSTOMER_NAME,
-    contactNumber: NODE_IDS.CONTACT_NUMBER,
-    emailAddress: NODE_IDS.EMAIL_ADDRESS,
     deebotModel: NODE_IDS.DEEBOT_MODEL,
     skuNumber: NODE_IDS.SKU_NUMBER,
     serialNumber: NODE_IDS.SERIAL_NUMBER,
@@ -1640,11 +1639,11 @@ Additional information (if needed): ${additional}`;
     resolutionSummary: NODE_IDS.RESOLUTION_SUMMARY,
   };
 
-  /** Friendly display labels for the 4 identity fields the extension auto
-   *  pushes into the confirm popup bottom-right. */
+  /** Friendly display labels for the identity fields the extension auto
+   *  pushes into the confirm popup bottom-right. contactNumber removed for
+   *  compliance — phone numbers are filled directly in Salesforce. */
   const EXT_PUSH_FIELD_LABELS: Record<string, string> = {
     customerName: 'Customer Name',
-    contactNumber: 'Contact Number',
     deebotModel: 'Deebot Model',
     serialNumber: 'Serial Number',
   };
@@ -2008,6 +2007,106 @@ Additional information (if needed): ${additional}`;
     setKittyHelpOpen(true);
     setAutoAskOnOpen(true);
   }, []);
+
+  // -------------------------------------------------------------------------
+  //  Desktop cat — Tauri only. The mascot can live OUTSIDE the app window
+  //  as a free-floating sprite (cat-overlay webview window). Toggled from
+  //  Settings › Cat › "Desktop cat" (persisted flag); while ON the in-app
+  //  cat is hidden. The main app drives the overlay: create/close, state
+  //  sync (identity + nap + growth scale), and bounce-back listeners
+  //  (pet / open-chat / position persistence).
+  // -------------------------------------------------------------------------
+  const [catOnDesktop, setCatOnDesktop] = useState<boolean>(() => isTauri && catDesktopEnabled());
+
+  useEffect(() => {
+    if (!isTauri) return;
+    const sync = () => setCatOnDesktop(catDesktopEnabled());
+    window.addEventListener(CAT_DESKTOP_ENABLED_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(CAT_DESKTOP_ENABLED_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, [isTauri]);
+
+  /** Create/close the overlay to match the flag (also auto-restores it on
+   *  app boot when the flag was left ON). Idempotent on the Rust side. */
+  useEffect(() => {
+    if (!isTauri) return;
+    void setCatDesktopOverlay(catOnDesktop, loadCatDesktopPosition());
+  }, [isTauri, catOnDesktop]);
+
+  const handleCatDesktopToggle = useCallback(
+    (enabled: boolean) => {
+      setCatDesktopEnabled(enabled);
+      toast.success(
+        enabled ? 'Cat sent to the desktop 🐾' : 'Cat returned to the workspace.'
+      );
+    },
+    []
+  );
+
+  /** Latest overlay state payload — a ref so the `hello` handshake listener
+   *  below can re-emit it without re-subscribing on every pet-state tick. */
+  const catSyncPayloadRef = useRef<CatDesktopSyncPayload>({
+    catId: selectedCat,
+    napping: catPet.pet?.napping ?? false,
+    scale: catPet.pet?.scale ?? 1,
+  });
+  catSyncPayloadRef.current = {
+    catId: selectedCat,
+    napping: catPet.pet?.napping ?? false,
+    scale: catPet.pet?.scale ?? 1,
+  };
+
+  useEffect(() => {
+    if (!isTauri) return;
+    void emit(CAT_DESKTOP_EVENTS.sync, catSyncPayloadRef.current);
+  }, [isTauri, selectedCat, catPet.pet?.napping, catPet.pet?.scale]);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    const unlisteners: Array<Promise<UnlistenFn>> = [
+      listen(CAT_DESKTOP_EVENTS.pet, () => catPet.petCat()),
+      listen(CAT_DESKTOP_EVENTS.hello, () => {
+        void emit(CAT_DESKTOP_EVENTS.sync, catSyncPayloadRef.current);
+      }),
+      listen(CAT_DESKTOP_EVENTS.openChat, () => {
+        void getCurrentWindow().setFocus();
+        setKittySpotlightOpen(true);
+      }),
+      // Desktop-cat context menu → focus the app and jump to the view.
+      listen<{ view?: string }>(CAT_DESKTOP_EVENTS.navigate, (event) => {
+        void getCurrentWindow().setFocus();
+        const view = event.payload?.view;
+        if (view === 'ask-kitty') runBothKittyWorkflows();
+        else if (view === 'commune' || view === 'collab' || view === 'settings') {
+          navigateToView(view);
+        }
+      }),
+      listen<CatDesktopPosition>(CAT_DESKTOP_EVENTS.position, (event) => {
+        saveCatDesktopPosition(event.payload);
+      }),
+    ];
+    return () => {
+      for (const un of unlisteners) void un.then((fn) => fn());
+    };
+  }, [isTauri, catPet.petCat, runBothKittyWorkflows, navigateToView]);
+
+  // Banner → cat thought bubble: ChatNotificationBanner mirrors new chat
+  // messages / mentions / task notifications onto 'econote:cat-notify'; the
+  // workspace cat speaks them as a tip and the desktop cat shows a bubble.
+  useEffect(() => {
+    const onCatNotify = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string }>).detail;
+      const text = typeof detail?.text === 'string' ? detail.text : '';
+      if (!text) return;
+      cat.pushTip(text, 8000);
+      if (isTauri) void emit(CAT_DESKTOP_EVENTS.thought, { text });
+    };
+    window.addEventListener('econote:cat-notify', onCatNotify);
+    return () => window.removeEventListener('econote:cat-notify', onCatNotify);
+  }, [isTauri, cat.pushTip]);
 
   // -------------------------------------------------------------------------
   //  Tier-2 browser extension bridge: DOM-scrapes the CCP + Salesforce tab.
@@ -2611,7 +2710,6 @@ Additional information (if needed): ${additional}`;
               quickInsertHidden={true}
               customerAddressCount={customerAddressCount}
               onIncrementCustomerAddressCount={() => setCustomerAddressCount((c) => c + 1)}
-              emailGlow={emailGlow === 'none' ? undefined : emailGlow}
               activeView={workView}
               externalNavigation
               hideUtilityRail
@@ -2715,6 +2813,11 @@ Additional information (if needed): ${additional}`;
                     }}
                     selectedCat={selectedCat}
                     onSelectCat={setStoredCatId}
+                    catDesktop={
+                      isTauri
+                        ? { enabled: catOnDesktop, onToggle: handleCatDesktopToggle }
+                        : undefined
+                    }
                     pet={catPet.pet}
                     petCooldown={catPet.petCooldown}
                     onPet={catPet.petCat}
@@ -3236,8 +3339,10 @@ Additional information (if needed): ${additional}`;
         </div>
       )}
 
-      {/* Keep the floating mascot out of the pixel-world scene. */}
-      {!['commune', 'settings', 'admin'].includes(workView) && !kittyHelpOpen && !kittySpotlightOpen && (
+      {/* Keep the floating mascot out of the pixel-world scene. Hidden
+          entirely while the Desktop Cat mode is ON — the cat lives on the
+          OS desktop instead. */}
+      {!catOnDesktop && !['commune', 'settings', 'admin'].includes(workView) && !kittyHelpOpen && !kittySpotlightOpen && (
         <CatAssistant
           catId={selectedCat}
           currentThought={cat.currentThought}

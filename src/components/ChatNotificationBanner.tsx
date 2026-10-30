@@ -44,6 +44,12 @@ function publishUnreadCount(counts: Map<string, number>): void {
   window.dispatchEvent(new CustomEvent('econote:chat-unread-count', { detail: { count } }));
 }
 
+/** Mirror a banner notice onto the cat's thought bubble (workspace cat and
+ *  desktop cat both listen — see TicketNotesPage + CatDesktopOverlay). */
+function notifyCat(text: string): void {
+  window.dispatchEvent(new CustomEvent('econote:cat-notify', { detail: { text } }));
+}
+
 export default function ChatNotificationBanner({
   username,
   isChatOpen,
@@ -105,6 +111,7 @@ export default function ChatNotificationBanner({
           seenIdsRef.current.add(item.id);
           setNotice({ task: item, roomTitle: 'Tasks', roomId: `collab-task:${item.id}` });
           setVisible(true);
+          notifyCat(`📋 ${item.title} — ${item.body || 'Open Collab Space to review.'}`);
           if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
           if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
           noticeTimerRef.current = window.setTimeout(() => {
@@ -236,6 +243,9 @@ export default function ChatNotificationBanner({
 
       setNotice({ message, roomTitle, roomId });
       setVisible(true);
+      notifyCat(
+        `${mentioned ? '📣 Mentioned you — ' : ''}${message.username} in ${roomTitle}: ${preview(message.markdown) || 'sent a message'}`
+      );
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
       if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
       noticeTimerRef.current = window.setTimeout(() => {

@@ -11,14 +11,14 @@
  * updates the global auth context.
  */
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { KeyRound, LogIn, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { ROSTER_202610 } from '@/data/roster-2026-10';
 import { ROSTER_202611 } from '@/data/roster-2026-11';
 
-const EXTRA_NAMES = ['Yolanda', 'Jingyang', 'Troy', 'Dezzy'];
+const EXTRA_NAMES = ['Yolanda', 'Jingyang', 'Troy', 'Dezzy', 'Ivy'];
 
 /** All selectable usernames — roster English aliases (deduped, sorted) plus
  *  the fixed extra accounts. */
@@ -46,6 +46,21 @@ export default function AuthPanel({ onClose, required = false, presentation = 'm
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The sign-in gate is a HARDCODED-DARK design (its own gradient + #0b121c
+  // card, field colors forced in quiet-workspace.css). Force the app's dark
+  // theme while the page-presentation login is up so toasts, focus rings and
+  // anything else theme-driven match; restore the user's theme on unmount.
+  useEffect(() => {
+    if (!pagePresentation) return;
+    const root = document.documentElement;
+    const previous = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'evening');
+    return () => {
+      if (previous === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', previous);
+    };
+  }, [pagePresentation]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();

@@ -21,7 +21,9 @@ tauri-build = { version = "2.7.1", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.12.1", features = [] }
+# "macos-private-api" — required for transparent windows on macOS (the
+# desktop-cat overlay). No effect on Windows/other targets.
+tauri = { version = "2.12.1", features = ["macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 cpal = "0.15"
