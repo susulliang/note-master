@@ -2000,7 +2000,7 @@ async function loadCommuneBanners(env: Env): Promise<CommuneRoomBanner[]> {
 async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   if (Number(request.headers.get('content-length') ?? 0) > 8_192)
     return authJson({ error: 'Request is too large' }, 413);
-  let payload: { x?: unknown; y?: unknown; status?: unknown };
+  let payload: { x?: unknown; y?: unknown; status?: unknown; viewRadius?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
   } catch {
@@ -2013,6 +2013,7 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   const x = Math.max(24, Math.min(COMMUNE_WORLD_W - 24, Number(payload.x) || 800));
   const y = Math.max(144, Math.min(COMMUNE_WORLD_H - 24, Number(payload.y) || 860));
   const status = String(payload.status ?? 'hanging out').slice(0, 40);
+  const viewRadius = Math.max(600, Math.min(4_000, Number(payload.viewRadius) || 1_500));
   const saved = await env.DB.prepare(
     'SELECT cards, pet, phrase, avatar FROM commune_loadout WHERE username = ?1',
   )
@@ -2037,6 +2038,7 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
     y,
     status,
     seenAgo: 0,
+    viewRadius,
     loadout: me,
     carId: null,
     carSeat: null,
@@ -4304,6 +4306,7 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
     iso?: string;
     code?: string;
     off?: number;
+    note?: string;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -4320,9 +4323,10 @@ async function handleRosterPost(request: Request, env: Env): Promise<Response> {
       const iso = String(payload.iso ?? '').trim();
       const code = String(payload.code ?? '').trim();
       const off = typeof payload.off === 'number' && payload.off >= 0 ? payload.off : 0;
+      const note = typeof payload.note === 'string' ? payload.note.slice(0, 300) : '';
       if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
-      await room.applyCell(en, iso, code, off);
-      return authJson({ ok: true, mode: 'cell', month, en, iso, code, off });
+      await room.applyCell(en, iso, code, off, note);
+      return authJson({ ok: true, mode: 'cell', month, en, iso, code, off, note });
     }
     if (payload.mode === 'full') {
       const agents = payload.agents ?? [];
@@ -4383,14 +4387,15 @@ async function handleRosterPostD1(
     const iso = String(payload.iso ?? '').trim();
     const code = String(payload.code ?? '').trim();
     const off = typeof payload.off === 'number' && payload.off >= 0 ? payload.off : 0;
+    const note = typeof payload.note === 'string' ? payload.note.slice(0, 300) : '';
     if (!en || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return authJson({ error: 'Invalid cell' }, 400);
     await env.DB.prepare(
-      `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
-       ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, off_hours = ?5, updated_at = datetime('now')`
+      `INSERT INTO roster_cells (month_key, en, iso, code, off_hours, off_note, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+       ON CONFLICT(month_key, en, iso) DO UPDATE SET code = ?4, off_hours = ?5, off_note = ?6, updated_at = datetime('now')`
     )
-      .bind(month, en, iso, code, off || null)
+      .bind(month, en, iso, code, off || null, note || null)
       .run();
-    return authJson({ ok: true, mode: 'cell', month, en, iso, code, off, degraded: true });
+    return authJson({ ok: true, mode: 'cell', month, en, iso, code, off, note, degraded: true });
   }
 
   if (payload.mode === 'full') {

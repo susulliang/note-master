@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const XLSX_PATH = resolve(ROOT, 'roster october 2026 with offtime comments.xlsx');
+const XLSX_PATH = resolve(ROOT, 'GZ-OPS-Ecovacs NA Roster October 2026 - V1012.xlsx');
 const OUT_DIR = resolve(ROOT, '.wrangler', 'tmp-roster');
 const MONTH = '2026-10';
 
@@ -42,8 +42,8 @@ const isoFor = (i) => `2026-10-${String(i - 4).padStart(2, '0')}`;
  */
 function parseOffHours(text) {
   let total = 0;
-  // 1) keyword + explicit hours ("调休1H", "调休2H0100-0300", "事假3H", "调1H")
-  const re = /(调休|调|事假|年假|病假)\s*[:：]?\s*(\d{1,2}(?:\.\d+)?)(\s*(?:H|时|小时))?/g;
+  // 1) keyword + explicit hours ("调休1H", "调休2H0100-0300", "事假3H", "调1H", "培训1H")
+  const re = /(调休|调|事假|年假|病假|培训)\s*[:：]?\s*(\d{1,2}(?:\.\d+)?)(\s*(?:H|时|小时))?/g;
   let m;
   while ((m = re.exec(text))) {
     const hasUnit = !!m[3];
@@ -55,7 +55,7 @@ function parseOffHours(text) {
   }
   if (total > 0) return total;
   // 2) keyword + colon time range ("病假：02：00-09：00")
-  const tm = /(调休|调|事假|年假|病假)\s*[:：]?\s*(\d{1,2})\s*[：:](\d{2})\s*[-–]\s*(\d{1,2})\s*[：:](\d{2})/.exec(text);
+  const tm = /(调休|调|事假|年假|病假|培训)\s*[:：]?\s*(\d{1,2})\s*[：:](\d{2})\s*[-–]\s*(\d{1,2})\s*[：:](\d{2})/.exec(text);
   if (tm) {
     let start = Number(tm[2]) + Number(tm[3]) / 60;
     let end = Number(tm[4]) + Number(tm[5]) / 60;
@@ -63,7 +63,7 @@ function parseOffHours(text) {
     return end - start;
   }
   // 3) keyword + plain HHMM-HHMM range, hours implied ("调休1 2100-2200")
-  const hm = /(调休|调|事假|年假|病假)[^\d-]*(\d{1,2}(?:\.\d+)?)?\s*(\d{2})(\d{2})\s*[-–]\s*(\d{2})(\d{2})/.exec(text);
+  const hm = /(调休|调|事假|年假|病假|培训)[^\d-]*(\d{1,2}(?:\.\d+)?)?\s*(\d{2})(\d{2})\s*[-–]\s*(\d{2})(\d{2})/.exec(text);
   if (hm) {
     if (hm[2] !== undefined) return parseFloat(hm[2]);
     let start = Number(hm[3]) + Number(hm[4]) / 60;

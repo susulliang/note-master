@@ -63,7 +63,8 @@ export async function pushRosterCell(
   en: string,
   iso: string,
   code: string,
-  off?: number
+  off?: number,
+  note?: string
 ): Promise<boolean> {
   const token = getStoredToken();
   if (!token) return false;
@@ -71,7 +72,15 @@ export async function pushRosterCell(
     const res = await fetch(`${getApiBase()}/api/roster`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify(off === undefined ? { month: monthKey, mode: 'cell', en, iso, code } : { month: monthKey, mode: 'cell', en, iso, code, off }),
+      body: JSON.stringify({
+        month: monthKey,
+        mode: 'cell',
+        en,
+        iso,
+        code,
+        ...(off !== undefined ? { off } : {}),
+        ...(note !== undefined ? { note } : {}),
+      }),
     });
     return res.ok;
   } catch {
@@ -121,6 +130,7 @@ export function subscribeRosterMonth(monthKey: string, handlers: RosterSocketHan
         iso: String(event.iso ?? ''),
         code: String(event.code ?? ''),
         off: typeof event.off === 'number' ? event.off : undefined,
+        note: typeof event.note === 'string' ? event.note : undefined,
       };
       if (cell.en && cell.iso) handlers.onCell?.(cell);
     } else if (event.type === 'roster_cells' || event.type === 'welcome') {
@@ -131,6 +141,7 @@ export function subscribeRosterMonth(monthKey: string, handlers: RosterSocketHan
           iso: String(c.iso ?? ''),
           code: String(c.code ?? ''),
           off: typeof c.off === 'number' ? c.off : undefined,
+          note: typeof c.note === 'string' ? c.note : undefined,
         }))
         .filter((c) => c.en && c.iso);
       if (cells.length) handlers.onCells?.(cells);

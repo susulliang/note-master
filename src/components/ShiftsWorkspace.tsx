@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { CalendarDays, Check, ChevronDown, CloudUpload, Download, RotateCcw, Search, X } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, CloudUpload, Download, RotateCcw, Search, UserRound, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { cn } from '@/lib/utils';
 import { getRoster } from '@/data/roster-index';
@@ -86,7 +86,7 @@ function hexAlpha(hex: string, alpha: string): string {
   return `${hex}${alpha}`;
 }
 
-type ShiftChange = { en: string; iso: string; code: string; /** Extra off hours (billable = 8 - off). */ off?: number };
+type ShiftChange = { en: string; iso: string; code: string; /** Extra off hours (billable = 8 - off). */ off?: number; /** Off-time comment; empty string clears. */ note?: string };
 type GridPoint = { row: number; col: number };
 
 /* ------------------------------- date helpers ------------------------------ */
@@ -347,14 +347,18 @@ function MonthYearSelect({
 /* ------------------------------ the workspace ------------------------------ */
 
 export default function ShiftsWorkspace() {
+  const { user: authUser } = useAuth();
   const available = ROSTER_MONTHS[ROSTER_MONTHS.length - 1] ?? { year: 2026, month: 11 };
   const [year, setYear] = useState(available.year);
   const [month, setMonth] = useState(available.month);
   const [agentEn, setAgentEn] = useState('');
+  const [showMyself, setShowMyself] = useState(false);
   /** Local shift overrides — `${en}|${iso}` → code (never written to Feishu). */
   const [edits, setEdits] = useState<Record<string, string>>({});
   /** Local extra-off-hours overrides — `${en}|${iso}` → hours (billable off-time). */
   const [offEdits, setOffEdits] = useState<Record<string, number>>({});
+  /** Local off-time comment overrides — `${en}|${iso}` → note text. */
+  const [noteEdits, setNoteEdits] = useState<Record<string, string>>({});
 
   /** Month-scoped roster (day-total stat rows are computed LIVE so local
    *  edits re-flow the counters, matching the sheet's COUNTIF behavior).
@@ -364,9 +368,17 @@ export default function ShiftsWorkspace() {
     () => getRoster(`${year}-${String(month).padStart(2, '0')}`) ?? [],
     [year, month]
   );
+  const selfUsername = authUser?.username.trim().toLocaleLowerCase() ?? '';
+  const selfAgent = useMemo(
+    () => ROSTER.find((entry) => entry.en.trim().toLocaleLowerCase() === selfUsername) ?? null,
+    [ROSTER, selfUsername],
+  );
+  useEffect(() => {
+    if (!selfAgent) setShowMyself(false);
+  }, [selfAgent]);
   /** Live D1 overlay — `${en}|${iso}` → cell fetched from roster_cells
-   *  (shift code + billable off hours). */
-  const [d1Overlay, setD1Overlay] = useState<Record<string, { code: string; off?: number }>>({});
+   *  (shift code + billable off hours + off-time comment). */
+  const [d1Overlay, setD1Overlay] = useState<Record<string, { code: string; off?: number; note?: string }>>({});
 
   const agent = useMemo(() => ROSTER.find((a) => a.en === agentEn) ?? null, [ROSTER, agentEn]);
 
@@ -384,6 +396,10 @@ export default function ShiftsWorkspace() {
     return a.offHours?.[iso] ?? 0;
   };
 
+  /** Off-time comment on a cell: local edit → D1 cell → baked comment record. */
+  const noteOf = (a: RosterAgent, iso: string): string =>
+    noteEdits[`${a.en}|${iso}`] ?? d1Overlay[`${a.en}|${iso}`]?.note ?? a.offNote?.[iso] ?? '';
+
   /** Billable hours for one cell: worked shifts are 8h minus extra off-time. */
   const billableOf = (a: RosterAgent, iso: string): number =>
     isWorkedShift(shiftOf(a, iso)) ? Math.max(0, STANDARD_SHIFT_HOURS - offOf(a, iso)) : 0;
@@ -394,7 +410,6 @@ export default function ShiftsWorkspace() {
    * land in the per-month RosterRoom Durable Object first (its SQLite) and
    * are broadcast live to every logged-in viewer of that month; D1 is the
    * backup mirror. */
-  const { user: authUser } = useAuth();
   const [d1Status, setD1Status] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const d1MonthRef = useRef<Map<string, boolean>>(new Map());
   const d1SyncQueueRef = useRef<Map<string, Promise<boolean>>>(new Map());
@@ -412,7 +427,7 @@ export default function ShiftsWorkspace() {
         // Layer the live database state over the baked snapshot.
         setD1Overlay((prev) => {
           const next = { ...prev };
-          for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off };
+          for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off, note: cell.note };
           return next;
         });
       }
@@ -422,7 +437,7 @@ export default function ShiftsWorkspace() {
       if (!alive) return;
       setD1Overlay((prev) => {
         const next = { ...prev };
-        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off };
+        for (const cell of cells) next[`${cell.en}|${cell.iso}`] = { code: cell.code, off: cell.off, note: cell.note };
         return next;
       });
     };
@@ -463,6 +478,14 @@ export default function ShiftsWorkspace() {
         .filter(([, off]) => off !== undefined)
     );
     if (offUpdates.size > 0) setOffEdits((prev) => ({ ...prev, ...Object.fromEntries(offUpdates) }));
+    // Comment edits: only materialize when the change explicitly carries one
+    // (code-only edits carry the cell's current comment through to D1 instead).
+    const noteUpdates = new Map<string, string>(
+      changes
+        .filter(({ note }) => note !== undefined)
+        .map(({ en, iso, note }) => [`${en}|${iso}`, note as string])
+    );
+    if (noteUpdates.size > 0) setNoteEdits((prev) => ({ ...prev, ...Object.fromEntries(noteUpdates) }));
     if (!authUser?.canAccessAdmin || ROSTER.length === 0) return;
 
     // Serialize writes for a month so a first-time full snapshot cannot race
@@ -498,10 +521,11 @@ export default function ShiftsWorkspace() {
           return ok;
         }
         const results = await Promise.all(
-          changes.map(({ en, iso, code, off }) => {
+          changes.map(({ en, iso, code, off, note }) => {
             const a = ROSTER.find((x) => x.en === en);
             const carry = off ?? (a ? offOf(a, iso) : 0);
-            return pushRosterCell(monthKey, en, iso, code, carry);
+            const noteCarry = note ?? (a ? noteOf(a, iso) : '');
+            return pushRosterCell(monthKey, en, iso, code, carry, noteCarry);
           })
         );
         return results.every(Boolean);
@@ -582,7 +606,10 @@ export default function ShiftsWorkspace() {
           onChange={setMonth}
           options={monthOptions}
         />
-        <AgentFilter agents={ROSTER} value={agentEn} onChange={setAgentEn} />
+        <AgentFilter agents={ROSTER} value={agentEn} onChange={(value) => {
+          setAgentEn(value);
+          if (value) setShowMyself(false);
+        }} />
         <button
           type="button"
           onClick={downloadXlsx}
@@ -592,6 +619,26 @@ export default function ShiftsWorkspace() {
         >
           <Download className="size-3" />
           XLSX
+        </button>
+        <button
+          type="button"
+          aria-pressed={showMyself}
+          disabled={!selfAgent}
+          onClick={() => {
+            if (!selfAgent) return;
+            setAgentEn('');
+            setShowMyself((current) => !current);
+          }}
+          title={selfAgent ? (showMyself ? 'Show every roster agent' : `Show only ${selfAgent.en}`) : 'Your login name does not match an agent in this roster'}
+          className={cn(
+            'flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            showMyself
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-border bg-card/80 text-muted-foreground hover:border-primary/40 hover:text-foreground',
+          )}
+        >
+          <UserRound className="size-3" />
+          {showMyself ? 'Show Everyone' : 'Show Myself'}
         </button>
         {authUser?.canAccessAdmin && (
           <span
@@ -640,10 +687,13 @@ export default function ShiftsWorkspace() {
           dayList={dayList}
           shiftOf={shiftOf}
           offOf={offOf}
+          noteOf={noteOf}
           billableOf={billableOf}
           canAccessAdmin={!!authUser?.canAccessAdmin}
           applyShiftChanges={applyShiftChanges}
           agents={ROSTER}
+          selfAgentEn={selfAgent?.en ?? ''}
+          showMyself={showMyself}
         />
       )}
     </div>
@@ -694,23 +744,36 @@ function RosterGrid({
   dayList,
   shiftOf,
   offOf,
+  noteOf,
   billableOf,
   canAccessAdmin,
   applyShiftChanges,
   agents,
+  selfAgentEn,
+  showMyself,
 }: {
   year: number;
   month: number;
   dayList: number[];
   shiftOf: (a: RosterAgent, iso: string) => string;
   offOf: (a: RosterAgent, iso: string) => number;
+  noteOf: (a: RosterAgent, iso: string) => string;
   billableOf: (a: RosterAgent, iso: string) => number;
   canAccessAdmin: boolean;
   applyShiftChanges: (changes: ShiftChange[]) => void;
   agents: RosterAgent[];
+  selfAgentEn: string;
+  showMyself: boolean;
 }) {
   const [selection, setSelection] = useState<{ anchor: GridPoint; focus: GridPoint } | null>(null);
+  const visibleAgents = useMemo(
+    () => showMyself && selfAgentEn
+      ? agents.filter((agent) => agent.en.toLocaleLowerCase() === selfAgentEn.toLocaleLowerCase())
+      : agents,
+    [agents, selfAgentEn, showMyself],
+  );
   const selectingRef = useRef(false);
+  useEffect(() => setSelection(null), [selfAgentEn, showMyself]);
   useEffect(() => {
     const stopSelecting = () => {
       selectingRef.current = false;
@@ -743,7 +806,7 @@ function RosterGrid({
     if (selectedCells.length === 0) return;
     applyShiftChanges(
       selectedCells.map(({ row, col }) => ({
-        en: agents[row].en,
+        en: visibleAgents[row].en,
         iso: isoOf(year, month, dayList[col]),
         code,
       }))
@@ -759,13 +822,29 @@ function RosterGrid({
     const off = Math.min(STANDARD_SHIFT_HOURS, value);
     applyShiftChanges(
       selectedCells.map(({ row, col }) => ({
-        en: agents[row].en,
+        en: visibleAgents[row].en,
         iso: isoOf(year, month, dayList[col]),
-        code: shiftOf(agents[row], isoOf(year, month, dayList[col])),
+        code: shiftOf(visibleAgents[row], isoOf(year, month, dayList[col])),
         off,
       }))
     );
     setOffInput('');
+  };
+
+  /** Off-time comment input for the selection toolbar (empty = clear). */
+  const [noteInput, setNoteInput] = useState('');
+  const applySelectedNote = () => {
+    if (selectedCells.length === 0) return;
+    const note = noteInput.trim().slice(0, 300);
+    applyShiftChanges(
+      selectedCells.map(({ row, col }) => ({
+        en: visibleAgents[row].en,
+        iso: isoOf(year, month, dayList[col]),
+        code: shiftOf(visibleAgents[row], isoOf(year, month, dayList[col])),
+        note,
+      }))
+    );
+    setNoteInput('');
   };
 
   /** LIVE day totals — recomputed from the (locally edited) roster so the
@@ -879,17 +958,17 @@ function RosterGrid({
         </span>
         {selectedCells.length > 0 && (() => {
           const billable = selectedCells.reduce(
-            (sum, { row, col }) => sum + billableOf(agents[row], isoOf(year, month, dayList[col])),
+            (sum, { row, col }) => sum + billableOf(visibleAgents[row], isoOf(year, month, dayList[col])),
             0
           );
           const offTotal = selectedCells.reduce(
-            (sum, { row, col }) => sum + offOf(agents[row], isoOf(year, month, dayList[col])),
+            (sum, { row, col }) => sum + offOf(visibleAgents[row], isoOf(year, month, dayList[col])),
             0
           );
           const single = selectedCells.length === 1
-            ? { a: agents[selectedCells[0]!.row], iso: isoOf(year, month, dayList[selectedCells[0]!.col]) }
+            ? { a: visibleAgents[selectedCells[0]!.row], iso: isoOf(year, month, dayList[selectedCells[0]!.col]) }
             : null;
-          const note = single ? single.a.offNote?.[single.iso] : undefined;
+          const note = single ? noteOf(single.a, single.iso) : undefined;
           return (
             <span className="flex items-center gap-1.5 text-[10px]">
               <span
@@ -935,6 +1014,26 @@ function RosterGrid({
               className="h-7 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/20"
             >
               −off hrs
+            </button>
+            <input
+              type="text"
+              value={noteInput}
+              onChange={(e) => setNoteInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applySelectedNote();
+              }}
+              placeholder="comment…"
+              aria-label="Off-time comment to record on selected cells"
+              maxLength={300}
+              className="h-7 w-36 rounded-md border border-border bg-background px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            />
+            <button
+              type="button"
+              onClick={applySelectedNote}
+              title="Set the off-time comment (调休/事假/病假…) on every selected cell — an empty box clears it"
+              className="h-7 rounded-md border border-sky-400/40 bg-sky-500/10 px-2 text-[10px] font-semibold text-sky-300 transition-colors hover:bg-sky-500/20"
+            >
+              📝 note
             </button>
           </span>
         )}
@@ -993,12 +1092,24 @@ function RosterGrid({
           </tr>
         </thead>
         <tbody>
-          {agents.map((a, rowIndex) => (
-            <tr key={a.hr} className="group/row">
+          {visibleAgents.map((a, rowIndex) => {
+            const isSelfRow = !!selfAgentEn && a.en.toLocaleLowerCase() === selfAgentEn.toLocaleLowerCase();
+            return (
+            <tr
+              key={a.hr}
+              aria-current={isSelfRow ? 'true' : undefined}
+              className={cn(
+                'group/row',
+                isSelfRow && 'h-12 bg-primary/10 shadow-[0_0_18px_rgba(35,134,54,0.22)]',
+              )}
+            >
               <td
                 onClick={(e) => onAgentClick(a.en, e.currentTarget.closest('tr'))}
-                title={`${a.zh} · Click to pin this agent's row to the top (click again to restore)`}
-                className="sticky left-0 z-10 cursor-pointer whitespace-nowrap border-b border-r border-border/50 bg-card/90 px-2 py-0.5 backdrop-blur group-hover/row:bg-accent/10"
+                title={isSelfRow ? `${a.zh} · Your roster row` : `${a.zh} · Click to pin this agent's row to the top (click again to restore)`}
+                className={cn(
+                  'sticky left-0 z-10 cursor-pointer whitespace-nowrap border-b border-r border-border/50 bg-card/90 px-2 py-0.5 backdrop-blur group-hover/row:bg-accent/10',
+                  isSelfRow && 'bg-primary/15 py-2 text-primary ring-1 ring-inset ring-primary/60',
+                )}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="max-w-[150px] truncate text-[11px] font-bold">{a.en}</span>
@@ -1018,7 +1129,10 @@ function RosterGrid({
                 return (
                   <td
                     key={d}
-                    className="h-6 border-b border-border/30 p-0"
+                    className={cn(
+                      'h-6 border-b border-border/30 p-0',
+                      isSelfRow && 'h-12 ring-1 ring-inset ring-primary/40',
+                    )}
                     onPointerDown={(e) => {
                       if (e.button !== 0) return;
                       e.preventDefault();
@@ -1040,6 +1154,7 @@ function RosterGrid({
                       title={`${a.en} · ${iso} · ${code || 'No shift'}${off > 0 ? ` · ${off}h extra off (billable ${Math.max(0, 8 - off)}h)` : ''}${a.offNote?.[iso] ? ` · ${a.offNote[iso]}` : ''}`}
                       className={cn(
                         'flex h-6 w-full select-none items-center justify-center border-0 px-0.5 font-mono text-[9px] font-bold leading-none outline-none',
+                        isSelfRow && 'h-12',
                         !code && weekend && 'bg-white/[0.025]',
                         off > 0 && !isSelected && 'ring-2 ring-inset ring-amber-400',
                         isSelected && 'relative z-[1] ring-2 ring-inset ring-primary',
@@ -1056,13 +1171,17 @@ function RosterGrid({
               {[String(offPhCounts.get(a.en) ?? 0), a.bhc, a.phc].map((stat, i) => (
                 <td
                   key={i}
-                  className="border-b border-l border-border/30 bg-muted/20 px-1 py-1 text-center font-mono text-[9px] text-muted-foreground"
+                  className={cn(
+                    'border-b border-l border-border/30 bg-muted/20 px-1 py-1 text-center font-mono text-[9px] text-muted-foreground',
+                    isSelfRow && 'bg-primary/10 ring-1 ring-inset ring-primary/40',
+                  )}
                 >
                   {stat}
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
 
           {/* Day-total stat rows — replicate the sheet's COUNTIF block.
               "Total Chat" / "Total Call" (the 2 requested headcount rows)

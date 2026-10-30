@@ -74,8 +74,9 @@ function attachment(ws: WebSocket): RosterAttachment | null {
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** Bump to force a one-time re-seed from D1 on the next cold start
- *  (v2 = billable off-hours columns + imported off-time records). */
-const ROSTER_SCHEMA_VERSION = 2;
+ *  (v2 = billable off-hours columns + imported off-time records;
+ *   v3 = V1012 workbook refresh — codes + off-time + comment notes). */
+const ROSTER_SCHEMA_VERSION = 3;
 
 export class RosterRoom extends DurableObject<Env> {
   /** The month this instance owns, derived from the DO instance name. */
