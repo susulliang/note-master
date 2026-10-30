@@ -1,6 +1,7 @@
 import { getRoster, ROSTER_MONTHS } from '@/data/roster-index';
 import rosterAliasOverrides from '@/data/roster-alias-overrides.json';
 import type { RosterAgent } from '@/data/roster';
+import { getLiveCell } from '@/lib/roster-live';
 
 /**
  * Shift codes that count as "not worked" for the MTD shift denominator:
@@ -228,15 +229,20 @@ export function countMtdShifts(
   const hoursByAgent: Record<string, number> = {};
   let total = 0;
   let totalHours = 0;
+  const month = first.slice(0, 7);
   for (const a of agents) {
     if (skillSet && !skillSet.has(a.skill)) continue;
     let n = 0;
     let hours = 0;
-    for (const [date, code] of Object.entries(a.shifts)) {
-      if (date >= first && date <= last && isWorkedShift(code)) {
-        n++;
-        hours += effectiveHours(a, date, code);
-      }
+    for (const [date, bakedCode] of Object.entries(a.shifts)) {
+      if (date < first || date > last) continue;
+      // Live overlay (SHIFTS edits / D1 cells) wins over the baked snapshot.
+      const live = getLiveCell(month, `${a.en}|${date}`);
+      const code = live?.code ?? bakedCode;
+      if (!isWorkedShift(code)) continue;
+      const off = typeof live?.off === 'number' ? live.off : (a.offHours?.[date] ?? 0);
+      n++;
+      hours += Math.max(0, STANDARD_SHIFT_HOURS - off);
     }
     byAgent[a.en] = n;
     hoursByAgent[a.en] = hours;

@@ -7,6 +7,7 @@ import type { RosterAgent, DayTotalRow } from '@/data/roster';
 import { ROSTER_MONTHS, SHIFT_CATALOG } from '@/data/shifts';
 import { useAuth } from '@/lib/auth-context';
 import { isWorkedShift, STANDARD_SHIFT_HOURS } from '@/lib/roster-shifts';
+import { setLiveLayer } from '@/lib/roster-live';
 import { fetchRosterMonth, pushRosterCell, pushRosterFull, subscribeRosterMonth } from '@/lib/roster-sync';
 import type { RosterCell } from '@/lib/roster-sync';
 import { DateBelt } from './DateBelt';
@@ -434,6 +435,18 @@ export default function ShiftsWorkspace() {
       unsubscribe();
     };
   }, [monthKey, authUser]);
+
+  /* Publish the live cell state (local edits + D1 overlay) to the session-wide
+   * roster live store so DASH dailies recalculate while cells change here. */
+  useEffect(() => {
+    const user: Record<string, { code?: string; off?: number }> = {};
+    for (const [key, code] of Object.entries(edits)) user[key] = { ...user[key], code };
+    for (const [key, off] of Object.entries(offEdits)) user[key] = { ...user[key], off };
+    const d1: Record<string, { code?: string; off?: number }> = {};
+    for (const [key, cell] of Object.entries(d1Overlay)) d1[key] = { code: cell.code, off: cell.off };
+    setLiveLayer(monthKey, 'user', user);
+    setLiveLayer(monthKey, 'd1', d1);
+  }, [monthKey, edits, offEdits, d1Overlay]);
 
   const applyShiftChanges = (changes: ShiftChange[]) => {
     if (changes.length === 0) return;

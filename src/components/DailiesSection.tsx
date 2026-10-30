@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { asOfDate, countMtdShifts, matchRosterShift, monthStart } from '@/lib/roster-shifts';
+import { useRosterLiveVersion } from '@/lib/roster-live';
 import type { CountReport } from '@/lib/sf-reports';
 import type { DailiesState } from '@/hooks/use-dailies-report';
 
@@ -440,21 +441,25 @@ export function DailiesSection({ state, onRetry, mini = false }: DailiesSectionP
     return { rosterStart: start, rosterEnd: end, rosterLabel: label };
   }, [state]);
 
+  // Live roster edits (SHIFTS workspace) bump this version — the dailies
+  // denominators below then recompute from the current cell state.
+  const rosterLiveVersion = useRosterLiveVersion();
+
   const hoursByAgent = useMemo(
     () => countMtdShifts(rosterStart, rosterEnd).hoursByAgent,
-    [rosterStart, rosterEnd],
+    [rosterStart, rosterEnd, rosterLiveVersion],
   );
   const chatHours = useMemo(
     () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CHAT_SKILLS]).totalHours,
-    [rosterStart, rosterEnd],
+    [rosterStart, rosterEnd, rosterLiveVersion],
   );
   const callHours = useMemo(
     () => countMtdShifts(rosterStart, rosterEnd, undefined, [...CALL_SKILLS]).totalHours,
-    [rosterStart, rosterEnd],
+    [rosterStart, rosterEnd, rosterLiveVersion],
   );
   const allHours = useMemo(
     () => countMtdShifts(rosterStart, rosterEnd, undefined, [...DAILIES_SKILLS]).totalHours,
-    [rosterStart, rosterEnd],
+    [rosterStart, rosterEnd, rosterLiveVersion],
   );
 
   const performers = useMemo(() => {

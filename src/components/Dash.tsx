@@ -34,6 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import { countMtdShifts, asOfDate, matchRosterShift, monthStart } from '@/lib/roster-shifts';
+import { useRosterLiveVersion } from '@/lib/roster-live';
 import { useCsatReport } from '@/hooks/use-csat-report';
 import { useOneTouchReport } from '@/hooks/use-one-touch-report';
 import { useDailiesReport } from '@/hooks/use-dailies-report';
@@ -1375,6 +1376,8 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
   const data = state.status === 'ready' ? state.data : null;
   const refreshError = state.status === 'ready' ? state.refreshError : undefined;
   const total = data ? data.call.handled + data.email.total + data.chat.total : null;
+  // Live roster edits (SHIFTS workspace) bump this version — recompute below.
+  const rosterLiveVersion = useRosterLiveVersion();
   const shiftStats = useMemo(() => {
     if (!data) return null;
     const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
@@ -1394,7 +1397,7 @@ function MtdVolumeSummary({ state, onExplore }: { state: ReturnType<typeof useDa
       call: { shifts: callEquiv, hours: callEquiv * 8, average: callEquiv > 0 ? data.call.handled / callEquiv : null },
       through: end,
     };
-  }, [data]);
+  }, [data, rosterLiveVersion]);
   const volumes = [
     { name: 'Total processed', value: total, detail: 'Call + Email + Chat', average: shiftStats?.total.average ?? null, shifts: shiftStats?.total.shifts ?? null, hours: shiftStats?.total.hours ?? null, color: 'text-foreground', accent: 'bg-accent' },
     { name: 'Call', value: data?.call.handled ?? null, detail: 'MTD handled', average: shiftStats?.call.average ?? null, shifts: shiftStats?.call.shifts ?? null, hours: shiftStats?.call.hours ?? null, color: 'text-amber-300', accent: 'bg-amber-400' },
@@ -1467,6 +1470,7 @@ function CallPerformanceCard({
       }),
     [reportAgents, averageAnswerRate],
   );
+  const rosterLiveVersion = useRosterLiveVersion();
   const shiftAverage = useMemo(() => {
     if (!data) return null;
     const dates = [asOfDate(data.chat.asOf), asOfDate(data.email.asOf)].filter((date): date is string => !!date).sort();
@@ -1475,7 +1479,7 @@ function CallPerformanceCard({
     const hours = countMtdShifts(monthStart(end), end, undefined, ['Call', 'FR Call']).totalHours;
     const equiv = hours / 8;
     return { average: equiv > 0 ? data.call.handled / equiv : null, shifts: equiv, hours };
-  }, [data]);
+  }, [data, rosterLiveVersion]);
   const answerValues = plotAgents.map((agent) => agent.answerRate ?? 0);
   const serviceValues = plotAgents.map((agent) => agent.serviceLevel20 ?? 0);
   const xMin = answerValues.length ? Math.max(0, Math.floor((Math.min(...answerValues) - 5) / 5) * 5) : 70;
@@ -1850,6 +1854,8 @@ function OneTouchMatrix({ agents, report, onSelect }: { agents: DashAgent[]; rep
 
 function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dailies']['state'] }) {
   const [perShift, setPerShift] = useState(false);
+  // Live roster edits (SHIFTS workspace) bump this version — recompute below.
+  const rosterLiveVersion = useRosterLiveVersion();
   const workload = useMemo(() => {
     if (state.status !== 'ready') return null;
     const { chat, email, historical } = state.data;
@@ -1912,7 +1918,7 @@ function WorkloadExplore({ state }: { state: ReturnType<typeof useDashData>['dai
       maxEmail: Math.max(1, ...all.map((row) => row.email)),
       total: compatible ? all.reduce((sum, row) => sum + row.total, 0) : null,
     };
-  }, [state, perShift]);
+  }, [state, perShift, rosterLiveVersion]);
 
   if (state.status === 'loading') return <div className={cn(PANEL, 'p-6 text-sm text-muted-foreground')}>Loading workload sources…</div>;
   if (state.status === 'error') return <div className={cn(PANEL, 'p-6 text-sm text-rose-200')}>{state.message}</div>;
