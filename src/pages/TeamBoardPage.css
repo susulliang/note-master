@@ -527,11 +527,15 @@
 .team-board-severity.is-low { color: var(--primary); }
 
 .team-board-card h3 {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   font-size: 12px;
   font-weight: 720;
   line-height: 1.4;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .team-board-ticket-number {
@@ -544,6 +548,32 @@
   background: color-mix(in srgb, var(--foreground) 3%, transparent);
   font-size: 8px;
   font-variant-numeric: tabular-nums;
+}
+
+.team-board-card-highlights {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  padding-left: 7px;
+}
+
+.team-board-card-highlights > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 8px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.team-board-card-highlights b {
+  margin-right: 5px;
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .team-board-card-excerpt {
@@ -715,6 +745,41 @@
 
 .team-board-inspector-cardhead {
   justify-content: space-between;
+}
+
+.team-board-inspector-highlights {
+  display: grid;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 9px;
+  padding: 8px 9px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.team-board-inspector-highlights > div {
+  display: grid;
+  gap: 3px;
+}
+
+.team-board-inspector-highlights > div + div {
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+  padding-top: 6px;
+}
+
+.team-board-inspector-highlights span {
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.team-board-inspector-highlights strong {
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 550;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .team-board-title-input {

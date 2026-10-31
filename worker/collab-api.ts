@@ -671,18 +671,32 @@ interface TeamBoardCardRow {
   source_id: string | null;
   source_url: string | null;
   source_snapshot: string;
+  highlight_source?: string;
   created_at: number;
   updated_at: number;
   closed_at: number | null;
   comment_count?: number;
 }
 
+function teamBoardHighlights(highlightText: string) {
+  const issueExcerpt = /(?:^|\r?\n)\s*(?:\*\*)?Issue\/s(?:\*\*)?\s*:\s*([^\r\n]*)/i
+    .exec(highlightText)?.[1]?.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 420) ?? '';
+  const robotModel = /(?:^|\r?\n)\s*(?:\*\*)?Robot\s+Model(?:\*\*)?\s*:\s*([^\r\n]*)/i
+    .exec(highlightText)?.[1]?.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) ?? '';
+  return { issueExcerpt, robotModel };
+}
+
 function teamBoardCardPublic(row: TeamBoardCardRow) {
+  const { issueExcerpt, robotModel } = teamBoardHighlights(
+    [row.highlight_source, row.source_snapshot, row.description].filter(Boolean).join('\n'),
+  );
   return {
     id: row.id,
     type: row.type,
     title: row.title,
     description: row.description,
+    issueExcerpt,
+    robotModel,
     status: row.status,
     severity: row.severity,
     visibility: row.visibility ?? 'private',
@@ -843,6 +857,12 @@ async function listTeamBoardCards(env: Env, username: string, url: URL): Promise
       substr(card.description, 1, 500) AS description,
       card.status, card.severity, card.visibility, card.ticket_number, card.is_beacon, card.owner, card.created_by,
       card.source_type, card.source_id, card.source_url, '' AS source_snapshot,
+      (CASE WHEN instr(lower(card.source_snapshot), 'issue/s:') > 0
+        THEN 'Issue/s: ' || substr(card.source_snapshot, instr(lower(card.source_snapshot), 'issue/s:') + 8, 420)
+        ELSE '' END) || char(10) ||
+      (CASE WHEN instr(lower(card.source_snapshot), 'robot model:') > 0
+        THEN 'Robot Model: ' || substr(card.source_snapshot, instr(lower(card.source_snapshot), 'robot model:') + 12, 120)
+        ELSE '' END) AS highlight_source,
       card.created_at, card.updated_at, card.closed_at,
       (SELECT COUNT(*) FROM team_board_comments comment WHERE comment.card_id = card.id) AS comment_count
     FROM team_board_cards card
@@ -894,7 +914,7 @@ async function getTeamBoardCard(
     FROM team_board_cards card WHERE card.id = ?
   `).bind(cardId).first<TeamBoardCardRow>();
   if (!row) return collabJson({ error: 'Card not found.' }, 404);
-  const [members, comments, activity, session, sharedRooms] = await Promise.all([
+  const [members, comments, session, sharedRooms] = await Promise.all([
     env.DB.prepare(
       `SELECT username, permission, added_by AS addedBy, created_at AS createdAt
        FROM team_board_members WHERE card_id = ? ORDER BY username COLLATE NOCASE`,
@@ -905,10 +925,6 @@ async function getTeamBoardCard(
     ).bind(cardId).all<{
       id: string; author: string; markdown: string; mentionsJson: string; createdAt: number;
     }>(),
-    env.DB.prepare(
-      `SELECT id, actor, kind, detail, created_at AS createdAt
-       FROM team_board_activity WHERE card_id = ? ORDER BY created_at DESC LIMIT 80`,
-    ).bind(cardId).all(),
     env.DB.prepare(
       `SELECT id, created_by AS createdBy, state, focus_target AS focusTarget,
        scratchpad, started_at AS startedAt, ended_at AS endedAt
@@ -952,7 +968,6 @@ async function getTeamBoardCard(
       }
       return { id: comment.id, author: comment.author, markdown: comment.markdown, mentions, createdAt: comment.createdAt };
     }),
-    activity: activity.results ?? [],
     session: sessionWithMembership,
     sharedRooms: sharedRooms.results ?? [],
   });
@@ -987,6 +1002,7 @@ async function createTeamBoardCard(
     ? payload.sourceUrl.slice(0, 500)
     : null;
   const sourceSnapshot = typeof payload?.sourceSnapshot === 'string' ? payload.sourceSnapshot.slice(0, 20_000) : '';
+  const highlights = teamBoardHighlights(`${sourceSnapshot}\n${description}`);
   const visibility: TeamBoardVisibility = payload?.visibility === 'private'
     ? 'private'
     : type === 'announcement' || payload?.visibility === 'registered'
@@ -1012,6 +1028,7 @@ async function createTeamBoardCard(
   return collabJson({
     card: {
       id, type, title, description, status, severity, ticketNumber, owner: username, createdBy: username,
+      ...highlights,
       sourceType, sourceId, sourceUrl, sourceSnapshot, createdAt: now, updatedAt: now, closedAt: null,
       commentCount: 0,
       isBeacon,

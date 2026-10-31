@@ -45,6 +45,14 @@ import {
   type TeamBoardSeverity,
   type TeamBoardStatus,
 } from '@/lib/chat-client';
+import {
+  loadTeamBoardCardDetail,
+  loadTeamBoardCardList,
+  saveTeamBoardCardDetail,
+  saveTeamBoardCardList,
+  teamBoardCardListKey,
+} from '@/lib/team-board-cache';
+import { extractTeamBoardHighlights } from '@/lib/team-board-insights';
 import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 import { cn } from '@/lib/utils';
 import './TeamBoardPage.css';
@@ -109,6 +117,17 @@ function parseTicketNumber(source: string): string {
   return match?.[1] ?? '';
 }
 
+function cardGeometry(card: TeamBoardCard): { width: number; titleLines: number; descriptionLines: number; height: number } {
+  const width = Math.min(340, Math.max(258, 258 + Math.round(Math.min(card.description.length, 520) / 7)));
+  const titleLines = Math.min(2, Math.max(1, Math.ceil(card.title.length / Math.max(28, width / 7))));
+  const descriptionLines = Math.min(7, Math.max(2, Math.ceil(card.description.length / Math.max(42, width / 5))));
+  const height = 130 + titleLines * 17 + descriptionLines * 13 +
+    (card.ticketNumber ? 20 : 0) +
+    (card.robotModel ? 25 : 0) +
+    (card.issueExcerpt ? 32 : 0);
+  return { width, titleLines, descriptionLines, height };
+}
+
 export default function TeamBoardPage({ username, initialCardId = null }: TeamBoardPageProps) {
   const [cards, setCards] = useState<TeamBoardCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +136,6 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
   const [typeFilter, setTypeFilter] = useState<TeamBoardCardType | 'all'>('all');
   const [selectedId, setSelectedId] = useState<string | null>(initialCardId);
   const [detail, setDetail] = useState<TeamBoardCardDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createType, setCreateType] = useState<TeamBoardCardType>('ticket');
   const [title, setTitle] = useState('');
@@ -143,6 +161,9 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const cardDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const canvasPanRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const cardsRequestSequenceRef = useRef(0);
+  const detailRequestSequenceRef = useRef(0);
+  const localCardChangeAtRef = useRef(new Map<string, number>());
   const socketRef = useRef<WebSocket | null>(null);
   const activeRoomIdRef = useRef<string | null>(selectedId);
   const sessionScratchpadDirtyRef = useRef(false);
@@ -153,29 +174,51 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
   }, [query]);
 
   const refreshCards = useCallback(async () => {
-    try {
-      setCards(await listTeamBoardCards({ type: typeFilter, query: debouncedQuery }));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not load Team Board.');
-    } finally {
+    const sequence = ++cardsRequestSequenceRef.current;
+    const options = { type: typeFilter, query: debouncedQuery };
+    const cacheKey = teamBoardCardListKey(options);
+    const cached = await loadTeamBoardCardList(username, cacheKey);
+    if (sequence !== cardsRequestSequenceRef.current) return;
+    if (cached) {
+      setCards(cached);
       setLoading(false);
     }
-  }, [debouncedQuery, typeFilter]);
+    try {
+      const fresh = await listTeamBoardCards(options);
+      if (sequence !== cardsRequestSequenceRef.current) return;
+      setCards(fresh);
+      void saveTeamBoardCardList(username, cacheKey, fresh);
+    } catch (error) {
+      if (sequence === cardsRequestSequenceRef.current && !cached) {
+        toast.error(error instanceof Error ? error.message : 'Could not load Team Board.');
+      }
+    } finally {
+      if (sequence === cardsRequestSequenceRef.current) setLoading(false);
+    }
+  }, [debouncedQuery, typeFilter, username]);
 
   const refreshDetail = useCallback(async (cardId: string) => {
-    setDetailLoading(true);
+    const sequence = ++detailRequestSequenceRef.current;
+    const cached = await loadTeamBoardCardDetail(username, cardId);
+    if (sequence !== detailRequestSequenceRef.current || activeRoomIdRef.current !== cardId) return;
+    if (cached) {
+      setDetail(cached);
+      if (!sessionScratchpadDirtyRef.current) setSessionScratchpad(cached.session?.scratchpad ?? '');
+    }
     try {
       const next = await getTeamBoardCard(cardId);
+      if (sequence !== detailRequestSequenceRef.current || activeRoomIdRef.current !== cardId) return;
       setDetail(next);
+      void saveTeamBoardCardDetail(username, cardId, next);
       if (!sessionScratchpadDirtyRef.current) setSessionScratchpad(next.session?.scratchpad ?? '');
     } catch (error) {
-      setDetail(null);
-      toast.error(error instanceof Error ? error.message : 'This card is no longer available.');
-      setSelectedId(null);
-    } finally {
-      setDetailLoading(false);
+      if (sequence === detailRequestSequenceRef.current && !cached) {
+        setDetail(null);
+        toast.error(error instanceof Error ? error.message : 'This card is no longer available.');
+        setSelectedId(null);
+      }
     }
-  }, []);
+  }, [username]);
 
   useEffect(() => { void refreshCards(); }, [refreshCards]);
   useEffect(() => { activeRoomIdRef.current = selectedId; }, [selectedId]);
@@ -267,8 +310,9 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
           }
           if (payload.type === 'board:changed') {
             void refreshCards();
-            if (payload.cardId === activeRoomIdRef.current) {
-              void refreshDetail(activeRoomIdRef.current);
+            if (typeof payload.cardId === 'string' && payload.cardId === activeRoomIdRef.current) {
+              const changedLocallyAt = localCardChangeAtRef.current.get(payload.cardId) ?? 0;
+              if (Date.now() - changedLocallyAt > 1_500) void refreshDetail(payload.cardId);
             }
             return;
           }
@@ -308,13 +352,33 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
     () => [...cards].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)),
     [cards],
   );
+  const boardCardIndex = useMemo(
+    () => new Map(boardCardOrder.map((card, index) => [card.id, index])),
+    [boardCardOrder],
+  );
 
   const getCardPosition = (card: TeamBoardCard) => {
     const saved = cardPositions[card.id];
     if (saved) return saved;
-    const index = boardCardOrder.findIndex((item) => item.id === card.id);
-    return { x: 34 + (index % 5) * 292, y: 34 + Math.floor(index / 5) * 238 };
+    const index = boardCardIndex.get(card.id) ?? 0;
+    return { x: 34 + (index % 5) * 360, y: 34 + Math.floor(index / 5) * 360 };
   };
+
+  const boardCanvasSize = useMemo(() => {
+    let width = 1_900;
+    let height = 1_200;
+    for (const card of boardCardOrder) {
+      const index = boardCardIndex.get(card.id) ?? 0;
+      const position = cardPositions[card.id] ?? {
+        x: 34 + (index % 5) * 360,
+        y: 34 + Math.floor(index / 5) * 360,
+      };
+      const geometry = cardGeometry(card);
+      width = Math.max(width, position.x + geometry.width + 60);
+      height = Math.max(height, position.y + geometry.height + 70);
+    }
+    return { width, height };
+  }, [boardCardIndex, boardCardOrder, cardPositions]);
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const canvas = canvasRef.current;
@@ -426,11 +490,35 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
 
   const saveCardPatch = async (patch: Parameters<typeof updateTeamBoardCard>[1]) => {
     if (!detail) return;
+    if (Object.entries(patch).every(([key, value]) => detail.card[key as keyof TeamBoardCard] === value)) return;
+    const cardId = detail.card.id;
+    const nextCard = {
+      ...detail.card,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    if (typeof patch.description === 'string') {
+      Object.assign(nextCard, extractTeamBoardHighlights(`${detail.card.sourceSnapshot}\n${patch.description}`));
+    }
+    const nextDetail = { ...detail, card: nextCard };
+    localCardChangeAtRef.current.set(cardId, Date.now());
+    setDetail(nextDetail);
+    void saveTeamBoardCardDetail(username, cardId, nextDetail);
+    setCards((current) => {
+      const next = current.map((card) => card.id === cardId ? nextCard : card);
+      void saveTeamBoardCardList(
+        username,
+        teamBoardCardListKey({ type: typeFilter, query: debouncedQuery }),
+        next,
+      );
+      return next;
+    });
     try {
-      await updateTeamBoardCard(detail.card.id, patch);
-      await Promise.all([refreshCards(), refreshDetail(detail.card.id)]);
+      await updateTeamBoardCard(cardId, patch);
       toast.success('Card updated.');
     } catch (error) {
+      void refreshDetail(cardId);
+      void refreshCards();
       toast.error(error instanceof Error ? error.message : 'Could not update this card.');
     }
   };
@@ -472,6 +560,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
     try {
       const next = await teamBoardSessionAction(detail.card.id, action, payload);
       setDetail(next);
+      void saveTeamBoardCardDetail(username, detail.card.id, next);
       if (action === 'start' || action === 'join' || action === 'scratchpad' || action === 'leave') {
         sessionScratchpadDirtyRef.current = false;
         setSessionScratchpad(next.session?.scratchpad ?? '');
@@ -498,6 +587,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
       await updateTeamBoardCard(detail.card.id, { status: 'investigating' });
       const next = await teamBoardSessionAction(detail.card.id, 'start');
       setDetail(next);
+      void saveTeamBoardCardDetail(username, detail.card.id, next);
       sessionScratchpadDirtyRef.current = false;
       setSessionScratchpad(next.session?.scratchpad ?? '');
       await refreshCards();
@@ -587,12 +677,13 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
             <div
               className="team-board-canvas-inner"
               style={{
-                width: Math.max(1800, Math.ceil(boardCardOrder.length / 5) * 292 + 68),
-                height: Math.max(1200, Math.ceil(boardCardOrder.length / 5) * 238 + 68),
+                width: boardCanvasSize.width,
+                height: boardCanvasSize.height,
               }}
             >
               {cards.map((card) => {
                 const position = getCardPosition(card);
+                const geometry = cardGeometry(card);
                 const statusLabel = LANES.find((lane) => lane.id === card.status)?.title ?? card.status;
                 return (
                   <article
@@ -605,7 +696,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                       draggingCardId === card.id && 'is-dragging',
                     )}
                     key={card.id}
-                    style={{ left: position.x, top: position.y }}
+                    style={{ left: position.x, top: position.y, width: geometry.width }}
                   >
                     <header className="team-board-card-topline">
                       <button
@@ -644,7 +735,13 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                       {card.ticketNumber && (
                         <span className="team-board-ticket-number"><Clipboard className="size-3" /> {card.ticketNumber}</span>
                       )}
-                      {card.description && <p className="team-board-card-excerpt">{card.description}</p>}
+                      {(card.issueExcerpt || card.robotModel) && (
+                        <div className="team-board-card-highlights">
+                          {card.robotModel && <span><b>Robot Model</b>{card.robotModel}</span>}
+                          {card.issueExcerpt && <span><b>Issue/s</b>{card.issueExcerpt}</span>}
+                        </div>
+                      )}
+                      {card.description && <p className="team-board-card-excerpt" style={{ WebkitLineClamp: geometry.descriptionLines }}>{card.description}</p>}
                       <div className="team-board-card-meta">
                         <span><CircleDot className="size-3" /> {card.owner}</span>
                         <span><MessageCircle className="size-3" /> {card.commentCount}</span>
@@ -678,7 +775,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
               </div>
               <button type="button" aria-label="Close card details" onClick={() => setSelectedId(null)}><PanelRightClose className="size-4" /></button>
             </header>
-            {detailLoading || !detail ? (
+            {!detail ? (
               <div className="team-board-inspector-loading">Loading card context…</div>
             ) : (
               <>
@@ -702,6 +799,16 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                       if (nextTitle) void saveCardPatch({ title: nextTitle });
                     }}
                   />
+                  {(detail.card.issueExcerpt || detail.card.robotModel) && (
+                    <div className="team-board-inspector-highlights" aria-label="Key ticket details">
+                      {detail.card.robotModel && (
+                        <div><span>Robot Model</span><strong>{detail.card.robotModel}</strong></div>
+                      )}
+                      {detail.card.issueExcerpt && (
+                        <div><span>Issue/s</span><strong>{detail.card.issueExcerpt}</strong></div>
+                      )}
+                    </div>
+                  )}
                   <div className="team-board-inspector-fields">
                     {(detail.card.type === 'ticket' || detail.card.type === 'incident') && (
                       <label>
@@ -903,12 +1010,6 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                     </form>
                   </section>
 
-                  <section className="team-board-activity-section">
-                    <header><Sparkles className="size-3.5" /> Activity</header>
-                    {detail.activity.slice(0, 12).map((item) => (
-                      <div key={item.id}><span>{item.actor}</span><p>{item.kind.replaceAll('_', ' ')}{item.detail ? ` · ${item.detail}` : ''}</p><time>{relativeTime(item.createdAt)}</time></div>
-                    ))}
-                  </section>
                 </div>
                 <footer className="team-board-inspector-footer">
                     <label>Status

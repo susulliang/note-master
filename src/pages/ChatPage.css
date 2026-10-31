@@ -1385,6 +1385,20 @@
   font-size: 9px;
 }
 
+.chat-board-card-picker-list .chat-board-card-picker-highlights {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+  color: var(--foreground);
+  white-space: normal;
+}
+
+.chat-board-card-picker-highlights b {
+  color: var(--accent);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
 .chat-board-card-picker-empty {
   margin: 0;
   padding: 17px 12px;
@@ -1484,6 +1498,32 @@
   padding: 3px 6px;
   color: var(--muted-foreground);
   font-size: 8px;
+}
+
+.chat-team-board-highlights {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  padding-left: 7px;
+}
+
+.chat-team-board-highlights > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 9px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-team-board-highlights b {
+  margin-right: 5px;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .chat-team-board-context,

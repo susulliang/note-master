@@ -147,6 +147,8 @@ export interface TeamBoardCard {
   type: TeamBoardCardType;
   title: string;
   description: string;
+  issueExcerpt: string;
+  robotModel: string;
   status: TeamBoardStatus;
   severity: TeamBoardSeverity;
   visibility: 'private' | 'registered';
@@ -197,7 +199,6 @@ export interface TeamBoardCardDetail {
   permission: 'owner' | 'edit' | 'view';
   members: TeamBoardMember[];
   comments: TeamBoardComment[];
-  activity: Array<{ id: string; actor: string; kind: string; detail: string; createdAt: number }>;
   session: TeamBoardSession | null;
   sharedRooms: Array<{ roomId: string; sharedBy: string; createdAt: number }>;
   assistStreak?: number;

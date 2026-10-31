@@ -109,6 +109,14 @@ import {
   type TeamBoardCardDetail,
   type TeamBoardStatus,
 } from '@/lib/chat-client';
+import {
+  loadTeamBoardCardDetail,
+  loadTeamBoardCardList,
+  saveTeamBoardCardDetail,
+  saveTeamBoardCardList,
+  teamBoardCardListKey,
+} from '@/lib/team-board-cache';
+import { extractTeamBoardHighlights } from '@/lib/team-board-insights';
 import { cn } from '@/lib/utils';
 import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 import { readRecentChatRoom, rememberRecentChatRoom } from '@/lib/workspace-recent';
@@ -1052,28 +1060,55 @@ function PollMessageCard({
   );
 }
 
-function TeamBoardChatCard({ cardId }: { cardId: string }) {
+function TeamBoardChatCard({ cardId, username }: { cardId: string; username: string }) {
   const [detail, setDetail] = useState<TeamBoardCardDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
-    void getTeamBoardCard(cardId)
-      .then((result) => { if (active) setDetail(result); })
-      .catch(() => { if (active) setDetail(null); })
-      .finally(() => { if (active) setLoading(false); });
+    void (async () => {
+      const cached = await loadTeamBoardCardDetail(username, cardId);
+      if (!active) return;
+      if (cached) {
+        setDetail(cached);
+        setLoading(false);
+      }
+      try {
+        const fresh = await getTeamBoardCard(cardId);
+        if (!active) return;
+        setDetail(fresh);
+        setLoading(false);
+        void saveTeamBoardCardDetail(username, cardId, fresh);
+      } catch (error) {
+        if (!active) return;
+        if (!cached) setDetail(null);
+        setLoading(false);
+        toast.error(error instanceof Error ? error.message : 'This shared Team Board card is unavailable.');
+      }
+    })();
     return () => { active = false; };
-  }, [cardId]);
+  }, [cardId, username]);
 
   const save = async (patch: Parameters<typeof updateTeamBoardCard>[1]) => {
     if (!detail || detail.permission === 'view') return;
+    const card = {
+      ...detail.card,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    if (typeof patch.description === 'string') {
+      Object.assign(card, extractTeamBoardHighlights(`${detail.card.sourceSnapshot}\n${patch.description}`));
+    }
+    const next = { ...detail, card };
+    setDetail(next);
+    void saveTeamBoardCardDetail(username, cardId, next);
     try {
       await updateTeamBoardCard(cardId, patch);
-      setDetail((current) => current ? {
-        ...current,
-        card: { ...current.card, ...patch },
-      } : current);
     } catch (error) {
+      void getTeamBoardCard(cardId).then((fresh) => {
+        setDetail(fresh);
+        void saveTeamBoardCardDetail(username, cardId, fresh);
+      }).catch(() => undefined);
       toast.error(error instanceof Error ? error.message : 'Could not update this Team Board card.');
     }
   };
@@ -1118,11 +1153,16 @@ function TeamBoardChatCard({ cardId }: { cardId: string }) {
       {(card.type === 'ticket' || card.type === 'incident') && card.ticketNumber && (
         <div className="chat-team-board-ticket">Ticket {card.ticketNumber}</div>
       )}
+      {(card.robotModel || card.issueExcerpt) && (
+        <div className="chat-team-board-highlights">
+          {card.robotModel && <span><b>Robot Model</b>{card.robotModel}</span>}
+          {card.issueExcerpt && <span><b>Issue/s</b>{card.issueExcerpt}</span>}
+        </div>
+      )}
       {canEdit ? (
         <textarea
           aria-label="Shared card context"
           defaultValue={card.description}
-          key={`${card.id}:context:${card.updatedAt}`}
           maxLength={12_000}
           placeholder="Add shared context…"
           onBlur={(event) => {
@@ -1912,15 +1952,24 @@ export default function ChatPage({
   }, [activeRoom.roomId]);
 
   const loadTeamBoardCards = useCallback(async () => {
-    setBoardCardsLoading(true);
+    const cacheKey = teamBoardCardListKey();
+    const cached = await loadTeamBoardCardList(username, cacheKey);
+    if (cached) {
+      setBoardCards(cached);
+      setBoardCardsLoading(false);
+    } else {
+      setBoardCardsLoading(true);
+    }
     try {
-      setBoardCards(await listTeamBoardCards());
+      const cards = await listTeamBoardCards();
+      setBoardCards(cards);
+      void saveTeamBoardCardList(username, cacheKey, cards);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not load Team Board cards.');
+      if (!cached) toast.error(error instanceof Error ? error.message : 'Could not load Team Board cards.');
     } finally {
       setBoardCardsLoading(false);
     }
-  }, []);
+  }, [username]);
 
   const sendTeamBoardCardToChat = useCallback(async (card: TeamBoardCard) => {
     const socket = socketRef.current;
@@ -3894,7 +3943,7 @@ export default function ChatPage({
                             : 'rounded-tl-md border-border/70 bg-card/65'),
                       )}>
                         {teamBoardCardId
-                          ? <TeamBoardChatCard cardId={teamBoardCardId} />
+                          ? <TeamBoardChatCard cardId={teamBoardCardId} username={username} />
                           : message.poll && (message.contentType === 'poll' || message.contentType === 'poll_result')
                           ? (
                             <PollMessageCard
@@ -4129,6 +4178,12 @@ export default function ChatPage({
                           <span className="min-w-0 flex-1">
                             <strong>{card.title}</strong>
                             <small>{card.type} · {card.owner}{card.visibility === 'registered' ? ' · everyone' : ''}</small>
+                            {(card.robotModel || card.issueExcerpt) && (
+                              <small className="chat-board-card-picker-highlights">
+                                {card.robotModel && <span><b>Robot Model</b> {card.robotModel}</span>}
+                                {card.issueExcerpt && <span><b>Issue/s</b> {card.issueExcerpt}</span>}
+                              </small>
+                            )}
                           </span>
                           {sharingBoardCardId === card.id ? <span className="text-[9px] text-accent">Sharing…</span> : <Send className="size-3.5 text-accent" />}
                         </button>
