@@ -179,6 +179,7 @@ const LASER_MAX_RANGE = 3_400;
 const PARKED_CAR_INTERACT_RANGE = 118;
 const PARKED_CAR_EXIT_DISTANCE = 100;
 const PARKED_CAR_SPEED = 220;
+const BUILD_CAR_SPEED = 440;
 const CAR_HALF_WIDTH = 39;
 const CAR_HALF_LENGTH = 59;
 const PARKED_CARS: Record<string, Omit<CommuneCarPosition, 'id'>> = {
@@ -1312,7 +1313,8 @@ export class CommuneRoom extends DurableObject<Env> {
       const car = this.getCarPosition(current.carId);
       if (!car || !Number.isFinite(directionLength) || now - car.lastMoveAt < MOVE_THROTTLE_MS || directionLength < 0.12) return;
       const elapsedMs = Math.min(150, Math.max(0, now - car.lastMoveAt));
-      const travel = PARKED_CAR_SPEED * Math.min(1, directionLength) * elapsedMs / 1000;
+      const speed = current.carId.startsWith('buildcar-') ? BUILD_CAR_SPEED : PARKED_CAR_SPEED;
+      const travel = speed * Math.min(1, directionLength) * elapsedMs / 1000;
       const x = car.x + (dx / directionLength) * travel;
       const y = car.y + (dy / directionLength) * travel;
       const cars = this.listCarPositions();

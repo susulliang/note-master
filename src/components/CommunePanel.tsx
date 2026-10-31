@@ -363,6 +363,7 @@ interface ParkedCar {
   owner?: string;
   halfWidth?: number;
   halfLength?: number;
+  samples?: { x: number; y: number; heading: number; at: number }[];
 }
 
 const PARKED_CARS: ParkedCar[] = [
@@ -403,8 +404,71 @@ function reconcileBuiltObjects(items: CommuneBuildable[]): void {
       style: 'electric-sport',
       halfWidth: 48,
       halfLength: 71,
+      samples: [{ x: item.x, y: item.y, heading: item.rotation, at: performance.now() }],
     });
   }
+}
+
+function resetCarSnapshot(car: ParkedCar, x: number, y: number, heading: number): void {
+  const at = performance.now();
+  car.x = x;
+  car.y = y;
+  car.heading = heading;
+  car.targetX = x;
+  car.targetY = y;
+  car.targetHeading = heading;
+  car.samples = [{ x, y, heading, at }];
+}
+
+function recordCarSnapshot(car: ParkedCar, x: number, y: number, heading: number): void {
+  const samples = car.samples ?? [];
+  const previous = samples[samples.length - 1];
+  const at = Math.max(performance.now(), (previous?.at ?? 0) + 0.01);
+  car.targetX = x;
+  car.targetY = y;
+  car.targetHeading = heading;
+  samples.push({ x, y, heading, at });
+  if (samples.length > 8) samples.splice(0, samples.length - 8);
+  car.samples = samples;
+}
+
+function interpolateCarSnapshots(car: ParkedCar, renderAt: number): void {
+  const samples = car.samples;
+  if (!samples?.length) return;
+  if (renderAt <= samples[0].at) {
+    const first = samples[0];
+    car.x = first.x;
+    car.y = first.y;
+    car.heading = first.heading;
+    return;
+  }
+  for (let index = 1; index < samples.length; index++) {
+    const next = samples[index];
+    const previous = samples[index - 1];
+    if (renderAt > next.at) continue;
+    const span = Math.max(0.01, next.at - previous.at);
+    const t = Math.max(0, Math.min(1, (renderAt - previous.at) / span));
+    const headingDelta = Math.atan2(
+      Math.sin(next.heading - previous.heading),
+      Math.cos(next.heading - previous.heading),
+    );
+    car.x = previous.x + (next.x - previous.x) * t;
+    car.y = previous.y + (next.y - previous.y) * t;
+    car.heading = previous.heading + headingDelta * t;
+    return;
+  }
+
+  const latest = samples[samples.length - 1];
+  car.x = latest.x;
+  car.y = latest.y;
+  car.heading = latest.heading;
+  if (samples.length < 2) return;
+  const previous = samples[samples.length - 2];
+  const span = latest.at - previous.at;
+  if (span <= 0) return;
+  const extrapolation = Math.min(CAR_MAX_EXTRAPOLATION_MS, Math.max(0, renderAt - latest.at)) / span;
+  car.x += (latest.x - previous.x) * extrapolation;
+  car.y += (latest.y - previous.y) * extrapolation;
 }
 
 function parseCommuneBuiltObjects(value: unknown): CommuneBuildable[] | null {
@@ -718,6 +782,8 @@ const PRESENCE_ACK_TIMEOUT_MS = 50_000;
 const REMOTE_INTERPOLATION_DELAY_MS = 100;
 const REMOTE_MAX_EXTRAPOLATION_MS = 180;
 const CAR_MOVE_INTERVAL_MS = 80;
+const CAR_INTERPOLATION_DELAY_MS = 100;
+const CAR_MAX_EXTRAPOLATION_MS = 160;
 const NPC_SPEED = 90;
 interface Banner extends CommuneBanner {
   hue: number;
@@ -1892,12 +1958,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         if (typeof incoming.id !== 'string') continue;
         const car = PARKED_CARS.find((item) => item.id === incoming.id);
         if (!car || !Number.isFinite(Number(incoming.x)) || !Number.isFinite(Number(incoming.y))) continue;
-        car.x = Number(incoming.x);
-        car.y = Number(incoming.y);
-        car.heading = Number(incoming.heading) || 0;
-        car.targetX = car.x;
-        car.targetY = car.y;
-        car.targetHeading = car.heading;
+        resetCarSnapshot(car, Number(incoming.x), Number(incoming.y), Number(incoming.heading) || 0);
       }
     };
 
@@ -2145,13 +2206,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           } else if (event.type === 'car_update' && typeof event.carId === 'string') {
             const car = PARKED_CARS.find((item) => item.id === event.carId);
             if (car && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
-              car.targetX = Number(event.x);
-              car.targetY = Number(event.y);
-              car.targetHeading = Number(event.heading) || 0;
-              if (playerRef.current.carId === car.id) {
-                playerRef.current.x = car.targetX;
-                playerRef.current.y = car.targetY;
-              }
+              recordCarSnapshot(car, Number(event.x), Number(event.y), Number(event.heading) || 0);
             }
           } else if (event.type === 'agent_join' || event.type === 'agent_update') {
             if (event.agent && typeof event.agent === 'object') {
@@ -2259,12 +2314,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             if (nextCar) {
               const car = PARKED_CARS.find((item) => item.id === nextCar.carId);
               if (car && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
-                car.x = Number(event.x);
-                car.y = Number(event.y);
-                car.heading = Number(event.heading) || 0;
-                car.targetX = car.x;
-                car.targetY = car.y;
-                car.targetHeading = car.heading;
+                resetCarSnapshot(car, Number(event.x), Number(event.y), Number(event.heading) || 0);
               }
             }
             clickTargetRef.current = null;
@@ -2992,10 +3042,26 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const petFollowers = new Map<string, PetFollower>();
     let latestFrame: CommuneThreeFrame | null = null;
 
+    const updateCarRenderPositions = (now: number) => {
+      const renderAt = now - CAR_INTERPOLATION_DELAY_MS;
+      for (const car of PARKED_CARS) interpolateCarSnapshots(car, renderAt);
+      const drivenCar = playerRef.current.carId
+        ? PARKED_CARS.find((car) => car.id === playerRef.current.carId)
+        : null;
+      if (!drivenCar) return;
+      playerRef.current.x = drivenCar.x;
+      playerRef.current.y = drivenCar.y;
+      if (latestFrame?.player.carId === drivenCar.id) {
+        latestFrame.player.x = drivenCar.x;
+        latestFrame.player.y = drivenCar.y;
+      }
+    };
+
     const renderStep = (now: number) => {
       renderRaf = 0;
       if (document.hidden) return;
       if (threeRenderer && latestFrame) {
+        updateCarRenderPositions(now);
         latestFrame.time = now / 1000;
         threeRenderer.render(latestFrame);
       }
@@ -3018,21 +3084,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       const dt = Math.min(0.04, (now - last) / 1000);
       last = now;
       lastFrame = now;
+      updateCarRenderPositions(now);
       const tSec = now / 1000;
       laserShotsRef.current = laserShotsRef.current.filter(
         (shot) => tSec - shot.startedAt <= shot.durationMs / 1000 + 0.12
       );
-      const carFollow = 1 - Math.exp(-dt * 14);
-      for (const car of PARKED_CARS) {
-        car.x += (car.targetX - car.x) * carFollow;
-        car.y += (car.targetY - car.y) * carFollow;
-        const headingDelta = Math.atan2(
-          Math.sin(car.targetHeading - car.heading),
-          Math.cos(car.targetHeading - car.heading)
-        );
-        car.heading += headingDelta * carFollow;
-      }
-
       /* update player */
       const player = playerRef.current;
       const hands = handsRef.current;
