@@ -5,6 +5,7 @@
  */
 
 import type { CommuneHangoutId } from '@shared/commune-hangouts';
+import type { CommuneBuildKind, CommuneBuildable } from '@shared/commune-buildables';
 
 export interface AuthUser {
   username: string;
@@ -675,6 +676,27 @@ export async function pickSpiceDrop(id: number): Promise<{ picked: boolean; spic
   return call<{ picked: boolean; spice: number }>('/api/commune/spice/pick', {
     method: 'POST',
     body: JSON.stringify({ id }),
+    token,
+  });
+}
+
+export async function placeCommuneBuildable(
+  build: { id: string; kind: CommuneBuildKind; x: number; y: number; rotation: number },
+): Promise<{ building: CommuneBuildable; spice: number }> {
+  const token = getStoredToken();
+  return call('/api/commune/buildables', {
+    method: 'POST',
+    body: JSON.stringify(build),
+    token,
+  });
+}
+
+export async function demolishCommuneBuildable(
+  id: string,
+): Promise<{ removed: string; refund: number; spice: number }> {
+  const token = getStoredToken();
+  return call(`/api/commune/buildables/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
     token,
   });
 }

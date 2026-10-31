@@ -51,6 +51,14 @@ import {
   type CommuneHangout,
   type CommuneHangoutId,
 } from '@shared/commune-hangouts';
+import {
+  COMMUNE_BUILD_CATALOG,
+  COMMUNE_BUILD_INTERACT_RANGE,
+  COMMUNE_BUILD_PLACE_RANGE,
+  communeBuildCarId,
+  type CommuneBuildable,
+  type CommuneBuildKind,
+} from '@shared/commune-buildables';
 import CommuneBoardSketchPad, { CommuneBoardSketchPreview } from '@/components/CommuneBoardSketchPad';
 import {
   communeSocketUrl,
@@ -80,9 +88,11 @@ import {
   type CommuneTreeholeCategory,
   type CommuneTreeholeEntry,
   finishCommuneMiniGame,
+  demolishCommuneBuildable,
   fireCommuneLaser,
   kickCommuneSoccerBall,
   listCommuneChallengeNpcs,
+  placeCommuneBuildable,
   startCommuneMiniGame,
   type CommuneChallengeNpc,
 } from '@/lib/auth-client';
@@ -335,7 +345,7 @@ function isRosterOffDay(code: string): boolean {
 type PropPanelKind = 'townhall' | 'store' | 'arcade' | 'banners' | 'showcase' | 'challenges';
 type PanelKind = PropPanelKind | 'loadout' | 'agent' | 'quiz' | 'treehole' | null;
 type BoardTab = 'roster' | 'announcements';
-type CommuneCarId = 'meadow-cruiser' | 'orchard-wagon';
+type CommuneCarId = string;
 
 interface ParkedCar {
   id: CommuneCarId;
@@ -348,20 +358,108 @@ interface ParkedCar {
   targetHeading: number;
   body: string;
   trim: string;
+  style?: 'classic' | 'electric-sport';
+  buildId?: string;
+  owner?: string;
+  halfWidth?: number;
+  halfLength?: number;
 }
 
 const PARKED_CARS: ParkedCar[] = [
   { id: 'meadow-cruiser', label: 'Meadow Coupe', x: 1740, y: 820, heading: 0, targetX: 1740, targetY: 820, targetHeading: 0, body: '#6288a4', trim: '#d5e2e7' },
   { id: 'orchard-wagon', label: 'Orchard Coupe', x: 2300, y: 1880, heading: 0, targetX: 2300, targetY: 1880, targetHeading: 0, body: '#b76552', trim: '#f0d7b3' },
 ];
+const BUILT_OBJECTS: CommuneBuildable[] = [];
+function reconcileBuiltObjects(items: CommuneBuildable[]): void {
+  BUILT_OBJECTS.splice(0, BUILT_OBJECTS.length, ...items);
+  const activeCarIds = new Set(
+    items.filter((item) => item.kind === 'sports-car').map((item) => communeBuildCarId(item.id)),
+  );
+  for (let index = PARKED_CARS.length - 1; index >= 0; index--) {
+    const car = PARKED_CARS[index];
+    if (car?.buildId && !activeCarIds.has(car.id)) PARKED_CARS.splice(index, 1);
+  }
+  for (const item of items) {
+    if (item.kind !== 'sports-car') continue;
+    const id = communeBuildCarId(item.id);
+    const existing = PARKED_CARS.find((car) => car.id === id);
+    if (existing) {
+      existing.owner = item.owner;
+      continue;
+    }
+    PARKED_CARS.push({
+      id,
+      buildId: item.id,
+      owner: item.owner,
+      label: 'Electric Sports Car',
+      x: item.x,
+      y: item.y,
+      heading: item.rotation,
+      targetX: item.x,
+      targetY: item.y,
+      targetHeading: item.rotation,
+      body: '#c9d7dd',
+      trim: '#5b7180',
+      style: 'electric-sport',
+      halfWidth: 48,
+      halfLength: 71,
+    });
+  }
+}
+
+function parseCommuneBuiltObjects(value: unknown): CommuneBuildable[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const item = raw as Record<string, unknown>;
+    if (
+      typeof item.id !== 'string'
+      || typeof item.owner !== 'string'
+      || !COMMUNE_BUILD_CATALOG.some((entry) => entry.kind === item.kind)
+      || ![item.x, item.y, item.rotation, item.createdAt].every((part) => Number.isFinite(Number(part)))
+    ) return [];
+    return [{
+      id: item.id,
+      owner: item.owner,
+      kind: item.kind as CommuneBuildKind,
+      x: Number(item.x),
+      y: Number(item.y),
+      rotation: Number(item.rotation),
+      createdAt: Number(item.createdAt),
+    }];
+  });
+}
+
 const CAR_HALF_WIDTH = 39;
 const CAR_HALF_LENGTH = 59;
 const CAR_EXIT_DISTANCE = 100;
-function carHalfExtents(heading: number) {
+function carHalfExtents(heading: number, halfWidth = CAR_HALF_WIDTH, halfLength = CAR_HALF_LENGTH) {
   return {
-    x: Math.abs(Math.cos(heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(heading)) * CAR_HALF_LENGTH,
-    y: Math.abs(Math.sin(heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(heading)) * CAR_HALF_LENGTH,
+    x: Math.abs(Math.cos(heading)) * halfWidth + Math.abs(Math.sin(heading)) * halfLength,
+    y: Math.abs(Math.sin(heading)) * halfWidth + Math.abs(Math.cos(heading)) * halfLength,
   };
+}
+
+function buildHalfExtents(kind: CommuneBuildKind, rotation: number) {
+  const item = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind);
+  if (!item) return { x: 0, y: 0 };
+  return {
+    x: Math.abs(Math.cos(rotation)) * item.width / 2 + Math.abs(Math.sin(rotation)) * item.depth / 2,
+    y: Math.abs(Math.sin(rotation)) * item.width / 2 + Math.abs(Math.cos(rotation)) * item.depth / 2,
+  };
+}
+
+function canPlaceBuildLocally(
+  kind: CommuneBuildKind,
+  x: number,
+  y: number,
+  rotation: number,
+  playerX: number,
+  playerY: number,
+): boolean {
+  const footprint = buildHalfExtents(kind, rotation);
+  return Math.hypot(playerX - x, playerY - y) <= COMMUNE_BUILD_PLACE_RANGE
+    && canOccupy(x, y, Math.max(footprint.x, footprint.y) + 4);
 }
 const TREEHOLE = { x: 1480, y: 1440, range: 108 };
 
@@ -380,6 +478,7 @@ type CommuneAction =
   | { type: 'exit-car'; key: 'E'; label: string }
   | { type: 'enter-hangout'; key: 'E'; label: string; hangoutId: CommuneHangoutId }
   | { type: 'exit-hangout'; key: 'E'; label: string }
+  | { type: 'demolish-build'; key: 'E'; label: string; buildingId: string }
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
   | { type: 'pond'; key: 'E'; label: string; pondId: (typeof PONDS)[number]['id'] }
@@ -396,6 +495,7 @@ function touchActionIcon(action: CommuneAction) {
     case 'exit-car': return <DoorOpen className="size-6" />;
     case 'enter-hangout': return <Building2 className="size-6" />;
     case 'exit-hangout': return <DoorOpen className="size-6" />;
+    case 'demolish-build': return <Building2 className="size-6" />;
     case 'sit':
     case 'stand': return <Armchair className="size-6" />;
     case 'challenge': return <Gamepad2 className="size-6" />;
@@ -419,6 +519,7 @@ function touchActionLabel(action: CommuneAction): string {
     case 'exit-car': return 'Leave car';
     case 'enter-hangout': return 'Go inside';
     case 'exit-hangout': return 'Step outside';
+    case 'demolish-build': return 'Take apart';
     case 'sit': return 'Sit';
     case 'stand': return 'Stand';
     case 'challenge': return 'Talk';
@@ -1174,6 +1275,17 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const [chatDraft, setChatDraft] = useState('');
   const [squareMessages, setSquareMessages] = useState<SquareChatMessage[]>([]);
   const [interiorChatMessages, setInteriorChatMessages] = useState<CarChatMessage[]>([]);
+  const [builtObjects, setBuiltObjects] = useState<CommuneBuildable[]>([]);
+  const builtObjectsRef = useRef(builtObjects);
+  builtObjectsRef.current = builtObjects;
+  const [buildMenuOpen, setBuildMenuOpen] = useState(false);
+  const [buildPlacementKind, setBuildPlacementKind] = useState<CommuneBuildKind | null>(null);
+  const buildPlacementKindRef = useRef<CommuneBuildKind | null>(buildPlacementKind);
+  buildPlacementKindRef.current = buildPlacementKind;
+  const buildPlacementRotationRef = useRef(0);
+  const buildPreviewRef = useRef<{ x: number; y: number; rotation: number; valid: boolean } | null>(null);
+  const buildTouchPreviewRef = useRef<{ x: number; y: number } | null>(null);
+  const [buildBusy, setBuildBusy] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   /* ── agent→agent interactions ──────────────────────────────────────────────── */
   /** Direct-chat target (selected from a profile or bump interaction). */
@@ -1766,6 +1878,29 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
     };
 
+    const applyBuildables = (value: unknown) => {
+      const parsed = parseCommuneBuiltObjects(value);
+      if (!parsed) return;
+      reconcileBuiltObjects(parsed);
+      setBuiltObjects(parsed);
+    };
+    const applyCarPositions = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const raw of value) {
+        if (!raw || typeof raw !== 'object') continue;
+        const incoming = raw as Record<string, unknown>;
+        if (typeof incoming.id !== 'string') continue;
+        const car = PARKED_CARS.find((item) => item.id === incoming.id);
+        if (!car || !Number.isFinite(Number(incoming.x)) || !Number.isFinite(Number(incoming.y))) continue;
+        car.x = Number(incoming.x);
+        car.y = Number(incoming.y);
+        car.heading = Number(incoming.heading) || 0;
+        car.targetX = car.x;
+        car.targetY = car.y;
+        car.targetHeading = car.heading;
+      }
+    };
+
     const upsertAgent = (agent: CommuneAgent, compactMove = false) => {
       if (agent.username === username) return;
       lastPresenceReceivedAtRef.current.set(agent.username, Date.now() - Math.max(0, agent.seenAgo));
@@ -1949,6 +2084,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             if (event.mowerState) applyMowerSnapshot(event.mowerState, true);
             if (Array.isArray(event.mowerTracks)) applyMowerTracks(event.mowerTracks);
             applySnapshot(Array.isArray(event.others) ? event.others as CommuneAgent[] : []);
+            applyBuildables(event.buildables);
+            applyCarPositions(event.cars);
             if (event.soccerBall && typeof event.soccerBall === 'object') {
               const value = event.soccerBall as Record<string, unknown>;
               if ([value.x, value.y, value.fromX, value.fromY].every((part) => Number.isFinite(Number(part)))) {
@@ -1962,21 +2099,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                 };
                 soccerBallRef.current = ball;
                 setSoccerBall(ball);
-              }
-            }
-            if (Array.isArray(event.cars)) {
-              for (const value of event.cars) {
-                if (!value || typeof value !== 'object') continue;
-                const incoming = value as Record<string, unknown>;
-                if (incoming.id !== 'meadow-cruiser' && incoming.id !== 'orchard-wagon') continue;
-                const car = PARKED_CARS.find((item) => item.id === incoming.id);
-                if (!car || !Number.isFinite(Number(incoming.x)) || !Number.isFinite(Number(incoming.y))) continue;
-                car.x = Number(incoming.x);
-                car.y = Number(incoming.y);
-                car.heading = Number(incoming.heading) || 0;
-                car.targetX = car.x;
-                car.targetY = car.y;
-                car.targetHeading = car.heading;
               }
             }
           } else if (event.type === 'mower_authority') {
@@ -2017,6 +2139,9 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             };
           } else if (event.type === 'drops' && Array.isArray(event.drops)) {
             dropsRef.current = (event.drops as CommuneDrop[]).filter((drop) => !pickingRef.current.has(drop.id));
+          } else if (event.type === 'buildables') {
+            applyBuildables(event.buildables);
+            applyCarPositions(event.cars);
           } else if (event.type === 'car_update' && typeof event.carId === 'string') {
             const car = PARKED_CARS.find((item) => item.id === event.carId);
             if (car && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
@@ -2117,7 +2242,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             }
           } else if (
             event.type === 'car_state'
-            && (event.carId === null || event.carId === 'meadow-cruiser' || event.carId === 'orchard-wagon')
+            && (event.carId === null || (typeof event.carId === 'string' && PARKED_CARS.some((car) => car.id === event.carId)))
           ) {
             const nextCar = event.carId
               ? { carId: event.carId as CommuneCarId, seat: Number(event.seat) }
@@ -2461,6 +2586,15 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           }
           case 'exit-hangout':
             return !!hangoutRef.current;
+          case 'demolish-build': {
+            const item = builtObjectsRef.current.find((entry) => entry.id === action.buildingId);
+            if (!item || item.owner !== username) return false;
+            const car = item.kind === 'sports-car'
+              ? PARKED_CARS.find((entry) => entry.buildId === item.id)
+              : null;
+            return Math.hypot(player.x - (car?.x ?? item.x), player.y - (car?.y ?? item.y))
+              <= COMMUNE_BUILD_INTERACT_RANGE;
+          }
           case 'sit':
             return BENCHES.some(([x, y]) => x === action.x && y === action.y)
               && Math.hypot(player.x - action.x, player.y - action.y) < BENCH_RANGE;
@@ -2557,6 +2691,29 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         return;
       case 'exit-hangout':
         sendRoomEvent({ type: 'hangout_exit' });
+        return;
+      case 'demolish-build':
+        if (buildBusy) return;
+        setBuildBusy(true);
+        void demolishCommuneBuildable(action.buildingId)
+          .then((result) => {
+            setSpice(result.spice);
+            const next = builtObjectsRef.current.filter((item) => item.id !== action.buildingId);
+            reconcileBuiltObjects(next);
+            builtObjectsRef.current = next;
+            setBuiltObjects(next);
+            setInbox((items) => [...items.slice(-4), {
+              from: 'COMMUNE',
+              message: `Structure taken apart. ${result.refund} spice returned.`,
+            }]);
+          })
+          .catch((error: unknown) => {
+            setInbox((items) => [...items.slice(-4), {
+              from: 'COMMUNE',
+              message: error instanceof Error ? error.message : 'Could not take apart that structure.',
+            }]);
+          })
+          .finally(() => setBuildBusy(false));
         return;
       case 'sit':
         sittingRef.current = { x: action.x, y: action.y - 2 };
@@ -2674,7 +2831,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         setPanel(action.panel);
         return;
     }
-  }, [onCatThought, rollBowlingBall, sendRoomEvent, setSpice, swingGolfBall]);
+  }, [buildBusy, onCatThought, rollBowlingBall, sendRoomEvent, setSpice, swingGolfBall, username]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -2689,6 +2846,36 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         return;
       }
       if (isTypingTarget(e.target)) return;
+      if (buildPlacementKindRef.current) {
+        if (e.code === 'Escape') {
+          e.preventDefault();
+          setBuildPlacementKind(null);
+          buildPlacementKindRef.current = null;
+          buildPreviewRef.current = null;
+          buildTouchPreviewRef.current = null;
+        } else if (e.code === 'KeyR') {
+          e.preventDefault();
+          buildPlacementRotationRef.current = (buildPlacementRotationRef.current + Math.PI / 2) % (Math.PI * 2);
+          const preview = buildPreviewRef.current;
+          const kind = buildPlacementKindRef.current;
+          if (preview && kind) {
+            preview.rotation = buildPlacementRotationRef.current;
+            preview.valid = canPlaceBuildLocally(
+              kind,
+              preview.x,
+              preview.y,
+              preview.rotation,
+              playerRef.current.x,
+              playerRef.current.y,
+            );
+          }
+        }
+        return;
+      }
+      if (e.code === 'Escape' && buildMenuOpen) {
+        setBuildMenuOpen(false);
+        return;
+      }
       if (e.code === 'KeyE' || e.code === 'KeyH') {
         if (panelRef.current) return;
         if (e.repeat) return;
@@ -2737,7 +2924,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', releaseInputs);
     };
-  }, [executeInteraction]);
+  }, [buildMenuOpen, executeInteraction]);
 
   /** Nearest interactable within range. */
   const nearestProp = (x: number, y: number) => {
@@ -3142,6 +3329,21 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           )
           .sort((a, b) => a.distance - b.distance)[0]?.place ?? null
         : null;
+      const nearOwnedBuildable = !carSeatRef.current && !hangoutRef.current
+        ? builtObjectsRef.current
+          .filter((item) => item.owner === username)
+          .map((item) => {
+            const car = item.kind === 'sports-car'
+              ? PARKED_CARS.find((entry) => entry.buildId === item.id)
+              : null;
+            return {
+              item,
+              distance: Math.hypot(player.x - (car?.x ?? item.x), player.y - (car?.y ?? item.y)),
+            };
+          })
+          .filter(({ distance }) => distance <= COMMUNE_BUILD_INTERACT_RANGE)
+          .sort((a, b) => a.distance - b.distance)[0]?.item ?? null
+        : null;
       const nearBench = !sittingRef.current
         ? BENCHES.find(([bx, by]) => Math.hypot(player.x - bx, player.y - by) < BENCH_RANGE)
         : undefined;
@@ -3199,6 +3401,14 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           key: 'E',
           label: `Enter ${nearHangout.label}`,
           hangoutId: nearHangout.id,
+        });
+      } else if (nearOwnedBuildable) {
+        const catalogEntry = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === nearOwnedBuildable.kind);
+        actions.push({
+          type: 'demolish-build',
+          key: 'E',
+          label: `Take apart ${catalogEntry?.name ?? 'structure'} · +${Math.round((catalogEntry?.price ?? 0) / 2)} spice`,
+          buildingId: nearOwnedBuildable.id,
         });
       } else if (sittingRef.current) {
         actions.push({ type: 'stand', key: 'E', label: 'Stand up' });
@@ -3437,6 +3647,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           remotes: remoteViews,
           pets: petViews,
           cars: PARKED_CARS,
+          buildables: builtObjectsRef.current,
+          buildPreview: buildPlacementKindRef.current && buildPreviewRef.current
+            ? { kind: buildPlacementKindRef.current, ...buildPreviewRef.current }
+            : null,
           drops: dropsRef.current,
           ducks: ducksRef.current,
           incident: duckIncidentRef.current,
@@ -3460,7 +3674,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           remoteViews, petViews, reduceMotion, nightOpacity, serendipityRef.current,
           clickTargetRef.current, dropsRef.current, ducksRef.current, duckIncidentRef.current,
           soccerBallRef.current, golfBallMotionRef.current, bowlingBallMotionRef.current,
-          bowlingPinsDownRef.current, tRexRef.current, mowerTracksRef.current, bowlingPinsKnockedAtRef.current
+          bowlingPinsDownRef.current, tRexRef.current, mowerTracksRef.current, bowlingPinsKnockedAtRef.current,
+          builtObjectsRef.current,
+          buildPlacementKindRef.current && buildPreviewRef.current
+            ? { kind: buildPlacementKindRef.current, ...buildPreviewRef.current }
+            : null,
         );
       }
       raf = requestAnimationFrame(step);
@@ -3504,7 +3722,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   /* ── pointer tap → focus a target, interact, or walk ─────────────────────── */
 
-  const handleCanvasTap = (clientX: number, clientY: number) => {
+  const handleCanvasTap = (clientX: number, clientY: number, pointerType?: string) => {
     if (panelRef.current || playerRef.current.carId || playerRef.current.hangoutId || mapZoomRef.current >= 5) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -3512,6 +3730,33 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const worldPoint = communeRendererRef.current?.screenToWorld(clientX, clientY, rect);
     const wx = worldPoint?.x ?? clientX - rect.left + camRef.current.x;
     const wy = worldPoint?.y ?? clientY - rect.top + camRef.current.y;
+    if (buildPlacementKindRef.current) {
+      if (pointerType && pointerType !== 'mouse') {
+        const x = Math.round(wx / 8) * 8;
+        const y = Math.round(wy / 8) * 8;
+        const previous = buildTouchPreviewRef.current;
+        buildPreviewRef.current = {
+          x,
+          y,
+          rotation: buildPlacementRotationRef.current,
+          valid: canPlaceBuildLocally(
+            buildPlacementKindRef.current,
+            x,
+            y,
+            buildPlacementRotationRef.current,
+            playerRef.current.x,
+            playerRef.current.y,
+          ),
+        };
+        if (!previous || Math.hypot(previous.x - x, previous.y - y) > 16) {
+          buildTouchPreviewRef.current = { x, y };
+          return;
+        }
+        buildTouchPreviewRef.current = { x, y };
+      }
+      void placeBuildAt(wx, wy);
+      return;
+    }
     // A target tap also stands the player up before selecting the target.
     if (sittingRef.current) sittingRef.current = null;
     const moment = serendipityRef.current;
@@ -3547,7 +3792,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       return;
     }
     const tappedCar = PARKED_CARS.find((car) => {
-      const bounds = carHalfExtents(car.heading);
+      const bounds = carHalfExtents(car.heading, car.halfWidth, car.halfLength);
       return Math.abs(wx - car.x) < bounds.x + 10 && Math.abs(wy - car.y) < bounds.y + 10;
     });
     if (tappedCar) {
@@ -3834,6 +4079,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const onCanvasPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (pointerLocked) return;
+    if (buildPlacementKindRef.current) {
+      updateBuildPreviewAt(event.clientX, event.clientY);
+      return;
+    }
     const pointer = canvasPointerRef.current;
     if (!pointer || pointer.id !== event.pointerId) return;
     if (mapZoomRef.current >= 5) {
@@ -3870,7 +4119,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       if (event.pointerType !== 'mouse') void fireLaser();
       return;
     }
-    handleCanvasTap(event.clientX, event.clientY);
+    handleCanvasTap(event.clientX, event.clientY, event.pointerType);
   };
 
   const onCanvasPointerCancel = () => {
@@ -3888,7 +4137,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   };
 
   const changeMapZoom = (value: number) => {
-    const maxZoom = hangoutRef.current ? 4.95 : 5;
+    const maxZoom = hangoutRef.current || buildPlacementKindRef.current ? 4.95 : 5;
     const zoom = Number(Math.min(maxZoom, Math.max(1, value)).toFixed(2));
     const wasFirstPerson = mapZoomRef.current >= 5;
     if (zoom >= 5 && !wasFirstPerson) {
@@ -3900,6 +4149,97 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     mapZoomRef.current = zoom;
     if (zoom >= 5) clickTargetRef.current = null;
     setMapZoom(zoom);
+  };
+
+  const cancelBuildPlacement = () => {
+    setBuildPlacementKind(null);
+    buildPlacementKindRef.current = null;
+    buildPreviewRef.current = null;
+    buildTouchPreviewRef.current = null;
+  };
+
+  const startBuildPlacement = (kind: CommuneBuildKind) => {
+    setBuildMenuOpen(false);
+    setBuildPlacementKind(kind);
+    buildPlacementKindRef.current = kind;
+    buildPlacementRotationRef.current = 0;
+    buildTouchPreviewRef.current = null;
+    const player = playerRef.current;
+    const headingLength = Math.hypot(player.headingX ?? 0, player.headingY ?? 1) || 1;
+    const x = Math.round((player.x + (player.headingX ?? 0) / headingLength * 150) / 8) * 8;
+    const y = Math.round((player.y + (player.headingY ?? 1) / headingLength * 150) / 8) * 8;
+    buildPreviewRef.current = {
+      x,
+      y,
+      rotation: 0,
+      valid: canPlaceBuildLocally(kind, x, y, 0, player.x, player.y),
+    };
+    clickTargetRef.current = null;
+    if (mapZoomRef.current >= 5) {
+      document.exitPointerLock();
+      mapZoomRef.current = 1.5;
+      setMapZoom(1.5);
+    }
+  };
+
+  const updateBuildPreviewAt = (clientX: number, clientY: number) => {
+    const kind = buildPlacementKindRef.current;
+    const canvas = canvasRef.current;
+    if (!kind || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = communeRendererRef.current?.screenToWorld(clientX, clientY, rect);
+    const x = Math.round((point?.x ?? clientX - rect.left + camRef.current.x) / 8) * 8;
+    const y = Math.round((point?.y ?? clientY - rect.top + camRef.current.y) / 8) * 8;
+    const rotation = buildPlacementRotationRef.current;
+    buildPreviewRef.current = {
+      x,
+      y,
+      rotation,
+      valid: canPlaceBuildLocally(kind, x, y, rotation, playerRef.current.x, playerRef.current.y),
+    };
+  };
+
+  const placeBuildAt = async (worldX: number, worldY: number) => {
+    const kind = buildPlacementKindRef.current;
+    if (!kind || buildBusy) return;
+    const x = Math.round(worldX / 8) * 8;
+    const y = Math.round(worldY / 8) * 8;
+    const rotation = buildPlacementRotationRef.current;
+    if (!canPlaceBuildLocally(kind, x, y, rotation, playerRef.current.x, playerRef.current.y)) {
+      buildPreviewRef.current = { x, y, rotation, valid: false };
+      setInbox((items) => [...items.slice(-4), {
+        from: 'BUILD',
+        message: 'That spot is blocked or too far away. Move the preview to a clear spot.',
+      }]);
+      return;
+    }
+    setBuildBusy(true);
+    try {
+      const result = await placeCommuneBuildable({
+        id: crypto.randomUUID(),
+        kind,
+        x,
+        y,
+        rotation,
+      });
+      setSpice(result.spice);
+      const next = [...builtObjectsRef.current.filter((item) => item.id !== result.building.id), result.building];
+      reconcileBuiltObjects(next);
+      builtObjectsRef.current = next;
+      setBuiltObjects(next);
+      setInbox((items) => [...items.slice(-4), {
+        from: 'BUILD',
+        message: `${COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind)?.name ?? 'Structure'} added to the village.`,
+      }]);
+      cancelBuildPlacement();
+    } catch (error) {
+      setInbox((items) => [...items.slice(-4), {
+        from: 'BUILD',
+        message: error instanceof Error ? error.message : 'Could not build there.',
+      }]);
+    } finally {
+      setBuildBusy(false);
+    }
   };
 
   const adjustMapZoom = (delta: number) => {
@@ -4255,6 +4595,93 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       >
         <Palette className="size-3.5" /> <span>Loadout</span>
       </button>
+
+      {!panel && (
+        <div
+          className="absolute right-3 z-30"
+          style={{
+            bottom: touchControls
+              ? 'calc(env(safe-area-inset-bottom, 0px) + 13rem)'
+              : 'calc(env(safe-area-inset-bottom, 0px) + 1rem)',
+          }}
+        >
+          {buildMenuOpen && !buildPlacementKind && (
+            <div
+              className="absolute bottom-[calc(100%+10px)] right-0 flex max-h-[min(62svh,520px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-amber-200/30 bg-slate-950/90 text-white shadow-2xl backdrop-blur-xl"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 px-3 py-2.5">
+                <div>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-amber-200">Village workshop</p>
+                  <p className="mt-0.5 text-[10px] text-white/55">Balance: {user?.spice ?? 0} spice · max 24 builds each</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBuildMenuOpen(false)}
+                  className="grid size-8 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200"
+                  aria-label="Close building catalog"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 overflow-y-auto p-2.5">
+                {COMMUNE_BUILD_CATALOG.map((entry) => {
+                  const canAfford = (user?.spice ?? 0) >= entry.price;
+                  return (
+                    <button
+                      key={entry.kind}
+                      type="button"
+                      disabled={!canAfford || buildBusy}
+                      onClick={() => startBuildPlacement(entry.kind)}
+                      className={cn(
+                        'flex min-h-[98px] flex-col items-start justify-between rounded-xl border p-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200',
+                        canAfford
+                          ? 'border-white/12 bg-white/[0.045] hover:border-amber-200/45 hover:bg-amber-200/10'
+                          : 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-45'
+                      )}
+                    >
+                      <span>
+                        <span className="block text-[11px] font-bold">{entry.name}</span>
+                        <span className="mt-1 block text-[9px] leading-snug text-white/55">{entry.description}</span>
+                      </span>
+                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200/20 bg-amber-200/10 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-100">
+                        <Coins className="size-3" /> {entry.price} spice
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (buildPlacementKindRef.current) {
+                cancelBuildPlacement();
+                return;
+              }
+              setBuildMenuOpen((open) => !open);
+            }}
+            disabled={buildBusy}
+            aria-label={buildPlacementKind ? 'Cancel building placement' : 'Open village building catalog'}
+            aria-expanded={buildMenuOpen}
+            className={cn(
+              'flex h-11 items-center gap-2 rounded-full border px-4 font-mono text-[11px] font-bold uppercase tracking-wider shadow-xl backdrop-blur-xl transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:opacity-60',
+              buildPlacementKind
+                ? 'border-rose-200/45 bg-slate-950/85 text-rose-100'
+                : 'border-amber-200/40 bg-slate-950/85 text-amber-100 hover:bg-amber-200/10'
+            )}
+          >
+            {buildPlacementKind ? <X className="size-4" /> : <Building2 className="size-4" />}
+            {buildPlacementKind ? 'Cancel build' : 'Build'}
+          </button>
+        </div>
+      )}
+      {buildPlacementKind && !panel && (
+        <div className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-full border border-amber-100/35 bg-slate-950/80 px-3 py-1.5 text-center font-mono text-[9px] font-bold uppercase tracking-wider text-amber-50 shadow-lg backdrop-blur-md">
+          {COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === buildPlacementKind)?.name} · Tap/click to place · R rotate · Esc cancel
+        </div>
+      )}
 
       {!touchControls && !panel && !chatFocused && (
         <div
@@ -5638,9 +6065,15 @@ function canOccupy(x: number, y: number, radius: number, ignoreCarId?: CommuneCa
   )) return false;
   if (PARKED_CARS.some((car) => {
     if (car.id === ignoreCarId) return false;
-    const bounds = carHalfExtents(car.heading);
+    const bounds = carHalfExtents(car.heading, car.halfWidth, car.halfLength);
     return x > car.x - bounds.x - radius && x < car.x + bounds.x + radius
       && y > car.y - bounds.y - radius && y < car.y + bounds.y + radius;
+  })) return false;
+  if (BUILT_OBJECTS.some((item) => {
+    if (item.kind === 'sports-car') return false;
+    const bounds = buildHalfExtents(item.kind, item.rotation);
+    return x > item.x - bounds.x - radius && x < item.x + bounds.x + radius
+      && y > item.y - bounds.y - radius && y < item.y + bounds.y + radius;
   })) return false;
 
   return !SOLID_RECTS.some(
@@ -6315,7 +6748,9 @@ function draw(
   bowlingPinsDown: readonly number[],
   mower: TRexState,
   mowerTracks: readonly MowerTrack[],
-  bowlingPinsKnockedAt = 0
+  bowlingPinsKnockedAt = 0,
+  buildables: readonly CommuneBuildable[] = [],
+  buildPreview: { kind: CommuneBuildKind; x: number; y: number; rotation: number; valid: boolean } | null = null,
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -6391,6 +6826,15 @@ function draw(
     items.push({
       y: place.y + place.depth / 2,
       fn: () => drawCommuneHangout(ctx, place, occupants),
+    });
+  }
+  for (const building of buildables) {
+    if (building.kind === 'sports-car') continue;
+    const catalog = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === building.kind);
+    if (!catalog || !isVisible(building.x, building.y, catalog.width / 2 + 40, catalog.depth / 2 + 110)) continue;
+    items.push({
+      y: building.y + catalog.depth / 2,
+      fn: () => drawCommuneBuildable(ctx, building, t),
     });
   }
   for (const object of WORLD_OBJECTS) {
@@ -6666,6 +7110,7 @@ function draw(
     it.fn();
     ctx.restore();
   }
+  if (buildPreview) drawBuildPreview(ctx, buildPreview);
 
   ctx.restore();
 }
@@ -6815,7 +7260,7 @@ function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants:
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(car.heading);
-  ctx.scale(1, 1.3);
+  ctx.scale(car.style === 'electric-sport' ? 1.3 : 1, car.style === 'electric-sport' ? 1.75 : 1.3);
   const cx = 0;
   const cy = 0;
   drawGroundShadow(ctx, cx + 2, cy + 8, 42, 39, 0.25);
@@ -6869,7 +7314,7 @@ function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants:
   ctx.textAlign = 'center';
   const occupantsLabel = occupants.length
     ? `${occupants.map((name) => name.slice(0, 6)).join(' + ')} · ${occupants.length}/2`
-    : `${car.label} · E`;
+    : `${car.owner ? `${car.owner}'s ` : ''}${car.label} · E`;
   ctx.fillText(occupantsLabel, x, y + 72);
 }
 
@@ -6965,6 +7410,146 @@ function drawCommuneHangout(ctx: CanvasRenderingContext2D, place: CommuneHangout
   lines.forEach((line, index) => {
     ctx.fillText(line, x, top + 9 + index * lineHeight, width - 10);
   });
+}
+
+function drawCommuneBuildable(ctx: CanvasRenderingContext2D, item: CommuneBuildable, time: number): void {
+  const catalog = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === item.kind);
+  if (!catalog) return;
+  ctx.save();
+  ctx.translate(item.x, item.y);
+  ctx.rotate(item.rotation);
+  drawGroundShadow(ctx, 4, catalog.depth * 0.16, catalog.width * 0.47, catalog.depth * 0.28, 0.24);
+  if (item.kind === 'tent') {
+    ctx.fillStyle = '#604832';
+    ctx.beginPath();
+    ctx.moveTo(-44, 26); ctx.lineTo(0, -46); ctx.lineTo(44, 26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#c88757';
+    ctx.beginPath();
+    ctx.moveTo(-39, 22); ctx.lineTo(0, -39); ctx.lineTo(39, 22); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#443a30';
+    ctx.beginPath();
+    ctx.moveTo(-14, 22); ctx.lineTo(0, -4); ctx.lineTo(14, 22); ctx.closePath(); ctx.fill();
+  } else if (item.kind === 'tree') {
+    drawPixelTree(ctx, 0, 2, 0.72);
+  } else if (item.kind === 'beach-umbrella') {
+    ctx.fillStyle = '#79573d';
+    ctx.fillRect(-3, -8, 6, 54);
+    ctx.fillStyle = '#e47b67';
+    ctx.beginPath();
+    ctx.moveTo(-34, -13); ctx.lineTo(-24, -37); ctx.lineTo(0, -48);
+    ctx.lineTo(24, -37); ctx.lineTo(34, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#f4e1b5';
+    ctx.beginPath();
+    ctx.moveTo(-15, -17); ctx.lineTo(-10, -41); ctx.lineTo(0, -47);
+    ctx.lineTo(10, -41); ctx.lineTo(15, -17); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#7a9c62';
+    ctx.fillRect(-15, 42, 30, 5);
+  } else if (item.kind === 'flowerbed') {
+    ctx.fillStyle = '#805a3b';
+    ctx.fillRect(-40, -26, 80, 48);
+    ctx.fillStyle = '#443b2d';
+    ctx.fillRect(-34, -20, 68, 36);
+    const flowerColors = ['#d9778c', '#e6c55b', '#b88de0', '#f4ece0', '#e58b61', '#84b9a1'];
+    flowerColors.forEach((color, index) => {
+      const px = -24 + (index % 3) * 24;
+      const py = -12 + Math.floor(index / 3) * 20;
+      ctx.fillStyle = '#557947';
+      ctx.fillRect(px - 1, py + 1, 3, 12);
+      ctx.fillStyle = color;
+      ctx.fillRect(px - 5, py - 4, 10, 8);
+      ctx.fillRect(px - 2, py - 7, 4, 14);
+    });
+  } else if (item.kind === 'garden-bench') {
+    ctx.fillStyle = '#594633';
+    ctx.fillRect(-32, 8, 7, 32); ctx.fillRect(25, 8, 7, 32);
+    ctx.fillStyle = '#9b7049';
+    ctx.fillRect(-42, -15, 84, 26);
+    ctx.fillStyle = '#79573d';
+    ctx.fillRect(-42, -33, 84, 12);
+    ctx.fillStyle = '#b68a5c';
+    ctx.fillRect(-39, -12, 78, 5);
+  } else if (item.kind === 'campfire') {
+    const flicker = Math.sin(time * 9 + item.x) * 3;
+    ctx.fillStyle = '#9a8c72';
+    for (let index = 0; index < 8; index++) {
+      const angle = index * Math.PI / 4;
+      ctx.fillRect(Math.cos(angle) * 20 - 5, Math.sin(angle) * 15 - 5, 10, 10);
+    }
+    ctx.fillStyle = '#79573d';
+    ctx.fillRect(-18, -4, 36, 8);
+    ctx.fillRect(-4, -18, 8, 36);
+    ctx.fillStyle = '#f09a47';
+    ctx.beginPath();
+    ctx.moveTo(-12, -2); ctx.lineTo(-8, -21 - flicker); ctx.lineTo(2, -10);
+    ctx.lineTo(10, -29 + flicker); ctx.lineTo(13, 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffe1a0';
+    ctx.fillRect(-3, -10, 7, 14);
+  } else if (item.kind === 'picnic-table') {
+    ctx.fillStyle = '#684a34';
+    ctx.fillRect(-31, -16, 7, 50); ctx.fillRect(24, -16, 7, 50);
+    ctx.fillStyle = '#a5794d';
+    ctx.fillRect(-52, -25, 104, 20);
+    ctx.fillRect(-47, 12, 94, 10);
+    ctx.fillRect(-47, 32, 94, 10);
+    ctx.fillStyle = '#c49b68';
+    ctx.fillRect(-47, -21, 94, 5);
+  } else if (item.kind === 'paper-lantern') {
+    ctx.fillStyle = '#79573d';
+    ctx.fillRect(-3, -5, 6, 54);
+    ctx.fillStyle = '#f4d48b';
+    ctx.fillRect(-12, -31, 24, 24);
+    ctx.fillStyle = '#fff0bd';
+    ctx.fillRect(-7, -26, 14, 14);
+    ctx.fillStyle = 'rgba(255,211,122,0.2)';
+    ctx.beginPath(); ctx.arc(0, -19, 24, 0, Math.PI * 2); ctx.fill();
+  } else if (item.kind === 'mini-fountain') {
+    ctx.fillStyle = '#a7afb2';
+    ctx.beginPath(); ctx.ellipse(0, 10, 39, 30, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5798b5';
+    ctx.beginPath(); ctx.ellipse(0, 7, 29, 21, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#c5c9bd';
+    ctx.fillRect(-8, -22, 16, 31);
+    ctx.fillStyle = '#8fc4d4';
+    ctx.fillRect(-9, -30, 18, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillRect(-16, 4, 12, 2);
+    ctx.fillRect(8, 12, 14, 2);
+  }
+  ctx.restore();
+  ctx.fillStyle = 'rgba(17,24,25,0.72)';
+  ctx.fillRect(item.x - 66, item.y + catalog.depth / 2 + 8, 132, 14);
+  ctx.fillStyle = '#fff4da';
+  ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.fillText(`${item.owner.slice(0, 10)} · ${catalog.name}`, item.x, item.y + catalog.depth / 2 + 18, 126);
+}
+
+function drawBuildPreview(
+  ctx: CanvasRenderingContext2D,
+  preview: { kind: CommuneBuildKind; x: number; y: number; rotation: number; valid: boolean },
+): void {
+  const catalog = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === preview.kind);
+  if (!catalog) return;
+  ctx.save();
+  ctx.translate(preview.x, preview.y);
+  ctx.rotate(preview.rotation);
+  ctx.fillStyle = preview.valid ? 'rgba(61,205,106,0.22)' : 'rgba(245,75,75,0.25)';
+  ctx.strokeStyle = preview.valid ? '#53df83' : '#ff5959';
+  ctx.lineWidth = 4;
+  ctx.fillRect(-catalog.width / 2, -catalog.depth / 2, catalog.width, catalog.depth);
+  ctx.strokeRect(-catalog.width / 2, -catalog.depth / 2, catalog.width, catalog.depth);
+  ctx.beginPath();
+  ctx.moveTo(-10, 0); ctx.lineTo(10, 0);
+  ctx.moveTo(0, -10); ctx.lineTo(0, 10);
+  ctx.stroke();
+  ctx.restore();
+  const label = preview.valid ? 'CLICK TO BUILD · R ROTATE' : 'BLOCKED SPOT';
+  ctx.fillStyle = preview.valid ? 'rgba(24,65,40,0.9)' : 'rgba(92,30,30,0.92)';
+  ctx.fillRect(preview.x - 82, preview.y - catalog.depth / 2 - 33, 164, 18);
+  ctx.fillStyle = '#fff';
+  ctx.font = "bold 9px 'Schoolbell', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.fillText(label, preview.x, preview.y - catalog.depth / 2 - 20);
 }
 
 function drawWhatTheDuck(ctx: CanvasRenderingContext2D, incident: DuckIncident, t: number, reduceMotion: boolean) {

@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { COMMUNE_HANGOUTS } from '@shared/commune-hangouts';
+import {
+  COMMUNE_BUILD_CATALOG,
+  type CommuneBuildable,
+  type CommuneBuildKind,
+} from '@shared/commune-buildables';
 
 const WORLD_W = 3200;
 const WORLD_H = 2400;
@@ -54,6 +59,16 @@ type RenderCar = {
   heading: number;
   body: string;
   trim: string;
+  style?: 'classic' | 'electric-sport';
+  owner?: string;
+};
+
+type RenderBuildPreview = {
+  kind: CommuneBuildKind;
+  x: number;
+  y: number;
+  rotation: number;
+  valid: boolean;
 };
 
 type RenderPet = {
@@ -122,6 +137,8 @@ export interface CommuneThreeFrame {
   remotes: readonly RenderActor[];
   pets: readonly RenderPet[];
   cars: readonly RenderCar[];
+  buildables: readonly CommuneBuildable[];
+  buildPreview: RenderBuildPreview | null;
   drops: readonly RenderDrop[];
   ducks: readonly RenderDuck[];
   incident: RenderDiscovery | null;
@@ -266,6 +283,107 @@ function addTent(parent: THREE.Object3D, x: number, z: number, color: string): v
   addBox(parent, x, 3, z + 44, 25, 37, 4, '#443a30');
   addBox(parent, x - 28, 5, z + 27, 3, 52, 3, '#d6bd8d');
   addBox(parent, x + 28, 5, z + 27, 3, 52, 3, '#d6bd8d');
+}
+
+function createBuildableModel(item: CommuneBuildable): THREE.Group {
+  const group = new THREE.Group();
+  const box = (x: number, y: number, z: number, width: number, height: number, depth: number, color: string) =>
+    addBox(group, x, y, z, width, height, depth, color);
+  const cylinder = (x: number, y: number, z: number, radius: number, height: number, color: string) => {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 8), material(color));
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+
+  if (item.kind === 'tent') {
+    addTent(group, 0, 0, '#bd7b51');
+  } else if (item.kind === 'tree') {
+    addGroundDisc(group, 0, 0, 28, 25, '#526f48', 2, 8);
+    box(0, 0, 0, 14, 54, 14, '#79573d');
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(34, 68, 6), material('#4e8153'));
+    crown.position.set(0, 76, 0);
+    crown.castShadow = true;
+    group.add(crown);
+    const upperCrown = new THREE.Mesh(new THREE.ConeGeometry(25, 50, 6), material('#68945d'));
+    upperCrown.position.set(0, 91, 0);
+    group.add(upperCrown);
+  } else if (item.kind === 'beach-umbrella') {
+    addGroundDisc(group, 0, 0, 32, 30, '#638b55', 2, 8);
+    box(0, 0, 0, 5, 80, 5, '#785a3c');
+    const canopy = new THREE.Mesh(new THREE.ConeGeometry(42, 22, 8), material('#e47b67'));
+    canopy.position.set(0, 75, 0);
+    canopy.castShadow = true;
+    group.add(canopy);
+    box(0, 67, 0, 5, 3, 38, '#f4e1b5');
+  } else if (item.kind === 'flowerbed') {
+    addGroundDisc(group, 0, 0, 46, 33, '#587354', 2, 8);
+    box(0, 2, 0, 78, 10, 49, '#805a3b');
+    box(0, 12, 0, 66, 4, 37, '#4b4030');
+    const colors = ['#d9778c', '#e6c55b', '#b88de0', '#f4ece0', '#e58b61', '#84b9a1'];
+    colors.forEach((color, index) => {
+      const x = (index % 3 - 1) * 22;
+      const z = (Math.floor(index / 3) - 0.5) * 19;
+      box(x, 15, z, 3, 15, 3, '#557947');
+      const flower = new THREE.Mesh(new THREE.DodecahedronGeometry(6, 0), material(color));
+      flower.position.set(x, 34, z);
+      group.add(flower);
+    });
+  } else if (item.kind === 'garden-bench') {
+    addGroundDisc(group, 0, 0, 48, 25, '#587354', 2, 8);
+    box(0, 23, 0, 76, 8, 18, '#9b7049');
+    box(0, 37, -7, 76, 21, 7, '#79573d');
+    for (const x of [-30, 30]) {
+      box(x, 3, 0, 6, 22, 6, '#594633');
+      box(x, 3, -8, 6, 36, 6, '#594633');
+    }
+  } else if (item.kind === 'campfire') {
+    addGroundDisc(group, 0, 0, 31, 29, '#526744', 2, 8);
+    for (let index = 0; index < 8; index++) {
+      const angle = index * Math.PI / 4;
+      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(8, 0), material('#9a8c72'));
+      stone.position.set(Math.cos(angle) * 19, 6, Math.sin(angle) * 17);
+      group.add(stone);
+    }
+    box(0, 8, 0, 8, 8, 34, '#79573d').rotation.y = 0.68;
+    box(0, 8, 0, 8, 8, 34, '#8b623f').rotation.y = -0.68;
+    const flame = new THREE.Mesh(new THREE.TetrahedronGeometry(18, 0), material('#f09a47'));
+    flame.position.set(0, 26, 0);
+    group.add(flame);
+  } else if (item.kind === 'picnic-table') {
+    addGroundDisc(group, 0, 0, 58, 40, '#587354', 2, 8);
+    box(0, 36, 0, 92, 8, 39, '#a5794d');
+    for (const x of [-31, 31]) {
+      box(x, 5, 0, 6, 31, 6, '#684a34');
+      box(x, 23, -32, 88, 7, 9, '#8d6441');
+      box(x, 23, 32, 88, 7, 9, '#8d6441');
+    }
+  } else if (item.kind === 'paper-lantern') {
+    addGroundDisc(group, 0, 0, 18, 17, '#526f48', 2, 8);
+    box(0, 0, 0, 4, 66, 4, '#79573d');
+    const lantern = new THREE.Mesh(new THREE.OctahedronGeometry(14, 0), new THREE.MeshLambertMaterial({
+      color: '#f4d48b',
+      emissive: '#a77635',
+      emissiveIntensity: 0.42,
+      flatShading: true,
+    }));
+    lantern.position.set(0, 76, 0);
+    group.add(lantern);
+  } else if (item.kind === 'mini-fountain') {
+    addGroundDisc(group, 0, 0, 42, 40, '#55764e', 2, 10);
+    cylinder(0, 7, 0, 38, 13, '#a7afb2');
+    cylinder(0, 15, 0, 28, 4, '#5798b5');
+    cylinder(0, 32, 0, 9, 30, '#c5c9bd');
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(7, 7, 5), material('#8fc4d4'));
+    cap.position.set(0, 50, 0);
+    group.add(cap);
+  }
+  group.traverse((object) => {
+    if (object instanceof THREE.Mesh) object.castShadow = true;
+  });
+  return group;
 }
 
 function drawHangoutLabel(
@@ -451,6 +569,17 @@ export class CommuneThreeRenderer {
   private readonly laserBeams = new Map<string, THREE.Mesh>();
   private readonly laserImpactMeshes = new Map<string, THREE.Mesh>();
   private readonly cars = new Map<string, THREE.Group>();
+  private readonly buildableModels = new Map<string, THREE.Group>();
+  private readonly buildPreviewMesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.82, 1, 4),
+    new THREE.MeshBasicMaterial({
+      color: '#69d78d',
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+    }),
+  );
   private readonly canvas: HTMLCanvasElement;
   private readonly labels: HTMLCanvasElement;
   private readonly labelCtx: CanvasRenderingContext2D;
@@ -705,6 +834,7 @@ export class CommuneThreeRenderer {
 
     this.addMarkerMeshes();
     this.buildCars();
+    this.scene.add(this.buildPreviewMesh);
   }
 
   resize(width: number, height: number): void {
@@ -808,6 +938,7 @@ export class CommuneThreeRenderer {
     this.scene.background = this.backgroundColor.copy(DAY_BACKGROUND).lerp(NIGHT_BACKGROUND, night);
 
     this.updateCars(frame.cars);
+    this.updateBuildableModels(frame.buildables, frame.buildPreview);
     this.updateActors(frame, 1 - Math.exp(-delta * 26));
     this.updatePets(frame.pets, frame.time, frame.reduceMotion);
     this.updateMarkers(frame, frame.time);
@@ -1275,11 +1406,52 @@ export class CommuneThreeRenderer {
   }
 
   private buildCars(): void {
-    for (const id of ['meadow-cruiser', 'orchard-wagon']) {
-      const group = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(64, 25, 102), material(id === 'meadow-cruiser' ? '#6288a4' : '#b76552'));
+    this.addCarModel({
+      id: 'meadow-cruiser', x: 0, y: 0, heading: 0, body: '#6288a4', trim: '#d5e2e7',
+    });
+    this.addCarModel({
+      id: 'orchard-wagon', x: 0, y: 0, heading: 0, body: '#b76552', trim: '#f0d7b3',
+    });
+  }
+
+  private addCarModel(car: RenderCar): THREE.Group {
+    const group = new THREE.Group();
+    if (car.style === 'electric-sport') {
+      addBox(group, 0, 5, 0, 88, 18, 136, car.body);
+      addBox(group, 0, 14, -42, 76, 12, 46, car.body);
+      addBox(group, 0, 14, 42, 76, 12, 42, car.body);
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(62, 22, 64), new THREE.MeshLambertMaterial({
+        color: '#526b77',
+        transparent: true,
+        opacity: 0.82,
+        flatShading: true,
+      }));
+      glass.position.set(0, 34, -3);
+      glass.castShadow = true;
+      group.add(glass);
+      addBox(group, 0, 47, -5, 49, 5, 54, car.trim);
+      for (const x of [-46, 46]) {
+        for (const z of [-44, 45]) {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, 8, 8), material('#252c31'));
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(x, 14, z);
+          group.add(wheel);
+          const hub = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 8.5, 8), material('#cbd2d3'));
+          hub.rotation.z = Math.PI / 2;
+          hub.position.set(x, 14, z);
+          group.add(hub);
+        }
+      }
+      addBox(group, -25, 20, -66, 22, 5, 4, '#fff2cc');
+      addBox(group, 25, 20, -66, 22, 5, 4, '#fff2cc');
+      addBox(group, -24, 18, 67, 20, 5, 4, '#e87667');
+      addBox(group, 24, 18, 67, 20, 5, 4, '#e87667');
+      addBox(group, 0, 9, -71, 66, 8, 5, '#34434a');
+      addBox(group, 0, 9, 71, 66, 8, 5, '#34434a');
+    } else {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(64, 25, 102), material(car.body));
       body.position.y = 24;
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(42, 24, 50), material(id === 'meadow-cruiser' ? '#d5e2e7' : '#f0d7b3'));
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(42, 24, 50), material(car.trim));
       cabin.position.set(0, 46, -6);
       group.add(body, cabin);
       for (const x of [-31, 31]) {
@@ -1290,19 +1462,67 @@ export class CommuneThreeRenderer {
           group.add(wheel);
         }
       }
-      group.visible = false;
-      this.cars.set(id, group);
-      this.scene.add(group);
     }
+    group.visible = false;
+    this.cars.set(car.id, group);
+    this.scene.add(group);
+    return group;
   }
 
   private updateCars(cars: readonly RenderCar[]): void {
+    const visibleIds = new Set(cars.map((car) => car.id));
     for (const car of cars) {
-      const group = this.cars.get(car.id);
-      if (!group) continue;
+      let group = this.cars.get(car.id);
+      if (!group) group = this.addCarModel(car);
       group.visible = true;
       group.position.set(car.x, 0, car.y);
       group.rotation.y = -car.heading;
+    }
+    for (const [id, group] of this.cars) {
+      if (!id.startsWith('buildcar-') || visibleIds.has(id)) continue;
+      this.scene.remove(group);
+      group.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((entry) => entry.dispose());
+      });
+      this.cars.delete(id);
+    }
+  }
+
+  private updateBuildableModels(buildables: readonly CommuneBuildable[], preview: RenderBuildPreview | null): void {
+    const liveIds = new Set<string>();
+    for (const item of buildables) {
+      if (item.kind === 'sports-car') continue;
+      liveIds.add(item.id);
+      let group = this.buildableModels.get(item.id);
+      if (!group) {
+        group = createBuildableModel(item);
+        this.buildableModels.set(item.id, group);
+        this.scene.add(group);
+      }
+      group.position.set(item.x, 0, item.y);
+      group.rotation.y = -item.rotation;
+    }
+    for (const [id, group] of this.buildableModels) {
+      if (liveIds.has(id)) continue;
+      this.scene.remove(group);
+      group.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((entry) => entry.dispose());
+      });
+      this.buildableModels.delete(id);
+    }
+    const entry = preview ? COMMUNE_BUILD_CATALOG.find((item) => item.kind === preview.kind) : null;
+    this.buildPreviewMesh.visible = !!preview && !!entry;
+    if (preview && entry) {
+      this.buildPreviewMesh.position.set(preview.x, 4, preview.y);
+      this.buildPreviewMesh.scale.set(entry.width / 2, entry.depth / 2, 1);
+      this.buildPreviewMesh.rotation.set(-Math.PI / 2, 0, -preview.rotation);
+      (this.buildPreviewMesh.material as THREE.MeshBasicMaterial).color.set(preview.valid ? '#67df8b' : '#ff5c5c');
     }
   }
 
@@ -1771,6 +1991,19 @@ export class CommuneThreeRenderer {
     drawActorLabel(frame.player);
     for (const npc of frame.npcs) drawActorLabel(npc);
     for (const remote of frame.remotes) drawActorLabel(remote);
+    for (const car of frame.cars) {
+      if (!car.owner || car.style !== 'electric-sport') continue;
+      this.projectedPoint.set(car.x, 62, car.y).project(this.activeCamera);
+      const point = this.projectedPoint;
+      if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
+      drawLabel(
+        ctx,
+        (point.x * 0.5 + 0.5) * this.width,
+        (-point.y * 0.5 + 0.5) * this.height,
+        `${car.owner} · ROADSTER`,
+        true,
+      );
+    }
     for (const hangout of COMMUNE_HANGOUTS) {
       const occupants = [frame.player, ...frame.remotes]
         .filter((actor) => actor.hangoutId === hangout.id)
@@ -1788,6 +2021,70 @@ export class CommuneThreeRenderer {
         occupants,
         hangout.capacity,
       );
+    }
+    for (const building of frame.buildables) {
+      if (building.kind === 'sports-car') continue;
+      const catalog = COMMUNE_BUILD_CATALOG.find((item) => item.kind === building.kind);
+      if (!catalog) continue;
+      const height = building.kind === 'tree' ? 110
+        : building.kind === 'beach-umbrella' ? 96
+          : building.kind === 'paper-lantern' ? 96
+            : building.kind === 'tent' ? 82 : 62;
+      this.projectedPoint.set(building.x, height, building.y).project(this.activeCamera);
+      const point = this.projectedPoint;
+      if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
+      drawLabel(
+        ctx,
+        (point.x * 0.5 + 0.5) * this.width,
+        (-point.y * 0.5 + 0.5) * this.height,
+        `${building.owner} · ${catalog.name}`,
+        true,
+      );
+    }
+    if (frame.buildPreview) {
+      const preview = frame.buildPreview;
+      const catalog = COMMUNE_BUILD_CATALOG.find((item) => item.kind === preview.kind);
+      if (catalog) {
+        const corners = [
+          [-catalog.width / 2, -catalog.depth / 2],
+          [catalog.width / 2, -catalog.depth / 2],
+          [catalog.width / 2, catalog.depth / 2],
+          [-catalog.width / 2, catalog.depth / 2],
+        ].map(([localX, localY]) => {
+          const cos = Math.cos(preview.rotation);
+          const sin = Math.sin(preview.rotation);
+          return new THREE.Vector3(
+            preview.x + (localX ?? 0) * cos - (localY ?? 0) * sin,
+            4,
+            preview.y + (localX ?? 0) * sin + (localY ?? 0) * cos,
+          ).project(this.activeCamera);
+        });
+        ctx.save();
+        ctx.beginPath();
+        corners.forEach((point, index) => {
+          const screenX = (point.x * 0.5 + 0.5) * this.width;
+          const screenY = (-point.y * 0.5 + 0.5) * this.height;
+          if (index === 0) ctx.moveTo(screenX, screenY);
+          else ctx.lineTo(screenX, screenY);
+        });
+        ctx.closePath();
+        ctx.fillStyle = preview.valid ? 'rgba(73,210,115,0.24)' : 'rgba(245,79,79,0.25)';
+        ctx.strokeStyle = preview.valid ? '#6de59a' : '#ff6262';
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        this.projectedPoint.set(preview.x, 105, preview.y).project(this.activeCamera);
+        if (Math.abs(this.projectedPoint.x) <= 1.08 && Math.abs(this.projectedPoint.y) <= 1.1) {
+          drawLabel(
+            ctx,
+            (this.projectedPoint.x * 0.5 + 0.5) * this.width,
+            (-this.projectedPoint.y * 0.5 + 0.5) * this.height,
+            preview.valid ? 'CLICK TO BUILD' : 'BLOCKED SPOT',
+            true,
+          );
+        }
+        ctx.restore();
+      }
     }
   }
 }

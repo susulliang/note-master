@@ -5,6 +5,16 @@ import {
   COMMUNE_HANGOUT_EXIT_OFFSET,
   type CommuneHangoutId,
 } from '../shared/commune-hangouts';
+import {
+  COMMUNE_BUILD_CATALOG,
+  COMMUNE_BUILD_INTERACT_RANGE,
+  COMMUNE_BUILD_MAX_PER_AGENT,
+  COMMUNE_BUILD_MAX_TOTAL,
+  COMMUNE_BUILD_PLACE_RANGE,
+  communeBuildCarId,
+  type CommuneBuildable,
+  type CommuneBuildKind,
+} from '../shared/commune-buildables';
 
 type SqlRow<T extends object> = T & Record<string, SqlStorageValue>;
 
@@ -249,11 +259,27 @@ function raySphereDistance(
   return near >= 0 ? near : far >= 0 ? far : null;
 }
 
-function canCarOccupy(x: number, y: number, carId: string, cars: CommuneCarPosition[]): boolean {
+function carHalfDimensions(carId: string, heading: number) {
+  const width = carId.startsWith('buildcar-') ? 48 : CAR_HALF_WIDTH;
+  const length = carId.startsWith('buildcar-') ? 71 : CAR_HALF_LENGTH;
+  return {
+    x: Math.abs(Math.cos(heading)) * width + Math.abs(Math.sin(heading)) * length,
+    y: Math.abs(Math.sin(heading)) * width + Math.abs(Math.cos(heading)) * length,
+  };
+}
+
+function canCarOccupy(
+  x: number,
+  y: number,
+  carId: string,
+  cars: CommuneCarPosition[],
+  buildables: CommuneBuildable[] = [],
+): boolean {
   const car = cars.find((item) => item.id === carId);
   const heading = car?.heading ?? 0;
-  const halfX = Math.abs(Math.cos(heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(heading)) * CAR_HALF_LENGTH;
-  const halfY = Math.abs(Math.sin(heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(heading)) * CAR_HALF_LENGTH;
+  const half = carHalfDimensions(carId, heading);
+  const halfX = half.x;
+  const halfY = half.y;
   if (x < halfX || x > COMMUNE_WORLD_W - halfX || y < 144 + halfY || y > COMMUNE_WORLD_H - halfY) return false;
   if (((x - 800) / (96 + halfX)) ** 2 + ((y - 600) / (96 + halfY)) ** 2 < 1) return false;
   const ponds = [
@@ -269,11 +295,23 @@ function canCarOccupy(x: number, y: number, carId: string, cars: CommuneCarPosit
     x > treeX - 30 - halfX && x < treeX + 30 + halfX
     && y > treeY - 42 - halfY && y < treeY + 4 + halfY
   )) return false;
-  return !cars.some((car) =>
-    car.id !== carId
-    && Math.abs(x - car.x) < halfX + Math.abs(Math.cos(car.heading)) * CAR_HALF_WIDTH + Math.abs(Math.sin(car.heading)) * CAR_HALF_LENGTH
-    && Math.abs(y - car.y) < halfY + Math.abs(Math.sin(car.heading)) * CAR_HALF_WIDTH + Math.abs(Math.cos(car.heading)) * CAR_HALF_LENGTH
-  );
+  if (cars.some((car) => {
+    const otherHalf = carHalfDimensions(car.id, car.heading);
+    return car.id !== carId
+      && Math.abs(x - car.x) < halfX + otherHalf.x
+      && Math.abs(y - car.y) < halfY + otherHalf.y;
+  })) return false;
+  return !buildables.some((item) => {
+    if (item.kind === 'sports-car' && communeBuildCarId(item.id) === carId) return false;
+    const definition = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === item.kind);
+    if (!definition) return false;
+    const otherHalfX = Math.abs(Math.cos(item.rotation)) * definition.width / 2
+      + Math.abs(Math.sin(item.rotation)) * definition.depth / 2;
+    const otherHalfY = Math.abs(Math.sin(item.rotation)) * definition.width / 2
+      + Math.abs(Math.cos(item.rotation)) * definition.depth / 2;
+    return Math.abs(x - item.x) < halfX + otherHalfX
+      && Math.abs(y - item.y) < halfY + otherHalfY;
+  });
 }
 
 function normalizeLoadout(input: unknown): CommuneRoomLoadout {
@@ -440,6 +478,17 @@ export class CommuneRoom extends DurableObject<Env> {
         )
       `);
       this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS commune_buildables (
+          id TEXT PRIMARY KEY,
+          owner TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          x REAL NOT NULL,
+          y REAL NOT NULL,
+          rotation REAL NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS commune_soccer_ball (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           x REAL NOT NULL,
@@ -567,6 +616,96 @@ export class CommuneRoom extends DurableObject<Env> {
     this.broadcast({ type: 'banners', banners });
   }
 
+  validateBuildPlacement(
+    username: string,
+    kind: CommuneBuildKind,
+    x: number,
+    y: number,
+    rotation: number,
+  ): { ok: boolean; error?: string } {
+    const catalog = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind);
+    const current = this.ctx.getWebSockets(username)
+      .map((socket) => attachment(socket))
+      .find((presence): presence is Presence => (
+        !!presence && !presence.carId && !presence.hangoutId
+        && Date.now() - presence.seenAt <= PRESENCE_TTL_MS
+      ));
+    if (!catalog || !current) return { ok: false, error: 'Reconnect to Commune before building.' };
+    if (Math.hypot(current.x - x, current.y - y) > COMMUNE_BUILD_PLACE_RANGE) {
+      return { ok: false, error: 'Build within 300 steps of your agent.' };
+    }
+    if (!this.isBuildSpaceClear(kind, x, y, rotation)) {
+      return { ok: false, error: 'That spot is occupied or outside the buildable map area.' };
+    }
+    const count = this.ctx.storage.sql.exec<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM commune_buildables WHERE owner = ?',
+      username,
+    ).toArray()[0]?.count ?? 0;
+    if (count >= COMMUNE_BUILD_MAX_PER_AGENT) return { ok: false, error: 'You have reached the 24-item building limit.' };
+    const total = this.ctx.storage.sql.exec<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM commune_buildables',
+    ).toArray()[0]?.count ?? 0;
+    if (total >= COMMUNE_BUILD_MAX_TOTAL) return { ok: false, error: 'The village has reached its building limit.' };
+    return { ok: true };
+  }
+
+  validateBuildDemolition(
+    username: string,
+    buildingId: string,
+  ): { ok: boolean; error?: string; building?: CommuneBuildable } {
+    const row = this.ctx.storage.sql.exec<{
+      id: string;
+      owner: string;
+      kind: string;
+      x: number;
+      y: number;
+      rotation: number;
+      created_at: number;
+    }>(
+      `SELECT id, owner, kind, x, y, rotation, created_at
+       FROM commune_buildables WHERE id = ?`,
+      buildingId,
+    ).toArray()[0];
+    if (!row) return { ok: false, error: 'That structure is no longer in the village.' };
+    if (row.owner !== username) return { ok: false, error: 'You can only take apart your own builds.' };
+    const current = this.ctx.getWebSockets(username)
+      .map((socket) => attachment(socket))
+      .find((presence): presence is Presence => (
+        !!presence && !presence.carId && !presence.hangoutId
+        && Date.now() - presence.seenAt <= PRESENCE_TTL_MS
+      ));
+    if (!current) return { ok: false, error: 'Reconnect to Commune before taking this apart.' };
+    const kind = row.kind as CommuneBuildKind;
+    const carId = kind === 'sports-car' ? communeBuildCarId(row.id) : null;
+    const carPosition = carId ? this.getCarPosition(carId) : null;
+    const removeX = carPosition?.x ?? row.x;
+    const removeY = carPosition?.y ?? row.y;
+    if (Math.hypot(current.x - removeX, current.y - removeY) > COMMUNE_BUILD_INTERACT_RANGE) {
+      return { ok: false, error: 'Walk closer to your structure first.' };
+    }
+    if (kind === 'sports-car') {
+      if (this.ctx.getWebSockets().some((socket) => attachment(socket)?.carId === carId)) {
+        return { ok: false, error: 'Everyone must leave the car before it can be taken apart.' };
+      }
+    }
+    return {
+      ok: true,
+      building: {
+        id: row.id,
+        owner: row.owner,
+        kind,
+        x: row.x,
+        y: row.y,
+        rotation: row.rotation,
+        createdAt: row.created_at,
+      },
+    };
+  }
+
+  syncBuildables(buildables: CommuneBuildable[]): CommuneBuildable[] {
+    return this.syncBuildablesInStorage(buildables);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/internal/minigame/verify') {
@@ -636,6 +775,7 @@ export class CommuneRoom extends DurableObject<Env> {
       self: profile.username,
       others: initialAgents,
       cars: this.listCarPositions(),
+      buildables: this.listBuildables(),
       soccerBall: this.getSoccerBall(),
       mowerClientId,
       mowerAuthorityClientId: authority.clientId,
@@ -878,19 +1018,16 @@ export class CommuneRoom extends DurableObject<Env> {
       );
       if (distance !== null) blockerDistance = Math.min(blockerDistance, distance);
     }
-    const cars = this.ctx.storage.sql.exec<{ x: number; y: number; heading: number }>(
-      'SELECT x, y, heading FROM commune_parked_cars',
+    const cars = this.ctx.storage.sql.exec<{ id: string; x: number; y: number; heading: number }>(
+      'SELECT id, x, y, heading FROM commune_parked_cars',
     ).toArray();
     for (const car of cars) {
-      const halfX = Math.abs(Math.cos(car.heading)) * CAR_HALF_WIDTH
-        + Math.abs(Math.sin(car.heading)) * CAR_HALF_LENGTH;
-      const halfY = Math.abs(Math.sin(car.heading)) * CAR_HALF_WIDTH
-        + Math.abs(Math.cos(car.heading)) * CAR_HALF_LENGTH;
+      const half = carHalfDimensions(car.id, car.heading);
       const distance = rayBoxDistance(
         origin,
         direction,
-        [car.x - halfX, 0, car.y - halfY],
-        [car.x + halfX, 58, car.y + halfY],
+        [car.x - half.x, 0, car.y - half.y],
+        [car.x + half.x, 58, car.y + half.y],
         blockerDistance,
       );
       if (distance !== null) blockerDistance = Math.min(blockerDistance, distance);
@@ -1098,9 +1235,7 @@ export class CommuneRoom extends DurableObject<Env> {
 
     if (event.type === 'car_enter') {
       const carId = typeof event.carId === 'string' ? event.carId : '';
-      const car = Object.prototype.hasOwnProperty.call(PARKED_CARS, carId)
-        ? this.getCarPosition(carId)
-        : null;
+      const car = this.getCarPosition(carId);
       if (!car || current.carId || current.hangoutId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
         send(ws, { type: 'error', code: 'car_unavailable', message: 'You cannot enter that car right now.' });
         return;
@@ -1184,7 +1319,7 @@ export class CommuneRoom extends DurableObject<Env> {
       const heading = Math.atan2(dy, dx) + Math.PI / 2;
       if (!canCarOccupy(x, y, current.carId, cars.map((item) =>
         item.id === current.carId ? { ...item, heading } : item
-      ))) {
+      ), this.listBuildables())) {
         this.ctx.storage.sql.exec(
           'UPDATE commune_parked_cars SET last_move_at = ? WHERE id = ?',
           now,
@@ -1515,6 +1650,136 @@ export class CommuneRoom extends DurableObject<Env> {
     } catch {
       return null;
     }
+  }
+
+  private listBuildables(): CommuneBuildable[] {
+    return this.ctx.storage.sql.exec<SqlRow<{
+      id: string;
+      owner: string;
+      kind: CommuneBuildKind;
+      x: number;
+      y: number;
+      rotation: number;
+      created_at: number;
+    }>>(
+      `SELECT id, owner, kind, x, y, rotation, created_at
+       FROM commune_buildables ORDER BY created_at, id`,
+    ).toArray().map((row) => ({
+      id: row.id,
+      owner: row.owner,
+      kind: row.kind,
+      x: row.x,
+      y: row.y,
+      rotation: row.rotation,
+      createdAt: row.created_at,
+    }));
+  }
+
+  private isBuildSpaceClear(kind: CommuneBuildKind, x: number, y: number, rotation: number): boolean {
+    const item = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind);
+    if (!item) return false;
+    const bounds = (width: number, depth: number, angle: number) => ({
+      x: Math.abs(Math.cos(angle)) * width / 2 + Math.abs(Math.sin(angle)) * depth / 2,
+      y: Math.abs(Math.sin(angle)) * width / 2 + Math.abs(Math.cos(angle)) * depth / 2,
+    });
+    const half = bounds(item.width, item.depth, rotation);
+    if (x < 24 + half.x || x > COMMUNE_WORLD_W - 24 - half.x
+      || y < 144 + half.y || y > COMMUNE_WORLD_H - 24 - half.y) return false;
+    if (((x - 800) / (96 + half.x)) ** 2 + ((y - 600) / (96 + half.y)) ** 2 < 1) return false;
+    const ponds = [
+      { x: 170, y: 640, rx: 115, ry: 75 },
+      { x: 2580, y: 790, rx: 150, ry: 102 },
+    ];
+    if (ponds.some((pond) => (
+      ((x - pond.x) / (pond.rx + half.x)) ** 2 + ((y - pond.y) / (pond.ry + half.y)) ** 2 < 1
+    ))) return false;
+    if (CAR_STATIC_BLOCKERS.some((blocker) => (
+      x + half.x > blocker.x - 8 && x - half.x < blocker.x + blocker.w + 8
+      && y + half.y > blocker.y - 8 && y - half.y < blocker.y + blocker.h + 8
+    ))) return false;
+    if (CAR_BLOCKING_TREES.some(([treeX, treeY]) => (
+      x + half.x > treeX - 36 && x - half.x < treeX + 36
+      && y + half.y > treeY - 48 && y - half.y < treeY + 10
+    ))) return false;
+    const cars = this.listCarPositions();
+    if (cars.some((car) => {
+      const carHalf = carHalfDimensions(car.id, car.heading);
+      return x + half.x > car.x - carHalf.x - 10
+        && x - half.x < car.x + carHalf.x + 10
+        && y + half.y > car.y - carHalf.y - 10
+        && y - half.y < car.y + carHalf.y + 10;
+    })) return false;
+    return !this.listBuildables().some((other) => {
+      const otherKind = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === other.kind);
+      if (!otherKind) return false;
+      const otherHalf = bounds(otherKind.width, otherKind.depth, other.rotation);
+      return x + half.x > other.x - otherHalf.x - 10
+        && x - half.x < other.x + otherHalf.x + 10
+        && y + half.y > other.y - otherHalf.y - 10
+        && y - half.y < other.y + otherHalf.y + 10;
+    });
+  }
+
+  private listBuildableCarIds(buildables: readonly CommuneBuildable[]): Set<string> {
+    return new Set(
+      buildables.filter((item) => item.kind === 'sports-car').map((item) => communeBuildCarId(item.id)),
+    );
+  }
+
+  private syncBuildablesInStorage(buildables: CommuneBuildable[]): CommuneBuildable[] {
+    const valid = buildables.filter((item) => (
+      item
+      && /^[\da-f-]{36}$/i.test(item.id)
+      && typeof item.owner === 'string'
+      && COMMUNE_BUILD_CATALOG.some((entry) => entry.kind === item.kind)
+      && Number.isFinite(item.x)
+      && Number.isFinite(item.y)
+      && Number.isFinite(item.rotation)
+    ));
+    const wantedIds = new Set(valid.map((item) => item.id));
+    const wantedCars = this.listBuildableCarIds(valid);
+    const existing = this.listBuildables();
+    const before = JSON.stringify(existing);
+    for (const item of existing) {
+      if (wantedIds.has(item.id)) continue;
+      this.ctx.storage.sql.exec('DELETE FROM commune_buildables WHERE id = ?', item.id);
+    }
+    const storedCars = this.ctx.storage.sql.exec<{ id: string }>(
+      "SELECT id FROM commune_parked_cars WHERE id LIKE 'buildcar-%'",
+    ).toArray();
+    for (const car of storedCars) {
+      if (!wantedCars.has(car.id)) {
+        this.ctx.storage.sql.exec('DELETE FROM commune_parked_cars WHERE id = ?', car.id);
+      }
+    }
+    for (const item of valid) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO commune_buildables (id, owner, kind, x, y, rotation, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, kind = excluded.kind`,
+        item.id,
+        item.owner,
+        item.kind,
+        item.x,
+        item.y,
+        item.rotation,
+        item.createdAt,
+      );
+      if (item.kind === 'sports-car') {
+        this.ctx.storage.sql.exec(
+          'INSERT OR IGNORE INTO commune_parked_cars (id, x, y, heading) VALUES (?, ?, ?, ?)',
+          communeBuildCarId(item.id),
+          item.x,
+          item.y,
+          item.rotation,
+        );
+      }
+    }
+    const snapshot = this.listBuildables();
+    if (JSON.stringify(snapshot) !== before) {
+      this.broadcast({ type: 'buildables', buildables: snapshot, cars: this.listCarPositions() });
+    }
+    return snapshot;
   }
 
   private electMowerAuthority(preferredClientId?: string): {

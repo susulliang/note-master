@@ -20,6 +20,11 @@ import {
   type CommuneRoomBannerStroke,
   type CommuneRoomLoadout,
 } from './commune-room';
+import {
+  COMMUNE_BUILD_CATALOG,
+  type CommuneBuildable,
+  type CommuneBuildKind,
+} from '../shared/commune-buildables';
 import { RosterRoom, type RosterCell } from './roster-room';
 import { handleChatApi } from './chat-api';
 import { handleCollabApi } from './collab-api';
@@ -1232,6 +1237,32 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            credited INTEGER NOT NULL DEFAULT 0
          )`
       ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_buildables (
+           id TEXT PRIMARY KEY,
+           owner_username TEXT NOT NULL,
+           kind TEXT NOT NULL,
+           x REAL NOT NULL,
+           y REAL NOT NULL,
+           rotation REAL NOT NULL DEFAULT 0,
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE INDEX IF NOT EXISTS commune_buildables_owner_idx
+         ON commune_buildables (owner_username, created_at)`
+      ).run();
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_build_charges (
+           id TEXT PRIMARY KEY,
+           username TEXT NOT NULL,
+           kind TEXT NOT NULL,
+           price INTEGER NOT NULL,
+           paid INTEGER NOT NULL DEFAULT 0,
+           ledgered INTEGER NOT NULL DEFAULT 0,
+           created_at INTEGER NOT NULL
+         )`
+      ).run();
       // NPC challenge personas — seeded from worker/npc/*.json on first use.
       await env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS npc_personas (
@@ -1996,6 +2027,234 @@ async function loadCommuneBanners(env: Env): Promise<CommuneRoomBanner[]> {
   }));
 }
 
+async function loadCommuneBuildables(env: Env): Promise<CommuneBuildable[]> {
+  const rows = await env.DB.prepare(
+    `SELECT id, owner_username, kind, x, y, rotation, created_at
+     FROM commune_buildables ORDER BY created_at, id`,
+  ).all<{
+    id: string;
+    owner_username: string;
+    kind: CommuneBuildKind;
+    x: number;
+    y: number;
+    rotation: number;
+    created_at: number;
+  }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    owner: row.owner_username,
+    kind: row.kind,
+    x: Number(row.x),
+    y: Number(row.y),
+    rotation: Number(row.rotation),
+    createdAt: Number(row.created_at),
+  }));
+}
+
+async function syncCommuneBuildables(env: Env): Promise<CommuneBuildable[]> {
+  const buildables = await loadCommuneBuildables(env);
+  await env.COMMUNE_ROOM.getByName('main-plaza').syncBuildables(buildables);
+  return buildables;
+}
+
+async function handleCommuneBuildPlace(
+  request: Request,
+  env: Env,
+  user: AuthUserRow,
+): Promise<Response> {
+  if (Number(request.headers.get('content-length') ?? 0) > 4_096) {
+    return authJson({ error: 'Request is too large' }, 413);
+  }
+  let payload: { id?: unknown; kind?: unknown; x?: unknown; y?: unknown; rotation?: unknown };
+  try {
+    payload = await request.json() as typeof payload;
+  } catch {
+    return authJson({ error: 'Invalid JSON body' }, 400);
+  }
+  const id = typeof payload.id === 'string' ? payload.id : '';
+  const kind = payload.kind as CommuneBuildKind;
+  const entry = COMMUNE_BUILD_CATALOG.find((item) => item.kind === kind);
+  const rawX = Number(payload.x);
+  const rawY = Number(payload.y);
+  const rawRotation = Number(payload.rotation ?? 0);
+  if (
+    !/^[\da-f-]{36}$/i.test(id)
+    || !entry
+    || !Number.isFinite(rawX)
+    || !Number.isFinite(rawY)
+    || !Number.isFinite(rawRotation)
+  ) return authJson({ error: 'Choose a valid build and location.' }, 400);
+
+  await ensureSpiceSchema(env);
+  const existing = await env.DB.prepare(
+    `SELECT id, owner_username, kind, x, y, rotation, created_at
+     FROM commune_buildables WHERE id = ?`,
+  ).bind(id).first<{
+    id: string;
+    owner_username: string;
+    kind: CommuneBuildKind;
+    x: number;
+    y: number;
+    rotation: number;
+    created_at: number;
+  }>();
+  if (existing) {
+    if (existing.owner_username !== user.username || existing.kind !== kind) {
+      return authJson({ error: 'That build request id is already in use.' }, 409);
+    }
+    const buildables = await syncCommuneBuildables(env);
+    const balance = await env.DB.prepare('SELECT spice FROM auth_users WHERE username = ?')
+      .bind(user.username).first<{ spice: number }>();
+    return authJson({
+      building: buildables.find((item) => item.id === id),
+      spice: Number(balance?.spice ?? user.spice ?? 0),
+    });
+  }
+
+  const rotation = ((rawRotation % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const x = Math.round(rawX / 8) * 8;
+  const y = Math.round(rawY / 8) * 8;
+  try {
+    await syncCommuneBuildables(env);
+  } catch {
+    return authJson({ error: 'The town is reconnecting. Try building again shortly.' }, 503);
+  }
+  let placement: { ok: boolean; error?: string };
+  try {
+    placement = await env.COMMUNE_ROOM.getByName('main-plaza')
+      .validateBuildPlacement(user.username, kind, x, y, rotation);
+  } catch {
+    return authJson({ error: 'The town is reconnecting. Try building again shortly.' }, 503);
+  }
+  if (!placement.ok) return authJson({ error: placement.error ?? 'That spot is not available.' }, 400);
+
+  const now = Date.now();
+  const statements = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO commune_build_charges
+       (id, username, kind, price, paid, ledgered, created_at)
+       VALUES (?, ?, ?, ?, 0, 0, ?)`,
+    ).bind(id, user.username, kind, entry.price, now),
+    env.DB.prepare(
+      `UPDATE auth_users SET spice = spice - ?, updated_at = ?
+       WHERE username = ? AND spice >= ? AND changes() = 1`,
+    ).bind(entry.price, now, user.username, entry.price),
+    env.DB.prepare(
+      `UPDATE commune_build_charges SET paid = 1
+       WHERE id = ? AND username = ? AND paid = 0 AND changes() = 1`,
+    ).bind(id, user.username),
+    env.DB.prepare(
+      `INSERT INTO commune_buildables
+       (id, owner_username, kind, x, y, rotation, created_at)
+       SELECT id, username, kind, ?, ?, ?, created_at
+       FROM commune_build_charges
+       WHERE id = ? AND username = ? AND paid = 1 AND changes() = 1`,
+    ).bind(x, y, rotation, id, user.username),
+    env.DB.prepare(
+      `INSERT INTO spice_ledger (username, delta, reason, detail, created_at)
+       SELECT username, -price, 'commune-build', ?, ?
+       FROM commune_build_charges
+       WHERE id = ? AND username = ? AND paid = 1 AND ledgered = 0
+         AND EXISTS (SELECT 1 FROM commune_buildables WHERE id = ?)`,
+    ).bind(`build:${id}:${kind}`, now, id, user.username, id),
+    env.DB.prepare(
+      `UPDATE commune_build_charges SET ledgered = 1
+       WHERE id = ? AND username = ? AND paid = 1 AND ledgered = 0 AND changes() = 1`,
+    ).bind(id, user.username),
+    env.DB.prepare(
+      'DELETE FROM commune_build_charges WHERE id = ? AND username = ? AND paid = 0',
+    ).bind(id, user.username),
+  ]);
+  const building = await env.DB.prepare(
+    `SELECT id, owner_username, kind, x, y, rotation, created_at
+     FROM commune_buildables WHERE id = ? AND owner_username = ?`,
+  ).bind(id, user.username).first<{
+    id: string;
+    owner_username: string;
+    kind: CommuneBuildKind;
+    x: number;
+    y: number;
+    rotation: number;
+    created_at: number;
+  }>();
+  if (!building) {
+    const balance = await env.DB.prepare('SELECT spice FROM auth_users WHERE username = ?')
+      .bind(user.username).first<{ spice: number }>();
+    const charge = await env.DB.prepare(
+      'SELECT paid FROM commune_build_charges WHERE id = ? AND username = ?',
+    ).bind(id, user.username).first<{ paid: number }>();
+    if (charge?.paid) return authJson({ error: 'Your build is still being processed. Try again shortly.' }, 409);
+    return authJson({
+      error: `Not enough spice — this build costs ${entry.price} spice.`,
+      spice: Number(balance?.spice ?? user.spice ?? 0),
+    }, statements[1]?.meta.changes ? 500 : 400);
+  }
+
+  const buildingRecord: CommuneBuildable = {
+    id: building.id,
+    owner: building.owner_username,
+    kind: building.kind,
+    x: Number(building.x),
+    y: Number(building.y),
+    rotation: Number(building.rotation),
+    createdAt: Number(building.created_at),
+  };
+  const buildables = await loadCommuneBuildables(env);
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').syncBuildables(buildables);
+  } catch {
+    console.warn(JSON.stringify({ event: 'commune_build_sync_pending', buildId: id }));
+  }
+  const balance = await env.DB.prepare('SELECT spice FROM auth_users WHERE username = ?')
+    .bind(user.username).first<{ spice: number }>();
+  return authJson({ building: buildingRecord, spice: Number(balance?.spice ?? 0) }, 201);
+}
+
+async function handleCommuneBuildDemolition(
+  env: Env,
+  user: AuthUserRow,
+  buildingId: string,
+): Promise<Response> {
+  if (!/^[\da-f-]{36}$/i.test(buildingId)) return authJson({ error: 'Invalid build id.' }, 400);
+  await ensureSpiceSchema(env);
+  let check: { ok: boolean; error?: string; building?: CommuneBuildable };
+  try {
+    check = await env.COMMUNE_ROOM.getByName('main-plaza')
+      .validateBuildDemolition(user.username, buildingId);
+  } catch {
+    return authJson({ error: 'The town is reconnecting. Try again shortly.' }, 503);
+  }
+  if (!check.ok || !check.building) return authJson({ error: check.error ?? 'That build is not available.' }, 400);
+  const entry = COMMUNE_BUILD_CATALOG.find((item) => item.kind === check.building?.kind);
+  if (!entry) return authJson({ error: 'Unknown build type.' }, 400);
+  const refund = Math.round(entry.price / 2);
+  const now = Date.now();
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      'DELETE FROM commune_buildables WHERE id = ? AND owner_username = ?',
+    ).bind(buildingId, user.username),
+    env.DB.prepare(
+      `UPDATE auth_users SET spice = spice + ?, updated_at = ?
+       WHERE username = ? AND changes() = 1`,
+    ).bind(refund, now, user.username),
+    env.DB.prepare(
+      `INSERT INTO spice_ledger (username, delta, reason, detail, created_at)
+       SELECT ?, ?, 'commune-build-refund', ?, ?
+       WHERE changes() = 1`,
+    ).bind(user.username, refund, `demolish:${buildingId}`, now),
+  ]);
+  if (!results[0]?.meta.changes) return authJson({ error: 'That structure was already removed.' }, 404);
+  const buildables = await loadCommuneBuildables(env);
+  try {
+    await env.COMMUNE_ROOM.getByName('main-plaza').syncBuildables(buildables);
+  } catch {
+    console.warn(JSON.stringify({ event: 'commune_build_remove_sync_pending', buildId: buildingId }));
+  }
+  const balance = await env.DB.prepare('SELECT spice FROM auth_users WHERE username = ?')
+    .bind(user.username).first<{ spice: number }>();
+  return authJson({ removed: buildingId, refund, spice: Number(balance?.spice ?? 0) });
+}
+
 /** Issue a single-use ticket for the browser's authenticated WebSocket upgrade. */
 async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
   if (Number(request.headers.get('content-length') ?? 0) > 8_192)
@@ -2008,6 +2267,7 @@ async function handleCommuneSocketTicket(request: Request, env: Env, user: AuthU
   }
 
   await ensureSpiceSchema(env);
+  await syncCommuneBuildables(env);
   const now = Date.now();
   await ensureCommuneDrops(env, now);
   const x = Math.max(24, Math.min(COMMUNE_WORLD_W - 24, Number(payload.x) || 800));
@@ -4183,6 +4443,23 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneSocketTicket(request, env, user);
+  }
+  if (path === '/api/commune/buildables' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneBuildPlace(request, env, user);
+  }
+  const buildableMatch = /^\/api\/commune\/buildables\/([^/]+)$/.exec(path);
+  if (buildableMatch && request.method === 'DELETE') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    let buildingId: string;
+    try {
+      buildingId = decodeURIComponent(buildableMatch[1]);
+    } catch {
+      return authJson({ error: 'Invalid build id.' }, 400);
+    }
+    return handleCommuneBuildDemolition(env, user, buildingId);
   }
   if (path === '/api/commune/spice/drops' && request.method === 'GET') {
     const user = await authBearerUser(request, env);
