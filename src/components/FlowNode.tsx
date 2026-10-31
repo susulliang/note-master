@@ -196,7 +196,6 @@ export interface FlowNodeProps {
   accent?: 'green' | 'blue' | 'red' | 'default';
   inputType?: 'text' | 'email' | 'tel' | 'textarea';
   width?: number;
-  disabled?: boolean;
   /** Visible textarea rows (defaults to 2) */
   textareaRows?: number;
   /** Focus this node's input once on mount (initial page focus target) */
@@ -625,7 +624,6 @@ function FlowNodeComponent({
   emailGlow,
   onMinimize,
   mono = false,
-  disabled = false,
   tip,
   showFirmware = false,
   showSkuLookup = false,
@@ -1068,7 +1066,6 @@ function FlowNodeComponent({
             onFocus={handleFocus}
             onBlur={onBlur}
             rows={textareaRows}
-            disabled={disabled}
             className={cn('resize-none text-sm', disabled && 'cursor-not-allowed opacity-55 grayscale')}
             placeholder="Type here..."
           />
@@ -1087,7 +1084,6 @@ function FlowNodeComponent({
               onChange={(e) => onChange(e.target.value)}
               onFocus={handleFocus}
               onBlur={onBlur}
-              disabled={disabled}
               className={cn('h-9 text-sm', mono && 'font-mono tracking-wide', disabled && 'cursor-not-allowed opacity-55 grayscale')}
               placeholder="Type here..."
             />
