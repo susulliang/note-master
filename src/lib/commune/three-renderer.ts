@@ -53,7 +53,7 @@ import { drawHangoutLabel, drawLabel } from './three-labels';
 import { createSkyMaterial } from './three-sky';
 import { animateWater, createWaterMaterial, createWaterSurface } from './three-water';
 import { createHuskoRig, updateHuskoRig, type HuskoRig } from './three-husko';
-import { loadCommuneModels, prepareCatGeometry, prepareDogGeometry } from './three-assets';
+import { loadCommuneModels, prepareCatGeometry } from './three-assets';
 import type {
   AvatarColors,
   CommuneThreeFrame,
@@ -103,7 +103,7 @@ export class CommuneThreeRenderer {
   private readonly buildingSites: { x: number; z: number; width: number; depth: number; rotation: number }[] = [];
   private readonly legacyBuildings: THREE.Group[] = [];
   private readonly catMeshes: THREE.InstancedMesh[] = [];
-  private huskoModel: THREE.Mesh | null = null;
+  private huskoModel: THREE.Group | null = null;
   private catsReady = false;
   private staticWorldFinalized = false;
   private readonly lanternLights: THREE.PointLight[] = [];
@@ -450,20 +450,39 @@ export class CommuneThreeRenderer {
     return this.catMeshes.length ? hash % this.catMeshes.length : 0;
   }
 
-  /** Husko swap: hide the voxel rig, pose the CC0 dog with the same math. */
+  /**
+   * Husko swap: use the GLTF scene directly (same path as the buildings,
+   * which are proven to render) instead of flattening to vertex colors —
+   * the flatten pass breaks textured models like the beagle.
+   */
   private applyDogModel(model: THREE.Group | null): void {
-    const prepared = model ? prepareDogGeometry(model) : null;
-    if (!prepared) return;
-    const material = prepared.textureMap
-      ? new THREE.MeshLambertMaterial({ map: prepared.textureMap })
-      : new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    const mesh = new THREE.Mesh(prepared.geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.visible = false;
-    mesh.name = 'husko-model';
-    this.scene.add(mesh);
-    this.huskoModel = mesh;
+    if (!model) return;
+    const wrapper = new THREE.Group();
+    wrapper.rotation.y = Math.PI / 2; // glTF +Z front → our +X forward
+    wrapper.add(model);
+    const box = new THREE.Box3();
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.setFromObject(wrapper);
+    box.getSize(size);
+    const scale = 104 / Math.max(size.x, 0.001);
+    wrapper.scale.setScalar(scale);
+    box.setFromObject(wrapper);
+    box.getCenter(center);
+    wrapper.position.set(-center.x, -box.min.y, -center.z);
+    const outer = new THREE.Group();
+    outer.add(wrapper);
+    outer.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+        object.frustumCulled = false;
+      }
+    });
+    outer.visible = false;
+    outer.name = 'husko-model';
+    this.scene.add(outer);
+    this.huskoModel = outer;
   }
 
   /**
@@ -939,6 +958,7 @@ export class CommuneThreeRenderer {
     this.addLantern(585, 805);
     this.addLantern(1015, 805);
     this.addMiniGameAreas();
+    this.addGroundscape();
 
     const treePositions: [number, number][] = [
       [480, 208], [1120, 208], [560, 260], [1040, 260],
@@ -1031,6 +1051,73 @@ export class CommuneThreeRenderer {
     };
     buildMergedMesh(lit, 'static-world', true);
     buildMergedMesh(doubleSided, 'static-world-double-sided', false);
+  }
+
+  /**
+   * Groundscape: district ground sections, cobble plaza, orchard furrows,
+   * wooden fences and low rock walls so the map reads like a lived-in town.
+   * Everything here is static Lambert — merged into the static draw call.
+   */
+  private addGroundscape(): void {
+    // District ground sections (front yards, quarters, working soil).
+    addGroundDisc(this.scene, 270, 430, 150, 96, '#b3a67f', 2, 20);    // spice store front
+    addGroundDisc(this.scene, 1330, 430, 150, 96, '#b3a67f', 2, 20);   // arcade front
+    addGroundDisc(this.scene, 230, 830, 122, 92, '#ab9f78', 2, 18);    // west homes
+    addGroundDisc(this.scene, 1370, 830, 122, 92, '#ab9f78', 2, 18);   // east homes
+    addGroundDisc(this.scene, 1870, 1190, 172, 122, '#8a6f4d', 2, 20); // orchard soil
+    addGroundDisc(this.scene, 2580, 700, 152, 82, '#7d9a5e', 2, 18);   // duck borough grass
+    // Cobble plaza rings around the fountain.
+    addGroundDisc(this.scene, 800, 600, 142, 142, '#c9c1a1', 3, 24);
+    addGroundDisc(this.scene, 800, 600, 118, 118, '#b7ae8d', 3, 24);
+    // Orchard furrows.
+    for (let row = -2; row <= 2; row++) {
+      addBox(this.scene, 1870, 3, 1190 + row * 34, 250, 3, 8, '#7a5f40');
+    }
+    // Fenced plots: orchard, duck borough, west homes garden.
+    this.addFenceLine(1700, 1080, 2040, 1080);
+    this.addFenceLine(1700, 1080, 1700, 1310);
+    this.addFenceLine(2040, 1080, 2040, 1310);
+    this.addFenceLine(2440, 710, 2560, 640);
+    this.addFenceLine(2560, 640, 2710, 665);
+    this.addFenceLine(650, 930, 650, 1080);
+    this.addFenceLine(650, 1080, 950, 1080);
+    // Low rock walls edging the golf green and bowling lane.
+    this.addRockWall(2680, 1170, 2960, 1170, 14);
+    this.addRockWall(2130, 1120, 2380, 1120, 12);
+    this.addRockWall(130, 520, 130, 780, 12);
+  }
+
+  private addFenceLine(x1: number, z1: number, x2: number, z2: number): void {
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    const length = Math.hypot(dx, dz) || 1;
+    const posts = Math.max(2, Math.round(length / 30));
+    for (let index = 0; index <= posts; index++) {
+      const t = index / posts;
+      addBox(this.scene, x1 + dx * t, 0, z1 + dz * t, 3.5, 12, 3.5, '#8a6a44');
+    }
+    for (const railY of [6, 10]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(length, 2.5, 2.5), material('#9a7748'));
+      rail.position.set((x1 + x2) / 2, railY, (z1 + z2) / 2);
+      rail.rotation.y = Math.atan2(-dz, dx);
+      rail.castShadow = true;
+      rail.receiveShadow = true;
+      this.scene.add(rail);
+    }
+  }
+
+  private addRockWall(x1: number, z1: number, x2: number, z2: number, count: number): void {
+    for (let index = 0; index <= count; index++) {
+      const t = index / count;
+      const jitter = ((index * 37) % 7) - 3;
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(6.5, 0), material('#93917f'));
+      rock.position.set(x1 + (x2 - x1) * t + jitter, 3.5, z1 + (z2 - z1) * t + jitter * 0.4);
+      rock.rotation.set(index * 0.7, index * 1.1, index * 0.3);
+      rock.scale.set(1.15, 0.62, 0.95);
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      this.scene.add(rock);
+    }
   }
 
   private addMiniGameAreas(): void {

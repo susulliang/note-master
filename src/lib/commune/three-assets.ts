@@ -94,10 +94,7 @@ export function prepareCatGeometry(root: THREE.Object3D): PreparedAnimalGeometry
   return prepareQuadrupedGeometry(root, 20);
 }
 
-/** Husko replacement: CC0 dog normalized to the giant-husky footprint. */
-export function prepareDogGeometry(root: THREE.Object3D): PreparedAnimalGeometry | null {
-  return prepareQuadrupedGeometry(root, 104);
-}
+/** Husko replacement uses the raw GLTF scene (see three-renderer.applyDogModel). */
 
 export interface PreparedAnimalGeometry {
   geometry: THREE.BufferGeometry;
