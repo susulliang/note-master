@@ -684,11 +684,14 @@ export class CommuneThreeRenderer {
       this.camera.zoom = zoom;
       this.camera.updateProjectionMatrix();
     }
-    this.activeCamera = firstPerson ? this.perspectiveCamera : this.camera;
+    // Past 2.5× the orthographic diorama hands off to a WoW-style perspective
+    // camera that follows the character; at 5× it becomes true first-person.
+    const followMode = firstPerson || frame.zoom > 2.5;
+    this.activeCamera = followMode ? this.perspectiveCamera : this.camera;
     this.skyMesh.visible = true;
     this.boundaryGroup.visible = firstPerson;
     this.firstPersonArms.visible = firstPerson;
-    this.updateShadowFrustum(firstPerson ? 5 : zoom);
+    this.updateShadowFrustum(followMode ? 5 : zoom);
     const delta = this.lastRenderTime
       ? THREE.MathUtils.clamp(frame.time - this.lastRenderTime, 0, 0.05)
       : 1 / 60;
@@ -711,6 +714,21 @@ export class CommuneThreeRenderer {
         55 + Math.sin(pitch) * 180,
         this.focus.z + Math.cos(yaw) * horizontal * 180
       );
+      this.perspectiveCamera.lookAt(this.lookAt);
+      this.perspectiveCamera.updateMatrixWorld();
+    } else if (followMode) {
+      // Over-the-shoulder follow: distance/height shrink as zoom approaches
+      // first-person, keeping the same ~40° tilt as the isometric view.
+      const t = THREE.MathUtils.clamp((frame.zoom - 2.5) / 2.45, 0, 1);
+      const yaw = frame.cameraYaw;
+      const dist = THREE.MathUtils.lerp(640, 175, t);
+      const height = THREE.MathUtils.lerp(545, 95, t);
+      this.perspectiveCamera.position.set(
+        this.focus.x - Math.sin(yaw) * dist,
+        height,
+        this.focus.z - Math.cos(yaw) * dist
+      );
+      this.lookAt.set(this.focus.x, 12, this.focus.z);
       this.perspectiveCamera.lookAt(this.lookAt);
       this.perspectiveCamera.updateMatrixWorld();
     } else {

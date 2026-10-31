@@ -82,7 +82,50 @@ function mergeSceneToGeometry(root: THREE.Object3D): { geometry: THREE.BufferGeo
   const merged = mergeGeometries(sources, false);
   sources.forEach((geometry) => geometry.dispose());
   if (!merged) return null;
+  // Textured models: bake the texture into per-vertex colors so instancing
+  // keeps working and the model can't render white if the map path misbehaves.
+  if (textureMap) {
+    const sampled = sampleTextureColors(merged, textureMap);
+    if (sampled) {
+      merged.setAttribute('color', new THREE.BufferAttribute(sampled, 3));
+      textureMap = null;
+    }
+  }
   return { geometry: merged, textureMap };
+}
+
+/** One-time CPU sampling of a texture into per-vertex colors (uv-mapped). */
+function sampleTextureColors(geometry: THREE.BufferGeometry, texture: THREE.Texture): Float32Array | null {
+  const uv = geometry.getAttribute('uv');
+  const image = texture.image as ImageBitmap | HTMLImageElement | undefined;
+  if (!uv || !image || !image.width || !image.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(image as CanvasImageSource, 0, 0);
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  } catch {
+    return null;
+  }
+  const count = uv.count;
+  const colors = new Float32Array(count * 3);
+  const color = new THREE.Color();
+  for (let index = 0; index < count; index++) {
+    const u = uv.getX(index);
+    const v = uv.getY(index);
+    const px = Math.min(canvas.width - 1, Math.max(0, Math.floor(u * canvas.width)));
+    const py = Math.min(canvas.height - 1, Math.max(0, Math.floor((texture.flipY ? 1 - v : v) * canvas.height)));
+    const offset = (py * canvas.width + px) * 4;
+    color.setRGB(pixels[offset] / 255, pixels[offset + 1] / 255, pixels[offset + 2] / 255, THREE.SRGBColorSpace);
+    colors[index * 3] = color.r;
+    colors[index * 3 + 1] = color.g;
+    colors[index * 3 + 2] = color.b;
+  }
+  return colors;
 }
 
 /**
