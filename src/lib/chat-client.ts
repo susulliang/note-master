@@ -149,6 +149,7 @@ export interface TeamBoardCard {
   description: string;
   status: TeamBoardStatus;
   severity: TeamBoardSeverity;
+  visibility: 'private' | 'registered';
   ticketNumber: string;
   isBeacon: boolean;
   owner: string;
@@ -475,6 +476,7 @@ export async function createTeamBoardCard(payload: {
   severity?: TeamBoardSeverity;
   ticketNumber?: string;
   isBeacon?: boolean;
+  visibility?: 'private' | 'registered';
   sourceType?: string;
   sourceId?: string;
   sourceUrl?: string;
@@ -490,7 +492,7 @@ export async function createTeamBoardCard(payload: {
 
 export async function updateTeamBoardCard(
   id: string,
-  patch: Partial<Pick<TeamBoardCard, 'title' | 'description' | 'status' | 'severity' | 'ticketNumber' | 'owner'>>,
+  patch: Partial<Pick<TeamBoardCard, 'title' | 'description' | 'status' | 'severity' | 'ticketNumber' | 'owner' | 'visibility'>>,
 ): Promise<void> {
   await requestJson(`/api/collab/board/cards/${encodeURIComponent(id)}`, {
     method: 'PATCH',

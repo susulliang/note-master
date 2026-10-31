@@ -2580,7 +2580,7 @@ Additional information (if needed): ${additional}`;
       onToggleHistory={handleToggleHistory}
       onUtilitySlot={setRailControlsSlot}
       username={authUser?.username}
-      hideDock={kittyHelpOpen || workView === 'login'}
+      hideDock={workView === 'login'}
     >
     <div className="relative h-full w-full overflow-hidden bg-background font-sans text-foreground">
       <div className="flex h-full w-full">
@@ -3374,6 +3374,7 @@ Additional information (if needed): ${additional}`;
           username={authUser.username}
                   isChatOpen={workView === 'chat'}
                   onOpenChat={openChatNotification}
+          onOpenBoard={(cardId) => navigate(`/board?card=${encodeURIComponent(cardId)}`)}
         />
       )}
 

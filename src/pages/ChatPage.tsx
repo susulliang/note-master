@@ -6,6 +6,7 @@ import {
   BarChart3,
   Check,
   CheckSquare2,
+  ClipboardList,
   ClipboardPaste,
   Copy,
   Download,
@@ -86,8 +87,12 @@ import {
   fetchChatGlobalTitle,
   fetchCollabDocuments,
   fetchPinnedChatDocument,
+  getTeamBoardCard,
+  listTeamBoardCards,
   pinChatDocument,
+  shareTeamBoardCardWithChat,
   setChatDocumentPermission,
+  updateTeamBoardCard,
   updateChatRoomTitle,
   unpinChatDocument,
   type ChatConversation,
@@ -100,6 +105,9 @@ import {
   type CollabDriveFile,
   type CollabDocument,
   type PinnedCollabDocument,
+  type TeamBoardCard,
+  type TeamBoardCardDetail,
+  type TeamBoardStatus,
 } from '@/lib/chat-client';
 import { cn } from '@/lib/utils';
 import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
@@ -1044,6 +1052,102 @@ function PollMessageCard({
   );
 }
 
+function TeamBoardChatCard({ cardId }: { cardId: string }) {
+  const [detail, setDetail] = useState<TeamBoardCardDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    void getTeamBoardCard(cardId)
+      .then((result) => { if (active) setDetail(result); })
+      .catch(() => { if (active) setDetail(null); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [cardId]);
+
+  const save = async (patch: Parameters<typeof updateTeamBoardCard>[1]) => {
+    if (!detail || detail.permission === 'view') return;
+    try {
+      await updateTeamBoardCard(cardId, patch);
+      setDetail((current) => current ? {
+        ...current,
+        card: { ...current.card, ...patch },
+      } : current);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update this Team Board card.');
+    }
+  };
+
+  if (loading) {
+    return <div className="chat-team-board-embed chat-team-board-embed--loading">Loading Team Board context…</div>;
+  }
+  if (!detail) {
+    return <div className="chat-team-board-embed chat-team-board-embed--loading">This shared Team Board card is unavailable.</div>;
+  }
+
+  const { card } = detail;
+  const canEdit = detail.permission !== 'view';
+  const statusLabel: Record<TeamBoardStatus, string> = {
+    signal: 'Signal',
+    investigating: 'Investigating',
+    waiting: 'Waiting',
+    captured: 'Captured',
+  };
+
+  return (
+    <article className="chat-team-board-embed" aria-label={`Team Board card: ${card.title}`}>
+      <header className="chat-team-board-embed-header">
+        <span className="chat-team-board-embed-icon"><ClipboardList className="size-4" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="chat-team-board-embed-kicker">TEAM BOARD · {card.type.toUpperCase()}</span>
+          <input
+            aria-label="Shared card title"
+            defaultValue={card.title}
+            key={`${card.id}:${card.title}`}
+            maxLength={180}
+            disabled={!canEdit}
+            onBlur={(event) => {
+              const title = event.currentTarget.value.trim();
+              if (title && title !== card.title) void save({ title });
+              else if (!title) event.currentTarget.value = card.title;
+            }}
+          />
+        </span>
+        <span className={`chat-team-board-status-dot is-${card.status}`} title={statusLabel[card.status]} />
+      </header>
+      {(card.type === 'ticket' || card.type === 'incident') && card.ticketNumber && (
+        <div className="chat-team-board-ticket">Ticket {card.ticketNumber}</div>
+      )}
+      {canEdit ? (
+        <textarea
+          aria-label="Shared card context"
+          defaultValue={card.description}
+          key={`${card.id}:context:${card.updatedAt}`}
+          maxLength={12_000}
+          placeholder="Add shared context…"
+          onBlur={(event) => {
+            if (event.currentTarget.value !== card.description) void save({ description: event.currentTarget.value });
+          }}
+        />
+      ) : (
+        <p className="chat-team-board-context">{card.description || 'No additional context yet.'}</p>
+      )}
+      <footer>
+        <label>
+          <span>Status</span>
+          {canEdit ? (
+            <select value={card.status} onChange={(event) => void save({ status: event.target.value as TeamBoardStatus })}>
+              {(Object.keys(statusLabel) as TeamBoardStatus[]).map((status) => <option key={status} value={status}>{statusLabel[status]}</option>)}
+            </select>
+          ) : <strong>{statusLabel[card.status]}</strong>}
+        </label>
+        <span className="chat-team-board-owner">Owner · {card.owner}</span>
+        <a href={`/board?card=${encodeURIComponent(card.id)}`} target="_blank" rel="noreferrer">Open full card</a>
+      </footer>
+    </article>
+  );
+}
+
 function fixNewsImagePaths(markdown: string): string {
   return markdown.replace(
     /(!\[[^\]]*\]\()(?:(?:\.\.\/)|(?:\.\/))*assets\//g,
@@ -1264,6 +1368,10 @@ export default function ChatPage({
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
+  const [boardPickerOpen, setBoardPickerOpen] = useState(false);
+  const [boardCards, setBoardCards] = useState<TeamBoardCard[]>([]);
+  const [boardCardsLoading, setBoardCardsLoading] = useState(false);
+  const [sharingBoardCardId, setSharingBoardCardId] = useState<string | null>(null);
   const [drivePickerScope, setDrivePickerScope] = useState<'team' | 'personal'>('team');
   const [drivePickerFiles, setDrivePickerFiles] = useState<CollabDriveFile[]>([]);
   const [drivePickerQuery, setDrivePickerQuery] = useState('');
@@ -1802,6 +1910,40 @@ export default function ChatPage({
       setDrivePickerLoading(false);
     }
   }, [activeRoom.roomId]);
+
+  const loadTeamBoardCards = useCallback(async () => {
+    setBoardCardsLoading(true);
+    try {
+      setBoardCards(await listTeamBoardCards());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load Team Board cards.');
+    } finally {
+      setBoardCardsLoading(false);
+    }
+  }, []);
+
+  const sendTeamBoardCardToChat = useCallback(async (card: TeamBoardCard) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      toast.error('Reconnect to this chat before sharing a Team Board card.');
+      return;
+    }
+    if (sharingBoardCardId) return;
+    setSharingBoardCardId(card.id);
+    try {
+      await shareTeamBoardCardWithChat(card.id, activeRoom.roomId);
+      socket.send(JSON.stringify({
+        type: 'message:create',
+        markdown: `:::team-board-card ${card.id}`,
+      }));
+      setBoardPickerOpen(false);
+      toast.success('Team Board card shared with this chat.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not share this Team Board card.');
+    } finally {
+      setSharingBoardCardId(null);
+    }
+  }, [activeRoom.roomId, sharingBoardCardId]);
 
   const addDriveFileToDraft = useCallback(async (file: CollabDriveFile) => {
     if (sharingDriveFileId) return;
@@ -3668,6 +3810,7 @@ export default function ChatPage({
                 const grouped = previous?.username === message.username && message.createdAt - previous.createdAt < 5 * 60_000;
                 const news = message.source === 'news';
                 const renderedMarkdown = news ? fixNewsImagePaths(message.markdown) : message.markdown;
+                const teamBoardCardId = /^:::team-board-card\s+([0-9a-f-]{36})\s*$/i.exec(message.markdown.trim())?.[1];
                 const stickerOnly = /^!\[sticker:[\s\S]*\]\(\/api\/chat\/stickers\/(?:public|private)\/[^)\s]+\)$/i
                   .test(message.markdown.trim());
                 const mediaOnly = !news && isStandaloneMediaMarkdown(message.markdown);
@@ -3750,7 +3893,9 @@ export default function ChatPage({
                             ? 'rounded-tr-md border-accent/15 bg-accent/[0.09]'
                             : 'rounded-tl-md border-border/70 bg-card/65'),
                       )}>
-                        {message.poll && (message.contentType === 'poll' || message.contentType === 'poll_result')
+                        {teamBoardCardId
+                          ? <TeamBoardChatCard cardId={teamBoardCardId} />
+                          : message.poll && (message.contentType === 'poll' || message.contentType === 'poll_result')
                           ? (
                             <PollMessageCard
                               poll={message.poll}
@@ -3770,7 +3915,7 @@ export default function ChatPage({
                             />
                           )
                           : <MarkdownBody markdown={renderedMarkdown} />}
-                        {!stickerOnly && !mediaOnly && message.contentType === 'markdown' && (
+                        {!teamBoardCardId && !stickerOnly && !mediaOnly && message.contentType === 'markdown' && (
                           <LinkPreviewCards markdown={renderedMarkdown} />
                         )}
                         {message.contentType === 'markdown' && message.updatedAt > message.createdAt + 1_000 && !news && (
@@ -3934,6 +4079,16 @@ export default function ChatPage({
                   setDrivePickerOpen(opening);
                   if (opening) void loadDrivePickerFiles(drivePickerScope);
                 }, sharingDriveFileId !== null)}
+                {toolbarButton('Share a Team Board card', <ClipboardList className="size-3.5" />, () => {
+                  const opening = !boardPickerOpen;
+                  setBoardPickerOpen(opening);
+                  if (opening) {
+                    setDrivePickerOpen(false);
+                    setPollComposerOpen(false);
+                    setStickerPanelOpen(false);
+                    void loadTeamBoardCards();
+                  }
+                }, sharingBoardCardId !== null)}
                 {toolbarButton('Create a quick poll (/poll)', <BarChart3 className="size-3.5" />, () => {
                   const opening = !pollComposerOpen;
                   setPollComposerOpen(opening);
@@ -3952,6 +4107,38 @@ export default function ChatPage({
                   onChange={(event) => void handleMediaFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
+
+              {boardPickerOpen && (
+                <section className="chat-board-card-picker" aria-label="Share a Team Board card">
+                  <header>
+                    <span><ClipboardList className="size-4" /> Share a Team Board card</span>
+                    <button type="button" aria-label="Close card picker" onClick={() => setBoardPickerOpen(false)}><X className="size-3.5" /></button>
+                  </header>
+                  {boardCardsLoading ? (
+                    <p className="chat-board-card-picker-empty">Loading your visible cards…</p>
+                  ) : boardCards.length ? (
+                    <div className="chat-board-card-picker-list">
+                      {boardCards.map((card) => (
+                        <button
+                          key={card.id}
+                          type="button"
+                          disabled={sharingBoardCardId !== null}
+                          onClick={() => void sendTeamBoardCardToChat(card)}
+                        >
+                          <span className={`chat-team-board-status-dot is-${card.status}`} />
+                          <span className="min-w-0 flex-1">
+                            <strong>{card.title}</strong>
+                            <small>{card.type} · {card.owner}{card.visibility === 'registered' ? ' · everyone' : ''}</small>
+                          </span>
+                          {sharingBoardCardId === card.id ? <span className="text-[9px] text-accent">Sharing…</span> : <Send className="size-3.5 text-accent" />}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="chat-board-card-picker-empty">No cards are visible to you yet.</p>
+                  )}
+                </section>
+              )}
 
               {mediaUploadProgress !== null && (
                 <div className="chat-media-upload-progress" role="status" aria-live="polite">

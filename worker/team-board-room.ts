@@ -69,6 +69,32 @@ export class TeamBoardRoom extends DurableObject<Env> {
     }
   }
 
+  async broadcastAnnouncement(payload: {
+    cardId: string;
+    title: string;
+    message: string;
+    author: string;
+  }): Promise<void> {
+    const now = Date.now();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const user = attachment(socket);
+      if (
+        !user?.username ||
+        now - user.lastSeenAt > PRESENCE_TTL_MS ||
+        user.username.toLowerCase() === payload.author.toLowerCase()
+      ) continue;
+      send(socket, {
+        type: 'board:announcement',
+        cardId: payload.cardId,
+        title: payload.title.slice(0, 180),
+        message: payload.message.slice(0, 500),
+        author: payload.author,
+        at: now,
+      });
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
@@ -177,6 +203,7 @@ export class TeamBoardRoom extends DurableObject<Env> {
       WHERE card.id = ? AND (
         card.owner = ? COLLATE NOCASE OR card.created_by = ? COLLATE NOCASE
         OR member.username IS NOT NULL
+        OR card.visibility = 'registered'
         OR EXISTS (
           SELECT 1 FROM team_board_card_rooms shared
           WHERE shared.card_id = card.id AND (

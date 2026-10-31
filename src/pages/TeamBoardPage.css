@@ -6,7 +6,7 @@
   flex-direction: column;
   gap: 14px;
   overflow: hidden;
-  padding: 20px clamp(12px, 2vw, 28px) 82px;
+  padding: 18px clamp(12px, 2vw, 28px) 18px;
   color: var(--foreground);
   background:
     radial-gradient(ellipse at 78% -12%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 46%),
@@ -258,6 +258,92 @@
   scrollbar-color: color-mix(in srgb, var(--foreground) 20%, transparent) transparent;
 }
 
+.team-board-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  border-radius: 14px;
+  background-color: color-mix(in srgb, var(--card) 18%, var(--background));
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 17%, transparent) .7px, transparent .7px);
+  background-size: 22px 22px;
+  cursor: grab;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+  touch-action: none;
+}
+
+.team-board-canvas:active {
+  cursor: grabbing;
+}
+
+.team-board-canvas-inner {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.team-board-canvas-card {
+  position: absolute;
+  width: 264px;
+  cursor: default;
+}
+
+.team-board-canvas-card.is-dragging {
+  z-index: 5;
+  box-shadow: 0 18px 44px color-mix(in srgb, var(--background) 65%, transparent);
+  transition: none;
+}
+
+.team-board-card-grab {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.team-board-card-grab:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.team-board-card-grab:active {
+  cursor: grabbing;
+}
+
+.team-board-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-radius: 50%;
+  background: #8b949e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #8b949e 12%, transparent);
+}
+
+.team-board-status-dot.is-investigating {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.team-board-status-dot.is-waiting {
+  background: #f0883e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f0883e 14%, transparent);
+}
+
+.team-board-status-dot.is-captured {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
 .team-board-lane {
   display: flex;
   min-width: 0;
@@ -349,6 +435,10 @@
   animation: team-board-card-in 180ms ease both;
 }
 
+.team-board-card.team-board-canvas-card {
+  position: absolute;
+}
+
 .team-board-card:hover {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
@@ -398,6 +488,10 @@
 .team-board-card-topline {
   justify-content: space-between;
   gap: 7px;
+}
+
+.team-board-canvas-card .team-board-card-topline {
+  padding: 7px 8px 0;
 }
 
 .team-board-type-chip {
@@ -775,6 +869,79 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.team-board-visibility-toggle {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.team-board-visibility-copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.team-board-visibility-copy > span {
+  display: grid;
+  gap: 2px;
+}
+
+.team-board-visibility-copy strong {
+  color: var(--foreground);
+  font-size: 9px;
+}
+
+.team-board-visibility-copy small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.team-board-visibility-toggle input {
+  width: 30px;
+  height: 17px;
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.team-board-visibility-toggle input::before {
+  display: block;
+  width: 11px;
+  height: 11px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  content: "";
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.team-board-visibility-toggle input:checked {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.team-board-visibility-toggle input:checked::before {
+  background: var(--accent);
+  transform: translateX(13px);
+}
+
+.team-board-visibility-toggle input:disabled {
+  cursor: not-allowed;
+  opacity: .6;
 }
 
 .team-board-member-list small {
@@ -1232,12 +1399,11 @@
 }
 
 @media (max-width: 1080px) {
-  .team-board-lanes { grid-template-columns: repeat(4, minmax(230px, 1fr)); }
   .team-board-inspector { width: min(360px, 39vw); min-width: 280px; }
 }
 
 @media (max-width: 760px) {
-  .team-board-page { padding: 12px 10px 90px; gap: 10px; }
+  .team-board-page { padding: 12px 10px; gap: 10px; }
   .team-board-header { align-items: flex-start; flex-direction: column; gap: 10px; }
   .team-board-heading { width: 100%; }
   .team-board-heading h1 { font-size: 17px; }
@@ -1247,10 +1413,8 @@
   .team-board-new-button { min-height: 33px; padding: 0 8px; font-size: 8px; }
   .team-board-toolbar { gap: 6px; }
   .team-board-presence-summary { font-size: 8px; }
-  .team-board-lanes { grid-template-columns: repeat(4, minmax(78vw, 1fr)); gap: 8px; scroll-snap-type: x mandatory; }
-  .team-board-lane { scroll-snap-align: start; }
   .team-board-workspace.has-selection { position: relative; }
-  .team-board-workspace.has-selection .team-board-lanes { display: none; }
+  .team-board-workspace.has-selection .team-board-canvas { display: none; }
   .team-board-inspector { width: 100%; min-width: 0; flex: 1; }
   .team-board-inspector-header > button { width: 38px; height: 38px; }
   .team-board-create-types { grid-template-columns: repeat(2, minmax(0, 1fr)); }

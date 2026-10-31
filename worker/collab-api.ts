@@ -653,6 +653,7 @@ async function deleteTask(request: Request, env: Env, username: string, id: stri
 type TeamBoardCardType = 'ticket' | 'incident' | 'announcement' | 'custom';
 type TeamBoardStatus = 'signal' | 'investigating' | 'waiting' | 'captured';
 type TeamBoardSeverity = 'low' | 'normal' | 'high' | 'critical';
+type TeamBoardVisibility = 'private' | 'registered';
 
 interface TeamBoardCardRow {
   id: string;
@@ -661,6 +662,7 @@ interface TeamBoardCardRow {
   description: string;
   status: TeamBoardStatus;
   severity: TeamBoardSeverity;
+  visibility: TeamBoardVisibility;
   ticket_number: string;
   is_beacon: number;
   owner: string;
@@ -683,6 +685,7 @@ function teamBoardCardPublic(row: TeamBoardCardRow) {
     description: row.description,
     status: row.status,
     severity: row.severity,
+    visibility: row.visibility ?? 'private',
     ticketNumber: row.ticket_number,
     isBeacon: row.is_beacon === 1,
     owner: row.owner,
@@ -704,7 +707,7 @@ async function teamBoardPermission(
   cardId: string,
 ): Promise<'owner' | 'edit' | 'view' | null> {
   const row = await env.DB.prepare(`
-    SELECT card.owner, card.created_by, member.permission,
+    SELECT card.owner, card.created_by, card.visibility, member.permission,
       EXISTS (
         SELECT 1 FROM team_board_card_rooms shared
         WHERE shared.card_id = card.id AND (
@@ -722,6 +725,7 @@ async function teamBoardPermission(
       card.owner = ? COLLATE NOCASE
       OR card.created_by = ? COLLATE NOCASE
       OR member.username IS NOT NULL
+      OR card.visibility = 'registered'
       OR EXISTS (
         SELECT 1 FROM team_board_card_rooms shared
         WHERE shared.card_id = card.id AND (
@@ -734,11 +738,11 @@ async function teamBoardPermission(
       )
     )
   `).bind(username, username, username, cardId, username, username, username, username)
-    .first<{ owner: string; created_by: string; permission: 'view' | 'edit' | null; shared_to_chat: number }>();
+    .first<{ owner: string; created_by: string; visibility: TeamBoardVisibility; permission: 'view' | 'edit' | null; shared_to_chat: number }>();
   if (!row) return null;
   if (row.owner.toLowerCase() === username.toLowerCase() || row.created_by.toLowerCase() === username.toLowerCase()) return 'owner';
   if (row.shared_to_chat === 1) return 'edit';
-  return row.permission ?? 'edit';
+  return row.permission ?? (row.visibility === 'registered' ? 'view' : 'edit');
 }
 
 async function addTeamBoardActivity(
@@ -837,7 +841,7 @@ async function listTeamBoardCards(env: Env, username: string, url: URL): Promise
   const rows = await env.DB.prepare(`
     SELECT card.id, card.type, card.title,
       substr(card.description, 1, 500) AS description,
-      card.status, card.severity, card.ticket_number, card.is_beacon, card.owner, card.created_by,
+      card.status, card.severity, card.visibility, card.ticket_number, card.is_beacon, card.owner, card.created_by,
       card.source_type, card.source_id, card.source_url, '' AS source_snapshot,
       card.created_at, card.updated_at, card.closed_at,
       (SELECT COUNT(*) FROM team_board_comments comment WHERE comment.card_id = card.id) AS comment_count
@@ -847,6 +851,7 @@ async function listTeamBoardCards(env: Env, username: string, url: URL): Promise
       OR card.created_by = ?1 COLLATE NOCASE
       OR EXISTS (SELECT 1 FROM team_board_members member
         WHERE member.card_id = card.id AND member.username = ?1 COLLATE NOCASE)
+      OR card.visibility = 'registered'
       OR EXISTS (
         SELECT 1 FROM team_board_card_rooms shared
         WHERE shared.card_id = card.id AND (
@@ -982,13 +987,18 @@ async function createTeamBoardCard(
     ? payload.sourceUrl.slice(0, 500)
     : null;
   const sourceSnapshot = typeof payload?.sourceSnapshot === 'string' ? payload.sourceSnapshot.slice(0, 20_000) : '';
+  const visibility: TeamBoardVisibility = payload?.visibility === 'private'
+    ? 'private'
+    : type === 'announcement' || payload?.visibility === 'registered'
+      ? 'registered'
+      : 'private';
   await env.DB.prepare(`
     INSERT INTO team_board_cards
-      (id, type, title, description, status, severity, ticket_number, is_beacon, owner, created_by,
+      (id, type, title, description, status, severity, visibility, ticket_number, is_beacon, owner, created_by,
        source_type, source_id, source_url, source_snapshot, created_at, updated_at, closed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
   `).bind(
-    id, type as TeamBoardCardType, title, description, status, severity, ticketNumber, isBeacon ? 1 : 0,
+    id, type as TeamBoardCardType, title, description, status, severity, visibility, ticketNumber, isBeacon ? 1 : 0,
     username, username, sourceType, sourceId, sourceUrl, sourceSnapshot, now, now,
   ).run();
   const mentions = await resolveTeamBoardMentions(env, `${title}\n${description}`);
@@ -996,12 +1006,16 @@ async function createTeamBoardCard(
   await addTeamBoardActivity(env, id, username, 'created', `Created a ${type} card`);
   const room = env.TEAM_BOARD_ROOM.getByName('team-board');
   await room.broadcastCardChange(id, 'created');
+  if (type === 'announcement' && visibility === 'registered') {
+    await room.broadcastAnnouncement({ cardId: id, title, message: description, author: username });
+  }
   return collabJson({
     card: {
       id, type, title, description, status, severity, ticketNumber, owner: username, createdBy: username,
       sourceType, sourceId, sourceUrl, sourceSnapshot, createdAt: now, updatedAt: now, closedAt: null,
       commentCount: 0,
       isBeacon,
+      visibility,
     },
   }, 201);
 }
@@ -1017,10 +1031,10 @@ async function updateTeamBoardCard(
   const payload = await readPayload(request);
   if (!payload) return collabJson({ error: 'Invalid card update.' }, 400);
   const current = await env.DB.prepare(
-    'SELECT title, description, status, severity, ticket_number, owner FROM team_board_cards WHERE id = ?',
+    'SELECT title, description, status, severity, visibility, ticket_number, owner, type FROM team_board_cards WHERE id = ?',
   ).bind(cardId).first<{
     title: string; description: string; status: TeamBoardStatus; severity: TeamBoardSeverity;
-    ticket_number: string; owner: string;
+    visibility: TeamBoardVisibility; ticket_number: string; owner: string; type: TeamBoardCardType;
   }>();
   if (!current) return collabJson({ error: 'Card not found.' }, 404);
   const title = typeof payload.title === 'string'
@@ -1032,6 +1046,14 @@ async function updateTeamBoardCard(
     ? payload.status as TeamBoardStatus : current.status;
   const severity = ['low', 'normal', 'high', 'critical'].includes(payload.severity as string)
     ? payload.severity as TeamBoardSeverity : current.severity;
+  if (payload.visibility !== undefined && permission !== 'owner') {
+    return collabJson({ error: 'Only the card owner can change its visibility.' }, 403);
+  }
+  const visibility: TeamBoardVisibility = payload.visibility === 'registered'
+    ? 'registered'
+    : payload.visibility === 'private'
+      ? 'private'
+      : current.visibility;
   const ticketNumber = typeof payload.ticketNumber === 'string'
     ? payload.ticketNumber.trim().slice(0, 80) : current.ticket_number;
   let owner = current.owner;
@@ -1049,14 +1071,18 @@ async function updateTeamBoardCard(
   }
   const now = Date.now();
   await env.DB.prepare(`
-    UPDATE team_board_cards SET title = ?, description = ?, status = ?, severity = ?,
+    UPDATE team_board_cards SET title = ?, description = ?, status = ?, severity = ?, visibility = ?,
       ticket_number = ?, owner = ?, updated_at = ?, closed_at = ?
     WHERE id = ?
-  `).bind(title, description, status, severity, ticketNumber, owner, now, status === 'captured' ? now : null, cardId).run();
+  `).bind(title, description, status, severity, visibility, ticketNumber, owner, now, status === 'captured' ? now : null, cardId).run();
   const mentions = await resolveTeamBoardMentions(env, `${title}\n${description}`);
   await shareTeamBoardCardWithUsers(env, cardId, username, mentions, title);
   await addTeamBoardActivity(env, cardId, username, 'updated', 'Updated card details');
-  await env.TEAM_BOARD_ROOM.getByName('team-board').broadcastCardChange(cardId, 'updated');
+  const room = env.TEAM_BOARD_ROOM.getByName('team-board');
+  await room.broadcastCardChange(cardId, 'updated');
+  if (current.type === 'announcement' && current.visibility !== 'registered' && visibility === 'registered') {
+    await room.broadcastAnnouncement({ cardId, title, message: description, author: username });
+  }
   return collabJson({ ok: true });
 }
 
@@ -1067,7 +1093,12 @@ async function shareTeamBoardCard(
   cardId: string,
 ): Promise<Response> {
   const permission = await teamBoardPermission(env, username, cardId);
-  if (permission !== 'owner' && permission !== 'edit') return collabJson({ error: 'You cannot share this card.' }, 403);
+  if (!permission) return collabJson({ error: 'Card not found.' }, 404);
+  if (permission !== 'owner' && permission !== 'edit') {
+    const card = await env.DB.prepare('SELECT visibility FROM team_board_cards WHERE id = ?')
+      .bind(cardId).first<{ visibility: TeamBoardVisibility }>();
+    if (card?.visibility !== 'registered') return collabJson({ error: 'You cannot share this card.' }, 403);
+  }
   const payload = await readPayload(request);
   const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
   if (!isValidChatRoomId(roomId) || !await isChatRoomMember(env, username, roomId)) {

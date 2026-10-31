@@ -236,6 +236,8 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
       closed_at INTEGER
     )
   `).run();
+  await ensureColumn(env, 'team_board_cards', 'visibility',
+    "ALTER TABLE team_board_cards ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'registered'))");
   await env.DB.prepare(`
     CREATE INDEX IF NOT EXISTS team_board_cards_updated_idx
     ON team_board_cards (updated_at DESC, id)

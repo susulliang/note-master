@@ -1,5 +1,5 @@
 import { ListTodo, MessageCircle } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   chatSocketUrl,
   fetchChatConversations,
@@ -20,16 +20,27 @@ interface ChatNotificationBannerProps {
   username: string;
   isChatOpen: boolean;
   onOpenChat: (roomId: string) => void;
+  onOpenBoard: (cardId: string) => void;
+}
+
+interface PublicBoardAnnouncement {
+  id: string;
+  cardId: string;
+  title: string;
+  message: string;
+  author: string;
 }
 
 interface Notice {
   message?: ChatMessage;
   task?: CollabNotification;
+  announcement?: PublicBoardAnnouncement;
   roomTitle: string;
   roomId: string;
 }
 
 function preview(markdown: string): string {
+  if (/^:::team-board-card\s+[0-9a-f-]{36}\s*$/i.test(markdown.trim())) return 'Shared a Team Board card';
   return markdown
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -54,12 +65,16 @@ export default function ChatNotificationBanner({
   username,
   isChatOpen,
   onOpenChat,
+  onOpenBoard,
 }: ChatNotificationBannerProps) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [globalTitle, setGlobalTitle] = useState('Ecovacs crew');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [visible, setVisible] = useState(false);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [quickReplyDraft, setQuickReplyDraft] = useState('');
+  const [quickReplyError, setQuickReplyError] = useState('');
   const noticeTimerRef = useRef<number | null>(null);
   const removeTimerRef = useRef<number | null>(null);
   const seenIdsRef = useRef(new Set<string>());
@@ -68,10 +83,13 @@ export default function ChatNotificationBanner({
   const activeRoomIdRef = useRef<string | null>(activeRoomId);
   const isChatOpenRef = useRef(isChatOpen);
   const onOpenChatRef = useRef(onOpenChat);
+  const onOpenBoardRef = useRef(onOpenBoard);
+  const socketByRoomRef = useRef(new Map<string, WebSocket>());
   conversationsRef.current = conversations;
   activeRoomIdRef.current = activeRoomId;
   isChatOpenRef.current = isChatOpen;
   onOpenChatRef.current = onOpenChat;
+  onOpenBoardRef.current = onOpenBoard;
   const roomKey = useMemo(
     () => JSON.stringify(['global', ...conversations.map((conversation) => conversation.roomId)]),
     [conversations],
@@ -80,6 +98,35 @@ export default function ChatNotificationBanner({
   useEffect(() => () => {
     if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const onAnnouncement = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<PublicBoardAnnouncement>>).detail;
+      if (!detail?.id || !detail.cardId) return;
+      setNotice({
+        announcement: {
+          id: detail.id,
+          cardId: detail.cardId,
+          title: detail.title || 'Team announcement',
+          message: detail.message || '',
+          author: detail.author || '',
+        },
+        roomTitle: 'Team Board',
+        roomId: `team-board:${detail.cardId}`,
+      });
+      setQuickReplyOpen(false);
+      setVisible(true);
+      notifyCat(`Team announcement: ${detail.title || 'New update'}${detail.message ? ` — ${preview(detail.message)}` : ''}`);
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+      if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
+      noticeTimerRef.current = window.setTimeout(() => {
+        setVisible(false);
+        removeTimerRef.current = window.setTimeout(() => setNotice(null), 250);
+      }, 6_000);
+    };
+    window.addEventListener('econote:public-board-announcement', onAnnouncement);
+    return () => window.removeEventListener('econote:public-board-announcement', onAnnouncement);
   }, []);
 
   useEffect(() => {
@@ -293,6 +340,7 @@ export default function ChatNotificationBanner({
         }
         const socket = new WebSocket(chatSocketUrl(ticket));
         sockets.set(roomId, socket);
+        socketByRoomRef.current.set(roomId, socket);
         socket.onmessage = (event) => {
           try {
             const payload = JSON.parse(String(event.data)) as Record<string, unknown>;
@@ -323,6 +371,7 @@ export default function ChatNotificationBanner({
         };
         socket.onclose = () => {
           if (sockets.get(roomId) === socket) sockets.delete(roomId);
+          if (socketByRoomRef.current.get(roomId) === socket) socketByRoomRef.current.delete(roomId);
           if (!stopped) {
             const timer = window.setTimeout(() => {
               retryTimers.delete(timer);
@@ -348,12 +397,29 @@ export default function ChatNotificationBanner({
       retryTimers.forEach((timer) => window.clearTimeout(timer));
       sockets.forEach((socket) => socket.close(1000, 'Notification rooms changed'));
       sockets.clear();
+      socketByRoomRef.current.clear();
     };
   }, [globalTitle, roomKey, username]);
 
   if (!notice) return null;
   const message = notice.message;
   const task = notice.task;
+  const announcement = notice.announcement;
+  const sendQuickReply = (event: FormEvent) => {
+    event.preventDefault();
+    const markdown = quickReplyDraft.trim();
+    if (!markdown || !message || message.source !== 'chat') return;
+    const socket = socketByRoomRef.current.get(notice.roomId);
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setQuickReplyError('Reconnecting to this conversation…');
+      return;
+    }
+    socket.send(JSON.stringify({ type: 'message:create', markdown, parentId: message.id }));
+    setQuickReplyDraft('');
+    setQuickReplyError('');
+    setQuickReplyOpen(false);
+    setVisible(false);
+  };
   return (
     <div
       className={cn(
@@ -361,38 +427,82 @@ export default function ChatNotificationBanner({
         visible ? 'translate-y-0 opacity-100' : '-translate-y-3 opacity-0',
       )}
     >
-      <button
-        type="button"
-        onClick={() => {
-          if (task) void markCollabNotificationRead(task.id).catch(() => undefined);
-          onOpenChat(notice.roomId);
-        }}
-        className="flex w-full items-center gap-3 rounded-2xl border border-border/80 bg-card/90 p-3 text-left shadow-[0_16px_50px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-label={task ? task.title : `New message from ${message?.username ?? 'teammate'}`}
-      >
-        {task
-          ? <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><ListTodo className="size-5" /></span>
-          : <ChatAvatar
-            username={message?.username ?? ''}
-            profile={message?.avatar}
-            size={40}
-            className="shrink-0 rounded-xl bg-muted/60"
-          />}
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            {task ? <ListTodo className="size-3.5 text-accent" /> : <MessageCircle className="size-3.5 text-accent" />}
-            {task ? task.title : message?.username}
-            {!task && <span className="font-normal text-muted-foreground">in {notice.roomTitle}</span>}
-            {message?.mentions?.some((name) => name.toLowerCase() === username.toLowerCase()) && (
-              <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-accent">Mention</span>
-            )}
-          </span>
-          <span className="mt-1 block truncate text-xs text-muted-foreground">
-            {task ? task.body : preview(message?.markdown ?? '')}
-          </span>
-        </span>
-        <span className="shrink-0 text-[10px] font-medium text-accent">Open</span>
-      </button>
+      <div className="overflow-hidden rounded-2xl border border-border/80 bg-card/90 shadow-[0_16px_50px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+        <div className="flex items-center gap-3 p-3">
+          {task || announcement
+            ? <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent"><ListTodo className="size-5" /></span>
+            : <ChatAvatar
+              username={message?.username ?? ''}
+              profile={message?.avatar}
+              size={40}
+              className="shrink-0 rounded-xl bg-muted/60"
+            />}
+          <button
+            type="button"
+            onClick={() => {
+              if (task) {
+                void markCollabNotificationRead(task.id).catch(() => undefined);
+                onOpenChat(notice.roomId);
+              } else if (announcement) {
+                onOpenBoard(announcement.cardId);
+              } else {
+                onOpenChat(notice.roomId);
+              }
+            }}
+            className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label={task ? task.title : announcement ? announcement.title : `New message from ${message?.username ?? 'teammate'}`}
+          >
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+              {task || announcement ? <ListTodo className="size-3.5 text-accent" /> : <MessageCircle className="size-3.5 text-accent" />}
+              {task ? task.title : announcement ? announcement.title : message?.username}
+              {announcement && <span className="font-normal text-muted-foreground">from {announcement.author}</span>}
+              {!task && !announcement && <span className="font-normal text-muted-foreground">in {notice.roomTitle}</span>}
+              {message?.mentions?.some((name) => name.toLowerCase() === username.toLowerCase()) && (
+                <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-accent">Mention</span>
+              )}
+            </span>
+            <span className="mt-1 block truncate text-xs text-muted-foreground">
+              {task ? task.body : announcement ? preview(announcement.message) : preview(message?.markdown ?? '')}
+            </span>
+          </button>
+          {!task && !announcement && (
+            <button
+              type="button"
+              aria-expanded={quickReplyOpen}
+              onClick={() => {
+                const opening = !quickReplyOpen;
+                setQuickReplyOpen(opening);
+                setQuickReplyError('');
+                if (opening && noticeTimerRef.current !== null) {
+                  window.clearTimeout(noticeTimerRef.current);
+                  noticeTimerRef.current = null;
+                }
+              }}
+              className="shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-accent transition hover:bg-accent/10"
+            >Quick reply</button>
+          )}
+        </div>
+        {quickReplyOpen && message && (
+          <form className="flex items-center gap-2 border-t border-border/60 px-3 py-2" onSubmit={sendQuickReply}>
+            <input
+              autoFocus
+              value={quickReplyDraft}
+              onChange={(event) => {
+                setQuickReplyDraft(event.target.value);
+                setQuickReplyError('');
+              }}
+              maxLength={2_000}
+              placeholder={`Reply to ${message.username}…`}
+              aria-label="Quick reply to message"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-border/70 bg-background/65 px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/60"
+            />
+            <button type="submit" disabled={!quickReplyDraft.trim()} className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent hover:bg-accent/20 disabled:opacity-40" aria-label="Send quick reply">
+              <MessageCircle className="size-3.5" />
+            </button>
+            {quickReplyError && <span className="text-[9px] text-amber-300">{quickReplyError}</span>}
+          </form>
+        )}
+      </div>
     </div>
   );
 }

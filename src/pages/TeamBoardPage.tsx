@@ -10,6 +10,9 @@ import {
   FileText,
   Flag,
   GitBranch,
+  Globe2,
+  Grip,
+  LockKeyhole,
   MessageCircle,
   PanelRightClose,
   Plus,
@@ -22,7 +25,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { toast } from 'sonner';
 import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
 import { findChatUsers, fetchChatConversations, type ChatConversation, type ChatUser } from '@/lib/chat-client';
@@ -71,6 +74,22 @@ const SEVERITIES: Array<{ value: TeamBoardSeverity; label: string }> = [
   { value: 'high', label: 'High' },
   { value: 'critical', label: 'Critical' },
 ];
+const BOARD_POSITIONS_KEY = 'econote_team_board_card_positions';
+
+function readBoardPositions(): Record<string, { x: number; y: number }> {
+  try {
+    const stored = window.localStorage.getItem(BOARD_POSITIONS_KEY);
+    if (!stored) return {};
+    const value = JSON.parse(stored) as Record<string, { x?: unknown; y?: unknown }>;
+    return Object.fromEntries(Object.entries(value).flatMap(([id, point]) =>
+      typeof point.x === 'number' && typeof point.y === 'number'
+        ? [[id, { x: point.x, y: point.y }]]
+        : [],
+    ));
+  } catch {
+    return {};
+  }
+}
 
 function cardTypeLabel(type: TeamBoardCardType): string {
   return CARD_TYPES.find((item) => item.id === type)?.title ?? 'Custom';
@@ -118,6 +137,12 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
   const [sessionScratchpad, setSessionScratchpad] = useState('');
   const [decisionDraft, setDecisionDraft] = useState('');
   const [sessionBusy, setSessionBusy] = useState(false);
+  const [cardPositions, setCardPositions] = useState(readBoardPositions);
+  const cardPositionsRef = useRef(cardPositions);
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const cardDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const canvasPanRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const activeRoomIdRef = useRef<string | null>(selectedId);
   const sessionScratchpadDirtyRef = useRef(false);
@@ -279,13 +304,68 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
     socket.send(JSON.stringify({ type: 'board:focus', cardId: selectedId ?? '' }));
   }, [selectedId]);
 
-  const cardsByLane = useMemo(() => {
-    const lanes = new Map<TeamBoardStatus, TeamBoardCard[]>(
-      LANES.map((lane) => [lane.id, []]),
-    );
-    for (const card of cards) lanes.get(card.status)?.push(card);
-    return lanes;
-  }, [cards]);
+  const boardCardOrder = useMemo(
+    () => [...cards].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)),
+    [cards],
+  );
+
+  const getCardPosition = (card: TeamBoardCard) => {
+    const saved = cardPositions[card.id];
+    if (saved) return saved;
+    const index = boardCardOrder.findIndex((item) => item.id === card.id);
+    return { x: 34 + (index % 5) * 292, y: 34 + Math.floor(index / 5) * 238 };
+  };
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, select, a')) return;
+    canvasPanRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: canvas.scrollLeft,
+      scrollTop: canvas.scrollTop,
+    };
+    canvas.setPointerCapture(event.pointerId);
+  };
+
+  const handleCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (cardDragRef.current) {
+      const bounds = canvas.getBoundingClientRect();
+      const drag = cardDragRef.current;
+      const next = {
+        x: Math.max(12, event.clientX - bounds.left + canvas.scrollLeft - drag.offsetX),
+        y: Math.max(12, event.clientY - bounds.top + canvas.scrollTop - drag.offsetY),
+      };
+      setCardPositions((current) => {
+        const updated = { ...current, [drag.id]: next };
+        cardPositionsRef.current = updated;
+        return updated;
+      });
+      return;
+    }
+    const pan = canvasPanRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    canvas.scrollLeft = pan.scrollLeft - (event.clientX - pan.x);
+    canvas.scrollTop = pan.scrollTop - (event.clientY - pan.y);
+  };
+
+  const handleCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    if (cardDragRef.current) {
+      cardDragRef.current = null;
+      setDraggingCardId(null);
+      try {
+        window.localStorage.setItem(BOARD_POSITIONS_KEY, JSON.stringify(cardPositionsRef.current));
+      } catch {
+        /* Card movement remains available when storage is disabled. */
+      }
+    }
+    if (canvasPanRef.current?.pointerId === event.pointerId) canvasPanRef.current = null;
+    if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
 
   const openCreate = (type: TeamBoardCardType = 'ticket', beacon = false) => {
     setCreateType(type);
@@ -332,23 +412,15 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
       setCreateOpen(false);
       await refreshCards();
       setSelectedId(card.id);
-      toast.success(isBeacon ? 'Help beacon shared with its mentions.' : `${cardTypeLabel(createType)} card created privately.`);
+      toast.success(isBeacon
+        ? 'Help beacon shared with its mentions.'
+        : createType === 'announcement'
+          ? 'Announcement sent to everyone online.'
+          : `${cardTypeLabel(createType)} card created privately.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create this card.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const moveCard = async (card: TeamBoardCard, next: TeamBoardStatus) => {
-    if (card.status === next) return;
-    setCards((current) => current.map((item) => item.id === card.id ? { ...item, status: next } : item));
-    try {
-      await updateTeamBoardCard(card.id, { status: next });
-      if (selectedId === card.id) await refreshDetail(card.id);
-    } catch (error) {
-      await refreshCards();
-      toast.error(error instanceof Error ? error.message : 'Could not move this card.');
     }
   };
 
@@ -498,81 +570,102 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
       </div>
 
       <div className={cn('team-board-workspace', selectedId && 'has-selection')}>
-        <main className="team-board-lanes" aria-label="Team Board cards">
+        <main
+          ref={canvasRef}
+          className="team-board-canvas"
+          aria-label="Team Board canvas"
+          onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerUp}
+          onPointerCancel={handleCanvasPointerUp}
+        >
           {loading ? (
             <div className="team-board-empty">Tuning in to the team signal…</div>
+          ) : cards.length === 0 ? (
+            <div className="team-board-empty">A clear canvas. Add a card to start the team signal.</div>
           ) : (
-            LANES.map((lane) => {
-              const laneCards = cardsByLane.get(lane.id) ?? [];
-              return (
-                <section className="team-board-lane" key={lane.id} aria-label={lane.title}>
-                  <header>
-                    <div className={`team-board-lane-dot is-${lane.id}`} />
-                    <div className="min-w-0 flex-1">
-                      <h2>{lane.title}</h2>
-                      <p>{lane.hint}</p>
-                    </div>
-                    <span className="team-board-lane-count">{laneCards.length}</span>
-                    {lane.id === 'signal' && (
-                      <button type="button" className="team-board-add-lane" aria-label="Add card" onClick={() => openCreate()}>
-                        <Plus className="size-4" />
-                      </button>
+            <div
+              className="team-board-canvas-inner"
+              style={{
+                width: Math.max(1800, Math.ceil(boardCardOrder.length / 5) * 292 + 68),
+                height: Math.max(1200, Math.ceil(boardCardOrder.length / 5) * 238 + 68),
+              }}
+            >
+              {cards.map((card) => {
+                const position = getCardPosition(card);
+                const statusLabel = LANES.find((lane) => lane.id === card.status)?.title ?? card.status;
+                return (
+                  <article
+                    className={cn(
+                      'team-board-card',
+                      'team-board-canvas-card',
+                      `is-${card.type}`,
+                      card.isBeacon && 'is-beacon',
+                      selectedId === card.id && 'is-selected',
+                      draggingCardId === card.id && 'is-dragging',
                     )}
-                  </header>
-                  <div className="team-board-lane-cards">
-                    {laneCards.map((card) => (
-                      <article
-                        className={cn(
-                          'team-board-card',
-                          `is-${card.type}`,
-                          card.isBeacon && 'is-beacon',
-                          selectedId === card.id && 'is-selected',
-                        )}
-                        key={card.id}
+                    key={card.id}
+                    style={{ left: position.x, top: position.y }}
+                  >
+                    <header className="team-board-card-topline">
+                      <button
+                        type="button"
+                        className="team-board-card-grab"
+                        aria-label={`Drag ${card.title}`}
+                        title="Drag card"
+                        onPointerDown={(event) => {
+                          const canvas = canvasRef.current;
+                          if (!canvas) return;
+                          const bounds = canvas.getBoundingClientRect();
+                          cardDragRef.current = {
+                            id: card.id,
+                            offsetX: event.clientX - bounds.left + canvas.scrollLeft - position.x,
+                            offsetY: event.clientY - bounds.top + canvas.scrollTop - position.y,
+                          };
+                          setCardPositions((current) => {
+                            const updated = { ...current, [card.id]: position };
+                            cardPositionsRef.current = updated;
+                            return updated;
+                          });
+                          setDraggingCardId(card.id);
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          event.stopPropagation();
+                          event.preventDefault();
+                        }}
                       >
-                        <button type="button" className="team-board-card-open" onClick={() => setSelectedId(card.id)}>
-                          <div className="team-board-card-topline">
-                            <span className={`team-board-type-chip is-${card.type}`}>{card.isBeacon && <Radio className="size-3" />}{card.isBeacon ? 'Help beacon' : cardTypeLabel(card.type)}</span>
-                            {card.severity !== 'normal' && <span className={`team-board-severity is-${card.severity}`}>{card.severity}</span>}
-                          </div>
-                          <h3>{card.title}</h3>
-                          {card.ticketNumber && (
-                            <span className="team-board-ticket-number"><Clipboard className="size-3" /> {card.ticketNumber}</span>
-                          )}
-                          {card.description && <p className="team-board-card-excerpt">{card.description}</p>}
-                          <div className="team-board-card-meta">
-                            <span><CircleDot className="size-3" /> {card.owner}</span>
-                            <span><MessageCircle className="size-3" /> {card.commentCount}</span>
-                            <span>{relativeTime(card.updatedAt)}</span>
-                          </div>
-                        </button>
-                        <footer className="team-board-card-footer">
-                          <span className="team-board-private-label"><Shield className="size-3" /> Private / shared</span>
-                          {card.sourceUrl && (
-                            <a href={card.sourceUrl} onClick={(event) => event.stopPropagation()} title="Open source">
-                              <ExternalLink className="size-3.5" />
-                            </a>
-                          )}
-                          <select
-                            aria-label={`Move ${card.title}`}
-                            value={card.status}
-                            onChange={(event) => void moveCard(card, event.target.value as TeamBoardStatus)}
-                          >
-                            {LANES.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
-                          </select>
-                        </footer>
-                      </article>
-                    ))}
-                    {laneCards.length === 0 && (
-                      <div className="team-board-lane-empty">
-                        <span>{lane.id === 'signal' ? 'Quiet signal.' : 'Nothing queued here.'}</span>
-                        {lane.id === 'signal' && <button type="button" onClick={() => openCreate()}>Create a card</button>}
+                        <Grip className="size-3.5" />
+                      </button>
+                      <span className={`team-board-type-chip is-${card.type}`}>{card.isBeacon && <Radio className="size-3" />}{card.isBeacon ? 'Help beacon' : cardTypeLabel(card.type)}</span>
+                      <span className={`team-board-status-dot is-${card.status}`} title={statusLabel} aria-label={`Status: ${statusLabel}`} />
+                      {card.severity !== 'normal' && <span className={`team-board-severity is-${card.severity}`}>{card.severity}</span>}
+                    </header>
+                    <button type="button" className="team-board-card-open" onClick={() => setSelectedId(card.id)}>
+                      <h3>{card.title}</h3>
+                      {card.ticketNumber && (
+                        <span className="team-board-ticket-number"><Clipboard className="size-3" /> {card.ticketNumber}</span>
+                      )}
+                      {card.description && <p className="team-board-card-excerpt">{card.description}</p>}
+                      <div className="team-board-card-meta">
+                        <span><CircleDot className="size-3" /> {card.owner}</span>
+                        <span><MessageCircle className="size-3" /> {card.commentCount}</span>
+                        <span>{relativeTime(card.updatedAt)}</span>
                       </div>
-                    )}
-                  </div>
-                </section>
-              );
-            })
+                    </button>
+                    <footer className="team-board-card-footer">
+                      <span className="team-board-private-label" title={card.visibility === 'registered' ? 'Visible to every registered user' : 'Private or shared with selected people'}>
+                        {card.visibility === 'registered' ? <Globe2 className="size-3" /> : <Shield className="size-3" />}
+                        {card.visibility === 'registered' ? 'Everyone' : 'Shared'}
+                      </span>
+                      {card.sourceUrl && (
+                        <a href={card.sourceUrl} onClick={(event) => event.stopPropagation()} title="Open source">
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      )}
+                    </footer>
+                  </article>
+                );
+              })}
+            </div>
           )}
         </main>
 
@@ -696,6 +789,23 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
 
                   <section className="team-board-share-section">
                     <header><Share2 className="size-3.5" /> Visible to</header>
+                    <label className="team-board-visibility-toggle">
+                      <span className="team-board-visibility-copy">
+                        {detail.card.visibility === 'registered' ? <Globe2 className="size-3.5" /> : <LockKeyhole className="size-3.5" />}
+                        <span>
+                          <strong>Everyone registered</strong>
+                          <small>{detail.card.visibility === 'registered' ? 'All signed-in teammates can view this card.' : 'Only you, mentions, and shared chats can view it.'}</small>
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label="Visible to everyone registered"
+                        checked={detail.card.visibility === 'registered'}
+                        disabled={detail.permission !== 'owner'}
+                        onChange={(event) => void saveCardPatch({ visibility: event.target.checked ? 'registered' : 'private' })}
+                      />
+                    </label>
                     <div className="team-board-member-list">
                       <span className="team-board-member-chip"><span>{detail.card.createdBy.slice(0, 1).toUpperCase()}</span>{detail.card.createdBy} · creator</span>
                       {detail.members.map((member) => (
@@ -708,7 +818,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                           <span><Users className="size-3" /></span>{room.roomId === 'global' ? 'Global chat' : chatRooms.find((item) => item.roomId === room.roomId)?.title ?? 'Shared chat'}
                         </span>
                       ))}
-                      {detail.members.length === 0 && detail.sharedRooms.length === 0 && <small>Only the creator can see this card until shared or mentioned.</small>}
+                      {detail.members.length === 0 && detail.sharedRooms.length === 0 && detail.card.visibility === 'private' && <small>Only the creator can see this card until shared or mentioned.</small>}
                     </div>
                     <div className="team-board-share-controls">
                       <select value={shareRoomId} onChange={(event) => setShareRoomId(event.target.value)} aria-label="Share card with a chat">
@@ -801,8 +911,8 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                   </section>
                 </div>
                 <footer className="team-board-inspector-footer">
-                  <label>Move card
-                    <select value={detail.card.status} disabled={detail.permission === 'view'} onChange={(event) => void moveCard(detail.card, event.target.value as TeamBoardStatus)}>
+                    <label>Status
+                      <select value={detail.card.status} disabled={detail.permission === 'view'} onChange={(event) => void saveCardPatch({ status: event.target.value as TeamBoardStatus })}>
                       {LANES.map((lane) => <option key={lane.id} value={lane.id}>{lane.title}</option>)}
                     </select>
                   </label>
@@ -873,7 +983,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
                 placeholder="/collab?type=sheet&document=… or a workspace URL"
               />
             </label>
-            <footer><span><Shield className="size-3.5" /> Private until you share or mention someone</span><button type="submit" disabled={!title.trim() || saving}>{saving ? 'Creating…' : isBeacon ? 'Send help beacon' : 'Create private card'} <ArrowRight className="size-4" /></button></footer>
+            <footer><span>{createType === 'announcement' ? <Globe2 className="size-3.5" /> : <Shield className="size-3.5" />}{createType === 'announcement' ? 'Visible to everyone registered' : 'Private until you share or mention someone'}</span><button type="submit" disabled={!title.trim() || saving}>{saving ? 'Creating…' : isBeacon ? 'Send help beacon' : createType === 'announcement' ? 'Publish announcement' : 'Create private card'} <ArrowRight className="size-4" /></button></footer>
           </form>
         </div>
       )}

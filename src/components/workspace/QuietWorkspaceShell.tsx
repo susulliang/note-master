@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, type RefCallback } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefCallback } from 'react';
 import {
   AudioLines,
   BarChart3,
@@ -21,9 +21,12 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  GripHorizontal,
 } from 'lucide-react';
 import type { WorkView } from '@/components/FlowchartCanvas';
 import { cn } from '@/lib/utils';
+import { requestTeamBoardSocketTicket, teamBoardSocketUrl } from '@/lib/chat-client';
+import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
 
 interface QuietWorkspaceShellProps {
   activeView: WorkView;
@@ -60,6 +63,7 @@ const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
 };
 
 const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'collab', 'teamBoard', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
+const DOCK_POSITION_KEY = 'econote_workspace_dock_position';
 const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }> = [
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },
@@ -88,6 +92,175 @@ export function QuietWorkspaceShell({
 }: QuietWorkspaceShellProps) {
   const views = VIEW_ORDER.filter((view) => availableViews.includes(view));
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [unreadAnnouncement, setUnreadAnnouncement] = useState(false);
+  const [dockPosition, setDockPosition] = useState<{ left: number; top: number } | null>(() => {
+    try {
+      const saved = window.localStorage.getItem(DOCK_POSITION_KEY);
+      if (!saved) return null;
+      const parsed = JSON.parse(saved) as { left?: unknown; top?: unknown };
+      return typeof parsed.left === 'number' && typeof parsed.top === 'number'
+        ? { left: parsed.left, top: parsed.top }
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  const dockDragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number } | null>(null);
+  const dockRef = useRef<HTMLElement | null>(null);
+  const dockPositionRef = useRef(dockPosition);
+
+  useEffect(() => {
+    try {
+      setUnreadAnnouncement(Boolean(window.localStorage.getItem('econote_unread_board_announcement')));
+    } catch {
+      setUnreadAnnouncement(false);
+    }
+    const onAnnouncement = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; cardId?: string }>).detail;
+      const id = detail?.id ?? detail?.cardId;
+      if (!id) return;
+      setUnreadAnnouncement(true);
+      try {
+        window.localStorage.setItem('econote_unread_board_announcement', id);
+      } catch {
+        /* Keep the in-session badge even when browser storage is unavailable. */
+      }
+    };
+    window.addEventListener('econote:public-board-announcement', onAnnouncement);
+    return () => window.removeEventListener('econote:public-board-announcement', onAnnouncement);
+  }, []);
+
+  useEffect(() => {
+    if (!username) return undefined;
+    let stopped = false;
+    let socket: WebSocket | null = null;
+    let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
+    let reconnectTimer = 0;
+    let attempts = 0;
+
+    const connect = async () => {
+      try {
+        const { ticket } = await requestTeamBoardSocketTicket();
+        if (stopped) return;
+        socket = new WebSocket(teamBoardSocketUrl(ticket));
+        socket.onopen = () => {
+          if (stopped || !socket) return;
+          attempts = 0;
+          heartbeat = startWebSocketHeartbeat(socket, () => socket?.close());
+        };
+        socket.onmessage = (message) => {
+          if (stopped || typeof message.data !== 'string') return;
+          try {
+            const payload = JSON.parse(message.data) as Record<string, unknown>;
+            if (payload.type === 'heartbeat_ack') {
+              heartbeat?.acknowledge();
+              return;
+            }
+            if (payload.type !== 'board:announcement' || typeof payload.cardId !== 'string') return;
+            try {
+              const deliveryKey = 'econote_last_board_announcement_delivery';
+              if (window.localStorage.getItem(deliveryKey) === payload.cardId) return;
+              window.localStorage.setItem(deliveryKey, payload.cardId);
+            } catch {
+              /* Deliver once per connected tab when local storage is unavailable. */
+            }
+            window.dispatchEvent(new CustomEvent('econote:public-board-announcement', {
+              detail: {
+                id: payload.cardId,
+                cardId: payload.cardId,
+                title: typeof payload.title === 'string' ? payload.title : 'Team announcement',
+                message: typeof payload.message === 'string' ? payload.message : '',
+                author: typeof payload.author === 'string' ? payload.author : '',
+              },
+            }));
+          } catch {
+            /* Ignore malformed board events and keep the app socket alive. */
+          }
+        };
+        socket.onclose = () => {
+          heartbeat?.stop();
+          heartbeat = null;
+          if (stopped) return;
+          const delay = getWebSocketReconnectDelay(attempts++);
+          reconnectTimer = window.setTimeout(() => void connect(), delay);
+        };
+        socket.onerror = () => socket?.close();
+      } catch {
+        if (!stopped) {
+          const delay = getWebSocketReconnectDelay(attempts++);
+          reconnectTimer = window.setTimeout(() => void connect(), delay);
+        }
+      }
+    };
+    void connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(reconnectTimer);
+      heartbeat?.stop();
+      socket?.close(1000, 'Workspace closed');
+    };
+  }, [username]);
+
+  useEffect(() => {
+    if (activeView !== 'teamBoard' || !unreadAnnouncement) return;
+    setUnreadAnnouncement(false);
+    try {
+      window.localStorage.removeItem('econote_unread_board_announcement');
+    } catch {
+      /* The badge still clears for this session. */
+    }
+  }, [activeView, unreadAnnouncement]);
+
+  const startDockDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const dock = dockRef.current;
+    if (!dock) return;
+    const rect = dock.getBoundingClientRect();
+    dockDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const moveDock = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dockDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dock = dockRef.current;
+    if (!dock) return;
+    const bounds = dock.getBoundingClientRect();
+    const left = Math.max(4, Math.min(window.innerWidth - bounds.width - 4, drag.left + event.clientX - drag.startX));
+    const top = Math.max(4, Math.min(window.innerHeight - bounds.height - 4, drag.top + event.clientY - drag.startY));
+    const next = { left, top };
+    dockPositionRef.current = next;
+    setDockPosition(next);
+  };
+
+  const endDockDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!dockDragRef.current || dockDragRef.current.pointerId !== event.pointerId) return;
+    dockDragRef.current = null;
+    try {
+      if (dockPositionRef.current) window.localStorage.setItem(DOCK_POSITION_KEY, JSON.stringify(dockPositionRef.current));
+    } catch {
+      /* The floating dock remains draggable without persistent storage. */
+    }
+  };
+
+  const navigate = (view: WorkView) => {
+    if (view === 'teamBoard') {
+      setUnreadAnnouncement(false);
+      try {
+        window.localStorage.removeItem('econote_unread_board_announcement');
+      } catch {
+        /* The badge still clears for this session. */
+      }
+    }
+    onNavigate(view);
+  };
 
   useEffect(() => {
     const onUnreadCount = (event: Event) => {
@@ -113,7 +286,24 @@ export function QuietWorkspaceShell({
       <div className="quiet-global-controls" ref={onUtilitySlot} aria-label={`Global controls for ${username || 'agent'}`} />
 
       {!hideDock && (
-        <nav className="quiet-orbit-dock" aria-label="Workspace and support tools">
+        <nav
+          ref={dockRef}
+          className={cn('quiet-orbit-dock', dockPosition && 'quiet-orbit-dock--placed')}
+          style={dockPosition ? { left: dockPosition.left, top: dockPosition.top, bottom: 'auto', transform: 'none' } : undefined}
+          aria-label="Workspace and support tools"
+        >
+          <button
+            type="button"
+            className="quiet-dock-drag-handle"
+            aria-label="Drag navigation bar"
+            title="Drag to move navigation"
+            onPointerDown={startDockDrag}
+            onPointerMove={moveDock}
+            onPointerUp={endDockDrag}
+            onPointerCancel={endDockDrag}
+          >
+            <GripHorizontal className="size-3.5" />
+          </button>
           <div className="quiet-dock-cluster quiet-dock-cluster--navigation" aria-label="Workspaces">
             {views.map((view) => {
               const Icon = VIEW_META[view].icon;
@@ -127,7 +317,7 @@ export function QuietWorkspaceShell({
                     ? `Chat, ${unread} unread message${unread === 1 ? '' : 's'}`
                     : VIEW_META[view].label}
                   aria-current={activeView === view ? 'page' : undefined}
-                  onClick={() => onNavigate(view)}
+                  onClick={() => navigate(view)}
                   className={cn('quiet-orbit-action', activeView === view && 'quiet-orbit-action--active')}
                 >
                   <Icon className="size-[18px]" strokeWidth={1.8} />
@@ -138,22 +328,21 @@ export function QuietWorkspaceShell({
                       style={{ animationDuration: `${pulseDuration}s` }}
                     />
                   )}
+                  {view === 'teamBoard' && unreadAnnouncement && (
+                    <span className="quiet-chat-unread-dot quiet-announcement-unread-dot" aria-label="New announcement" />
+                  )}
                   <span className="quiet-dock-tooltip" aria-hidden="true">{VIEW_META[view].label}</span>
                 </button>
               );
             })}
           </div>
 
-          <span className="quiet-dock-divider" aria-hidden="true" />
-
           <div className="quiet-magic-ball-anchor">
             <button type="button" className="quiet-magic-ball" aria-label="Open Kitty Help" onClick={onOpenHelp}>
-              <span className="quiet-magic-ball-core"><Sparkles className="size-5" /></span>
+              <Sparkles className="size-[18px]" strokeWidth={1.8} />
             </button>
             <span className="quiet-dock-tooltip" aria-hidden="true">Ask Kitty</span>
           </div>
-
-          <span className="quiet-dock-divider" aria-hidden="true" />
 
           <div className="quiet-dock-cluster quiet-dock-cluster--widgets" aria-label="Support widgets">
             {SUPPORT_WIDGETS.map(({ id, label, icon: Icon }) => (

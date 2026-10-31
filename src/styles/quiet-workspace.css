@@ -817,11 +817,14 @@
   position: absolute;
   inset: 0;
   min-height: 0;
-  padding: 10px 12px calc(70px + env(safe-area-inset-bottom));
+  padding: 0;
 }
 
 .quiet-stage-surface {
-  border-radius: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .quiet-global-controls {
@@ -952,10 +955,56 @@
   border: 1px solid color-mix(in srgb, var(--qw-line) 90%, transparent);
   border-radius: 999px;
   color: var(--qw-ink);
-  background: color-mix(in srgb, var(--qw-field) 91%, transparent);
-  box-shadow: 0 12px 38px rgb(28 47 58 / 16%), inset 0 1px 0 rgb(255 255 255 / 76%);
-  backdrop-filter: blur(24px) saturate(1.25);
+  background: color-mix(in srgb, var(--qw-field) 48%, transparent);
+  box-shadow: 0 12px 38px rgb(28 47 58 / 13%), inset 0 1px 0 rgb(255 255 255 / 40%);
+  backdrop-filter: blur(28px) saturate(1.2);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
   transform: translateX(-50%);
+}
+
+.quiet-orbit-dock--placed {
+  left: auto;
+}
+
+.quiet-dock-drag-handle {
+  position: absolute;
+  z-index: 3;
+  top: auto;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  display: grid;
+  width: 42px;
+  height: 15px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--qw-line) 72%, transparent);
+  border-radius: 999px;
+  color: var(--qw-muted);
+  background: color-mix(in srgb, var(--qw-field) 60%, transparent);
+  opacity: 0;
+  visibility: hidden;
+  cursor: grab;
+  touch-action: none;
+  transform: translateX(-50%);
+  transition: opacity 140ms ease, visibility 0s linear 140ms, background-color 140ms ease;
+}
+
+.quiet-orbit-dock:hover .quiet-dock-drag-handle,
+.quiet-dock-drag-handle:focus-visible {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 1s, 1s, 0s;
+}
+
+.quiet-dock-drag-handle:active {
+  cursor: grabbing;
+}
+
+@media (hover: none) {
+  .quiet-dock-drag-handle {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0s;
+  }
 }
 
 .quiet-kitty-spotlight-backdrop {
@@ -1221,54 +1270,25 @@
 }
 
 .quiet-magic-ball {
-  position: relative;
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   flex: none;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 75%);
+  border: 1px solid transparent;
   border-radius: 50%;
-  color: #244752;
-  background:
-    radial-gradient(ellipse at 34% 20%, rgb(255 255 255 / 94%), transparent 25%),
-    radial-gradient(ellipse at 70% 76%, rgb(114 219 197 / 88%), transparent 36%),
-    radial-gradient(ellipse at 32% 75%, rgb(129 154 231 / 76%), transparent 40%),
-    linear-gradient(145deg, #dff7ee 0%, #b9e7e3 45%, #9cb9e6 100%);
-  box-shadow: inset 0 2px 5px rgb(255 255 255 / 83%), inset 0 -5px 11px rgb(74 123 156 / 17%), 0 5px 15px rgb(75 141 156 / 22%);
-  transition: transform 180ms ease, box-shadow 180ms ease;
-}
-
-.quiet-magic-ball::before {
-  position: absolute;
-  right: -8px;
-  bottom: 6px;
-  left: -8px;
-  height: 14px;
-  border-top: 1px solid rgb(255 255 255 / 74%);
-  border-radius: 50%;
-  background: rgb(255 255 255 / 24%);
-  content: "";
-  transform: rotate(-9deg);
+  color: var(--qw-muted);
+  background: transparent;
+  transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
 
 .quiet-magic-ball:hover {
-  box-shadow: inset 0 2px 5px rgb(255 255 255 / 88%), 0 7px 20px rgb(75 141 156 / 32%);
-  transform: translateY(-2px) scale(1.03);
+  color: var(--qw-focus);
+  background: color-mix(in srgb, var(--qw-focus) 9%, var(--qw-field));
 }
 
-.quiet-magic-ball-core {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 1px solid rgb(255 255 255 / 62%);
-  border-radius: 50%;
-  background: rgb(255 255 255 / 35%);
-  backdrop-filter: blur(6px);
+.quiet-magic-ball:active {
+  transform: scale(.94);
 }
 
 .quiet-widget-tray {
@@ -1458,7 +1478,7 @@
   }
 
   .quiet-stage {
-    padding: 8px 7px calc(106px + env(safe-area-inset-bottom));
+    padding: 0;
   }
 
   .quiet-call-action-dock {
@@ -1579,16 +1599,6 @@
     height: 17px;
   }
 
-  .quiet-magic-ball {
-    width: 40px;
-    height: 40px;
-  }
-
-  .quiet-magic-ball-core {
-    width: 23px;
-    height: 23px;
-  }
-
   .quiet-dock-divider {
     height: 18px;
   }
@@ -1596,11 +1606,6 @@
   .quiet-dock-cluster svg {
     width: 16px;
     height: 16px;
-  }
-
-  .quiet-magic-ball-core svg {
-    width: 15px;
-    height: 15px;
   }
 
   .quiet-kitty-spotlight {
@@ -1661,7 +1666,7 @@
   }
 
   .quiet-stage-surface {
-    border-radius: 18px;
+    border-radius: 0;
   }
 }
 
