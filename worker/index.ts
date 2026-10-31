@@ -1265,6 +1265,37 @@ async function ensureSpiceSchema(env: Env): Promise<void> {
            created_at INTEGER NOT NULL
          )`
       ).run();
+      // Husko — the commune's one shared giant husky. Single-row state.
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_husky (
+           id INTEGER PRIMARY KEY CHECK (id = 1),
+           happiness INTEGER NOT NULL DEFAULT 70,
+           fullness INTEGER NOT NULL DEFAULT 70,
+           energy INTEGER NOT NULL DEFAULT 80,
+           pets INTEGER NOT NULL DEFAULT 0,
+           feeds INTEGER NOT NULL DEFAULT 0,
+           plays INTEGER NOT NULL DEFAULT 0,
+           last_pet_at INTEGER NOT NULL DEFAULT 0,
+           last_fed_at INTEGER NOT NULL DEFAULT 0,
+           last_play_at INTEGER NOT NULL DEFAULT 0,
+           last_actor TEXT NOT NULL DEFAULT '',
+           updated_at INTEGER NOT NULL DEFAULT 0
+         )`
+      ).run();
+      // Fishing pond catches — per-user fish collection (aquarium showcase).
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_fish (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           username TEXT NOT NULL,
+           species TEXT NOT NULL,
+           rarity TEXT NOT NULL,
+           caught_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE INDEX IF NOT EXISTS commune_fish_user_idx
+         ON commune_fish (username, caught_at)`
+      ).run();
       // NPC challenge personas — seeded from worker/npc/*.json on first use.
       await env.DB.prepare(
         `CREATE TABLE IF NOT EXISTS npc_personas (
@@ -2513,6 +2544,183 @@ async function handleCommuneSpiceDrops(env: Env): Promise<Response> {
   }
   return authJson({ drops });
 }
+
+/* ── Husko — the commune's shared giant husky ─────────────────────────────── */
+
+const HUSKY_STAT_CAP = 100;
+const HUSKY_COOLDOWNS: Record<string, number> = { pet: 12_000, feed: 45_000, play: 20_000 };
+
+let communeHuskySchemaPromise: Promise<void> | null = null;
+
+async function ensureCommuneHuskySchema(env: Env): Promise<void> {
+  if (!communeHuskySchemaPromise) {
+    communeHuskySchemaPromise = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS commune_husky (
+         id INTEGER PRIMARY KEY CHECK (id = 1),
+         happiness INTEGER NOT NULL DEFAULT 70,
+         fullness INTEGER NOT NULL DEFAULT 70,
+         energy INTEGER NOT NULL DEFAULT 80,
+         pets INTEGER NOT NULL DEFAULT 0,
+         feeds INTEGER NOT NULL DEFAULT 0,
+         plays INTEGER NOT NULL DEFAULT 0,
+         last_pet_at INTEGER NOT NULL DEFAULT 0,
+         last_fed_at INTEGER NOT NULL DEFAULT 0,
+         last_play_at INTEGER NOT NULL DEFAULT 0,
+         last_actor TEXT NOT NULL DEFAULT '',
+         updated_at INTEGER NOT NULL DEFAULT 0
+       )`
+    ).run().then(() => undefined);
+  }
+  await communeHuskySchemaPromise;
+}
+
+interface CommuneHuskyRow {
+  happiness: number;
+  fullness: number;
+  energy: number;
+  pets: number;
+  feeds: number;
+  plays: number;
+  last_pet_at: number;
+  last_fed_at: number;
+  last_play_at: number;
+  last_actor: string;
+  updated_at: number;
+}
+
+async function loadCommuneHusky(env: Env): Promise<CommuneHuskyRow> {
+  await ensureCommuneHuskySchema(env);
+  const row = await env.DB.prepare('SELECT * FROM commune_husky WHERE id = 1').first<CommuneHuskyRow>();
+  if (row) return row;
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO commune_husky (id, updated_at) VALUES (1, ?)'
+  ).bind(Date.now()).run();
+  return (await env.DB.prepare('SELECT * FROM commune_husky WHERE id = 1').first<CommuneHuskyRow>())!;
+}
+
+function huskyView(row: CommuneHuskyRow) {
+  return {
+    happiness: row.happiness,
+    fullness: row.fullness,
+    energy: row.energy,
+    pets: row.pets,
+    feeds: row.feeds,
+    plays: row.plays,
+    lastActor: row.last_actor,
+    updatedAt: row.updated_at,
+    cooldowns: { pet: row.last_pet_at, feed: row.last_fed_at, play: row.last_play_at },
+  };
+}
+
+async function handleCommuneHuskyGet(env: Env): Promise<Response> {
+  const row = await loadCommuneHusky(env);
+  return authJson({ husky: huskyView(row) });
+}
+
+/** Pet / feed / play — each has a global cooldown so the whole team shares
+ *  one dog and one rhythm (whoever gets there first wins the interaction). */
+async function handleCommuneHuskyInteract(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  let payload: { action?: unknown };
+  try {
+    payload = (await request.json()) as { action?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body.' }, 400);
+  }
+  const action = typeof payload.action === 'string' ? payload.action : '';
+  const delta = action === 'pet'
+    ? { happiness: 6, fullness: 0, energy: -1, cooldownField: 'last_pet_at' as const, counter: 'pets' as const, cooldown: HUSKY_COOLDOWNS.pet }
+    : action === 'feed'
+      ? { happiness: 2, fullness: 25, energy: 2, cooldownField: 'last_fed_at' as const, counter: 'feeds' as const, cooldown: HUSKY_COOLDOWNS.feed }
+      : action === 'play'
+        ? { happiness: 8, fullness: -2, energy: -6, cooldownField: 'last_play_at' as const, counter: 'plays' as const, cooldown: HUSKY_COOLDOWNS.play }
+        : null;
+  if (!delta) return authJson({ error: 'Unknown husky interaction.' }, 400);
+
+  const row = await loadCommuneHusky(env);
+  const now = Date.now();
+  if (now - row[delta.cooldownField] < delta.cooldown) {
+    return authJson({ error: 'Husko needs a moment — try again shortly.', retryAfter: delta.cooldown - (now - row[delta.cooldownField]) }, 429);
+  }
+  const clamp = (value: number) => Math.max(0, Math.min(HUSKY_STAT_CAP, value));
+  const next = {
+    happiness: clamp(row.happiness + delta.happiness),
+    fullness: clamp(row.fullness + delta.fullness),
+    energy: clamp(row.energy + delta.energy),
+  };
+  await env.DB.prepare(
+    `UPDATE commune_husky SET happiness = ?, fullness = ?, energy = ?,
+       ${delta.counter} = ${delta.counter} + 1, ${delta.cooldownField} = ?,
+       last_actor = ?, updated_at = ? WHERE id = 1`
+  ).bind(next.happiness, next.fullness, next.energy, now, user.username, now).run();
+  const updated = await loadCommuneHusky(env);
+  return authJson({ husky: huskyView(updated) });
+}
+
+/* ── Fishing pond — per-user fish collection ──────────────────────────────── */
+
+const COMMUNE_FISH_RARITIES = new Set(['common', 'uncommon', 'rare', 'epic', 'legendary']);
+const COMMUNE_FISH_SPECIES = new Set([
+  'Minnow', 'Sunfish', 'Pond Smelt', 'Bluegill', 'Perch', 'Carp',
+  'Rainbow Trout', 'Catfish', 'Pike', 'Koi', 'Arowana',
+  'Golden Koi', 'Moonfin', 'Bassalisk', 'Crystal Piranha', 'The Old Boot',
+]);
+
+let communeFishSchemaPromise: Promise<void> | null = null;
+
+async function ensureCommuneFishSchema(env: Env): Promise<void> {
+  if (!communeFishSchemaPromise) {
+    communeFishSchemaPromise = (async () => {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS commune_fish (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           username TEXT NOT NULL,
+           species TEXT NOT NULL,
+           rarity TEXT NOT NULL,
+           caught_at INTEGER NOT NULL
+         )`
+      ).run();
+      await env.DB.prepare(
+        `CREATE INDEX IF NOT EXISTS commune_fish_user_idx
+         ON commune_fish (username, caught_at)`
+      ).run();
+    })().then(() => undefined);
+  }
+  await communeFishSchemaPromise;
+}
+
+async function handleCommuneFishGet(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  await ensureCommuneFishSchema(env);
+  const url = new URL(request.url);
+  const target = (url.searchParams.get('user') || user.username).slice(0, 40);
+  const result = await env.DB.prepare(
+    'SELECT id, species, rarity, caught_at FROM commune_fish WHERE username = ? ORDER BY caught_at DESC LIMIT 200'
+  ).bind(target).all<{ id: number; species: string; rarity: string; caught_at: number }>();
+  return authJson({
+    user: target,
+    fish: (result.results ?? []).map((row) => ({
+      id: row.id, species: row.species, rarity: row.rarity, caughtAt: row.caught_at,
+    })),
+  });
+}
+
+async function handleCommuneFishAdd(request: Request, env: Env, user: AuthUserRow): Promise<Response> {
+  let payload: { species?: unknown; rarity?: unknown };
+  try {
+    payload = (await request.json()) as { species?: unknown; rarity?: unknown };
+  } catch {
+    return authJson({ error: 'Invalid JSON body.' }, 400);
+  }
+  const species = typeof payload.species === 'string' ? payload.species : '';
+  const rarity = typeof payload.rarity === 'string' ? payload.rarity : '';
+  if (!COMMUNE_FISH_SPECIES.has(species)) return authJson({ error: 'Unknown species.' }, 400);
+  if (!COMMUNE_FISH_RARITIES.has(rarity)) return authJson({ error: 'Unknown rarity.' }, 400);
+  await ensureCommuneFishSchema(env);
+  await env.DB.prepare(
+    'INSERT INTO commune_fish (username, species, rarity, caught_at) VALUES (?, ?, ?, ?)'
+  ).bind(user.username, species, rarity, Date.now()).run();
+  return authJson({ ok: true });
+}
+
 
 type CommuneTreeholeCategory = 'app-feedback' | 'suggestion' | 'tip' | 'other';
 const COMMUNE_TREEHOLE_CATEGORIES = new Set<CommuneTreeholeCategory>([
@@ -4482,6 +4690,26 @@ async function handleAuth(request: Request, env: Env): Promise<Response> {
     const user = await authBearerUser(request, env);
     if (!user) return authJson({ error: 'Not authenticated' }, 401);
     return handleCommuneLoadout(request, env, user);
+  }
+  if (path === '/api/commune/husky' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneHuskyGet(env);
+  }
+  if (path === '/api/commune/husky' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneHuskyInteract(request, env, user);
+  }
+  if (path === '/api/commune/fish' && request.method === 'GET') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneFishGet(request, env, user);
+  }
+  if (path === '/api/commune/fish' && request.method === 'POST') {
+    const user = await authBearerUser(request, env);
+    if (!user) return authJson({ error: 'Not authenticated' }, 401);
+    return handleCommuneFishAdd(request, env, user);
   }
   if (path === '/api/commune/spice/pick' && request.method === 'POST') {
     const user = await authBearerUser(request, env);

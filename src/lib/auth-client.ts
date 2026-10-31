@@ -523,6 +523,65 @@ export async function createCommuneBanner(content: CommuneBannerContent): Promis
   return out.banners;
 }
 
+/* ── Husko — the commune's shared giant husky ─────────────────────────────── */
+
+export interface CommuneHuskyState {
+  happiness: number;
+  fullness: number;
+  energy: number;
+  pets: number;
+  feeds: number;
+  plays: number;
+  lastActor: string;
+  updatedAt: number;
+  cooldowns: { pet: number; feed: number; play: number };
+}
+
+export async function fetchCommuneHusky(): Promise<CommuneHuskyState> {
+  const token = getStoredToken();
+  const out = await call<{ husky: CommuneHuskyState }>('/api/commune/husky', { token });
+  return out.husky;
+}
+
+export type CommuneHuskyAction = 'pet' | 'feed' | 'play';
+
+export async function interactCommuneHusky(action: CommuneHuskyAction): Promise<CommuneHuskyState> {
+  const token = getStoredToken();
+  const out = await call<{ husky: CommuneHuskyState }>('/api/commune/husky', {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+    token,
+  });
+  return out.husky;
+}
+
+/* ── Fishing pond — per-user fish collection ──────────────────────────────── */
+
+export type CommuneFishRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+
+export interface CommuneFishEntry {
+  id: number;
+  species: string;
+  rarity: CommuneFishRarity;
+  caughtAt: number;
+}
+
+export async function fetchCommuneFish(username?: string): Promise<CommuneFishEntry[]> {
+  const token = getStoredToken();
+  const query = username ? `?user=${encodeURIComponent(username)}` : '';
+  const out = await call<{ fish: CommuneFishEntry[] }>(`/api/commune/fish${query}`, { token });
+  return out.fish;
+}
+
+export async function addCommuneFish(species: string, rarity: CommuneFishRarity): Promise<void> {
+  const token = getStoredToken();
+  await call('/api/commune/fish', {
+    method: 'POST',
+    body: JSON.stringify({ species, rarity }),
+    token,
+  });
+}
+
 /** Edit an existing shared town board item. */
 export async function editCommuneBanner(id: string, content: CommuneBannerContent): Promise<CommuneBanner[]> {
   const token = getStoredToken();

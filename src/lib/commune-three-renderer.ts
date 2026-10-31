@@ -115,6 +115,26 @@ type RenderMower = {
 };
 type RenderMowerTrack = { fromX: number; fromY: number; x: number; y: number; at: number };
 
+export type HuskoState =
+  | 'wander' | 'sniff-tree' | 'poo' | 'sniff-npc' | 'swim'
+  | 'chill' | 'chase-ball' | 'follow' | 'eat' | 'zoomies';
+
+export type RenderHusko = {
+  x: number;
+  y: number;
+  state: HuskoState;
+  moving: boolean;
+  headingX: number;
+  headingY: number;
+  walkPhase: number;
+  happiness: number;
+  says?: { text: string; until: number } | null;
+  /** Thrown ball in flight/on ground for Husko to chase. */
+  ball?: { x: number; y: number } | null;
+  /** Left-behind poo piles (fade on the client). */
+  poos?: readonly { x: number; y: number; at: number }[];
+};
+
 export interface CommuneThreeLaserShot {
   id: string;
   shooter: string;
@@ -156,6 +176,8 @@ export interface CommuneThreeFrame {
   laserShots: readonly CommuneThreeLaserShot[];
   mower: RenderMower;
   mowerTracks: readonly RenderMowerTrack[];
+  /** The commune's shared giant husky (null → not yet spawned). */
+  husko: RenderHusko | null;
   nightOpacity: number;
   reduceMotion: boolean;
 }
@@ -1900,7 +1922,145 @@ export class CommuneThreeRenderer {
     if (this.petSparkles.instanceColor) this.petSparkles.instanceColor.needsUpdate = true;
   }
 
+  /* ── Husko the giant husky ────────────────────────────────────────────────── */
+
+  private huskoRoot: THREE.Group | null = null;
+  private huskoLegs: THREE.Mesh[] = [];
+  private huskoTail: THREE.Mesh | null = null;
+  private huskoBallMesh: THREE.Mesh | null = null;
+  private huskoPooMeshes: THREE.Group[] = [];
+
+  /** Voxel husky — roughly 2.5× a pet, grey coat, white chest, curled tail. */
+  private addHuskoModel(): THREE.Group {
+    const root = new THREE.Group();
+    root.name = 'husko';
+    const coat = '#93a1ad';
+    const dark = '#57646f';
+    const light = '#edf1f4';
+    const body = addBox(root, -6, 30, 0, 58, 26, 30, coat);
+    body.name = 'body';
+    addBox(root, 6, 26, 0, 34, 18, 32, light);           // chest / belly
+    addBox(root, -20, 40, 0, 26, 14, 28, dark);          // saddle
+    const head = addBox(root, 36, 48, 0, 24, 22, 22, coat);
+    head.name = 'head';
+    addBox(root, 50, 42, 0, 14, 11, 11, light);          // snout
+    addBox(root, 58, 44, 0, 4, 5, 5, '#20262c');         // nose
+    addBox(root, 34, 62, -8, 5, 12, 4, dark);            // ear L
+    addBox(root, 34, 62, 8, 5, 12, 4, dark);             // ear R
+    addBox(root, 46, 52, -6, 3, 4, 3, '#6fb7e0');        // eye L (blue)
+    addBox(root, 46, 52, 6, 3, 4, 3, '#6fb7e0');         // eye R
+    const tail = addBox(root, -40, 44, 0, 10, 9, 9, coat);
+    tail.name = 'tail';
+    addBox(root, -46, 50, 0, 8, 8, 8, light);            // tail tip
+    const legs: THREE.Mesh[] = [];
+    for (const [lx, lz] of [[20, -10], [20, 10], [-22, -10], [-22, 10]] as const) {
+      legs.push(addBox(root, lx, 0, lz, 8, 30, 9, lx > 0 ? light : coat));
+    }
+    this.huskoLegs = legs;
+    this.huskoTail = tail;
+    root.visible = false;
+    this.scene.add(root);
+    return root;
+  }
+
+  private ensureHuskoProps(): void {
+    if (!this.huskoBallMesh) {
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(9, 10, 8), material('#e05a4e'));
+      ball.name = 'husko-ball';
+      ball.visible = false;
+      this.scene.add(ball);
+      this.huskoBallMesh = ball;
+    }
+    if (this.huskoPooMeshes.length === 0) {
+      for (let i = 0; i < 4; i++) {
+        const poo = new THREE.Group();
+        addBox(poo, 0, 0, 0, 10, 7, 10, '#7a5b40');
+        addBox(poo, 2, 7, 1, 6, 5, 6, '#6a4d35');
+        poo.name = `husko-poo-${i}`;
+        poo.visible = false;
+        this.scene.add(poo);
+        this.huskoPooMeshes.push(poo);
+      }
+    }
+  }
+
+  private updateHusko(frame: CommuneThreeFrame, time: number): void {
+    const husko = frame.husko;
+    this.ensureHuskoProps();
+    if (!this.huskoRoot) this.huskoRoot = this.addHuskoModel();
+    const root = this.huskoRoot;
+    if (!husko) {
+      root.visible = false;
+      if (this.huskoBallMesh) this.huskoBallMesh.visible = false;
+      for (const poo of this.huskoPooMeshes) poo.visible = false;
+      return;
+    }
+    root.visible = true;
+    root.position.set(husko.x, 0, husko.y);
+    root.rotation.y = Math.atan2(husko.headingY ?? 1, husko.headingX ?? 0);
+
+    // Pose by state.
+    let bodySquash = 1;
+    let rearSquat = 0;
+    let sink = 0;
+    if (husko.state === 'chill') bodySquash = 0.5;
+    else if (husko.state === 'poo') { bodySquash = 0.82; rearSquat = 0.16; }
+    else if (husko.state === 'swim') { bodySquash = 0.8; sink = 12; }
+    root.scale.set(1, bodySquash, 1);
+    root.position.y = -sink + rearSquat * 18;
+
+    const bob = husko.moving
+      ? Math.abs(Math.sin(husko.walkPhase)) * 4
+      : Math.sin(time * 2.2) * 1.2 + (husko.state === 'zoomies' ? 3 : 0);
+    root.position.y += bob;
+
+    // Legs & tail.
+    const swing = husko.moving ? Math.sin(husko.walkPhase) * 0.55 : 0;
+    this.huskoLegs.forEach((leg, index) => {
+      leg.rotation.z = index % 2 === 0 ? swing : -swing;
+    });
+    if (this.huskoTail) {
+      const wagSpeed = husko.state === 'chase-ball' || husko.state === 'eat' ? 14 : husko.happiness > 65 ? 9 : 4;
+      this.huskoTail.rotation.y = Math.sin(time * wagSpeed) * 0.6;
+    }
+
+    // Ball + poos.
+    if (this.huskoBallMesh) {
+      this.huskoBallMesh.visible = !!husko.ball;
+      if (husko.ball) {
+        this.huskoBallMesh.position.set(husko.ball.x, 9 + Math.abs(Math.sin(time * 9)) * 5, husko.ball.y);
+        this.huskoBallMesh.rotation.x = time * 6;
+      }
+    }
+    const poos = husko.poos ?? [];
+    for (let i = 0; i < this.huskoPooMeshes.length; i++) {
+      const poo = this.huskoPooMeshes[i];
+      const entry = poos[i];
+      poo.visible = !!entry;
+      if (entry) {
+        poo.position.set(entry.x, 0, entry.y);
+        poo.rotation.y = i * 1.3;
+        const age = (Date.now() - entry.at) / 90_000;
+        poo.scale.setScalar(Math.max(0.2, 1 - age));
+      }
+    }
+  }
+
+  /** Project a world coordinate to CSS pixels on the label overlay. */
+  projectWorldToScreen(x: number, y: number, height = 70): { x: number; y: number; visible: boolean } {
+    this.projectedPoint.set(x, height, y).project(this.activeCamera);
+    const point = this.projectedPoint;
+    const visible = point.z >= -1 && point.z <= 1
+      && Math.abs(point.x) <= 1.05 && Math.abs(point.y) <= 1.05;
+    return {
+      x: (point.x * 0.5 + 0.5) * this.width,
+      y: (-point.y * 0.5 + 0.5) * this.height,
+      visible,
+    };
+  }
+
   private updateMarkers(frame: CommuneThreeFrame, time: number): void {
+    this.updateHusko(frame, time);
     const duckCount = Math.min(frame.ducks.length, 64);
     for (let index = 0; index < duckCount; index++) {
       const duck = frame.ducks[index];
@@ -1988,6 +2148,15 @@ export class CommuneThreeRenderer {
         drawLabel(ctx, mowerX, mowerY - 24, mower.says.text.slice(0, 48), true);
       } else if (mower.mode !== 'mowing') {
         drawLabel(ctx, mowerX, mowerY - 24, mower.mode.toUpperCase(), true);
+      }
+    }
+    if (frame.husko) {
+      const spot = this.projectWorldToScreen(frame.husko.x, frame.husko.y, 110);
+      if (spot.visible) {
+        drawLabel(ctx, spot.x, spot.y, 'Husko 🐺');
+        if (frame.husko.says && frame.husko.says.until > Date.now()) {
+          drawLabel(ctx, spot.x, spot.y - 24, frame.husko.says.text.slice(0, 48), true);
+        }
       }
     }
     const drawActorLabel = (actor: RenderActor) => {

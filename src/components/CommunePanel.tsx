@@ -30,6 +30,7 @@ import {
   GraduationCap,
   Gamepad2,
   Hand,
+  Heart,
   MessageCircle,
   Megaphone,
   MessageSquare,
@@ -69,6 +70,10 @@ import {
   editCommuneBanner,
   fetchCommuneTreeholeFeedback,
   fetchCardCollection,
+  fetchCommuneFish,
+  fetchCommuneHusky,
+  addCommuneFish,
+  interactCommuneHusky,
   pickSpiceDrop,
   refreshCommuneSpiceDrops,
   saveCommuneLoadout,
@@ -80,6 +85,9 @@ import {
   type CommuneBannerPriority,
   type CommuneBannerStroke,
   type CommuneDrop,
+  type CommuneFishEntry,
+  type CommuneFishRarity,
+  type CommuneHuskyState,
   type CommuneLaserShot,
   type CommuneLoadout,
   type CommuneMiniGame,
@@ -110,6 +118,7 @@ import {
   CommuneThreeRenderer,
   type CommuneThreeFrame,
   type CommuneThreeLaserShot,
+  type HuskoState,
 } from '@/lib/commune-three-renderer';
 
 const SelfTestWorkspace = lazy(() => import('@/components/SelfTestWorkspace'));
@@ -555,6 +564,8 @@ type CommuneAction =
   | { type: 'sit'; key: 'E'; label: string; x: number; y: number }
   | { type: 'fountain'; key: 'E'; label: string }
   | { type: 'pond'; key: 'E'; label: string; pondId: (typeof PONDS)[number]['id'] }
+  | { type: 'husko'; key: 'E'; label: string }
+  | { type: 'fish'; key: 'E'; label: string }
   | { type: 'serendipity'; key: 'E'; label: string; momentId: number }
   | { type: 'world-object'; key: 'E'; label: string; objectId: CommuneWorldObjectId }
   | { type: 'duck-incident'; key: 'E'; label: string; incidentId: number }
@@ -577,6 +588,8 @@ function touchActionIcon(action: CommuneAction) {
     case 'release-hands': return <Hand className="size-6" />;
     case 'fountain': return <Coins className="size-6" />;
     case 'pond': return <Fish className="size-6" />;
+    case 'husko': return <Heart className="size-6" />;
+    case 'fish': return <Fish className="size-6" />;
     case 'serendipity':
     case 'duck-incident':
     case 'world-object': return <Sparkles className="size-6" />;
@@ -601,6 +614,8 @@ function touchActionLabel(action: CommuneAction): string {
     case 'release-hands': return 'Let go';
     case 'fountain': return 'Toss coin';
     case 'pond': return 'Feed ducks';
+    case 'husko': return 'Pet Husko';
+    case 'fish': return 'Go fishing';
     case 'serendipity': return 'Discover';
     case 'duck-incident': return 'Ask duck';
     case 'world-object': return 'Explore';
@@ -721,6 +736,88 @@ interface TownSerendipity {
   message: string;
   expiresAt: number;
 }
+
+/* ── Husko — the commune's one shared giant husky ──────────────────────────── */
+
+interface HuskoSim {
+  x: number;
+  y: number;
+  state: HuskoState;
+  stateUntil: number;
+  targetX: number;
+  targetY: number;
+  headingX: number;
+  headingY: number;
+  moving: boolean;
+  walkPhase: number;
+  happiness: number;
+  followUntil: number;
+  followUser: string | null;
+  ball: { x: number; y: number } | null;
+  poos: { x: number; y: number; at: number }[];
+  says: { text: string; until: number } | null;
+}
+
+const HUSKO_HOME = { x: 340, y: 800 }; // east shore of the town pond
+const HUSKO_ROAM = 420;
+const HUSKO_WALK_SPEED = 92;
+const HUSKO_RUN_SPEED = 165;
+const HUSKO_PET_RANGE = 150;
+const HUSKO_SAY_MS = 4200;
+
+const HUSKO_STATE_LINES: Record<HuskoState, string[]> = {
+  wander: ['Patrolling. For reasons.', 'Where did everyone go?', 'New smells detected.'],
+  'sniff-tree': ['SQUIRREL PROTOCOL engaged.', 'This tree owes me answers.', 'Reading the trunk news.'],
+  poo: ['A gentleman never discusses…', 'Do not perceive me right now.', 'This is a private ceremony.'],
+  'sniff-npc': ['You smell like paperwork.', 'Hello. I inspect everyone.', 'Interesting. Very interesting.'],
+  swim: ['Cannonball practice. Do not judge.', 'The pond accepts me.', 'Dog paddle: expert mode.'],
+  chill: ['Five minutes. Maybe ten.', 'Do not disturb. Or do.', 'Flat dog hours.'],
+  'chase-ball': ['THE BALL. THE BALL!!', 'Deploying maximum dog.', 'This is what I trained for.'],
+  follow: ['Leading? No. Escorting.', 'I follow ONLY for snacks.', 'On your six.'],
+  eat: ['NMOM NMOM NMOM.', 'Superior nutrition.', 'More? There is more?'],
+  zoomies: ['ZOOMIES INITIATED.', 'MY LEGS ARE FULL OF JOY.', 'CANNOT STOP. WILL NOT STOP.'],
+};
+
+/** Pick a random line, occasionally summoning a themed variant. */
+function huskoLine(state: HuskoState): string {
+  const lines = HUSKO_STATE_LINES[state];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+/* ── Fishing pond — cast, wait for the bite, reel ──────────────────────────── */
+
+const FISHING_SPOT = { x: 306, y: 640, range: 120 }; // small dock east of the town pond
+
+const FISH_CATALOG: Record<CommuneFishRarity, string[]> = {
+  common: ['Minnow', 'Pond Smelt', 'Sunfish', 'The Old Boot'],
+  uncommon: ['Bluegill', 'Perch', 'Carp'],
+  rare: ['Rainbow Trout', 'Catfish', 'Pike'],
+  epic: ['Koi', 'Arowana', 'Bassalisk'],
+  legendary: ['Golden Koi', 'Moonfin', 'Crystal Piranha'],
+};
+
+const FISH_RARITY_STYLE: Record<CommuneFishRarity, { color: string; glow: string; label: string }> = {
+  common: { color: '#9aa7b0', glow: 'transparent', label: 'Common' },
+  uncommon: { color: '#7ed7a1', glow: 'rgba(126,215,161,.25)', label: 'Uncommon' },
+  rare: { color: '#6fb7e0', glow: 'rgba(111,183,224,.3)', label: 'Rare' },
+  epic: { color: '#c39be0', glow: 'rgba(195,155,224,.35)', label: 'Epic' },
+  legendary: { color: '#f4cc72', glow: 'rgba(244,204,114,.45)', label: 'Legendary' },
+};
+
+function rollFishRarity(): CommuneFishRarity {
+  const roll = Math.random();
+  if (roll < 0.015) return 'legendary';
+  if (roll < 0.065) return 'epic';
+  if (roll < 0.195) return 'rare';
+  if (roll < 0.475) return 'uncommon';
+  return 'common';
+}
+
+function rollFishSpecies(rarity: CommuneFishRarity): string {
+  const pool = FISH_CATALOG[rarity];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 
 const SERENDIPITY_SPOTS: [number, number][] = [
   [430, 520], [1170, 520], [410, 785], [1190, 785],
@@ -1403,6 +1500,311 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   const canvasPointerRef = useRef<{ id: number; x: number; y: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   /** Pixel ducks drifting on the pond after a feed. */
   const ducksRef = useRef<PondDuck[]>([]);
+
+  /* ── Husko the shared husky + fishing pond ─────────────────────────────── */
+  const huskoRef = useRef<HuskoSim>({
+    x: HUSKO_HOME.x,
+    y: HUSKO_HOME.y,
+    state: 'wander',
+    stateUntil: 0,
+    targetX: HUSKO_HOME.x,
+    targetY: HUSKO_HOME.y,
+    headingX: 1,
+    headingY: 0,
+    moving: false,
+    walkPhase: 0,
+    happiness: 70,
+    followUntil: 0,
+    followUser: null,
+    ball: null,
+    poos: [],
+    says: null,
+  });
+  const huskyRef = useRef<CommuneHuskyState | null>(null);
+  const [husky, setHusky] = useState<CommuneHuskyState | null>(null);
+  /** Hover card anchor (screen px) — null when the pointer is away. */
+  const [huskoCard, setHuskoCard] = useState<{ sx: number; sy: number } | null>(null);
+  const huskoCardRef = useRef<{ sx: number; sy: number } | null>(null);
+  const huskoCardSyncedAtRef = useRef(0);
+  const pointerScreenRef = useRef({ x: -9999, y: -9999 });
+
+  // Track the raw pointer position (screen px) for the Husko hover card.
+  useEffect(() => {
+    const track = (event: PointerEvent) => {
+      pointerScreenRef.current = { x: event.clientX, y: event.clientY };
+    };
+    window.addEventListener('pointermove', track, { passive: true });
+    return () => window.removeEventListener('pointermove', track);
+  }, []);
+  const [fishingOpen, setFishingOpen] = useState(false);
+  const fishingOpenRef = useRef(false);
+  fishingOpenRef.current = fishingOpen;
+  const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite'>('idle');
+  const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite'>('idle');
+  fishingPhaseRef.current = fishingPhase;
+  const fishingTimersRef = useRef<number[]>([]);
+  const [lastCatch, setLastCatch] = useState<{ species: string; rarity: CommuneFishRarity } | null>(null);
+  const [fishingNote, setFishingNote] = useState('');
+  const [myFish, setMyFish] = useState<CommuneFishEntry[]>([]);
+  const [visitUser, setVisitUser] = useState('');
+  const [visitFish, setVisitFish] = useState<CommuneFishEntry[] | null>(null);
+  const [fishLoading, setFishLoading] = useState(false);
+
+  /* ── Husko simulation (client-side, like every other NPC) ─────────────────── */
+
+  const huskoSay = useCallback((text: string) => {
+    huskoRef.current.says = { text, until: Date.now() + HUSKO_SAY_MS };
+  }, []);
+
+  const pickHuskoTarget = useCallback(() => {
+    const husko = huskoRef.current;
+    const roll = Math.random();
+    const enterState = (state: HuskoState, durationMs: number, tx?: number, ty?: number) => {
+      husko.state = state;
+      husko.stateUntil = Date.now() + durationMs;
+      if (tx !== undefined && ty !== undefined) {
+        husko.targetX = tx;
+        husko.targetY = ty;
+      }
+      huskoSay(huskoLine(state));
+    };
+    if (roll < 0.3) {
+      // wander
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 90 + Math.random() * HUSKO_ROAM;
+      enterState('wander', 6_000 + Math.random() * 8_000,
+        HUSKO_HOME.x + Math.cos(angle) * radius,
+        HUSKO_HOME.y + Math.sin(angle) * radius * 0.7);
+    } else if (roll < 0.46) {
+      // investigate the nearest tree
+      const tree = TREES[Math.floor(Math.random() * TREES.length)];
+      enterState('sniff-tree', 5_000 + Math.random() * 4_000, tree[0] + 40, tree[1] + 30);
+    } else if (roll < 0.6) {
+      // sniff an NPC
+      const npc = npcsRef.current[Math.floor(Math.random() * npcsRef.current.length)];
+      if (npc) enterState('sniff-npc', 5_500, npc.x + 46, npc.y);
+      else enterState('wander', 5_000, HUSKO_HOME.x + 60, HUSKO_HOME.y);
+    } else if (roll < 0.7) {
+      // swim at the pond edge
+      const pond = PONDS[0];
+      enterState('swim', 5_000 + Math.random() * 3_000, pond.x - 30, pond.y + 20);
+    } else if (roll < 0.84) {
+      // lay down and chill
+      husko.moving = false;
+      enterState('chill', 7_000 + Math.random() * 6_000, husko.x, husko.y);
+    } else if (roll < 0.92) {
+      // a private ceremony
+      enterState('poo', 4_200, husko.x, husko.y);
+    } else {
+      // ZOOMIES
+      const angle = Math.random() * Math.PI * 2;
+      enterState('zoomies', 3_500 + Math.random() * 2_500,
+        HUSKO_HOME.x + Math.cos(angle) * HUSKO_ROAM,
+        HUSKO_HOME.y + Math.sin(angle) * HUSKO_ROAM * 0.6);
+    }
+  }, [huskoSay]);
+
+  const stepHusko = useCallback((dt: number, wallNow: number) => {
+    const husko = huskoRef.current;
+    husko.says = husko.says && husko.says.until > wallNow ? husko.says : null;
+    husko.poos = husko.poos.filter((poo) => wallNow - poo.at < 90_000);
+
+    if (husko.state === 'follow' && wallNow > husko.followUntil) {
+      husko.state = 'wander';
+      husko.followUser = null;
+    }
+
+    const chasing = husko.state === 'chase-ball' && husko.ball;
+    const followTarget = husko.state === 'follow' ? playerRef.current : null;
+
+    let tx = husko.targetX;
+    let ty = husko.targetY;
+    let speed = husko.state === 'chase-ball' || husko.state === 'zoomies' || husko.state === 'follow'
+      ? HUSKO_RUN_SPEED
+      : HUSKO_WALK_SPEED;
+    if (husko.state === 'chill' || husko.state === 'poo' || husko.state === 'eat' || husko.state === 'swim') speed = 0;
+    if (followTarget) {
+      tx = followTarget.x - 56;
+      ty = followTarget.y + 20;
+    } else if (chasing && husko.ball) {
+      tx = husko.ball.x;
+      ty = husko.ball.y;
+    }
+
+    const dx = tx - husko.x;
+    const dy = ty - husko.y;
+    const distance = Math.hypot(dx, dy);
+    husko.moving = distance > 26 && speed > 0;
+    if (husko.moving) {
+      const step = Math.min(distance, speed * dt);
+      husko.x += (dx / distance) * step;
+      husko.y += (dy / distance) * step;
+      husko.headingX = dx / distance;
+      husko.headingY = dy / distance;
+      husko.walkPhase += dt * (speed >= HUSKO_RUN_SPEED ? 16 : 10);
+    }
+
+    if (chasing && husko.ball && Math.hypot(husko.ball.x - husko.x, husko.ball.y - husko.y) < 52) {
+      husko.ball = null;
+      huskoSay('GOT IT! I am the best dog.');
+      pickHuskoTarget();
+      return;
+    }
+
+    // Arrived (and not chasing) → idle until the state ends, then re-decide.
+    if (!chasing && !followTarget && husko.moving === false && wallNow > husko.stateUntil) {
+      if (husko.state === 'poo') {
+        husko.poos.push({ x: husko.x - 30, y: husko.y + 14, at: wallNow });
+        if (husko.poos.length > 4) husko.poos.shift();
+        huskoSay('Leave it. It is art.');
+      }
+      pickHuskoTarget();
+    }
+    // Stuck-less guard: if a wander target never arrives, re-decide eventually.
+    if (husko.state === 'wander' && wallNow > husko.stateUntil + 6_000) pickHuskoTarget();
+  }, [huskoSay, pickHuskoTarget]);
+
+  /* ── Husky stats (shared server state) ────────────────────────────────────── */
+
+  const applyHuskyState = useCallback((state: CommuneHuskyState) => {
+    huskyRef.current = state;
+    huskoRef.current.happiness = state.happiness;
+    setHusky(state);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      fetchCommuneHusky()
+        .then((state) => { if (alive) applyHuskyState(state); })
+        .catch(() => undefined);
+    };
+    load();
+    const interval = window.setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      window.clearInterval(interval);
+    };
+  }, [applyHuskyState]);
+
+  const doHuskyAction = useCallback((action: 'pet' | 'feed' | 'play') => {
+    interactCommuneHusky(action)
+      .then((state) => {
+        applyHuskyState(state);
+        if (action === 'pet') huskoSay('Ahhhh. Right behind the ear. +1 trust.');
+        if (action === 'feed') {
+          huskoSay('NMOM NMOM NMOM.');
+          huskoRef.current.state = 'eat';
+          huskoRef.current.stateUntil = Date.now() + 3_200;
+        }
+        if (action === 'play') huskoSay('AGAIN! THROW IT AGAIN!');
+        onCatThought?.(action === 'feed' ? 'Husko approves of your snack choice.' : 'Husko happiness increased.', 4200);
+      })
+      .catch((error: unknown) => {
+        huskoSay(error instanceof Error ? error.message.slice(0, 44) : 'Husko is confused.');
+      });
+  }, [applyHuskyState, huskoSay, onCatThought]);
+
+  const signalHuskoFollow = useCallback(() => {
+    const husko = huskoRef.current;
+    husko.state = 'follow';
+    husko.followUntil = Date.now() + 25_000;
+    husko.followUser = username;
+    huskoSay(huskoLine('follow'));
+  }, [huskoSay, username]);
+
+  const throwHuskoBall = useCallback(() => {
+    const player = playerRef.current;
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 240 + Math.random() * 200;
+    huskoRef.current.ball = {
+      x: Math.max(60, player.x + Math.cos(angle) * distance),
+      y: Math.max(60, player.y + Math.sin(angle) * distance),
+    };
+    huskoRef.current.state = 'chase-ball';
+    huskoRef.current.stateUntil = Date.now() + 12_000;
+    huskoSay(huskoLine('chase-ball'));
+  }, [huskoSay]);
+
+  /* ── Fishing pond ─────────────────────────────────────────────────────────── */
+
+  const clearFishingTimers = useCallback(() => {
+    for (const timer of fishingTimersRef.current) window.clearTimeout(timer);
+    fishingTimersRef.current = [];
+  }, []);
+
+  const castLine = useCallback(() => {
+    if (fishingPhaseRef.current !== 'idle') return;
+    clearFishingTimers();
+    setFishingNote('Line is out… the pond is thinking.');
+    setFishingPhase('waiting');
+    const biteAt = Date.now() + 3_000 + Math.random() * 9_000;
+    const biteTimer = window.setTimeout(() => {
+      if (!fishingOpenRef.current) return;
+      setFishingPhase('bite');
+      setFishingNote('Something is biting! Reel it in!');
+      const goneTimer = window.setTimeout(() => {
+        if (fishingPhaseRef.current === 'bite') {
+          setFishingPhase('idle');
+          setFishingNote('Too slow — it stole your worm and your dignity.');
+        }
+      }, 1_800);
+      fishingTimersRef.current.push(goneTimer);
+    }, biteAt - Date.now());
+    fishingTimersRef.current.push(biteTimer);
+  }, [clearFishingTimers]);
+
+  const reelLine = useCallback(() => {
+    if (fishingPhaseRef.current !== 'bite') {
+      setFishingNote('Nothing on the line yet. Patience, angler.');
+      return;
+    }
+    clearFishingTimers();
+    setFishingPhase('idle');
+    const rarity = rollFishRarity();
+    const species = rollFishSpecies(rarity);
+    setLastCatch({ species, rarity });
+    setFishingNote(`Caught a ${rarity === 'common' ? '' : rarity + ' '}${species}!`);
+    playerRef.current.says = {
+      text: rarity === 'legendary' ? `A ${species}?! THE POND HAS CHOSEN ME. 🐟` : `Caught a ${species}! 🐟`,
+      until: Date.now() + 4_500,
+    };
+    if (rarity === 'legendary') onCatThought?.('A legendary fish! The pond will sing of this.', 5200);
+    void addCommuneFish(species, rarity)
+      .then(() => setMyFish((current) => [
+        { id: -Date.now(), species, rarity, caughtAt: Date.now() },
+        ...current,
+      ]))
+      .catch(() => setFishingNote(`Caught a ${species}, but it slipped back into the log book.`));
+  }, [clearFishingTimers, onCatThought]);
+
+  const openFishing = useCallback(() => {
+    setFishingOpen(true);
+    if (myFish.length === 0) {
+      setFishLoading(true);
+      fetchCommuneFish()
+        .then(setMyFish)
+        .catch(() => undefined)
+        .finally(() => setFishLoading(false));
+    }
+  }, [myFish.length]);
+
+  useEffect(() => {
+    if (!visitUser) {
+      setVisitFish(null);
+      return;
+    }
+    let alive = true;
+    setFishLoading(true);
+    fetchCommuneFish(visitUser)
+      .then((fish) => { if (alive) setVisitFish(fish); })
+      .catch(() => { if (alive) setVisitFish([]); })
+      .finally(() => { if (alive) setFishLoading(false); });
+    return () => { alive = false; };
+  }, [visitUser]);
+
+  useEffect(() => () => clearFishingTimers(), [clearFishingTimers]);
+
   const [chatFocused, setChatFocused] = useState(false);
 
   useEffect(() => {
@@ -2702,6 +3104,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               && Math.hypot(player.x - pond.x, player.y - pond.y) < POND_RANGE
               && Math.hypot(player.x - FOUNTAIN.x, player.y - FOUNTAIN.y) >= FOUNTAIN_RANGE;
           }
+          case 'husko':
+            return Math.hypot(player.x - huskoRef.current.x, player.y - huskoRef.current.y) < HUSKO_PET_RANGE;
+          case 'fish':
+            return Math.hypot(player.x - FISHING_SPOT.x, player.y - FISHING_SPOT.y) < FISHING_SPOT.range;
           case 'serendipity': {
             const moment = serendipityRef.current;
             return moment?.id === action.momentId
@@ -2841,6 +3247,12 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         };
         return;
       }
+      case 'husko':
+        doHuskyAction('pet');
+        return;
+      case 'fish':
+        openFishing();
+        return;
       case 'serendipity': {
         const moment = serendipityRef.current;
         if (!moment || moment.id !== action.momentId) return;
@@ -2927,7 +3339,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         setPanel(action.panel);
         return;
     }
-  }, [buildBusy, onCatThought, rollBowlingBall, sendRoomEvent, setSpice, swingGolfBall, username]);
+  }, [buildBusy, doHuskyAction, openFishing, onCatThought, rollBowlingBall, sendRoomEvent, setSpice, swingGolfBall, username]);
 
   /* ── input ───────────────────────────────────────────────────────────────── */
 
@@ -3129,6 +3541,30 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       last = now;
       lastFrame = now;
       updateCarRenderPositions(now);
+      stepHusko(dt, wallNow);
+      // Husko hover card — project his position to screen px and show the
+      // stat card while the pointer is near. Synced at most every ~90ms.
+      if (threeRenderer && !fishingOpenRef.current) {
+        const husko = huskoRef.current;
+        const spot = threeRenderer.projectWorldToScreen(husko.x, husko.y, 80);
+        const pointer = pointerScreenRef.current;
+        const near = spot.visible && Math.hypot(pointer.x - spot.x, pointer.y - spot.y) < 96;
+        if (near) huskoCardSyncedAtRef.current = wallNow;
+        const show = near || (huskoCardSyncedAtRef.current > 0 && wallNow - huskoCardSyncedAtRef.current < 500);
+        if (show && spot.visible) {
+          const current = huskoCardRef.current;
+          if (!current || Math.abs(current.sx - spot.x) > 3 || Math.abs(current.sy - spot.y) > 3) {
+            huskoCardRef.current = { sx: spot.x, sy: spot.y };
+            setHuskoCard({ sx: spot.x, sy: spot.y });
+          }
+        } else if (huskoCardRef.current) {
+          huskoCardRef.current = null;
+          setHuskoCard(null);
+        }
+      } else if (huskoCardRef.current) {
+        huskoCardRef.current = null;
+        setHuskoCard(null);
+      }
       const tSec = now / 1000;
       laserShotsRef.current = laserShotsRef.current.filter(
         (shot) => tSec - shot.startedAt <= shot.durationMs / 1000 + 0.12
@@ -3487,6 +3923,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           )
           .sort((a, b) => a.distance - b.distance)[0]?.pond ?? null
         : null;
+      const nearHusko = !carSeatRef.current && !hangoutRef.current
+        && Math.hypot(player.x - huskoRef.current.x, player.y - huskoRef.current.y) < HUSKO_PET_RANGE;
+      const nearFishSpot = !carSeatRef.current && !hangoutRef.current
+        && Math.hypot(player.x - FISHING_SPOT.x, player.y - FISHING_SPOT.y) < FISHING_SPOT.range;
       const actions: CommuneAction[] = [];
 
       if (carSeatRef.current) {
@@ -3577,6 +4017,10 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         actions.push({ type: 'sit', key: 'E', label: 'Sit on the bench', x: nearBench[0], y: nearBench[1] });
       } else if (nearFountain) {
         actions.push({ type: 'fountain', key: 'E', label: 'Toss a coin into the fountain' });
+      } else if (nearHusko) {
+        actions.push({ type: 'husko', key: 'E', label: 'Pet Husko · he deserves it' });
+      } else if (nearFishSpot) {
+        actions.push({ type: 'fish', key: 'E', label: 'Open the fishing hut' });
       } else if (nearPond) {
         actions.push({ type: 'pond', key: 'E', label: 'Feed the ducks', pondId: nearPond.id });
       } else if (nearProp) {
@@ -3766,6 +4210,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           laserShots: laserShotsRef.current,
           mower: tRexRef.current,
           mowerTracks: mowerTracksRef.current,
+          husko: huskoRef.current,
           nightOpacity,
           reduceMotion,
         };
@@ -5059,6 +5504,175 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           Speak
         </button>
       </div>
+
+      {/* ── Husko hover card ─────────────────────────────────────────────────── */}
+      {huskoCard && (
+        <div
+          className="pointer-events-auto absolute z-40 w-56 -translate-x-1/2 rounded-2xl border border-white/15 bg-[#101822]/95 p-3 text-foreground shadow-2xl backdrop-blur"
+          style={{ left: huskoCard.sx, top: Math.max(64, huskoCard.sy - 150) }}
+          onPointerEnter={() => { huskoCardSyncedAtRef.current = Date.now() + 60_000; }}
+          onPointerLeave={() => { huskoCardSyncedAtRef.current = Date.now(); }}
+        >
+          <div className="flex items-baseline justify-between">
+            <strong className="text-sm">🐺 Husko</strong>
+            <span className="text-[10px] text-white/50">
+              {huskoRef.current.state === 'poo' ? 'busy…' : huskoRef.current.state}
+            </span>
+          </div>
+          {huskoRef.current.says && (
+            <p className="mt-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] italic leading-snug text-white/85">
+              “{huskoRef.current.says.text}”
+            </p>
+          )}
+          {husky ? (
+            <div className="mt-2 space-y-1.5">
+              {([['Happiness', husky.happiness, '#f4cc72'], ['Fullness', husky.fullness, '#7ed7a1'], ['Energy', husky.energy, '#6fb7e0']] as const).map(
+                ([label, value, color]) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <span className="w-16 text-[10px] text-white/60">{label}</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/15">
+                      <span className="block h-full rounded-full transition-all" style={{ width: `${Math.round(value)}%`, background: color }} />
+                    </span>
+                    <span className="w-7 text-right text-[10px] tabular-nums text-white/70">{Math.round(value)}</span>
+                  </div>
+                ),
+              )}
+              <p className="pt-0.5 text-[10px] text-white/45">
+                {husky.pets + husky.feeds + husky.plays} cares · last by {husky.lastActor || 'nobody yet'}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 text-[11px] text-white/50">Fetching husky stats…</p>
+          )}
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            {([
+              ['Pet', () => doHuskyAction('pet'), husky ? Date.now() - husky.cooldowns.pet < 12_000 : false],
+              ['Follow', signalHuskoFollow, false],
+              ['Feed', () => doHuskyAction('feed'), husky ? Date.now() - husky.cooldowns.feed < 45_000 : false],
+              ['Throw ball', throwHuskoBall, husky ? Date.now() - husky.cooldowns.play < 20_000 : false],
+            ] as const).map(([label, handler, cooling]) => (
+              <button
+                key={label}
+                type="button"
+                disabled={cooling}
+                onClick={handler}
+                className={cn(
+                  'rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition',
+                  cooling
+                    ? 'cursor-not-allowed border-white/10 text-white/30'
+                    : 'border-white/20 bg-white/10 hover:bg-white/20',
+                )}
+              >
+                {label}{cooling ? ' …' : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Fishing hut HUD ──────────────────────────────────────────────────── */}
+      {fishingOpen && (
+        <div className="pointer-events-auto absolute bottom-24 left-1/2 z-40 w-[min(420px,92vw)] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#101822]/95 p-4 text-foreground shadow-2xl backdrop-blur">
+          <div className="mb-3 flex items-center justify-between">
+            <strong className="text-sm">🎣 Pond Fishing Hut</strong>
+            <button
+              type="button"
+              className="rounded-lg border border-white/20 px-2 py-1 text-[11px] text-white/70 hover:bg-white/10"
+              onClick={() => { clearFishingTimers(); setFishingPhase('idle'); setFishingOpen(false); }}
+            >
+              Close
+            </button>
+          </div>
+          <div className="mb-3 flex gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={castLine}
+              disabled={fishingPhase !== 'idle'}
+              className={cn(
+                'flex-1 rounded-xl border px-3 py-2 font-bold transition',
+                fishingPhase === 'idle'
+                  ? 'border-primary/50 bg-primary text-primary-foreground hover:brightness-105'
+                  : 'cursor-not-allowed border-white/10 text-white/30',
+              )}
+            >
+              {fishingPhase === 'idle' ? 'Cast line' : fishingPhase === 'waiting' ? 'Waiting for a bite…' : 'Something bites!'}
+            </button>
+            <button
+              type="button"
+              onClick={reelLine}
+              className={cn(
+                'flex-1 rounded-xl border px-3 py-2 font-bold transition',
+                fishingPhase === 'bite'
+                  ? 'animate-pulse border-amber-300 bg-amber-400 text-black'
+                  : 'border-white/20 bg-white/10 hover:bg-white/20',
+              )}
+            >
+              Reel in
+            </button>
+          </div>
+          {fishingNote && <p className="mb-3 text-[11px] text-white/70">{fishingNote}</p>}
+          {lastCatch && (
+            <div
+              className="mb-3 rounded-xl border px-3 py-2 text-xs"
+              style={{ borderColor: FISH_RARITY_STYLE[lastCatch.rarity].color, background: FISH_RARITY_STYLE[lastCatch.rarity].glow }}
+            >
+              <strong style={{ color: FISH_RARITY_STYLE[lastCatch.rarity].color }}>{lastCatch.species}</strong>
+              <span className="ml-2 text-white/60">{FISH_RARITY_STYLE[lastCatch.rarity].label}</span>
+            </div>
+          )}
+          <div className="border-t border-white/10 pt-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <strong className="text-xs">🐠 Aquarium</strong>
+              <select
+                value={visitUser}
+                onChange={(event) => setVisitUser(event.target.value)}
+                className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-[11px] text-foreground"
+              >
+                <option value="">My tank ({myFish.length})</option>
+                {[...remoteRef.current.values()].map((remote) => (
+                  <option key={remote.agent.username} value={remote.agent.username}>
+                    {remote.agent.username}'s tank
+                  </option>
+                ))}
+              </select>
+            </div>
+            {fishLoading && <p className="text-[11px] text-white/50">Checking the tank…</p>}
+            {!fishLoading && (() => {
+              const list = visitUser ? (visitFish ?? []) : myFish;
+              if (list.length === 0) {
+                return (
+                  <p className="text-[11px] text-white/50">
+                    {visitUser ? `${visitUser} hasn't caught anything yet.` : 'Empty tank — go catch your first fish!'}
+                  </p>
+                );
+              }
+              const groups = new Map<string, { rarity: CommuneFishRarity; count: number }>();
+              for (const entry of list) {
+                const group = groups.get(entry.species);
+                if (group) group.count += 1;
+                else groups.set(entry.species, { rarity: entry.rarity, count: 1 });
+              }
+              return (
+                <div className="grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto">
+                  {[...groups.entries()].map(([species, info]) => (
+                    <div
+                      key={species}
+                      className="flex items-center justify-between rounded-lg border px-2 py-1 text-[11px]"
+                      style={{
+                        borderColor: FISH_RARITY_STYLE[info.rarity].color,
+                        background: FISH_RARITY_STYLE[info.rarity].glow,
+                      }}
+                    >
+                      <span style={{ color: FISH_RARITY_STYLE[info.rarity].color }}>{species}</span>
+                      <span className="text-white/60">×{info.count}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* ── panels ──────────────────────────────────────────────────────────── */}
       {/* The Store is its own centered modal (same one as Settings). */}
