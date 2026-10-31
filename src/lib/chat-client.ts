@@ -470,6 +470,21 @@ export async function getTeamBoardCard(id: string): Promise<TeamBoardCardDetail>
   return requestJson<TeamBoardCardDetail>(`/api/collab/board/cards/${encodeURIComponent(id)}`);
 }
 
+export async function getTeamBoardCardWithRetry(id: string, retries = 3): Promise<TeamBoardCardDetail> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await getTeamBoardCard(id);
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await new Promise((resolve) => window.setTimeout(resolve, 160 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Could not load this Team Board card.');
+}
+
 export async function createTeamBoardCard(payload: {
   type: TeamBoardCardType;
   title: string;

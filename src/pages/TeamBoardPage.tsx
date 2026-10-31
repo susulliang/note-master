@@ -32,7 +32,7 @@ import { findChatUsers, fetchChatConversations, type ChatConversation, type Chat
 import {
   addTeamBoardComment,
   createTeamBoardCard,
-  getTeamBoardCard,
+  getTeamBoardCardWithRetry,
   listTeamBoardCards,
   requestTeamBoardSocketTicket,
   shareTeamBoardCardWithChat,
@@ -206,7 +206,7 @@ export default function TeamBoardPage({ username, initialCardId = null }: TeamBo
       if (!sessionScratchpadDirtyRef.current) setSessionScratchpad(cached.session?.scratchpad ?? '');
     }
     try {
-      const next = await getTeamBoardCard(cardId);
+      const next = await getTeamBoardCardWithRetry(cardId);
       if (sequence !== detailRequestSequenceRef.current || activeRoomIdRef.current !== cardId) return;
       setDetail(next);
       void saveTeamBoardCardDetail(username, cardId, next);

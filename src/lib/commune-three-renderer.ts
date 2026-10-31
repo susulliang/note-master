@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COMMUNE_HANGOUTS } from '@shared/commune-hangouts';
 import {
   COMMUNE_BUILD_CATALOG,
+  communeBuildIsUnderConstruction,
   type CommuneBuildable,
   type CommuneBuildKind,
 } from '@shared/commune-buildables';
@@ -61,6 +62,7 @@ type RenderCar = {
   trim: string;
   style?: 'classic' | 'electric-sport';
   owner?: string;
+  buildId?: string;
 };
 
 type RenderBuildPreview = {
@@ -138,6 +140,7 @@ export interface CommuneThreeFrame {
   pets: readonly RenderPet[];
   cars: readonly RenderCar[];
   buildables: readonly CommuneBuildable[];
+  hoveredBuildId?: string | null;
   buildPreview: RenderBuildPreview | null;
   drops: readonly RenderDrop[];
   ducks: readonly RenderDuck[];
@@ -159,6 +162,25 @@ export interface CommuneThreeFrame {
 
 function material(color: THREE.ColorRepresentation): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({ color, flatShading: true });
+}
+
+function setConstructionOpacity(root: THREE.Object3D, opacity: number): void {
+  if (root.userData.communeConstructionOpacity === opacity) return;
+  root.userData.communeConstructionOpacity = opacity;
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const entry of materials) {
+      const data = entry.userData as Record<string, unknown>;
+      if (typeof data.communeBaseOpacity !== 'number') data.communeBaseOpacity = entry.opacity;
+      if (typeof data.communeBaseTransparent !== 'boolean') data.communeBaseTransparent = entry.transparent;
+      if (typeof data.communeBaseDepthWrite !== 'boolean') data.communeBaseDepthWrite = entry.depthWrite;
+      entry.opacity = Number(data.communeBaseOpacity) * opacity;
+      entry.transparent = Boolean(data.communeBaseTransparent) || opacity < 1;
+      entry.depthWrite = opacity < 1 ? false : Boolean(data.communeBaseDepthWrite);
+      entry.needsUpdate = true;
+    }
+  });
 }
 
 const CAT_COATS: Record<string, { body: string; light: string; dark: string; accent: string; patch: string }> = {
@@ -937,7 +959,7 @@ export class CommuneThreeRenderer {
     this.updateLanterns(night, frame.time);
     this.scene.background = this.backgroundColor.copy(DAY_BACKGROUND).lerp(NIGHT_BACKGROUND, night);
 
-    this.updateCars(frame.cars);
+    this.updateCars(frame.cars, frame.buildables);
     this.updateBuildableModels(frame.buildables, frame.buildPreview);
     this.updateActors(frame, 1 - Math.exp(-delta * 26));
     this.updatePets(frame.pets, frame.time, frame.reduceMotion);
@@ -1469,7 +1491,7 @@ export class CommuneThreeRenderer {
     return group;
   }
 
-  private updateCars(cars: readonly RenderCar[]): void {
+  private updateCars(cars: readonly RenderCar[], buildables: readonly CommuneBuildable[]): void {
     const visibleIds = new Set(cars.map((car) => car.id));
     for (const car of cars) {
       let group = this.cars.get(car.id);
@@ -1477,6 +1499,8 @@ export class CommuneThreeRenderer {
       group.visible = true;
       group.position.set(car.x, 0, car.y);
       group.rotation.y = -car.heading;
+      const buildable = car.buildId ? buildables.find((item) => item.id === car.buildId) : undefined;
+      setConstructionOpacity(group, buildable && communeBuildIsUnderConstruction(buildable) ? 0.46 : 1);
     }
     for (const [id, group] of this.cars) {
       if (!id.startsWith('buildcar-') || visibleIds.has(id)) continue;
@@ -1504,6 +1528,7 @@ export class CommuneThreeRenderer {
       }
       group.position.set(item.x, 0, item.y);
       group.rotation.y = -item.rotation;
+      setConstructionOpacity(group, communeBuildIsUnderConstruction(item) ? 0.46 : 1);
     }
     for (const [id, group] of this.buildableModels) {
       if (liveIds.has(id)) continue;
@@ -1992,17 +2017,20 @@ export class CommuneThreeRenderer {
     for (const npc of frame.npcs) drawActorLabel(npc);
     for (const remote of frame.remotes) drawActorLabel(remote);
     for (const car of frame.cars) {
-      if (!car.owner || car.style !== 'electric-sport') continue;
-      this.projectedPoint.set(car.x, 62, car.y).project(this.activeCamera);
+      const buildable = car.buildId
+        ? frame.buildables.find((item) => item.id === car.buildId)
+        : undefined;
+      if (!buildable) continue;
+      const underConstruction = communeBuildIsUnderConstruction(buildable);
+      const hovered = frame.hoveredBuildId === buildable.id;
+      if (!underConstruction && !hovered) continue;
+      this.projectedPoint.set(car.x, 82, car.y).project(this.activeCamera);
       const point = this.projectedPoint;
       if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
-      drawLabel(
-        ctx,
-        (point.x * 0.5 + 0.5) * this.width,
-        (-point.y * 0.5 + 0.5) * this.height,
-        `${car.owner} · ROADSTER`,
-        true,
-      );
+      const screenX = (point.x * 0.5 + 0.5) * this.width;
+      const screenY = (-point.y * 0.5 + 0.5) * this.height;
+      if (underConstruction) drawLabel(ctx, screenX, screenY, 'UNDER CONSTRUCTION', true);
+      if (hovered) drawLabel(ctx, screenX, screenY - (underConstruction ? 20 : 0), `Owner · ${buildable.owner}`, true);
     }
     for (const hangout of COMMUNE_HANGOUTS) {
       const occupants = [frame.player, ...frame.remotes]
@@ -2026,6 +2054,9 @@ export class CommuneThreeRenderer {
       if (building.kind === 'sports-car') continue;
       const catalog = COMMUNE_BUILD_CATALOG.find((item) => item.kind === building.kind);
       if (!catalog) continue;
+      const underConstruction = communeBuildIsUnderConstruction(building);
+      const hovered = frame.hoveredBuildId === building.id;
+      if (!underConstruction && !hovered) continue;
       const height = building.kind === 'tree' ? 110
         : building.kind === 'beach-umbrella' ? 96
           : building.kind === 'paper-lantern' ? 96
@@ -2033,13 +2064,10 @@ export class CommuneThreeRenderer {
       this.projectedPoint.set(building.x, height, building.y).project(this.activeCamera);
       const point = this.projectedPoint;
       if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.1) continue;
-      drawLabel(
-        ctx,
-        (point.x * 0.5 + 0.5) * this.width,
-        (-point.y * 0.5 + 0.5) * this.height,
-        `${building.owner} · ${catalog.name}`,
-        true,
-      );
+      const screenX = (point.x * 0.5 + 0.5) * this.width;
+      const screenY = (-point.y * 0.5 + 0.5) * this.height;
+      if (underConstruction) drawLabel(ctx, screenX, screenY, 'UNDER CONSTRUCTION', true);
+      if (hovered) drawLabel(ctx, screenX, screenY - (underConstruction ? 20 : 0), `Owner · ${building.owner}`, true);
     }
     if (frame.buildPreview) {
       const preview = frame.buildPreview;

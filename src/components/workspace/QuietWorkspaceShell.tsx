@@ -238,6 +238,9 @@ export function QuietWorkspaceShell({
     const next = { left, top };
     dockPositionRef.current = next;
     setDockPosition(next);
+    window.dispatchEvent(new CustomEvent('econote:workspace-dock-bounds', {
+      detail: { left, top, width: bounds.width, height: bounds.height },
+    }));
   };
 
   const endDockDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {

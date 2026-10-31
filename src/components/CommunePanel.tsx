@@ -54,7 +54,7 @@ import {
 import {
   COMMUNE_BUILD_CATALOG,
   COMMUNE_BUILD_INTERACT_RANGE,
-  COMMUNE_BUILD_PLACE_RANGE,
+  communeBuildIsUnderConstruction,
   communeBuildCarId,
   type CommuneBuildable,
   type CommuneBuildKind,
@@ -409,6 +409,18 @@ function reconcileBuiltObjects(items: CommuneBuildable[]): void {
   }
 }
 
+function isBuildCarReady(car: ParkedCar): boolean {
+  if (!car.buildId) return true;
+  const buildable = BUILT_OBJECTS.find((item) => item.id === car.buildId);
+  return !buildable || !communeBuildIsUnderConstruction(buildable);
+}
+
+function formatBuildDuration(durationMs: number): string {
+  return durationMs < 60_000
+    ? `${Math.round(durationMs / 1_000)} sec`
+    : `${Math.round(durationMs / 60_000)} min`;
+}
+
 function resetCarSnapshot(car: ParkedCar, x: number, y: number, heading: number): void {
   const at = performance.now();
   car.x = x;
@@ -518,12 +530,9 @@ function canPlaceBuildLocally(
   x: number,
   y: number,
   rotation: number,
-  playerX: number,
-  playerY: number,
 ): boolean {
   const footprint = buildHalfExtents(kind, rotation);
-  return Math.hypot(playerX - x, playerY - y) <= COMMUNE_BUILD_PLACE_RANGE
-    && canOccupy(x, y, Math.max(footprint.x, footprint.y) + 4);
+  return canOccupy(x, y, Math.max(footprint.x, footprint.y) + 4);
 }
 const TREEHOLE = { x: 1480, y: 1440, range: 108 };
 
@@ -1350,6 +1359,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
   buildPlacementKindRef.current = buildPlacementKind;
   const buildPlacementRotationRef = useRef(0);
   const buildPreviewRef = useRef<{ x: number; y: number; rotation: number; valid: boolean } | null>(null);
+  const hoveredBuildObjectIdRef = useRef<string | null>(null);
   const buildTouchPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const [buildBusy, setBuildBusy] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
@@ -1640,6 +1650,42 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     updateTouchMode();
     coarsePointer.addEventListener('change', updateTouchMode);
     return () => coarsePointer.removeEventListener('change', updateTouchMode);
+  }, []);
+
+  useEffect(() => {
+    const applyDockBounds = (top: number, height: number) => {
+      const root = wrapRef.current;
+      if (!root) return;
+      const dockBottom = top + height;
+      const clearance = dockBottom > window.innerHeight - 72
+        ? Math.max(0, window.innerHeight - top)
+        : 0;
+      root.style.setProperty('--commune-dock-clearance', `${clearance}px`);
+    };
+    const updateFromDom = () => {
+      const dock = document.querySelector<HTMLElement>('.quiet-orbit-dock');
+      if (!dock || getComputedStyle(dock).display === 'none') {
+        applyDockBounds(window.innerHeight, 0);
+        return;
+      }
+      const rect = dock.getBoundingClientRect();
+      applyDockBounds(rect.top, rect.height);
+    };
+    const onDockBounds = (event: Event) => {
+      const bounds = (event as CustomEvent<{ top?: number; height?: number }>).detail;
+      if (typeof bounds?.top === 'number' && typeof bounds.height === 'number') {
+        applyDockBounds(bounds.top, bounds.height);
+      } else {
+        updateFromDom();
+      }
+    };
+    updateFromDom();
+    window.addEventListener('resize', updateFromDom);
+    window.addEventListener('econote:workspace-dock-bounds', onDockBounds);
+    return () => {
+      window.removeEventListener('resize', updateFromDom);
+      window.removeEventListener('econote:workspace-dock-bounds', onDockBounds);
+    };
   }, []);
 
   useEffect(() => {
@@ -2915,8 +2961,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               preview.x,
               preview.y,
               preview.rotation,
-              playerRef.current.x,
-              playerRef.current.y,
             );
           }
         }
@@ -3366,7 +3410,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             distance: Math.hypot(player.x - car.x, player.y - car.y),
             occupied: [...remoteRef.current.values()].filter((remote) => remote.agent.carId === car.id).length,
           }))
-          .filter(({ distance, occupied }) => distance < 118 && occupied < 2)
+          .filter(({ car, distance, occupied }) => isBuildCarReady(car) && distance < 118 && occupied < 2)
           .sort((a, b) => a.distance - b.distance)[0]?.car ?? null
         : null;
       const nearHangout = !carSeatRef.current && !hangoutRef.current
@@ -3704,6 +3748,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           pets: petViews,
           cars: PARKED_CARS,
           buildables: builtObjectsRef.current,
+          hoveredBuildId: hoveredBuildObjectIdRef.current,
           buildPreview: buildPlacementKindRef.current && buildPreviewRef.current
             ? { kind: buildPlacementKindRef.current, ...buildPreviewRef.current }
             : null,
@@ -3735,6 +3780,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           buildPlacementKindRef.current && buildPreviewRef.current
             ? { kind: buildPlacementKindRef.current, ...buildPreviewRef.current }
             : null,
+          hoveredBuildObjectIdRef.current,
         );
       }
       raf = requestAnimationFrame(step);
@@ -3800,8 +3846,6 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
             x,
             y,
             buildPlacementRotationRef.current,
-            playerRef.current.x,
-            playerRef.current.y,
           ),
         };
         if (!previous || Math.hypot(previous.x - x, previous.y - y) > 16) {
@@ -3848,6 +3892,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       return;
     }
     const tappedCar = PARKED_CARS.find((car) => {
+      if (!isBuildCarReady(car)) return false;
       const bounds = carHalfExtents(car.heading, car.halfWidth, car.halfLength);
       return Math.abs(wx - car.x) < bounds.x + 10 && Math.abs(wy - car.y) < bounds.y + 10;
     });
@@ -4163,8 +4208,32 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
   const onCanvasMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (mapZoomRef.current >= 5 && document.pointerLockElement === event.currentTarget) {
+      hoveredBuildObjectIdRef.current = null;
       updateFirstPersonLook(event.movementX, event.movementY, 0.0025);
+      return;
     }
+    if (buildPlacementKindRef.current) {
+      hoveredBuildObjectIdRef.current = null;
+      updateBuildPreviewAt(event.clientX, event.clientY);
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = communeRendererRef.current?.screenToWorld(event.clientX, event.clientY, rect);
+    const worldX = point?.x ?? event.clientX - rect.left + camRef.current.x;
+    const worldY = point?.y ?? event.clientY - rect.top + camRef.current.y;
+    const hovered = [...builtObjectsRef.current].reverse().find((item) => {
+      const car = item.kind === 'sports-car'
+        ? PARKED_CARS.find((candidate) => candidate.buildId === item.id)
+        : null;
+      const bounds = car
+        ? carHalfExtents(car.heading, car.halfWidth, car.halfLength)
+        : buildHalfExtents(item.kind, item.rotation);
+      return Math.abs(worldX - (car?.x ?? item.x)) <= bounds.x + 12
+        && Math.abs(worldY - (car?.y ?? item.y)) <= bounds.y + 12;
+    });
+    hoveredBuildObjectIdRef.current = hovered?.id ?? null;
   };
 
   const onCanvasPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -4228,7 +4297,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       x,
       y,
       rotation: 0,
-      valid: canPlaceBuildLocally(kind, x, y, 0, player.x, player.y),
+      valid: canPlaceBuildLocally(kind, x, y, 0),
     };
     clickTargetRef.current = null;
     if (mapZoomRef.current >= 5) {
@@ -4251,7 +4320,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       x,
       y,
       rotation,
-      valid: canPlaceBuildLocally(kind, x, y, rotation, playerRef.current.x, playerRef.current.y),
+      valid: canPlaceBuildLocally(kind, x, y, rotation),
     };
   };
 
@@ -4261,11 +4330,11 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
     const x = Math.round(worldX / 8) * 8;
     const y = Math.round(worldY / 8) * 8;
     const rotation = buildPlacementRotationRef.current;
-    if (!canPlaceBuildLocally(kind, x, y, rotation, playerRef.current.x, playerRef.current.y)) {
+    if (!canPlaceBuildLocally(kind, x, y, rotation)) {
       buildPreviewRef.current = { x, y, rotation, valid: false };
       setInbox((items) => [...items.slice(-4), {
         from: 'BUILD',
-        message: 'That spot is blocked or too far away. Move the preview to a clear spot.',
+        message: 'That spot is blocked. Move the preview to a clear spot.',
       }]);
       return;
     }
@@ -4285,7 +4354,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       setBuiltObjects(next);
       setInbox((items) => [...items.slice(-4), {
         from: 'BUILD',
-        message: `${COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind)?.name ?? 'Structure'} added to the village.`,
+        message: `${COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind)?.name ?? 'Structure'} placed · under construction for ${formatBuildDuration(COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === kind)?.buildTimeMs ?? 0)}.`,
       }]);
       cancelBuildPlacement();
     } catch (error) {
@@ -4381,6 +4450,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         onPointerUp={onCanvasPointerUp}
         onPointerCancel={onCanvasPointerCancel}
         onMouseMove={onCanvasMouseMove}
+        onMouseLeave={() => { hoveredBuildObjectIdRef.current = null; }}
         onClick={onCanvasClick}
         onWheel={onCanvasWheel}
         className={cn(
@@ -4483,6 +4553,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         <div
           aria-live="polite"
           className="absolute bottom-[4.75rem] left-1/2 z-20 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-col items-center gap-1.5 animate-in fade-in"
+          style={{ bottom: 'max(4.75rem, calc(var(--commune-dock-clearance, 0px) + 12px))' }}
         >
           {focusedNpc && !focusedNpcIsReady && (
             <div className="flex items-center gap-2 rounded-xl border border-accent/40 bg-card/95 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl">
@@ -4529,7 +4600,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-live="polite"
           className="absolute z-20 flex items-center gap-2 rounded-xl border border-accent/40 bg-card/95 px-3 py-2 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl"
           style={{
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 15rem)',
+            bottom: 'max(calc(env(safe-area-inset-bottom, 0px) + 15rem), calc(var(--commune-dock-clearance, 0px) + 12px))',
             right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
           }}
         >
@@ -4557,7 +4628,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-label={carSeat ? 'Car steering joystick' : 'Movement joystick'}
           className="absolute z-20 size-[clamp(116px,34vw,144px)] touch-none select-none rounded-full border border-white/30 bg-slate-950/25 shadow-[inset_0_0_22px_rgba(0,0,0,0.4),0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-sm"
           style={{
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.5rem)',
+            bottom: 'max(calc(env(safe-area-inset-bottom, 0px) + 5.5rem), calc(var(--commune-dock-clearance, 0px) + 12px))',
             left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
             touchAction: 'none',
           }}
@@ -4596,7 +4667,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           aria-label="Nearby actions"
           className="absolute z-20 flex items-end gap-2.5"
           style={{
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.5rem)',
+            bottom: 'max(calc(env(safe-area-inset-bottom, 0px) + 5.5rem), calc(var(--commune-dock-clearance, 0px) + 12px))',
             right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
           }}
         >
@@ -4657,8 +4728,8 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
           className="absolute right-3 z-30"
           style={{
             bottom: touchControls
-              ? 'calc(env(safe-area-inset-bottom, 0px) + 13rem)'
-              : 'calc(env(safe-area-inset-bottom, 0px) + 1rem)',
+              ? 'max(calc(env(safe-area-inset-bottom, 0px) + 13rem), calc(var(--commune-dock-clearance, 0px) + 12px))'
+              : 'max(calc(env(safe-area-inset-bottom, 0px) + 1rem), calc(var(--commune-dock-clearance, 0px) + 12px))',
           }}
         >
           {buildMenuOpen && !buildPlacementKind && (
@@ -4700,8 +4771,13 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
                         <span className="block text-[11px] font-bold">{entry.name}</span>
                         <span className="mt-1 block text-[9px] leading-snug text-white/55">{entry.description}</span>
                       </span>
-                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200/20 bg-amber-200/10 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-100">
-                        <Coins className="size-3" /> {entry.price} spice
+                      <span className="mt-2 flex w-full items-center justify-between gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/20 bg-amber-200/10 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-100">
+                          <Coins className="size-3" /> {entry.price} spice
+                        </span>
+                        <span className="font-mono text-[9px] font-semibold text-white/55">
+                          {formatBuildDuration(entry.buildTimeMs)}
+                        </span>
                       </span>
                     </button>
                   );
@@ -4809,7 +4885,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
       {/* Short-lived messages in parked cars are delivered only to occupants. */}
       {carSeat && (
-          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2" style={{ bottom: 'max(7.5rem, calc(var(--commune-dock-clearance, 0px) + 12px))' }}>
             <div
               role="log"
               aria-label="Private parked car conversation"
@@ -4843,7 +4919,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         )}
       {/* Short-lived shared history lets everyone remove inappropriate chat. */}
         {hangout && (
-          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+          <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2" style={{ bottom: 'max(7.5rem, calc(var(--commune-dock-clearance, 0px) + 12px))' }}>
             <div
               role="log"
               aria-label={`Private ${currentHangout?.label ?? 'building'} conversation`}
@@ -4875,7 +4951,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
         )}
       {/* Short-lived shared history lets everyone remove inappropriate chat. */}
         {!carSeat && !hangout && squareMessages.length > 0 && (
-        <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2">
+        <div className="pointer-events-none absolute bottom-[7.5rem] left-1/2 z-10 w-[min(560px,calc(100%-24px))] -translate-x-1/2" style={{ bottom: 'max(7.5rem, calc(var(--commune-dock-clearance, 0px) + 12px))' }}>
           <div
             role="log"
             aria-label="Recent square chat"
@@ -4909,7 +4985,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
 
       {/* Hand-holding indicator */}
       {hands && (
-        <div className="pointer-events-none absolute bottom-[7.25rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-full border border-primary/50 bg-primary/15 px-3 py-1 text-[11px] font-bold text-primary shadow-lg backdrop-blur-xl">
+        <div className="pointer-events-none absolute bottom-[7.25rem] left-1/2 -translate-x-1/2 animate-in fade-in rounded-full border border-primary/50 bg-primary/15 px-3 py-1 text-[11px] font-bold text-primary shadow-lg backdrop-blur-xl" style={{ bottom: 'max(7.25rem, calc(var(--commune-dock-clearance, 0px) + 12px))' }}>
           🤝 {hands.lead ? 'Leading' : 'Following'} {hands.partner}
           {touchControls ? ' · Use the action button to let go' : ' · press H to let go'}
         </div>
@@ -4930,7 +5006,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               ? 'border-white/30 bg-card/95'
               : 'border-white/35 bg-transparent'
         )}
-        style={{ bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
+        style={{ bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px), calc(var(--commune-dock-clearance, 0px) + 12px))' }}
       >
         {messaging && (
           <button
@@ -5033,7 +5109,7 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
               }
             : touchControls
             ? {
-                bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
+                  bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px), calc(var(--commune-dock-clearance, 0px) + 12px))',
                 left: 'max(0.75rem, env(safe-area-inset-left, 0px))',
                 right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
               }
@@ -6807,6 +6883,7 @@ function draw(
   bowlingPinsKnockedAt = 0,
   buildables: readonly CommuneBuildable[] = [],
   buildPreview: { kind: CommuneBuildKind; x: number; y: number; rotation: number; valid: boolean } | null = null,
+  hoveredBuildId: string | null = null,
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -6862,11 +6939,15 @@ function draw(
   }
   for (const car of PARKED_CARS) {
     if (!isVisible(car.x, car.y, 64, 90)) continue;
+    const buildable = car.buildId ? buildables.find((item) => item.id === car.buildId) ?? null : null;
     const occupants = [
       ...(player.carId === car.id ? [player.name] : []),
       ...remotes.filter((remote) => remote.carId === car.id).map((remote) => remote.name),
     ].slice(0, 2);
-    items.push({ y: car.y + 72, fn: () => drawParkedCar(ctx, car, occupants) });
+    items.push({
+      y: car.y + 72,
+      fn: () => drawParkedCar(ctx, car, occupants, buildable, buildable?.id === hoveredBuildId),
+    });
   }
   for (const place of COMMUNE_HANGOUTS) {
     if (!isVisible(place.x, place.y, place.width / 2 + 42, place.depth / 2 + 112)) continue;
@@ -6890,7 +6971,7 @@ function draw(
     if (!catalog || !isVisible(building.x, building.y, catalog.width / 2 + 40, catalog.depth / 2 + 110)) continue;
     items.push({
       y: building.y + catalog.depth / 2,
-      fn: () => drawCommuneBuildable(ctx, building, t),
+      fn: () => drawCommuneBuildable(ctx, building, t, building.id === hoveredBuildId),
     });
   }
   for (const object of WORLD_OBJECTS) {
@@ -7311,9 +7392,17 @@ function drawCommuneWorldObject(ctx: CanvasRenderingContext2D, object: CommuneWo
   }
 }
 
-function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants: string[]) {
+function drawParkedCar(
+  ctx: CanvasRenderingContext2D,
+  car: ParkedCar,
+  occupants: string[],
+  buildable: CommuneBuildable | null = null,
+  hovered = false,
+) {
   const { x, y } = car;
+  const underConstruction = !!buildable && communeBuildIsUnderConstruction(buildable);
   ctx.save();
+  if (underConstruction) ctx.globalAlpha = 0.46;
   ctx.translate(x, y);
   ctx.rotate(car.heading);
   ctx.scale(car.style === 'electric-sport' ? 1.3 : 1, car.style === 'electric-sport' ? 1.75 : 1.3);
@@ -7363,15 +7452,14 @@ function drawParkedCar(ctx: CanvasRenderingContext2D, car: ParkedCar, occupants:
   }
   ctx.restore();
 
-  ctx.fillStyle = 'rgba(17,24,25,0.76)';
-  ctx.fillRect(x - 49, y + 62, 98, 14);
-  ctx.fillStyle = '#fff4da';
-  ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
-  ctx.textAlign = 'center';
-  const occupantsLabel = occupants.length
-    ? `${occupants.map((name) => name.slice(0, 6)).join(' + ')} · ${occupants.length}/2`
-    : `${car.owner ? `${car.owner}'s ` : ''}${car.label} · E`;
-  ctx.fillText(occupantsLabel, x, y + 72);
+  if (buildable) {
+    if (underConstruction) drawBuildTooltip(ctx, x, y + 82, 'UNDER CONSTRUCTION', true);
+    else if (hovered) drawBuildTooltip(ctx, x, y - 70, `Owner · ${buildable.owner}`);
+  } else if (occupants.length) {
+    drawBuildTooltip(ctx, x, y + 72, `${occupants.map((name) => name.slice(0, 6)).join(' + ')} · ${occupants.length}/2`);
+  } else {
+    drawBuildTooltip(ctx, x, y + 72, `${car.label} · E`);
+  }
 }
 
 function drawCommuneHangout(ctx: CanvasRenderingContext2D, place: CommuneHangout, occupants: string[]): void {
@@ -7468,10 +7556,36 @@ function drawCommuneHangout(ctx: CanvasRenderingContext2D, place: CommuneHangout
   });
 }
 
-function drawCommuneBuildable(ctx: CanvasRenderingContext2D, item: CommuneBuildable, time: number): void {
+function drawBuildTooltip(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  text: string,
+  construction = false,
+): void {
+  ctx.save();
+  ctx.font = "bold 9px 'Schoolbell', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const width = Math.min(230, Math.ceil(ctx.measureText(text).width) + 16);
+  ctx.fillStyle = construction ? 'rgba(56,43,25,0.9)' : 'rgba(17,24,25,0.84)';
+  ctx.fillRect(x - width / 2 + 1, y - 7, width, 15);
+  ctx.fillStyle = construction ? '#f0c875' : '#fff4da';
+  ctx.fillText(text, x, y + 0.5, width - 10);
+  ctx.restore();
+}
+
+function drawCommuneBuildable(
+  ctx: CanvasRenderingContext2D,
+  item: CommuneBuildable,
+  time: number,
+  hovered = false,
+): void {
   const catalog = COMMUNE_BUILD_CATALOG.find((entry) => entry.kind === item.kind);
   if (!catalog) return;
+  const underConstruction = communeBuildIsUnderConstruction(item);
   ctx.save();
+  if (underConstruction) ctx.globalAlpha = 0.46;
   ctx.translate(item.x, item.y);
   ctx.rotate(item.rotation);
   drawGroundShadow(ctx, 4, catalog.depth * 0.16, catalog.width * 0.47, catalog.depth * 0.28, 0.24);
@@ -7572,12 +7686,15 @@ function drawCommuneBuildable(ctx: CanvasRenderingContext2D, item: CommuneBuilda
     ctx.fillRect(8, 12, 14, 2);
   }
   ctx.restore();
-  ctx.fillStyle = 'rgba(17,24,25,0.72)';
-  ctx.fillRect(item.x - 66, item.y + catalog.depth / 2 + 8, 132, 14);
-  ctx.fillStyle = '#fff4da';
-  ctx.font = "bold 7px 'Schoolbell', ui-monospace, monospace";
-  ctx.textAlign = 'center';
-  ctx.fillText(`${item.owner.slice(0, 10)} · ${catalog.name}`, item.x, item.y + catalog.depth / 2 + 18, 126);
+  if (underConstruction) {
+    drawBuildTooltip(ctx, item.x, item.y + catalog.depth / 2 + 18, 'UNDER CONSTRUCTION', true);
+  }
+  if (hovered) {
+    const height = item.kind === 'tree' ? 112
+      : item.kind === 'beach-umbrella' || item.kind === 'paper-lantern' ? 92
+        : item.kind === 'tent' ? 76 : 62;
+    drawBuildTooltip(ctx, item.x, item.y - height, `Owner · ${item.owner}`);
+  }
 }
 
 function drawBuildPreview(

@@ -10,7 +10,8 @@ import {
   COMMUNE_BUILD_INTERACT_RANGE,
   COMMUNE_BUILD_MAX_PER_AGENT,
   COMMUNE_BUILD_MAX_TOTAL,
-  COMMUNE_BUILD_PLACE_RANGE,
+  communeBuildIsUnderConstruction,
+  communeBuildRemainingMs,
   communeBuildCarId,
   type CommuneBuildable,
   type CommuneBuildKind,
@@ -632,9 +633,6 @@ export class CommuneRoom extends DurableObject<Env> {
         && Date.now() - presence.seenAt <= PRESENCE_TTL_MS
       ));
     if (!catalog || !current) return { ok: false, error: 'Reconnect to Commune before building.' };
-    if (Math.hypot(current.x - x, current.y - y) > COMMUNE_BUILD_PLACE_RANGE) {
-      return { ok: false, error: 'Build within 300 steps of your agent.' };
-    }
     if (!this.isBuildSpaceClear(kind, x, y, rotation)) {
       return { ok: false, error: 'That spot is occupied or outside the buildable map area.' };
     }
@@ -1237,6 +1235,18 @@ export class CommuneRoom extends DurableObject<Env> {
     if (event.type === 'car_enter') {
       const carId = typeof event.carId === 'string' ? event.carId : '';
       const car = this.getCarPosition(carId);
+      const buildable = carId.startsWith('buildcar-')
+        ? this.listBuildables().find((item) => communeBuildCarId(item.id) === carId)
+        : null;
+      if (buildable && communeBuildIsUnderConstruction(buildable, now)) {
+        const seconds = Math.ceil(communeBuildRemainingMs(buildable, now) / 1000);
+        send(ws, {
+          type: 'error',
+          code: 'car_under_construction',
+          message: `This electric sports car is under construction for ${seconds} more seconds.`,
+        });
+        return;
+      }
       if (!car || current.carId || current.hangoutId || Math.hypot(current.x - car.x, current.y - car.y) > PARKED_CAR_INTERACT_RANGE) {
         send(ws, { type: 'error', code: 'car_unavailable', message: 'You cannot enter that car right now.' });
         return;
@@ -1306,6 +1316,10 @@ export class CommuneRoom extends DurableObject<Env> {
 
     if (event.type === 'car_move') {
       if (!current.carId) return;
+      if (current.carId.startsWith('buildcar-')) {
+        const buildable = this.listBuildables().find((item) => communeBuildCarId(item.id) === current.carId);
+        if (buildable && communeBuildIsUnderConstruction(buildable, now)) return;
+      }
       const dx = Number(event.dx);
       const dy = Number(event.dy);
       if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;

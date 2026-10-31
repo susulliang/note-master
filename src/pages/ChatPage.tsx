@@ -87,7 +87,7 @@ import {
   fetchChatGlobalTitle,
   fetchCollabDocuments,
   fetchPinnedChatDocument,
-  getTeamBoardCard,
+  getTeamBoardCardWithRetry,
   listTeamBoardCards,
   pinChatDocument,
   shareTeamBoardCardWithChat,
@@ -1074,16 +1074,41 @@ function TeamBoardChatCard({ cardId, username }: { cardId: string; username: str
         setLoading(false);
       }
       try {
-        const fresh = await getTeamBoardCard(cardId);
+        const fresh = await getTeamBoardCardWithRetry(cardId);
         if (!active) return;
         setDetail(fresh);
         setLoading(false);
         void saveTeamBoardCardDetail(username, cardId, fresh);
       } catch (error) {
         if (!active) return;
-        if (!cached) setDetail(null);
+        if (!cached) {
+          let previewCard = (await loadTeamBoardCardList(username, teamBoardCardListKey()))
+            ?.find((card) => card.id === cardId) ?? null;
+          if (!previewCard) {
+            try {
+              const visibleCards = await listTeamBoardCards();
+              previewCard = visibleCards.find((card) => card.id === cardId) ?? null;
+              void saveTeamBoardCardList(username, teamBoardCardListKey(), visibleCards);
+            } catch {
+              /* Keep the embed's unavailable state if even the card index is offline. */
+            }
+          }
+          if (!active) return;
+          if (previewCard) {
+            setDetail({
+              card: previewCard,
+              permission: 'view',
+              members: [],
+              comments: [],
+              session: null,
+              sharedRooms: [],
+            });
+          } else {
+            setDetail(null);
+            toast.error(error instanceof Error ? error.message : 'This shared Team Board card is unavailable.');
+          }
+        }
         setLoading(false);
-        toast.error(error instanceof Error ? error.message : 'This shared Team Board card is unavailable.');
       }
     })();
     return () => { active = false; };
@@ -1105,7 +1130,7 @@ function TeamBoardChatCard({ cardId, username }: { cardId: string; username: str
     try {
       await updateTeamBoardCard(cardId, patch);
     } catch (error) {
-      void getTeamBoardCard(cardId).then((fresh) => {
+      void getTeamBoardCardWithRetry(cardId).then((fresh) => {
         setDetail(fresh);
         void saveTeamBoardCardDetail(username, cardId, fresh);
       }).catch(() => undefined);
