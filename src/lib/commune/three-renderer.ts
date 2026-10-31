@@ -41,11 +41,14 @@ import {
   addTent,
   addTreeInstances,
   createBuildableModel,
+  makeGroundTexture,
   makeInstanceMesh,
   material,
   setConstructionOpacity,
   setInstance,
 } from './three-builders';
+import { addWorldScatter, updateSway } from './three-scatter';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { drawHangoutLabel, drawLabel } from './three-labels';
 import { createSkyMaterial } from './three-sky';
 import { animateWater, createWaterMaterial, createWaterSurface } from './three-water';
@@ -92,6 +95,10 @@ export class CommuneThreeRenderer {
   private renderPass: RenderPass | null = null;
   private huskoRig: HuskoRig | null = null;
   private lastShadowZoom = 0;
+  private readonly swayMaterials: THREE.MeshLambertMaterial[] = [];
+  private readonly debugStats = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).has('commune-debug');
+  private lastStatsAt = 0;
   private readonly lanternLights: THREE.PointLight[] = [];
   private readonly lanternBulbs: THREE.Mesh[] = [];
   private readonly lanternHalos: THREE.Mesh[] = [];
@@ -379,6 +386,7 @@ export class CommuneThreeRenderer {
     this.addMarkerMeshes();
     this.buildCars();
     this.scene.add(this.buildPreviewMesh);
+    this.mergeStaticWorld();
     this.setupComposer();
   }
 
@@ -541,6 +549,12 @@ export class CommuneThreeRenderer {
     this.sun.target.updateMatrixWorld();
     this.updateLanterns(night, frame.time);
     for (const waterMaterial of this.waterMaterials) animateWater(waterMaterial, frame.time);
+    updateSway(this.swayMaterials, frame.time, frame.reduceMotion);
+    if (this.debugStats && frame.time - this.lastStatsAt > 5) {
+      this.lastStatsAt = frame.time;
+      const stats = this.renderer.info.render;
+      console.info(`[commune] ${stats.calls} draw calls · ${(stats.triangles / 1000).toFixed(0)}k tris`);
+    }
     this.scene.background = this.backgroundColor.copy(DAY_BACKGROUND).lerp(NIGHT_BACKGROUND, night);
 
     this.updateCars(frame.cars, frame.buildables);
@@ -574,7 +588,11 @@ export class CommuneThreeRenderer {
       if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh || object instanceof THREE.Line) {
         object.geometry.dispose();
         const materials = Array.isArray(object.material) ? object.material : [object.material];
-        materials.forEach((entry) => entry.dispose());
+        materials.forEach((entry) => {
+          entry.map?.dispose();
+          entry.normalMap?.dispose();
+          entry.dispose();
+        });
       }
     });
   }
@@ -662,13 +680,16 @@ export class CommuneThreeRenderer {
   }
 
   private buildWorld(): void {
+    const groundMaterial = material('#78976b');
+    groundMaterial.map = makeGroundTexture();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_W, WORLD_H),
-      material('#78976b')
+      groundMaterial
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WORLD_W / 2, -5, WORLD_H / 2);
     ground.receiveShadow = true;
+    ground.userData.communeKeepSeparate = true;
     this.scene.add(ground);
 
     this.boundaryGroup.visible = false;
@@ -755,6 +776,85 @@ export class CommuneThreeRenderer {
       [1480, 1440],
     ];
     addTreeInstances(this.scene, treePositions);
+    this.swayMaterials.push(...addWorldScatter(this.scene));
+  }
+
+  /**
+   * Bake every remaining opaque Lambert mesh (buildings, paths, benches,
+   * mini-game props, lantern posts…) into one vertex-colored draw call —
+   * cutting the static world from a few hundred draw calls to ~2. Dynamic
+   * objects (cars, mower, pins, bulbs, markers, water, sky) are untouched.
+   */
+  private mergeStaticWorld(): void {
+    const skipObjects = new Set<THREE.Object3D>([
+      this.skyMesh,
+      this.boundaryGroup,
+      this.mowerGroup,
+      this.firstPersonArms,
+      this.buildPreviewMesh,
+      this.soccerBallMesh,
+      this.golfBallMesh,
+      this.bowlingBallMesh,
+      ...this.bowlingPins,
+      ...this.lanternBulbs,
+      ...this.lanternHalos,
+    ]);
+    for (const car of this.cars.values()) skipObjects.add(car);
+    this.scene.updateMatrixWorld(true);
+    const lit: THREE.BufferGeometry[] = [];
+    const doubleSided: THREE.BufferGeometry[] = [];
+    const color = new THREE.Color();
+    const walk = (object: THREE.Object3D): void => {
+      if (skipObjects.has(object)) return;
+      if (object.name === 'destination-marker' || object.name === 'click-marker') return;
+      if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) {
+        for (const child of object.children) walk(child);
+        return;
+      }
+      const entry = object.material;
+      if (!(entry instanceof THREE.MeshLambertMaterial) || entry.transparent) return;
+      if (object.userData.communeKeepSeparate) return;
+      const geometry = (object.geometry.index
+        ? object.geometry.toNonIndexed()
+        : object.geometry.clone()
+      ).applyMatrix4(object.matrixWorld);
+      if (!geometry.getAttribute('uv')) {
+        geometry.setAttribute('uv', new THREE.BufferAttribute(
+          new Float32Array(geometry.getAttribute('position').count * 2), 2
+        ));
+      }
+      const vertexCount = geometry.getAttribute('position').count;
+      color.copy(entry.color);
+      const colors = new Float32Array(vertexCount * 3);
+      for (let index = 0; index < vertexCount; index++) {
+        colors[index * 3] = color.r;
+        colors[index * 3 + 1] = color.g;
+        colors[index * 3 + 2] = color.b;
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      (entry.side === THREE.DoubleSide ? doubleSided : lit).push(geometry);
+      object.geometry.dispose();
+      entry.dispose();
+      object.removeFromParent();
+    };
+    for (const child of [...this.scene.children]) walk(child);
+
+    const buildMergedMesh = (sources: THREE.BufferGeometry[], name: string, castShadow: boolean): void => {
+      if (sources.length === 0) return;
+      const merged = mergeGeometries(sources, false);
+      sources.forEach((geometry) => geometry.dispose());
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        flatShading: true,
+      }));
+      mesh.name = name;
+      mesh.castShadow = castShadow;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    };
+    buildMergedMesh(lit, 'static-world', true);
+    buildMergedMesh(doubleSided, 'static-world-double-sided', false);
   }
 
   private addMiniGameAreas(): void {

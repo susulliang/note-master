@@ -123,6 +123,11 @@ export function addBuilding(
   roof.receiveShadow = true;
   parent.add(roof);
   addBox(parent, x, 4, z + depth * 0.505, width * 0.22, height * 0.58, 3, '#654a36');
+  // Trim pass: roof overhang slab + two front windows (merged statically later — free).
+  addBox(parent, x, height - 2, z, width * 1.1, 4, depth * 1.1, roofColor);
+  for (const wx of [-width * 0.28, width * 0.28]) {
+    addBox(parent, x + wx, height * 0.52, z + depth * 0.505, width * 0.12, height * 0.18, 2.5, '#7fa8b5');
+  }
 }
 
 export function addTent(parent: THREE.Object3D, x: number, z: number, color: string): void {
@@ -248,33 +253,78 @@ export function addTreeInstances(scene: THREE.Scene, positions: readonly [number
     material('#79573d'),
     positions.length
   );
-  const canopy = new THREE.InstancedMesh(
-    new THREE.ConeGeometry(32, 82, 5),
-    material('#537d50'),
-    positions.length
-  );
   trunk.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-  canopy.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  // Three canopy silhouettes (conifer cone / oak blob / tall pine) so the
+  // treeline doesn't read as a single stamped cone.
+  const variantDefs = [
+    { make: () => new THREE.ConeGeometry(30, 74, 5), colors: ['#537d50', '#5f8957', '#688d58'] },
+    { make: () => new THREE.IcosahedronGeometry(27, 0), colors: ['#5f8957', '#688d58', '#4f764c'] },
+    { make: () => new THREE.ConeGeometry(25, 94, 6), colors: ['#4f764c', '#537d50', '#5c8455'] },
+  ];
+  const autumn = '#b98b52';
+  const buckets: number[][] = [[], [], []];
+  positions.forEach((_, index) => buckets[index % 3].push(index));
+  const canopies = variantDefs.map((def, variant) => {
+    const mesh = new THREE.InstancedMesh(def.make(), material('#537d50'), Math.max(1, buckets[variant].length));
+    mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  });
   const transform = new THREE.Object3D();
-  const colors = ['#537d50', '#5f8957', '#688d58', '#4f764c'];
+  const color = new THREE.Color();
   positions.forEach(([x, z], index) => {
+    const variant = index % 3;
     transform.position.set(x, 20, z);
     transform.rotation.set(0, (index % 5) * 0.27, 0);
+    transform.scale.set(1, 1, 1);
     transform.updateMatrix();
     trunk.setMatrixAt(index, transform.matrix);
-    transform.position.set(x, 78, z);
-    transform.scale.set(1 + (index % 3) * 0.08, 1 + (index % 4) * 0.06, 1);
+    const slot = buckets[variant].indexOf(index);
+    const canopyY = variant === 2 ? 90 : variant === 1 ? 74 : 78;
+    const s = 1 + (index % 3) * 0.08;
+    const sy = 1 + (index % 4) * 0.06;
+    transform.position.set(x, canopyY, z);
+    transform.scale.set(s, sy, s);
     transform.updateMatrix();
-    canopy.setMatrixAt(index, transform.matrix);
-    canopy.setColorAt(index, new THREE.Color(colors[index % colors.length]));
+    const canopy = canopies[variant];
+    canopy.setMatrixAt(slot, transform.matrix);
+    const palette = variantDefs[variant].colors;
+    color.set(index % 9 === 4 ? autumn : palette[index % palette.length]);
+    canopy.setColorAt(slot, color);
     transform.scale.set(1, 1, 1);
   });
   trunk.computeBoundingSphere();
-  canopy.computeBoundingSphere();
   trunk.castShadow = true;
-  canopy.castShadow = true;
-  canopy.receiveShadow = true;
-  scene.add(trunk, canopy);
+  scene.add(trunk, ...canopies);
+}
+
+/** Subtle mottled ground texture — generated once, uploaded once. */
+export function makeGroundTexture(): THREE.DataTexture {
+  const size = 256;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n = Math.sin(x * 0.37 + Math.sin(y * 0.21) * 2.1) * Math.cos(y * 0.29 + Math.sin(x * 0.17) * 1.7);
+      const speck = ((x * 7 + y * 13) % 31) / 31;
+      const v = Math.max(0, Math.min(255, Math.round(236 + n * 9 + speck * 8)));
+      const index = (y * size + x) * 4;
+      data[index] = v;
+      data[index + 1] = v;
+      data[index + 2] = v;
+      data[index + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(42, 32);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 export function makeInstanceMesh(

@@ -23,11 +23,12 @@ export const NIGHT_AMBIENT_COLOR = new THREE.Color('#9cb7e1');
 export const DAY_SUN_COLOR = new THREE.Color('#fff2d4');
 export const NIGHT_SUN_COLOR = new THREE.Color('#8298c4');
 
-/** Fog must sit between the sky horizon and background so edges melt away. */
+/** Fog must sit between the sky horizon and background so edges melt away.
+ *  Kept gentle: haze only at the far map edge, never over the play area. */
 export const DAY_FOG_COLOR = new THREE.Color('#c2d4bd');
 export const NIGHT_FOG_COLOR = new THREE.Color('#26374f');
-export const FOG_NEAR = 1500;
-export const FOG_FAR = 3600;
+export const FOG_NEAR = 2400;
+export const FOG_FAR = 6200;
 
 /** Direction of the sun disc drawn in the sky dome (matches the sun light offset). */
 export const SUN_DIRECTION = { x: -850, y: 1650, z: 1050 };
