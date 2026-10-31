@@ -13,6 +13,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
@@ -36,6 +37,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  ListPlus,
   ListTodo,
   Loader2,
   PanelLeftClose,
@@ -104,6 +106,16 @@ interface FloatingMediaProgress {
   top: number;
   label: string;
   progress: number | null;
+}
+
+/** In-app prompt bubble replacing window.prompt for todo fields. */
+interface TodoPromptRequest {
+  title: string;
+  placeholder?: string;
+  value: string;
+  multiline?: boolean;
+  submitLabel: string;
+  onSubmit: (value: string) => void;
 }
 
 const MAX_DOCUMENT_CHARACTERS = 500_000;
@@ -329,6 +341,44 @@ function editorMarkdown(editor: HTMLElement): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, MAX_DOCUMENT_CHARACTERS);
+}
+
+/** Markdown line indexes of task-list items (`- [ ]` / `- [x]`), in order. */
+function taskListLineIndexes(lines: string[]): number[] {
+  return lines.reduce<number[]>((acc, line, index) => (
+    /^\s*-\s+\[[ xX]\]/.test(line) ? [...acc, index] : acc
+  ), []);
+}
+
+/** Task-list `<li>` elements of the editor, in document order. */
+function editorTaskItems(editor: HTMLElement): HTMLElement[] {
+  return Array.from(editor.querySelectorAll('li'))
+    .filter((item) => item.querySelector('input[type="checkbox"]'));
+}
+
+function createTodoGrip(): HTMLSpanElement {
+  const grip = document.createElement('span');
+  grip.className = 'smart-doc-todo-grip';
+  grip.contentEditable = 'false';
+  grip.draggable = true;
+  grip.title = 'Drag to reorder';
+  return grip;
+}
+
+/** Post-process rendered markdown HTML for the editing surface:
+ *  enable task checkboxes (remark renders them disabled) and, in todo mode,
+ *  tag task items + add a drag handle for reordering. */
+function applyEditorTodoEnhancements(editor: HTMLElement, todoMode: boolean): void {
+  editor.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((box) => {
+    box.disabled = false;
+  });
+  if (!todoMode) return;
+  editorTaskItems(editor).forEach((item) => {
+    item.classList.add('smart-doc-todo-item');
+    if (!item.querySelector(':scope > .smart-doc-todo-grip')) {
+      item.insertBefore(createTodoGrip(), item.firstChild);
+    }
+  });
 }
 
 function fileIsMedia(file: CollabDriveFile): boolean {
@@ -614,6 +664,7 @@ export default function SmartDocsPage({
   const [mediaDropActive, setMediaDropActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [todoContextText, setTodoContextText] = useState('');
+  const [todoPrompt, setTodoPrompt] = useState<TodoPromptRequest | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
   const [hydrateVersion, setHydrateVersion] = useState(0);
@@ -989,6 +1040,7 @@ export default function SmartDocsPage({
     const editor = editorRef.current;
     if (!editor || document.activeElement === editor) return;
     editor.innerHTML = markdownToEditorHtml(markdown);
+    applyEditorTodoEnhancements(editor, isTodoMode);
     Array.from(editor.querySelectorAll<HTMLElement>('[data-smartdoc-heading]'))
       .forEach((heading, index) => { heading.dataset.outlineIndex = String(index); });
     const elements = Array.from(editor.querySelectorAll<HTMLElement>('[data-smartdoc-source]'));
@@ -1009,7 +1061,7 @@ export default function SmartDocsPage({
         })
         .catch(() => undefined);
     }
-  }, [activeDocumentId, canEdit, hydrateVersion, markdown, snapshotReady]);
+  }, [activeDocumentId, canEdit, hydrateVersion, isTodoMode, markdown, snapshotReady]);
 
   useEffect(() => {
     if (mentionQuery === null) {
@@ -1295,7 +1347,10 @@ export default function SmartDocsPage({
   const replaceTodoMarkdown = (nextMarkdown: string) => {
     if (!canEditNow) return;
     const editor = editorRef.current;
-    if (editor) editor.innerHTML = markdownToEditorHtml(nextMarkdown);
+    if (editor) {
+      editor.innerHTML = markdownToEditorHtml(nextMarkdown);
+      applyEditorTodoEnhancements(editor, isTodoMode);
+    }
     handleEditorInput();
   };
 
@@ -1312,17 +1367,15 @@ export default function SmartDocsPage({
     ));
   };
 
-  const addTodoItem = () => {
-    const title = window.prompt('Todo item');
-    if (!title?.trim()) return;
+  const addTodoItem = (title: string) => {
     const lines = markdownRef.current.split('\n');
     const headingIndex = lines.findIndex((line) => /^##\s+To-do list\s*$/i.test(line));
     if (headingIndex < 0) {
-      lines.push('', '## To-do list', '', `- [ ] ${title.trim()}`);
+      lines.push('', '## To-do list', '', `- [ ] ${title}`);
     } else {
       let insertAt = headingIndex + 1;
       while (insertAt < lines.length && !/^#{1,2}\s+/.test(lines[insertAt])) insertAt += 1;
-      lines.splice(insertAt, 0, `- [ ] ${title.trim()}`);
+      lines.splice(insertAt, 0, `- [ ] ${title}`);
     }
     replaceTodoMarkdown(lines.join('\n'));
   };
@@ -1340,14 +1393,200 @@ export default function SmartDocsPage({
     replaceTodoMarkdown(lines.join('\n'));
   };
 
-  const addTodoNote = () => {
-    const note = window.prompt('Post-call note or reference');
-    if (!note?.trim()) return;
+  const addTodoNote = (note: string) => {
     const lines = markdownRef.current.split('\n');
     const headingIndex = lines.findIndex((line) => /^##\s+Post notes\s*$/i.test(line));
-    if (headingIndex < 0) lines.push('', '## Post notes', '', note.trim());
-    else lines.splice(headingIndex + 1, 0, '', note.trim());
+    if (headingIndex < 0) lines.push('', '## Post notes', '', note);
+    else lines.splice(headingIndex + 1, 0, '', note);
     replaceTodoMarkdown(lines.join('\n'));
+  };
+
+  /* ── todo prompt bubble (replaces window.prompt) ────────────────────────── */
+
+  const submitTodoPrompt = () => {
+    if (!todoPrompt) return;
+    const value = todoPrompt.value.trim();
+    if (!value) return;
+    const { onSubmit } = todoPrompt;
+    setTodoPrompt(null);
+    onSubmit(value);
+  };
+
+  const promptAddTodo = () => {
+    if (!canEditNow) return;
+    setTodoPrompt({
+      title: 'Add todo item',
+      placeholder: 'What needs to get done?',
+      value: '',
+      multiline: true,
+      submitLabel: 'Add todo',
+      onSubmit: addTodoItem,
+    });
+  };
+
+  const promptTodoField = (
+    title: string,
+    placeholder: string,
+    submitLabel: string,
+    apply: (value: string, line: string) => string,
+  ) => {
+    if (!canEditNow) return;
+    setTodoPrompt({
+      title,
+      placeholder,
+      value: '',
+      submitLabel,
+      onSubmit: (value) => updateSelectedTodo((line) => apply(value, line)),
+    });
+  };
+
+  /* ── editor interactions: checkbox toggle, Enter split, drag reorder ────── */
+
+  const todoDragIndexRef = useRef<number | null>(null);
+  const todoDropMarkerRef = useRef<{ item: HTMLElement; above: boolean } | null>(null);
+
+  const clearTodoDropMarker = () => {
+    todoDropMarkerRef.current?.item.classList.remove('is-drop-above', 'is-drop-below');
+    todoDropMarkerRef.current = null;
+  };
+
+  const toggleTodoCheckbox = (box: HTMLInputElement) => {
+    const editor = editorRef.current;
+    const item = box.closest('li');
+    if (!editor || !item) return;
+    const taskIndex = editorTaskItems(editor).indexOf(item);
+    const lines = markdownRef.current.split('\n');
+    const taskLines = taskListLineIndexes(lines);
+    if (taskIndex < 0 || taskIndex >= taskLines.length) return;
+    const lineIndex = taskLines[taskIndex];
+    lines[lineIndex] = /^\s*-\s+\[[xX]\]/.test(lines[lineIndex])
+      ? lines[lineIndex].replace(/^(\s*-\s+)\[[xX]\]/, '$1[ ]')
+      : lines[lineIndex].replace(/^(\s*-\s+)\[ \]/, '$1[x]');
+    replaceTodoMarkdown(lines.join('\n'));
+  };
+
+  const handleEditorClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+      event.preventDefault();
+      toggleTodoCheckbox(target);
+    }
+  };
+
+  const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!canEditNow || event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount || !editor.contains(selection.anchorNode)) return;
+    const anchor = selection.anchorNode;
+    const item = (anchor instanceof Element ? anchor : anchor.parentElement)?.closest('li');
+    if (!item || !editor.contains(item) || !item.querySelector('input[type="checkbox"]')) return;
+
+    event.preventDefault();
+    const placeCaret = (node: Node, offset: number) => {
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    const bodyText = (item.textContent ?? '').trim();
+    if (!bodyText) {
+      // Empty todo — leave the list with a plain paragraph instead of
+      // stacking endless empty checkboxes.
+      const paragraph = document.createElement('p');
+      paragraph.appendChild(document.createElement('br'));
+      const list = item.parentElement;
+      if (list && list.querySelectorAll('li').length > 1) {
+        list.insertBefore(paragraph, item.nextSibling);
+        item.remove();
+      } else if (list) {
+        list.replaceWith(paragraph);
+      } else {
+        item.replaceWith(paragraph);
+      }
+      placeCaret(paragraph, 0);
+    } else {
+      // Split at the caret: everything after it moves to a fresh unchecked todo.
+      const range = selection.getRangeAt(0);
+      const tail = document.createRange();
+      tail.setStart(range.endContainer, range.endOffset);
+      tail.setEnd(item, item.childNodes.length);
+      const fragment = tail.extractContents();
+      const next = document.createElement('li');
+      next.appendChild(createTodoGrip());
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      next.appendChild(box);
+      next.appendChild(fragment);
+      item.after(next);
+      placeCaret(next, 2);
+    }
+    handleEditorInput();
+  };
+
+  const handleTodoDragStart = (event: ReactDragEvent<HTMLDivElement>) => {
+    const grip = event.target instanceof Element ? event.target.closest('.smart-doc-todo-grip') : null;
+    const item = grip?.closest('li');
+    const editor = editorRef.current;
+    if (!item || !editor) return;
+    const index = editorTaskItems(editor).indexOf(item);
+    if (index < 0) return;
+    todoDragIndexRef.current = index;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', (item.textContent ?? '').trim());
+    try {
+      event.dataTransfer.setDragImage(item, 24, 14);
+    } catch {
+      /* Older engines without setDragImage. */
+    }
+  };
+
+  const handleTodoDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (todoDragIndexRef.current === null) return;
+    const element = event.target instanceof Element ? event.target : null;
+    const item = element?.closest('li');
+    if (!item || !item.querySelector('input[type="checkbox"]')) {
+      clearTodoDropMarker();
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const above = event.clientY < item.getBoundingClientRect().top + item.clientHeight / 2;
+    const marker = todoDropMarkerRef.current;
+    if (!marker || marker.item !== item || marker.above !== above) {
+      clearTodoDropMarker();
+      item.classList.add(above ? 'is-drop-above' : 'is-drop-below');
+      todoDropMarkerRef.current = { item, above };
+    }
+  };
+
+  const handleTodoDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    const from = todoDragIndexRef.current;
+    const marker = todoDropMarkerRef.current;
+    todoDragIndexRef.current = null;
+    clearTodoDropMarker();
+    if (!canEditNow || from === null || !marker) return;
+    event.preventDefault();
+    const editor = editorRef.current;
+    if (!editor) return;
+    const to = editorTaskItems(editor).indexOf(marker.item);
+    const lines = markdownRef.current.split('\n');
+    const taskLines = taskListLineIndexes(lines);
+    if (to < 0 || from >= taskLines.length || to >= taskLines.length) return;
+    // Insertion slot among the task lines (before/after the drop target).
+    let insertIndex = marker.above ? taskLines[to] : taskLines[to] + 1;
+    const removeIndex = taskLines[from];
+    if (insertIndex === removeIndex || insertIndex === removeIndex + 1) return;
+    const [moved] = lines.splice(removeIndex, 1);
+    if (removeIndex < insertIndex) insertIndex -= 1;
+    lines.splice(insertIndex, 0, moved);
+    replaceTodoMarkdown(lines.join('\n'));
+  };
+
+  const handleTodoDragEnd = () => {
+    todoDragIndexRef.current = null;
+    clearTodoDropMarker();
   };
 
   const handleEditorDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
@@ -1762,7 +2001,7 @@ export default function SmartDocsPage({
     : '';
 
   return (
-    <section className="smart-docs-page smart-doc-editor-page">
+    <section className={`smart-docs-page smart-doc-editor-page${isTodoMode ? ' smart-doc-editor-page--todo' : ''}`}>
       <header className="smart-doc-editor-header">
         {!embedded && (
           <button type="button" className="collab-tool-icon" aria-label={`Back to ${isTodoMode ? 'Smart Todos' : 'Smart Docs'}`} onClick={() => {
@@ -1819,26 +2058,28 @@ export default function SmartDocsPage({
       )}
 
       <div className={`smart-doc-workspace ${outlineOpen ? '' : 'is-outline-collapsed'}`}>
-        <aside className="smart-doc-outline">
-          <div className="smart-doc-outline-header">
-            <strong>On this page</strong>
-            <button type="button" className="smart-doc-small-icon" aria-label="Collapse outline" onClick={() => setOutlineOpen(false)}><PanelLeftClose className="size-4" /></button>
-          </div>
-          {outline.length ? (
-            <nav aria-label="Document headings">
-              {outline.map((heading, index) => (
-                <button
-                  type="button"
-                  key={`${heading.text}-${index}`}
-                  className={`smart-doc-outline-item smart-doc-outline-item--${heading.level}`}
-                  onClick={() => jumpToHeading(index)}
-                >{heading.text}</button>
-              ))}
-            </nav>
-          ) : (
-            <p className="smart-doc-outline-empty">Use heading styles to build an outline.</p>
-          )}
-        </aside>
+        {!isTodoMode && (
+          <aside className="smart-doc-outline">
+            <div className="smart-doc-outline-header">
+              <strong>On this page</strong>
+              <button type="button" className="smart-doc-small-icon" aria-label="Collapse outline" onClick={() => setOutlineOpen(false)}><PanelLeftClose className="size-4" /></button>
+            </div>
+            {outline.length ? (
+              <nav aria-label="Document headings">
+                {outline.map((heading, index) => (
+                  <button
+                    type="button"
+                    key={`${heading.text}-${index}`}
+                    className={`smart-doc-outline-item smart-doc-outline-item--${heading.level}`}
+                    onClick={() => jumpToHeading(index)}
+                  >{heading.text}</button>
+                ))}
+              </nav>
+            ) : (
+              <p className="smart-doc-outline-empty">Use heading styles to build an outline.</p>
+            )}
+          </aside>
+        )}
 
         <main className="smart-doc-main">
           <div className="smart-doc-toolbar" aria-label="Formatting tools">
@@ -1851,6 +2092,11 @@ export default function SmartDocsPage({
             <button type="button" disabled={!canEditNow} aria-label="Italic" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('italic')}><Italic className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Bulleted list" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('insertUnorderedList')}><List className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Numbered list" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('insertOrderedList')}><ListOrdered className="size-4" /></button>
+            {isTodoMode && (
+              <button type="button" disabled={!canEditNow} aria-label="Add todo item" title="Add todo item" onMouseDown={onToolbarMouseDown} onClick={promptAddTodo}>
+                <ListPlus className="size-4" />
+              </button>
+            )}
             <button type="button" disabled={!canEditNow} aria-label="Quote" onMouseDown={onToolbarMouseDown} onClick={() => runCommand('formatBlock', 'BLOCKQUOTE')}><Quote className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Insert code block" title="Insert code block" onMouseDown={onToolbarMouseDown} onClick={insertCodeBlock}><Code2 className="size-4" /></button>
             <button type="button" disabled={!canEditNow} aria-label="Insert link" onMouseDown={onToolbarMouseDown} onClick={() => {
@@ -1862,11 +2108,6 @@ export default function SmartDocsPage({
               {mediaUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             </button>
             <button type="button" disabled={!canEditNow} aria-label="Insert media from Drive" title="Insert media from Drive" onMouseDown={onToolbarMouseDown} onClick={openDrivePicker}><ImagePlus className="size-4" /></button>
-            {isTodoMode && (
-              <button type="button" disabled={!canEditNow} className="smart-doc-todo-add" onMouseDown={(event) => event.preventDefault()} onClick={addTodoItem}>
-                <Plus className="size-3.5" /> Add todo
-              </button>
-            )}
             <input
               ref={mediaInputRef}
               hidden
@@ -1888,6 +2129,39 @@ export default function SmartDocsPage({
                 ? <i className="is-indeterminate" />
                 : <div role="progressbar" aria-label={mediaStage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={mediaProgress}><i style={{ width: `${mediaProgress}%` }} /></div>}
               {mediaProgress !== null && <small>{mediaProgress}%</small>}
+            </div>
+          )}
+          {todoPrompt && (
+            <div className="smart-doc-todo-prompt" data-smartdoc-todo-prompt>
+              <strong>{todoPrompt.title}</strong>
+              {todoPrompt.multiline ? (
+                <textarea
+                  autoFocus
+                  rows={3}
+                  value={todoPrompt.value}
+                  placeholder={todoPrompt.placeholder}
+                  onChange={(event) => setTodoPrompt((current) => current && { ...current, value: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setTodoPrompt(null);
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitTodoPrompt();
+                  }}
+                />
+              ) : (
+                <input
+                  autoFocus
+                  value={todoPrompt.value}
+                  placeholder={todoPrompt.placeholder}
+                  onChange={(event) => setTodoPrompt((current) => current && { ...current, value: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setTodoPrompt(null);
+                    if (event.key === 'Enter') submitTodoPrompt();
+                  }}
+                />
+              )}
+              <div className="smart-doc-todo-prompt-actions">
+                <button type="button" className="collab-tool-secondary" onClick={() => setTodoPrompt(null)}>Cancel</button>
+                <button type="button" className="collab-tool-primary" disabled={!todoPrompt.value.trim()} onClick={submitTodoPrompt}>{todoPrompt.submitLabel}</button>
+              </div>
             </div>
           )}
 
@@ -1946,6 +2220,12 @@ export default function SmartDocsPage({
                 spellCheck
                 onInput={handleEditorInput}
                 onPaste={handleEditorPaste}
+                onKeyDown={handleEditorKeyDown}
+                onClick={handleEditorClick}
+                onDragStart={isTodoMode ? handleTodoDragStart : undefined}
+                onDragOver={isTodoMode ? handleTodoDragOver : undefined}
+                onDrop={isTodoMode ? handleTodoDrop : undefined}
+                onDragEnd={isTodoMode ? handleTodoDragEnd : undefined}
                 onKeyUp={captureSelection}
                 onMouseUp={captureSelection}
                 onFocus={() => setMentionQuery(null)}
@@ -1978,33 +2258,37 @@ export default function SmartDocsPage({
                   <span className="smart-doc-context-menu-title">{isTodoMode ? 'Todo list controls' : 'Markdown editor'}</span>
                   {canEditNow && isTodoMode && (
                     <>
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(addTodoItem)}><ListTodo className="size-4" />Add todo item</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(promptAddTodo)}><ListPlus className="size-4" />Add todo item</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => line.replace(/^(\s*-\s+)\[ \]/, '$1[x]')))}><CheckSquare2 className="size-4" />Mark complete</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => line.replace(/^(\s*-\s+)\[[xX]\]/, '$1[ ]')))}><CheckSquare2 className="size-4" />Mark incomplete</button>
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
-                        const priority = window.prompt('Priority (High, Normal, or Low)', 'Normal');
-                        if (!priority?.trim()) return line;
-                        return /Priority:\s*[^·|]+/i.test(line)
-                          ? line.replace(/Priority:\s*[^·|]+/i, `Priority: ${priority.trim()}`)
-                          : `${line} · Priority: ${priority.trim()}`;
-                      }))}><ListTodo className="size-4" />Set priority</button>
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
-                        const owner = window.prompt('Task owner', '');
-                        if (!owner?.trim()) return line;
-                        return /Owner:\s*[^·|]+/i.test(line)
-                          ? line.replace(/Owner:\s*[^·|]+/i, `Owner: ${owner.trim()}`)
-                          : `${line} · Owner: ${owner.trim()}`;
-                      }))}><UsersRound className="size-4" />Assign owner</button>
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo((line) => {
-                        const dueDate = window.prompt('Due date (YYYY-MM-DD)', '');
-                        if (!dueDate?.trim()) return line;
-                        return /Due:\s*[^·|]+/i.test(line)
-                          ? line.replace(/Due:\s*[^·|]+/i, `Due: ${dueDate.trim()}`)
-                          : `${line} · Due: ${dueDate.trim()}`;
-                      }))}><ListTodo className="size-4" />Set due date</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => promptTodoField('Set priority', 'High, Normal, or Low', 'Set priority', (value, line) => (
+                        /Priority:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Priority:\s*[^·|]+/i, `Priority: ${value}`)
+                          : `${line} · Priority: ${value}`
+                      )))}><ListTodo className="size-4" />Set priority</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => promptTodoField('Assign owner', 'Who owns this task?', 'Assign', (value, line) => (
+                        /Owner:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Owner:\s*[^·|]+/i, `Owner: ${value}`)
+                          : `${line} · Owner: ${value}`
+                      )))}><UsersRound className="size-4" />Assign owner</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => promptTodoField('Set due date', 'YYYY-MM-DD', 'Set due date', (value, line) => (
+                        /Due:\s*[^·|]+/i.test(line)
+                          ? line.replace(/Due:\s*[^·|]+/i, `Due: ${value}`)
+                          : `${line} · Due: ${value}`
+                      )))}><ListTodo className="size-4" />Set due date</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => updateSelectedTodo(() => null))}><Trash2 className="size-4" />Delete todo item</button>
                       <span className="smart-doc-context-menu-divider" />
-                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(addTodoNote)}><FileText className="size-4" />Add post-call note</button>
+                      <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => {
+                        if (!canEditNow) return;
+                        setTodoPrompt({
+                          title: 'Add post-call note',
+                          placeholder: 'Post-call note or reference…',
+                          value: '',
+                          multiline: true,
+                          submitLabel: 'Add note',
+                          onSubmit: addTodoNote,
+                        });
+                      })}><FileText className="size-4" />Add post-call note</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void copySelection(); })}><ClipboardCopy className="size-4" />Copy selection</button>
                       <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => handleContextAction(() => { void pasteFromClipboard(); })}><ClipboardPaste className="size-4" />Paste</button>
                     </>
@@ -2071,7 +2355,7 @@ export default function SmartDocsPage({
         </main>
       </div>
 
-      {!outlineOpen && (
+      {!isTodoMode && !outlineOpen && (
         <button type="button" className="smart-doc-outline-expand" aria-label="Expand outline" title="Show document outline" onClick={() => setOutlineOpen(true)}>
           <PanelLeftOpen className="size-4" />
         </button>
