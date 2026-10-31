@@ -53,7 +53,7 @@ import { drawHangoutLabel, drawLabel } from './three-labels';
 import { createSkyMaterial } from './three-sky';
 import { animateWater, createWaterMaterial, createWaterSurface } from './three-water';
 import { createHuskoRig, updateHuskoRig, type HuskoRig } from './three-husko';
-import { loadCommuneModels, prepareCatGeometry } from './three-assets';
+import { loadCommuneModels, prepareCatGeometry, prepareDogGeometry } from './three-assets';
 import type {
   AvatarColors,
   CommuneThreeFrame,
@@ -103,6 +103,7 @@ export class CommuneThreeRenderer {
   private readonly buildingSites: { x: number; z: number; width: number; depth: number; rotation: number }[] = [];
   private readonly legacyBuildings: THREE.Group[] = [];
   private readonly catMeshes: THREE.InstancedMesh[] = [];
+  private huskoModel: THREE.Mesh | null = null;
   private catsReady = false;
   private staticWorldFinalized = false;
   private readonly lanternLights: THREE.PointLight[] = [];
@@ -401,8 +402,9 @@ export class CommuneThreeRenderer {
   private async initializeAssets(): Promise<void> {
     const guard = setTimeout(() => this.finalizeStaticWorld(), 8000);
     try {
-      const { buildings, cats } = await loadCommuneModels();
+      const { buildings, cats, dog } = await loadCommuneModels();
       this.applyCatModels(cats);
+      this.applyDogModel(dog);
       this.applyAssetBuildings(buildings);
     } catch {
       this.finalizeStaticWorld();
@@ -418,16 +420,15 @@ export class CommuneThreeRenderer {
   }
 
   private applyCatModels(models: (THREE.Group | null)[]): void {
-    const geometries = models
+    const prepared = models
       .map((model) => (model ? prepareCatGeometry(model) : null))
-      .filter((geometry): geometry is THREE.BufferGeometry => !!geometry);
-    if (geometries.length === 0) return;
-    geometries.forEach((geometry, index) => {
-      const mesh = new THREE.InstancedMesh(
-        geometry,
-        new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-        MAX_ACTORS
-      );
+      .filter((entry): entry is NonNullable<typeof entry> => !!entry);
+    if (prepared.length === 0) return;
+    prepared.forEach((entry, index) => {
+      const material = entry.textureMap
+        ? new THREE.MeshLambertMaterial({ map: entry.textureMap })
+        : new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+      const mesh = new THREE.InstancedMesh(entry.geometry, material, MAX_ACTORS);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.frustumCulled = false;
       mesh.count = 0;
@@ -447,6 +448,50 @@ export class CommuneThreeRenderer {
     let hash = 0;
     for (const char of catId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
     return this.catMeshes.length ? hash % this.catMeshes.length : 0;
+  }
+
+  /** Husko swap: hide the voxel rig, pose the CC0 dog with the same math. */
+  private applyDogModel(model: THREE.Group | null): void {
+    const prepared = model ? prepareDogGeometry(model) : null;
+    if (!prepared) return;
+    const material = prepared.textureMap
+      ? new THREE.MeshLambertMaterial({ map: prepared.textureMap })
+      : new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const mesh = new THREE.Mesh(prepared.geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.visible = false;
+    mesh.name = 'husko-model';
+    this.scene.add(mesh);
+    this.huskoModel = mesh;
+  }
+
+  /**
+   * Recolor kit buildings into the town palette: walls warmed to sandy cream,
+   * wood lightened, and cool teal/grey roofs shifted to warm terracotta so
+   * the medieval pack stops reading dark against the olive-green map.
+   */
+  private tintBuildingMaterials(model: THREE.Group): void {
+    const hsl = { h: 0, s: 0, l: 0 };
+    model.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const entry of materials) {
+        const standard = entry as THREE.MeshStandardMaterial;
+        if (!standard.color) continue;
+        standard.color.getHSL(hsl);
+        const isCoolRoof = hsl.h > 0.42 && hsl.h < 0.78 && hsl.l < 0.55;
+        const hue = isCoolRoof
+          ? THREE.MathUtils.lerp(hsl.h, 0.05, 0.85)
+          : THREE.MathUtils.lerp(hsl.h, 0.085, 0.3);
+        const saturation = isCoolRoof ? 0.42 : hsl.s * 0.78;
+        const lightness = Math.min(0.88, hsl.l * 0.82 + 0.26);
+        standard.color.setHSL(hue, saturation, lightness);
+        if (typeof standard.roughness === 'number') standard.roughness = 1;
+        if (typeof standard.metalness === 'number') standard.metalness = 0;
+        standard.needsUpdate = true;
+      }
+    });
   }
 
   /** Procedural building fallback recorded as a swappable site. */
@@ -479,6 +524,7 @@ export class CommuneThreeRenderer {
     const box = new THREE.Box3();
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
+    loaded.forEach((model) => this.tintBuildingMaterials(model));
     this.buildingSites.forEach((site, index) => {
       const instance = loaded[index % loaded.length].clone(true);
       instance.traverse((object) => {
@@ -1806,6 +1852,32 @@ export class CommuneThreeRenderer {
   private updateHusko(frame: CommuneThreeFrame, time: number): void {
     if (!this.huskoRig) this.huskoRig = createHuskoRig(this.scene);
     updateHuskoRig(this.huskoRig, frame.husko, time);
+    const model = this.huskoModel;
+    if (!model) return;
+    const husko = frame.husko;
+    if (!husko) {
+      model.visible = false;
+      return;
+    }
+    // CC0 dog replaces the voxel rig — same pose math, whole-model motion.
+    this.huskoRig.root.visible = false;
+    model.visible = true;
+    let bodySquash = 1;
+    let rearSquat = 0;
+    let sink = 0;
+    if (husko.state === 'chill') bodySquash = 0.6;
+    else if (husko.state === 'poo') { bodySquash = 0.86; rearSquat = 0.16; }
+    else if (husko.state === 'swim') { bodySquash = 0.82; sink = 12; }
+    const bob = husko.moving
+      ? Math.abs(Math.sin(husko.walkPhase)) * 4
+      : Math.sin(time * 2.2) * 1.2 + (husko.state === 'zoomies' ? 3 : 0);
+    model.position.set(husko.x, -sink + rearSquat * 18 + bob, husko.y);
+    model.rotation.set(
+      husko.moving && !frame.reduceMotion ? Math.sin(husko.walkPhase) * 0.035 : 0,
+      Math.atan2(husko.headingY ?? 1, husko.headingX ?? 0),
+      0,
+    );
+    model.scale.set(1, bodySquash, 1);
   }
 
   /** Project a world coordinate to CSS pixels on the label overlay. */

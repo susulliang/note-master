@@ -23,6 +23,7 @@ function loadScene(loader: GLTFLoader, url: string): Promise<THREE.Group | null>
 export async function loadCommuneModels(): Promise<{
   buildings: (THREE.Group | null)[];
   cats: (THREE.Group | null)[];
+  dog: THREE.Group | null;
 }> {
   const loader = new GLTFLoader();
   const buildings = await Promise.all(
@@ -31,36 +32,46 @@ export async function loadCommuneModels(): Promise<{
   const cats = await Promise.all(
     CAT_FILES.map((file) => loadScene(loader, `/assets/commune/animals/${file}`))
   );
-  return { buildings, cats };
+  const dog = await loadScene(loader, '/assets/commune/animals/dog-1.glb');
+  return { buildings, cats, dog };
 }
 
-/** Flatten a model into one geometry with baked vertex colors (drops UVs). */
-function mergeSceneToGeometry(root: THREE.Object3D): THREE.BufferGeometry | null {
+/**
+ * Flatten a model into one geometry. When the model is textured, the first
+ * texture map is returned alongside so the renderer can keep it; otherwise
+ * material colors are baked into vertex colors (drops UVs).
+ */
+function mergeSceneToGeometry(root: THREE.Object3D): { geometry: THREE.BufferGeometry; textureMap: THREE.Texture | null } | null {
   root.updateMatrixWorld(true);
   const sources: THREE.BufferGeometry[] = [];
   const color = new THREE.Color();
+  let textureMap: THREE.Texture | null = null;
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
+    const material = object.material;
+    if (!Array.isArray(material) && material?.map) textureMap = material.map;
+    const keepUv = !!textureMap;
     const geometry = (object.geometry.index
       ? object.geometry.toNonIndexed()
       : object.geometry.clone()
     ).applyMatrix4(object.matrixWorld);
-    const material = object.material;
     color.set(0xffffff);
     if (!Array.isArray(material)) {
       const maybe = material as THREE.MeshStandardMaterial;
       if (maybe.color) color.copy(maybe.color);
     }
     const vertexCount = geometry.getAttribute('position').count;
-    const colors = new Float32Array(vertexCount * 3);
-    for (let index = 0; index < vertexCount; index++) {
-      colors[index * 3] = color.r;
-      colors[index * 3 + 1] = color.g;
-      colors[index * 3 + 2] = color.b;
+    if (!textureMap) {
+      const colors = new Float32Array(vertexCount * 3);
+      for (let index = 0; index < vertexCount; index++) {
+        colors[index * 3] = color.r;
+        colors[index * 3 + 1] = color.g;
+        colors[index * 3 + 2] = color.b;
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     }
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     for (const name of Object.keys(geometry.attributes)) {
-      if (name !== 'position' && name !== 'normal' && name !== 'color') {
+      if (name !== 'position' && name !== 'normal' && name !== 'color' && !(keepUv && name === 'uv')) {
         geometry.deleteAttribute(name);
       }
     }
@@ -70,15 +81,30 @@ function mergeSceneToGeometry(root: THREE.Object3D): THREE.BufferGeometry | null
   if (sources.length === 0) return null;
   const merged = mergeGeometries(sources, false);
   sources.forEach((geometry) => geometry.dispose());
-  return merged;
+  if (!merged) return null;
+  return { geometry: merged, textureMap };
 }
 
 /**
  * Normalize a CC0 cat model to the commune's pet scale: forward = +X,
- * pivot at ground center, length ≈ 26 world units. Returns null when the
+ * pivot at ground center, length ≈ 20 world units. Returns null when the
  * model has no usable mesh (or is skinned-only).
  */
-export function prepareCatGeometry(root: THREE.Object3D): THREE.BufferGeometry | null {
+export function prepareCatGeometry(root: THREE.Object3D): PreparedAnimalGeometry | null {
+  return prepareQuadrupedGeometry(root, 20);
+}
+
+/** Husko replacement: CC0 dog normalized to the giant-husky footprint. */
+export function prepareDogGeometry(root: THREE.Object3D): PreparedAnimalGeometry | null {
+  return prepareQuadrupedGeometry(root, 104);
+}
+
+export interface PreparedAnimalGeometry {
+  geometry: THREE.BufferGeometry;
+  textureMap: THREE.Texture | null;
+}
+
+function prepareQuadrupedGeometry(root: THREE.Object3D, length: number): PreparedAnimalGeometry | null {
   const hasSkinnedOnly = (() => {
     let skinned = 0;
     let plain = 0;
@@ -92,18 +118,19 @@ export function prepareCatGeometry(root: THREE.Object3D): THREE.BufferGeometry |
   const merged = mergeSceneToGeometry(root);
   if (!merged) return null;
   // glTF convention: front = +Z → rotate to our pets' +X forward.
-  merged.rotateY(Math.PI / 2);
-  merged.computeBoundingBox();
-  const box = merged.boundingBox;
+  const geometry = merged.geometry;
+  geometry.rotateY(Math.PI / 2);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
   if (!box) return null;
   const size = box.getSize(new THREE.Vector3());
-  const scale = 26 / Math.max(size.x, 0.001);
-  merged.scale(scale, scale, scale);
-  merged.computeBoundingBox();
-  const box2 = merged.boundingBox;
+  const scale = length / Math.max(size.x, 0.001);
+  geometry.scale(scale, scale, scale);
+  geometry.computeBoundingBox();
+  const box2 = geometry.boundingBox;
   if (!box2) return null;
   const center = box2.getCenter(new THREE.Vector3());
-  merged.translate(-center.x, -box2.min.y, -center.z);
-  merged.computeBoundingSphere();
-  return merged;
+  geometry.translate(-center.x, -box2.min.y, -center.z);
+  geometry.computeBoundingSphere();
+  return { geometry, textureMap: merged.textureMap };
 }

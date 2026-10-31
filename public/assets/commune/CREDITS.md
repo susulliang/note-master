@@ -19,7 +19,7 @@ Downloaded via the open-source mirror: https://github.com/trebeljahr/quaternius-
 | `buildings/building-7.glb` | Mill | Quaternius | CC0 1.0 |
 | `buildings/building-8.glb` | Bell Tower | Quaternius | CC0 1.0 |
 
-## Animals (Cats)
+## Animals (Cats & Dogs)
 
 Sourced from **Poly Pizza** (https://poly.pizza). These are static (non-rigged, non-animated) models originally published on Google Poly, licensed **CC-BY 3.0** — attribution is provided here as required by the license.
 
@@ -28,6 +28,7 @@ Sourced from **Poly Pizza** (https://poly.pizza). These are static (non-rigged, 
 | `animals/cat-1.glb` | Cat | Poly by Google | https://poly.pizza/m/6dM1J6f6pm9 | CC-BY 3.0 |
 | `animals/cat-2.glb` | cat loaf | Hiroyuki Kajiwara (hk) | https://poly.pizza/m/5qGO_C5GvAB | CC-BY 3.0 |
 | `animals/cat-3.glb` | Tubbs the cat | Nikki Morin | https://poly.pizza/m/2iwlJG9K-ym | CC-BY 3.0 |
+| `animals/dog-1.glb` | Beagle | Poly by Google | https://poly.pizza/m/0BnDT3T1wTE | CC-BY 3.0 |
 
 ## License Notes
 
