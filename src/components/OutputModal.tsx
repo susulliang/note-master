@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useContext, useRef } from 'react';
-import { Copy, Check, X, Eye, Code2, Upload, Loader2, Minus, CircleAlert } from 'lucide-react';
+import { Copy, Check, X, Eye, Code2, Upload, Loader2, Minus, CircleAlert, ClipboardList } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -26,6 +26,7 @@ interface OutputModalProps {
   onArchiveTicketNote: (note: SavedTicketNoteInput) => Promise<void>;
   onUpdateArchivedTicketNote: (note: SavedTicketNoteInput) => Promise<void>;
   onSaveToHistory?: (finalText: string) => void;
+  onSendToTeamBoard?: (finalText: string) => Promise<void>;
 }
 
 /** Contact fields offered as click-to-copy chips (bullet-dotted) */
@@ -137,6 +138,7 @@ export default function OutputModal({
   onArchiveTicketNote,
   onUpdateArchivedTicketNote,
   onSaveToHistory,
+  onSendToTeamBoard,
 }: OutputModalProps) {
   const [copied, setCopied] = useState<null | 'rich' | 'plain'>(null);
   const [editableText, setEditableText] = useState(noteText);
@@ -146,6 +148,7 @@ export default function OutputModal({
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const lastArchivedKeyRef = useRef<string | null>(null);
   const [pushing, setPushing] = useState(false);
+  const [sendingToBoard, setSendingToBoard] = useState(false);
   const [pushReport, setPushReport] = useState<PushReport | null>(null);
   /** Raw-source textarea collapsed by default — most calls only need the
    *  rendered preview; the Show Source toggle in the action row expands it. */
@@ -1015,6 +1018,31 @@ export default function OutputModal({
          *  on ONE line (left), copy/close controls on the right. */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
           <div className="flex flex-wrap items-center gap-2">
+            {onSendToTeamBoard && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={sendingToBoard}
+                onClick={() => {
+                  setSendingToBoard(true);
+                  void (async () => {
+                    try {
+                      await onSendToTeamBoard(editableText);
+                      handleOpenChange(false);
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : 'Could not pin this ticket.');
+                    } finally {
+                      setSendingToBoard(false);
+                    }
+                  })();
+                }}
+                className="gap-1.5"
+                title="Create a private Team Board ticket card from this note"
+              >
+                {sendingToBoard ? <Loader2 className="size-3.5 animate-spin" /> : <ClipboardList className="size-3.5" />}
+                {sendingToBoard ? 'Pinning…' : 'Pin to Team Board'}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

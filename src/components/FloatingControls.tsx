@@ -10,6 +10,7 @@ interface RailControlsProps {
   history: NoteHistoryEntry[];
   onDeleteHistory: (id: string) => void;
   onClearHistory: () => void;
+  onSendToTeamBoard: (entry: NoteHistoryEntry) => void;
   /** Collapse the left rail pill into its glass circle (hidden while
    *  collapsed — the rail is unmounted then). */
   onCollapseRail?: () => void;
@@ -30,6 +31,7 @@ export default function RailControls({
   history,
   onDeleteHistory,
   onClearHistory,
+  onSendToTeamBoard,
   onCollapseRail,
 }: RailControlsProps) {
   return (
@@ -64,6 +66,7 @@ export default function RailControls({
             onDeleteHistory={onDeleteHistory}
             onClearHistory={onClearHistory}
             onClose={onToggleHistory}
+            onSendToTeamBoard={onSendToTeamBoard}
           />
         </div>
       )}

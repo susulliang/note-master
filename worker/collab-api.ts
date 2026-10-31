@@ -16,7 +16,7 @@ interface CollabDocumentRow {
   kind?: 'smartdoc' | 'smarttodo';
 }
 
-const MAX_BODY_BYTES = 8 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 const MAX_DRIVE_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PERSONAL_DRIVE_BYTES = 100 * 1024 * 1024;
 const DRIVE_RESERVATION_MAX_AGE = 24 * 60 * 60 * 1000;
@@ -650,6 +650,610 @@ async function deleteTask(request: Request, env: Env, username: string, id: stri
   return collabJson({ ok: true });
 }
 
+type TeamBoardCardType = 'ticket' | 'incident' | 'announcement' | 'custom';
+type TeamBoardStatus = 'signal' | 'investigating' | 'waiting' | 'captured';
+type TeamBoardSeverity = 'low' | 'normal' | 'high' | 'critical';
+
+interface TeamBoardCardRow {
+  id: string;
+  type: TeamBoardCardType;
+  title: string;
+  description: string;
+  status: TeamBoardStatus;
+  severity: TeamBoardSeverity;
+  ticket_number: string;
+  is_beacon: number;
+  owner: string;
+  created_by: string;
+  source_type: string | null;
+  source_id: string | null;
+  source_url: string | null;
+  source_snapshot: string;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  comment_count?: number;
+}
+
+function teamBoardCardPublic(row: TeamBoardCardRow) {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    severity: row.severity,
+    ticketNumber: row.ticket_number,
+    isBeacon: row.is_beacon === 1,
+    owner: row.owner,
+    createdBy: row.created_by,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    sourceUrl: row.source_url,
+    sourceSnapshot: row.source_snapshot,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    closedAt: row.closed_at,
+    commentCount: Number(row.comment_count ?? 0),
+  };
+}
+
+async function teamBoardPermission(
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<'owner' | 'edit' | 'view' | null> {
+  const row = await env.DB.prepare(`
+    SELECT card.owner, card.created_by, member.permission,
+      EXISTS (
+        SELECT 1 FROM team_board_card_rooms shared
+        WHERE shared.card_id = card.id AND (
+          shared.room_id = 'global'
+          OR EXISTS (SELECT 1 FROM chat_conversations dm
+            WHERE dm.room_id = shared.room_id AND dm.username = ? COLLATE NOCASE)
+          OR EXISTS (SELECT 1 FROM chat_group_members group_member
+            WHERE group_member.room_id = shared.room_id AND group_member.username = ? COLLATE NOCASE)
+        )
+      ) AS shared_to_chat
+    FROM team_board_cards card
+    LEFT JOIN team_board_members member
+      ON member.card_id = card.id AND member.username = ? COLLATE NOCASE
+    WHERE card.id = ? AND (
+      card.owner = ? COLLATE NOCASE
+      OR card.created_by = ? COLLATE NOCASE
+      OR member.username IS NOT NULL
+      OR EXISTS (
+        SELECT 1 FROM team_board_card_rooms shared
+        WHERE shared.card_id = card.id AND (
+          shared.room_id = 'global'
+          OR EXISTS (SELECT 1 FROM chat_conversations dm
+            WHERE dm.room_id = shared.room_id AND dm.username = ? COLLATE NOCASE)
+          OR EXISTS (SELECT 1 FROM chat_group_members group_member
+            WHERE group_member.room_id = shared.room_id AND group_member.username = ? COLLATE NOCASE)
+        )
+      )
+    )
+  `).bind(username, username, username, cardId, username, username, username, username)
+    .first<{ owner: string; created_by: string; permission: 'view' | 'edit' | null; shared_to_chat: number }>();
+  if (!row) return null;
+  if (row.owner.toLowerCase() === username.toLowerCase() || row.created_by.toLowerCase() === username.toLowerCase()) return 'owner';
+  if (row.shared_to_chat === 1) return 'edit';
+  return row.permission ?? 'edit';
+}
+
+async function addTeamBoardActivity(
+  env: Env,
+  cardId: string,
+  actor: string,
+  kind: string,
+  detail = '',
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO team_board_activity (id, card_id, actor, kind, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(crypto.randomUUID(), cardId, actor, kind, detail.slice(0, 1000), Date.now()).run();
+}
+
+async function notifyTeamBoardUsers(
+  env: Env,
+  cardId: string,
+  actor: string,
+  usernames: string[],
+  title: string,
+  body: string,
+): Promise<void> {
+  const unique = [...new Map(usernames.map((name) => [name.toLowerCase(), name])).values()]
+    .filter((name) => name.toLowerCase() !== actor.toLowerCase());
+  if (!unique.length) return;
+  const now = Date.now();
+  await env.DB.batch(unique.map((username) => env.DB.prepare(
+    `INSERT INTO collab_notifications (id, username, type, title, body, target_url, created_at)
+     VALUES (?, ?, 'team_board', ?, ?, ?, ?)`,
+  ).bind(
+    crypto.randomUUID(),
+    username,
+    title.slice(0, 180),
+    body.slice(0, 500),
+    `/board?card=${encodeURIComponent(cardId)}`,
+    now,
+  )));
+}
+
+async function resolveTeamBoardMentions(env: Env, text: string): Promise<string[]> {
+  const mentions = taskMentionNames(text);
+  if (!mentions.length) return [];
+  const placeholders = mentions.map(() => '?').join(', ');
+  const rows = await env.DB.prepare(
+    `SELECT username FROM auth_users WHERE lower(username) IN (${placeholders})`,
+  ).bind(...mentions).all<{ username: string }>();
+  return (rows.results ?? []).map((row) => row.username);
+}
+
+async function shareTeamBoardCardWithUsers(
+  env: Env,
+  cardId: string,
+  actor: string,
+  usernames: string[],
+  title: string,
+): Promise<string[]> {
+  const valid = [...new Set(usernames.map((name) => name.trim()).filter(Boolean))].slice(0, 40);
+  if (!valid.length) return [];
+  const placeholders = valid.map(() => '?').join(', ');
+  const users = await env.DB.prepare(
+    `SELECT username FROM auth_users WHERE lower(username) IN (${placeholders})`,
+  ).bind(...valid.map((name) => name.toLowerCase())).all<{ username: string }>();
+  const canonical = (users.results ?? []).map((row) => row.username);
+  const existing = await env.DB.prepare(
+    `SELECT username, permission FROM team_board_members WHERE card_id = ?`,
+  ).bind(cardId).all<{ username: string; permission: 'view' | 'edit' }>();
+  const previousPermissions = new Map((existing.results ?? []).map((row) => [row.username.toLowerCase(), row.permission]));
+  const newlyGranted = canonical.filter((name) => previousPermissions.get(name.toLowerCase()) !== 'edit');
+  const now = Date.now();
+  if (canonical.length) {
+    await env.DB.batch(canonical.map((username) => env.DB.prepare(
+      `INSERT INTO team_board_members (card_id, username, permission, added_by, created_at)
+       VALUES (?, ?, 'edit', ?, ?)
+       ON CONFLICT(card_id, username) DO UPDATE SET
+         permission = 'edit', added_by = excluded.added_by`,
+    ).bind(cardId, username, actor, now)));
+    if (newlyGranted.length) {
+      await notifyTeamBoardUsers(
+        env,
+        cardId,
+        actor,
+        newlyGranted,
+        `${actor} shared a Team Board card with you`,
+        title,
+      );
+    }
+  }
+  return canonical;
+}
+
+async function listTeamBoardCards(env: Env, username: string, url: URL): Promise<Response> {
+  const type = url.searchParams.get('type');
+  const status = url.searchParams.get('status');
+  const needle = (url.searchParams.get('q') ?? '').trim().slice(0, 100);
+  const rows = await env.DB.prepare(`
+    SELECT card.id, card.type, card.title,
+      substr(card.description, 1, 500) AS description,
+      card.status, card.severity, card.ticket_number, card.is_beacon, card.owner, card.created_by,
+      card.source_type, card.source_id, card.source_url, '' AS source_snapshot,
+      card.created_at, card.updated_at, card.closed_at,
+      (SELECT COUNT(*) FROM team_board_comments comment WHERE comment.card_id = card.id) AS comment_count
+    FROM team_board_cards card
+    WHERE (
+      card.owner = ?1 COLLATE NOCASE
+      OR card.created_by = ?1 COLLATE NOCASE
+      OR EXISTS (SELECT 1 FROM team_board_members member
+        WHERE member.card_id = card.id AND member.username = ?1 COLLATE NOCASE)
+      OR EXISTS (
+        SELECT 1 FROM team_board_card_rooms shared
+        WHERE shared.card_id = card.id AND (
+          shared.room_id = 'global'
+          OR EXISTS (SELECT 1 FROM chat_conversations dm
+            WHERE dm.room_id = shared.room_id AND dm.username = ?1 COLLATE NOCASE)
+          OR EXISTS (SELECT 1 FROM chat_group_members group_member
+            WHERE group_member.room_id = shared.room_id AND group_member.username = ?1 COLLATE NOCASE)
+        )
+      )
+    )
+      AND (?2 IS NULL OR card.type = ?2)
+      AND (?3 IS NULL OR card.status = ?3)
+      AND (?4 = '' OR lower(card.title || ' ' || card.description || ' ' ||
+        card.ticket_number || ' ' || card.owner) LIKE ?5)
+    ORDER BY CASE WHEN card.status = 'captured' THEN 1 ELSE 0 END,
+      CASE card.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
+      card.updated_at DESC
+    LIMIT 300
+  `).bind(
+    username,
+    ['ticket', 'incident', 'announcement', 'custom'].includes(type ?? '') ? type : null,
+    ['signal', 'investigating', 'waiting', 'captured'].includes(status ?? '') ? status : null,
+    needle.toLowerCase(),
+    `%${escapeLike(needle.toLowerCase())}%`,
+  ).all<TeamBoardCardRow>();
+  return collabJson({ cards: (rows.results ?? []).map(teamBoardCardPublic) });
+}
+
+async function getTeamBoardCard(
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<Response> {
+  const permission = await teamBoardPermission(env, username, cardId);
+  if (!permission) return collabJson({ error: 'Card not found.' }, 404);
+  const row = await env.DB.prepare(`
+    SELECT card.*,
+      (SELECT COUNT(*) FROM team_board_comments comment WHERE comment.card_id = card.id) AS comment_count
+    FROM team_board_cards card WHERE card.id = ?
+  `).bind(cardId).first<TeamBoardCardRow>();
+  if (!row) return collabJson({ error: 'Card not found.' }, 404);
+  const [members, comments, activity, session, sharedRooms] = await Promise.all([
+    env.DB.prepare(
+      `SELECT username, permission, added_by AS addedBy, created_at AS createdAt
+       FROM team_board_members WHERE card_id = ? ORDER BY username COLLATE NOCASE`,
+    ).bind(cardId).all(),
+    env.DB.prepare(
+      `SELECT id, author, markdown, mentions_json AS mentionsJson, created_at AS createdAt
+       FROM team_board_comments WHERE card_id = ? ORDER BY created_at, id LIMIT 100`,
+    ).bind(cardId).all<{
+      id: string; author: string; markdown: string; mentionsJson: string; createdAt: number;
+    }>(),
+    env.DB.prepare(
+      `SELECT id, actor, kind, detail, created_at AS createdAt
+       FROM team_board_activity WHERE card_id = ? ORDER BY created_at DESC LIMIT 80`,
+    ).bind(cardId).all(),
+    env.DB.prepare(
+      `SELECT id, created_by AS createdBy, state, focus_target AS focusTarget,
+       scratchpad, started_at AS startedAt, ended_at AS endedAt
+       FROM team_board_sessions WHERE card_id = ?`,
+    ).bind(cardId).first<{
+      id: string; createdBy: string; state: 'active' | 'ended'; focusTarget: string;
+      scratchpad: string; startedAt: number; endedAt: number | null;
+    }>(),
+    env.DB.prepare(
+      `SELECT room_id AS roomId, shared_by AS sharedBy, created_at AS createdAt
+       FROM team_board_card_rooms WHERE card_id = ? ORDER BY created_at`,
+    ).bind(cardId).all(),
+  ]);
+  let sessionWithMembership: Record<string, unknown> | null = null;
+  if (session) {
+    const participant = await env.DB.prepare(
+      'SELECT 1 AS found FROM team_board_session_members WHERE session_id = ? AND username = ? COLLATE NOCASE AND left_at IS NULL',
+    ).bind(session.id, username).first<{ found: number }>();
+    const sessionMembers = await env.DB.prepare(
+      `SELECT username, joined_at AS joinedAt FROM team_board_session_members
+       WHERE session_id = ? AND left_at IS NULL ORDER BY joined_at`,
+    ).bind(session.id).all();
+    sessionWithMembership = {
+      ...session,
+      scratchpad: participant ? session.scratchpad : '',
+      isParticipant: !!participant,
+      members: sessionMembers.results ?? [],
+    };
+  }
+  return collabJson({
+    card: teamBoardCardPublic(row),
+    permission,
+    members: members.results ?? [],
+    comments: (comments.results ?? []).map((comment) => {
+      let mentions: string[] = [];
+      try {
+        const parsed: unknown = JSON.parse(comment.mentionsJson);
+        if (Array.isArray(parsed)) mentions = parsed.filter((name): name is string => typeof name === 'string');
+      } catch {
+        /* Ignore malformed legacy mention metadata. */
+      }
+      return { id: comment.id, author: comment.author, markdown: comment.markdown, mentions, createdAt: comment.createdAt };
+    }),
+    activity: activity.results ?? [],
+    session: sessionWithMembership,
+    sharedRooms: sharedRooms.results ?? [],
+  });
+}
+
+async function createTeamBoardCard(
+  request: Request,
+  env: Env,
+  username: string,
+): Promise<Response> {
+  const payload = await readPayload(request);
+  const type = payload?.type;
+  const title = typeof payload?.title === 'string' ? payload.title.trim().replace(/\s+/g, ' ').slice(0, 180) : '';
+  const description = typeof payload?.description === 'string' ? payload.description.trim().slice(0, 12_000) : '';
+  if (!['ticket', 'incident', 'announcement', 'custom'].includes(type as string)) {
+    return collabJson({ error: 'Choose a valid card type.' }, 400);
+  }
+  if (!title) return collabJson({ error: 'Every Team Board card needs a title.' }, 400);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const status: TeamBoardStatus = 'signal';
+  const severity: TeamBoardSeverity = payload?.severity === 'low' || payload?.severity === 'high' || payload?.severity === 'critical'
+    ? payload.severity
+    : 'normal';
+  const ticketNumber = typeof payload?.ticketNumber === 'string'
+    ? payload.ticketNumber.trim().slice(0, 80)
+    : '';
+  const isBeacon = payload?.isBeacon === true;
+  const sourceType = typeof payload?.sourceType === 'string' ? payload.sourceType.slice(0, 40) : null;
+  const sourceId = typeof payload?.sourceId === 'string' ? payload.sourceId.slice(0, 120) : null;
+  const sourceUrl = typeof payload?.sourceUrl === 'string' && payload.sourceUrl.startsWith('/')
+    ? payload.sourceUrl.slice(0, 500)
+    : null;
+  const sourceSnapshot = typeof payload?.sourceSnapshot === 'string' ? payload.sourceSnapshot.slice(0, 20_000) : '';
+  await env.DB.prepare(`
+    INSERT INTO team_board_cards
+      (id, type, title, description, status, severity, ticket_number, is_beacon, owner, created_by,
+       source_type, source_id, source_url, source_snapshot, created_at, updated_at, closed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+  `).bind(
+    id, type as TeamBoardCardType, title, description, status, severity, ticketNumber, isBeacon ? 1 : 0,
+    username, username, sourceType, sourceId, sourceUrl, sourceSnapshot, now, now,
+  ).run();
+  const mentions = await resolveTeamBoardMentions(env, `${title}\n${description}`);
+  await shareTeamBoardCardWithUsers(env, id, username, mentions, title);
+  await addTeamBoardActivity(env, id, username, 'created', `Created a ${type} card`);
+  const room = env.TEAM_BOARD_ROOM.getByName('team-board');
+  await room.broadcastCardChange(id, 'created');
+  return collabJson({
+    card: {
+      id, type, title, description, status, severity, ticketNumber, owner: username, createdBy: username,
+      sourceType, sourceId, sourceUrl, sourceSnapshot, createdAt: now, updatedAt: now, closedAt: null,
+      commentCount: 0,
+      isBeacon,
+    },
+  }, 201);
+}
+
+async function updateTeamBoardCard(
+  request: Request,
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<Response> {
+  const permission = await teamBoardPermission(env, username, cardId);
+  if (permission !== 'owner' && permission !== 'edit') return collabJson({ error: 'You cannot edit this card.' }, 403);
+  const payload = await readPayload(request);
+  if (!payload) return collabJson({ error: 'Invalid card update.' }, 400);
+  const current = await env.DB.prepare(
+    'SELECT title, description, status, severity, ticket_number, owner FROM team_board_cards WHERE id = ?',
+  ).bind(cardId).first<{
+    title: string; description: string; status: TeamBoardStatus; severity: TeamBoardSeverity;
+    ticket_number: string; owner: string;
+  }>();
+  if (!current) return collabJson({ error: 'Card not found.' }, 404);
+  const title = typeof payload.title === 'string'
+    ? payload.title.trim().replace(/\s+/g, ' ').slice(0, 180)
+    : current.title;
+  if (!title) return collabJson({ error: 'Every Team Board card needs a title.' }, 400);
+  const description = typeof payload.description === 'string' ? payload.description.trim().slice(0, 12_000) : current.description;
+  const status = ['signal', 'investigating', 'waiting', 'captured'].includes(payload.status as string)
+    ? payload.status as TeamBoardStatus : current.status;
+  const severity = ['low', 'normal', 'high', 'critical'].includes(payload.severity as string)
+    ? payload.severity as TeamBoardSeverity : current.severity;
+  const ticketNumber = typeof payload.ticketNumber === 'string'
+    ? payload.ticketNumber.trim().slice(0, 80) : current.ticket_number;
+  let owner = current.owner;
+  if (permission === 'owner' && typeof payload.owner === 'string' && payload.owner.trim()) {
+    const candidate = await env.DB.prepare(
+      'SELECT username FROM auth_users WHERE username = ? COLLATE NOCASE',
+    ).bind(payload.owner.trim()).first<{ username: string }>();
+    if (!candidate) return collabJson({ error: 'Choose a registered card owner.' }, 404);
+    owner = candidate.username;
+    await env.DB.prepare(`
+      INSERT INTO team_board_members (card_id, username, permission, added_by, created_at)
+      VALUES (?, ?, 'edit', ?, ?)
+      ON CONFLICT(card_id, username) DO UPDATE SET permission = 'edit', added_by = excluded.added_by
+    `).bind(cardId, owner, username, Date.now()).run();
+  }
+  const now = Date.now();
+  await env.DB.prepare(`
+    UPDATE team_board_cards SET title = ?, description = ?, status = ?, severity = ?,
+      ticket_number = ?, owner = ?, updated_at = ?, closed_at = ?
+    WHERE id = ?
+  `).bind(title, description, status, severity, ticketNumber, owner, now, status === 'captured' ? now : null, cardId).run();
+  const mentions = await resolveTeamBoardMentions(env, `${title}\n${description}`);
+  await shareTeamBoardCardWithUsers(env, cardId, username, mentions, title);
+  await addTeamBoardActivity(env, cardId, username, 'updated', 'Updated card details');
+  await env.TEAM_BOARD_ROOM.getByName('team-board').broadcastCardChange(cardId, 'updated');
+  return collabJson({ ok: true });
+}
+
+async function shareTeamBoardCard(
+  request: Request,
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<Response> {
+  const permission = await teamBoardPermission(env, username, cardId);
+  if (permission !== 'owner' && permission !== 'edit') return collabJson({ error: 'You cannot share this card.' }, 403);
+  const payload = await readPayload(request);
+  const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+  if (!isValidChatRoomId(roomId) || !await isChatRoomMember(env, username, roomId)) {
+    return collabJson({ error: 'Choose a chat you belong to.' }, 403);
+  }
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO team_board_card_rooms (card_id, room_id, shared_by, created_at)
+    VALUES (?, ?, ?, ?)
+  `).bind(cardId, roomId, username, Date.now()).run();
+  const members = await getChatRoomMembers(env, roomId);
+  const card = await env.DB.prepare('SELECT title FROM team_board_cards WHERE id = ?')
+    .bind(cardId).first<{ title: string }>();
+  await shareTeamBoardCardWithUsers(env, cardId, username, members, card?.title ?? 'Team Board card');
+  await addTeamBoardActivity(env, cardId, username, 'shared_in_chat', roomId);
+  await env.TEAM_BOARD_ROOM.getByName('team-board').broadcastCardChange(cardId, 'shared');
+  return collabJson({ ok: true, url: `/board?card=${encodeURIComponent(cardId)}` });
+}
+
+async function createTeamBoardComment(
+  request: Request,
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<Response> {
+  if (!await teamBoardPermission(env, username, cardId)) return collabJson({ error: 'Card not found.' }, 404);
+  const payload = await readPayload(request);
+  const markdown = typeof payload?.markdown === 'string' ? payload.markdown.trim().slice(0, 8_000) : '';
+  if (!markdown) return collabJson({ error: 'Write a comment first.' }, 400);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const mentions = await resolveTeamBoardMentions(env, markdown);
+  await env.DB.prepare(`
+    INSERT INTO team_board_comments (id, card_id, author, markdown, mentions_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, cardId, username, markdown, JSON.stringify(mentions), now).run();
+  const card = await env.DB.prepare('SELECT title FROM team_board_cards WHERE id = ?')
+    .bind(cardId).first<{ title: string }>();
+  await shareTeamBoardCardWithUsers(env, cardId, username, mentions, card?.title ?? 'Team Board card');
+  await addTeamBoardActivity(env, cardId, username, 'commented', markdown.slice(0, 400));
+  await env.TEAM_BOARD_ROOM.getByName('team-board').broadcastCardChange(cardId, 'commented');
+  return collabJson({
+    comment: { id, cardId, author: username, markdown, mentions, createdAt: now },
+  }, 201);
+}
+
+async function teamBoardSessionAction(
+  request: Request,
+  env: Env,
+  username: string,
+  cardId: string,
+): Promise<Response> {
+  const permission = await teamBoardPermission(env, username, cardId);
+  if (!permission) return collabJson({ error: 'Card not found.' }, 404);
+  const payload = await readPayload(request);
+  const action = payload?.action;
+  if ((action === 'start' || action === 'join') && permission === 'view') {
+    return collabJson({ error: 'Edit access is required to join a pair session.' }, 403);
+  }
+  const now = Date.now();
+  let assistStreak: number | null = null;
+  let session = await env.DB.prepare(
+    'SELECT id, state FROM team_board_sessions WHERE card_id = ?',
+  ).bind(cardId).first<{ id: string; state: string }>();
+
+  if (action === 'start') {
+    if (session?.state === 'active') {
+      await env.DB.prepare(`
+        INSERT INTO team_board_session_members (session_id, username, joined_at, left_at)
+        VALUES (?, ?, ?, NULL)
+        ON CONFLICT(session_id, username) DO UPDATE SET joined_at = excluded.joined_at, left_at = NULL
+      `).bind(session.id, username, now).run();
+    } else {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO team_board_sessions
+          (id, card_id, created_by, state, focus_target, scratchpad, started_at, ended_at)
+        VALUES (?, ?, ?, 'active', '', '', ?, NULL)
+        ON CONFLICT(card_id) DO UPDATE SET id = excluded.id, created_by = excluded.created_by,
+          state = 'active', focus_target = '', scratchpad = '', started_at = excluded.started_at, ended_at = NULL
+      `).bind(id, cardId, username, now).run();
+      session = { id, state: 'active' };
+      await env.DB.prepare(`
+        INSERT INTO team_board_session_members (session_id, username, joined_at, left_at)
+        VALUES (?, ?, ?, NULL)
+        ON CONFLICT(session_id, username) DO UPDATE SET joined_at = excluded.joined_at, left_at = NULL
+      `).bind(id, username, now).run();
+      await addTeamBoardActivity(env, cardId, username, 'pair_started', 'Started a pair-debug session');
+    }
+  } else if (!session || session.state !== 'active') {
+    return collabJson({ error: 'There is no active pair session.' }, 409);
+  } else if (action === 'join') {
+    const alreadyJoined = await env.DB.prepare(
+      `SELECT 1 AS found FROM team_board_session_members
+       WHERE session_id = ? AND username = ? COLLATE NOCASE AND left_at IS NULL`,
+    ).bind(session.id, username).first<{ found: number }>();
+    await env.DB.prepare(`
+      INSERT INTO team_board_session_members (session_id, username, joined_at, left_at)
+      VALUES (?, ?, ?, NULL)
+      ON CONFLICT(session_id, username) DO UPDATE SET joined_at = excluded.joined_at, left_at = NULL
+    `).bind(session.id, username, now).run();
+    await addTeamBoardActivity(env, cardId, username, 'pair_joined', 'Joined the pair-debug session');
+    const card = await env.DB.prepare(
+      'SELECT is_beacon, created_by FROM team_board_cards WHERE id = ?',
+    ).bind(cardId).first<{ is_beacon: number; created_by: string }>();
+    if (!alreadyJoined && card?.is_beacon === 1 && card.created_by.toLowerCase() !== username.toLowerCase()) {
+      const previous = await env.DB.prepare(
+        'SELECT streak_count, last_assist_at FROM team_board_assists WHERE username = ? COLLATE NOCASE',
+      ).bind(username).first<{ streak_count: number; last_assist_at: number }>();
+      assistStreak = previous && now - previous.last_assist_at <= 36 * 60 * 60 * 1000
+        ? Number(previous.streak_count) + 1
+        : 1;
+      await env.DB.prepare(`
+        INSERT INTO team_board_assists (username, streak_count, last_assist_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+          streak_count = excluded.streak_count, last_assist_at = excluded.last_assist_at
+      `).bind(username, assistStreak, now).run();
+    }
+  } else {
+    const participant = await env.DB.prepare(
+      'SELECT 1 AS found FROM team_board_session_members WHERE session_id = ? AND username = ? COLLATE NOCASE AND left_at IS NULL',
+    ).bind(session.id, username).first<{ found: number }>();
+    if (!participant) return collabJson({ error: 'Join the pair session to edit its scratchpad.' }, 403);
+    if (action === 'scratchpad' && typeof payload?.scratchpad === 'string') {
+      const scratchpad = payload.scratchpad.slice(0, 8_000);
+      await env.DB.prepare('UPDATE team_board_sessions SET scratchpad = ? WHERE id = ?')
+        .bind(scratchpad, session.id).run();
+    } else if (action === 'focus' && typeof payload?.focusTarget === 'string') {
+      const focusTarget = payload.focusTarget.startsWith('/') ? payload.focusTarget.slice(0, 500) : '';
+      await env.DB.prepare('UPDATE team_board_sessions SET focus_target = ? WHERE id = ?')
+        .bind(focusTarget, session.id).run();
+    } else if (action === 'decision' && typeof payload?.decision === 'string' && payload.decision.trim()) {
+      const decision = payload.decision.trim().slice(0, 2_000);
+      await env.DB.prepare(`
+        UPDATE team_board_cards SET
+          description = substr(
+            CASE WHEN trim(description) = '' THEN '' ELSE description || char(10) || char(10) END
+              || 'Captured decision: ' || ?,
+            1, 12000
+          ),
+          updated_at = ?
+        WHERE id = ?
+      `).bind(decision, now, cardId).run();
+      await addTeamBoardActivity(env, cardId, username, 'decision_captured', decision);
+    } else if (action === 'leave') {
+      await env.DB.prepare(`
+        UPDATE team_board_session_members SET left_at = ? WHERE session_id = ? AND username = ? COLLATE NOCASE
+      `).bind(now, session.id, username).run();
+      const activeMembers = await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM team_board_session_members WHERE session_id = ? AND left_at IS NULL',
+      ).bind(session.id).first<{ count: number }>();
+      if (!activeMembers?.count) {
+        await env.DB.prepare('UPDATE team_board_sessions SET state = ?, ended_at = ? WHERE id = ?')
+          .bind('ended', now, session.id).run();
+        await addTeamBoardActivity(env, cardId, username, 'pair_ended', 'Ended the pair-debug session');
+      }
+    } else {
+      return collabJson({ error: 'Invalid pair-session action.' }, 400);
+    }
+  }
+  await env.TEAM_BOARD_ROOM.getByName('team-board').broadcastCardChange(cardId, `session:${String(action)}`);
+  const response = await getTeamBoardCard(env, username, cardId);
+  if (assistStreak === null) return response;
+  const body = await response.json() as Record<string, unknown>;
+  return collabJson({ ...body, assistStreak });
+}
+
+async function createTeamBoardSocketTicket(
+  request: Request,
+  env: Env,
+  username: string,
+): Promise<Response> {
+  let payload: { cardId?: unknown };
+  try {
+    payload = await request.json() as typeof payload;
+  } catch {
+    return collabJson({ error: 'Invalid JSON body.' }, 400);
+  }
+  const cardId = typeof payload.cardId === 'string' ? payload.cardId : '';
+  if (cardId && (!/^[0-9a-f-]{36}$/i.test(cardId) || !await teamBoardPermission(env, username, cardId))) {
+    return collabJson({ error: 'Card not found.' }, 404);
+  }
+  const ticket = await env.TEAM_BOARD_ROOM.getByName('team-board').createTicket(username);
+  return collabJson({ ticket });
+}
+
 async function listCollabNotifications(env: Env, username: string): Promise<Response> {
   const rows = await env.DB.prepare(
     `SELECT id, type, title, body, target_url, created_at
@@ -907,6 +1511,30 @@ export async function handleCollabApi(request: Request, env: Env, username: stri
     });
   }
   await ensureCollabSchema(env);
+  if (url.pathname === '/api/collab/board/cards' && request.method === 'GET') {
+    return listTeamBoardCards(env, username, url);
+  }
+  if (url.pathname === '/api/collab/board/cards' && request.method === 'POST') {
+    return createTeamBoardCard(request, env, username);
+  }
+  if (url.pathname === '/api/collab/board/socket-ticket' && request.method === 'POST') {
+    return createTeamBoardSocketTicket(request, env, username);
+  }
+  const boardMatch = /^\/api\/collab\/board\/cards\/([0-9a-f-]{36})(?:\/(comments|share|session))?$/i.exec(url.pathname);
+  if (boardMatch) {
+    const cardId = boardMatch[1];
+    if (!boardMatch[2] && request.method === 'GET') return getTeamBoardCard(env, username, cardId);
+    if (!boardMatch[2] && request.method === 'PATCH') return updateTeamBoardCard(request, env, username, cardId);
+    if (boardMatch[2] === 'comments' && request.method === 'POST') {
+      return createTeamBoardComment(request, env, username, cardId);
+    }
+    if (boardMatch[2] === 'share' && request.method === 'POST') {
+      return shareTeamBoardCard(request, env, username, cardId);
+    }
+    if (boardMatch[2] === 'session' && request.method === 'POST') {
+      return teamBoardSessionAction(request, env, username, cardId);
+    }
+  }
   if (url.pathname === '/api/collab/documents' && request.method === 'GET') {
     return listDocuments(env, username);
   }

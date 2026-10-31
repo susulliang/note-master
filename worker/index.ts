@@ -30,6 +30,7 @@ import { handleChatApi } from './chat-api';
 import { handleCollabApi } from './collab-api';
 import { handleSheetsApi } from './sheets-api';
 import { handleSmartDocsApi } from './smartdocs-api';
+import { TeamBoardRoom } from './team-board-room';
 import { handleAsk } from './ask';
 import {
   handleKbCreate,
@@ -51,6 +52,7 @@ export { ChatStickerPack } from './chat-sticker-pack';
 export { SheetsRoom } from './sheets-room';
 export { MindmapRoom } from './mindmap-room';
 export { SmartDocsRoom } from './smartdocs-room';
+export { TeamBoardRoom } from './team-board-room';
 
 /** An NPC challenge persona (see worker/npc/*.json). */
 interface NpcPersona {
@@ -4953,6 +4955,15 @@ export default {
         return await env.SMARTDOC_ROOM.getByName(documentId).fetch(request);
       } catch {
         return new Response('Smart Docs room is temporarily unavailable', { status: 503 });
+      }
+    }
+    if (url.pathname === '/api/collab/board/socket') {
+      if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+        return new Response('WebSocket upgrade required', { status: 426 });
+      try {
+        return await env.TEAM_BOARD_ROOM.getByName('team-board').fetch(request);
+      } catch {
+        return new Response('Team Board room is temporarily unavailable', { status: 503 });
       }
     }
     if (url.pathname === '/api/call-transcription/socket') {

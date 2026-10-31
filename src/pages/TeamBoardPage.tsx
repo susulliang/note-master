@@ -1,0 +1,882 @@
+import {
+  AlertTriangle,
+  ArrowRight,
+  Bell,
+  Check,
+  ChevronRight,
+  CircleDot,
+  Clipboard,
+  ExternalLink,
+  FileText,
+  Flag,
+  GitBranch,
+  MessageCircle,
+  PanelRightClose,
+  Plus,
+  Radio,
+  Search,
+  Send,
+  Share2,
+  Shield,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
+import CollabPresenceStack, { type CollaboratorPresence } from '@/components/CollabPresenceStack';
+import { findChatUsers, fetchChatConversations, type ChatConversation, type ChatUser } from '@/lib/chat-client';
+import {
+  addTeamBoardComment,
+  createTeamBoardCard,
+  getTeamBoardCard,
+  listTeamBoardCards,
+  requestTeamBoardSocketTicket,
+  shareTeamBoardCardWithChat,
+  teamBoardSessionAction,
+  teamBoardSocketUrl,
+  updateTeamBoardCard,
+  type TeamBoardCard,
+  type TeamBoardCardDetail,
+  type TeamBoardCardType,
+  type TeamBoardSeverity,
+  type TeamBoardStatus,
+} from '@/lib/chat-client';
+import { getWebSocketReconnectDelay, startWebSocketHeartbeat } from '@/lib/websocket-health';
+import { cn } from '@/lib/utils';
+import './TeamBoardPage.css';
+
+interface TeamBoardPageProps {
+  username: string;
+  initialCardId?: string | null;
+}
+
+const LANES: Array<{ id: TeamBoardStatus; title: string; hint: string }> = [
+  { id: 'signal', title: 'Signal', hint: 'New cards and help beacons' },
+  { id: 'investigating', title: 'Investigating', hint: 'Someone is on it' },
+  { id: 'waiting', title: 'Waiting / Escalated', hint: 'Needs a response or handoff' },
+  { id: 'captured', title: 'Captured', hint: 'Decision recorded or resolved' },
+];
+
+const CARD_TYPES: Array<{ id: TeamBoardCardType; title: string; hint: string }> = [
+  { id: 'ticket', title: 'Ticket', hint: 'A customer case and its next action' },
+  { id: 'incident', title: 'Incident', hint: 'A product or service issue affecting multiple cases' },
+  { id: 'announcement', title: 'Announcement', hint: 'An important update or escalation request' },
+  { id: 'custom', title: 'Custom', hint: 'A flexible shared work card' },
+];
+
+const SEVERITIES: Array<{ value: TeamBoardSeverity; label: string }> = [
+  { value: 'low', label: 'Low' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'high', label: 'High' },
+  { value: 'critical', label: 'Critical' },
+];
+
+function cardTypeLabel(type: TeamBoardCardType): string {
+  return CARD_TYPES.find((item) => item.id === type)?.title ?? 'Custom';
+}
+
+function relativeTime(timestamp: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function parseTicketNumber(source: string): string {
+  const match = /(?:ticket|case)\s*(?:number|#|no\.?)\s*[:#-]?\s*([A-Z0-9-]{4,32})/i.exec(source);
+  return match?.[1] ?? '';
+}
+
+export default function TeamBoardPage({ username, initialCardId = null }: TeamBoardPageProps) {
+  const [cards, setCards] = useState<TeamBoardCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TeamBoardCardType | 'all'>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(initialCardId);
+  const [detail, setDetail] = useState<TeamBoardCardDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createType, setCreateType] = useState<TeamBoardCardType>('ticket');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [ticketNumber, setTicketNumber] = useState('');
+  const [sourceUrlDraft, setSourceUrlDraft] = useState('');
+  const [severity, setSeverity] = useState<TeamBoardSeverity>('normal');
+  const [isBeacon, setIsBeacon] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionUsers, setMentionUsers] = useState<ChatUser[]>([]);
+  const [presenceByCard, setPresenceByCard] = useState<Record<string, CollaboratorPresence[]>>({});
+  const [chatRooms, setChatRooms] = useState<ChatConversation[]>([]);
+  const [shareRoomId, setShareRoomId] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [sessionScratchpad, setSessionScratchpad] = useState('');
+  const [decisionDraft, setDecisionDraft] = useState('');
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
+  const activeRoomIdRef = useRef<string | null>(selectedId);
+  const sessionScratchpadDirtyRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const refreshCards = useCallback(async () => {
+    try {
+      setCards(await listTeamBoardCards({ type: typeFilter, query: debouncedQuery }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load Team Board.');
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedQuery, typeFilter]);
+
+  const refreshDetail = useCallback(async (cardId: string) => {
+    setDetailLoading(true);
+    try {
+      const next = await getTeamBoardCard(cardId);
+      setDetail(next);
+      if (!sessionScratchpadDirtyRef.current) setSessionScratchpad(next.session?.scratchpad ?? '');
+    } catch (error) {
+      setDetail(null);
+      toast.error(error instanceof Error ? error.message : 'This card is no longer available.');
+      setSelectedId(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void refreshCards(); }, [refreshCards]);
+  useEffect(() => { activeRoomIdRef.current = selectedId; }, [selectedId]);
+
+  useEffect(() => {
+    if (!initialCardId) return;
+    setSelectedId(initialCardId);
+  }, [initialCardId]);
+
+  useEffect(() => {
+    sessionScratchpadDirtyRef.current = false;
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId) void refreshDetail(selectedId);
+    else setDetail(null);
+  }, [refreshDetail, selectedId]);
+
+  useEffect(() => {
+    let active = true;
+    void fetchChatConversations().then((items) => {
+      if (active) setChatRooms(items);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (mentionQuery === null || mentionQuery.length < 1) {
+      setMentionUsers([]);
+      return undefined;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void findChatUsers(mentionQuery).then((people) => {
+        if (active) setMentionUsers(people.slice(0, 7));
+      }).catch(() => {
+        if (active) setMentionUsers([]);
+      });
+    }, 160);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [mentionQuery]);
+
+  useEffect(() => {
+    let stopped = false;
+    let socket: WebSocket | null = null;
+    let heartbeat: ReturnType<typeof startWebSocketHeartbeat> | null = null;
+    let reconnectTimer = 0;
+    let reconnectAttempt = 0;
+    let connectSequence = 0;
+    setPresenceByCard({});
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        void connect();
+      }, getWebSocketReconnectDelay(reconnectAttempt));
+      reconnectAttempt += 1;
+    };
+    const connect = async () => {
+      if (stopped) return;
+      const sequence = ++connectSequence;
+      try {
+        const ticket = await requestTeamBoardSocketTicket();
+        if (stopped || sequence !== connectSequence) return;
+        const current = new WebSocket(teamBoardSocketUrl(ticket.ticket));
+        socket = current;
+        socketRef.current = current;
+        current.onopen = () => {
+          reconnectAttempt = 0;
+          heartbeat = startWebSocketHeartbeat(current, () => current.close(4000, 'Heartbeat timeout'));
+          if (activeRoomIdRef.current) {
+            current.send(JSON.stringify({ type: 'board:focus', cardId: activeRoomIdRef.current }));
+          }
+        };
+        current.onmessage = (event) => {
+          let payload: Record<string, unknown>;
+          try {
+            payload = JSON.parse(String(event.data)) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (payload.type === 'heartbeat_ack') {
+            heartbeat?.acknowledge();
+            return;
+          }
+          if (payload.type === 'board:changed') {
+            void refreshCards();
+            if (payload.cardId === activeRoomIdRef.current) {
+              void refreshDetail(activeRoomIdRef.current);
+            }
+            return;
+          }
+          if (payload.type === 'board:presence' && typeof payload.cardId === 'string' && Array.isArray(payload.participants)) {
+            const participants = (payload.participants as string[]).map((name) => ({ username: name }));
+            setPresenceByCard((current) => ({ ...current, [payload.cardId as string]: participants }));
+          }
+        };
+        current.onclose = () => {
+          heartbeat?.stop();
+          heartbeat = null;
+          if (socketRef.current === current) socketRef.current = null;
+          scheduleReconnect();
+        };
+        current.onerror = () => current.close();
+      } catch {
+        scheduleReconnect();
+      }
+    };
+    void connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(reconnectTimer);
+      heartbeat?.stop();
+      socket?.close(1000, 'Leaving Team Board');
+      if (socketRef.current === socket) socketRef.current = null;
+    };
+  }, [refreshCards, refreshDetail]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: 'board:focus', cardId: selectedId ?? '' }));
+  }, [selectedId]);
+
+  const cardsByLane = useMemo(() => {
+    const lanes = new Map<TeamBoardStatus, TeamBoardCard[]>(
+      LANES.map((lane) => [lane.id, []]),
+    );
+    for (const card of cards) lanes.get(card.status)?.push(card);
+    return lanes;
+  }, [cards]);
+
+  const openCreate = (type: TeamBoardCardType = 'ticket', beacon = false) => {
+    setCreateType(type);
+    setIsBeacon(beacon);
+    setTitle('');
+    setDescription('');
+    setTicketNumber('');
+    setSourceUrlDraft('');
+    setSeverity(beacon ? 'high' : 'normal');
+    setCreateOpen(true);
+  };
+
+  const submitCard = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || saving) return;
+    let sourceUrl: string | undefined;
+    const rawSourceUrl = sourceUrlDraft.trim();
+    if (rawSourceUrl.startsWith('/')) sourceUrl = rawSourceUrl;
+    else if (rawSourceUrl) {
+      try {
+        const parsed = new URL(rawSourceUrl, window.location.origin);
+        if (parsed.origin !== window.location.origin) {
+          toast.error('Team Board links must point to this workspace.');
+          return;
+        }
+        sourceUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      } catch {
+        toast.error('Enter a valid workspace link.');
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      const card = await createTeamBoardCard({
+        type: createType,
+        title: title.trim(),
+        description: description.trim(),
+        severity,
+        ticketNumber: ticketNumber.trim(),
+        isBeacon,
+        sourceType: sourceUrl ? 'workspace_link' : undefined,
+        sourceUrl,
+      });
+      setCreateOpen(false);
+      await refreshCards();
+      setSelectedId(card.id);
+      toast.success(isBeacon ? 'Help beacon shared with its mentions.' : `${cardTypeLabel(createType)} card created privately.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not create this card.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const moveCard = async (card: TeamBoardCard, next: TeamBoardStatus) => {
+    if (card.status === next) return;
+    setCards((current) => current.map((item) => item.id === card.id ? { ...item, status: next } : item));
+    try {
+      await updateTeamBoardCard(card.id, { status: next });
+      if (selectedId === card.id) await refreshDetail(card.id);
+    } catch (error) {
+      await refreshCards();
+      toast.error(error instanceof Error ? error.message : 'Could not move this card.');
+    }
+  };
+
+  const saveCardPatch = async (patch: Parameters<typeof updateTeamBoardCard>[1]) => {
+    if (!detail) return;
+    try {
+      await updateTeamBoardCard(detail.card.id, patch);
+      await Promise.all([refreshCards(), refreshDetail(detail.card.id)]);
+      toast.success('Card updated.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update this card.');
+    }
+  };
+
+  const submitComment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!detail || !commentDraft.trim()) return;
+    try {
+      await addTeamBoardComment(detail.card.id, commentDraft.trim());
+      setCommentDraft('');
+      await Promise.all([refreshDetail(detail.card.id), refreshCards()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not post your comment.');
+    }
+  };
+
+  const shareToChat = async () => {
+    if (!detail || !shareRoomId || sharing) return;
+    setSharing(true);
+    try {
+      const path = await shareTeamBoardCardWithChat(detail.card.id, shareRoomId);
+      await navigator.clipboard.writeText(new URL(path, window.location.origin).toString());
+      setShareRoomId('');
+      await Promise.all([refreshDetail(detail.card.id), refreshCards()]);
+      toast.success('Shared access with chat members. Board link copied.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not share this card.');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const runSessionAction = async (
+    action: 'start' | 'join' | 'leave' | 'scratchpad' | 'focus' | 'decision',
+    payload?: Record<string, unknown>,
+  ) => {
+    if (!detail || sessionBusy) return;
+    setSessionBusy(true);
+    try {
+      const next = await teamBoardSessionAction(detail.card.id, action, payload);
+      setDetail(next);
+      if (action === 'start' || action === 'join' || action === 'scratchpad' || action === 'leave') {
+        sessionScratchpadDirtyRef.current = false;
+        setSessionScratchpad(next.session?.scratchpad ?? '');
+      }
+      if (action === 'decision') {
+        setDecisionDraft('');
+        toast.success('Decision captured on the card timeline.');
+      }
+      if (action === 'join' && next.assistStreak) {
+        toast.success(`You helped a teammate · ${next.assistStreak} assist streak!`);
+      }
+      if (action === 'start') toast.success('Pair session started. Invite a teammate by mentioning them on the card.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Pair session update failed.');
+    } finally {
+      setSessionBusy(false);
+    }
+  };
+
+  const acceptBeacon = async () => {
+    if (!detail) return;
+    setSessionBusy(true);
+    try {
+      await updateTeamBoardCard(detail.card.id, { status: 'investigating' });
+      const next = await teamBoardSessionAction(detail.card.id, 'start');
+      setDetail(next);
+      sessionScratchpadDirtyRef.current = false;
+      setSessionScratchpad(next.session?.scratchpad ?? '');
+      await refreshCards();
+      toast.success('Beacon accepted. Your pair session is live.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not accept this beacon.');
+    } finally {
+      setSessionBusy(false);
+    }
+  };
+
+  const insertMention = (person: ChatUser) => {
+    setDescription((current) => current.replace(/(^|\s)@[\w.-]*$/, (_match, prefix: string) => `${prefix}@${person.username} `));
+    setMentionQuery(null);
+  };
+  const insertCardMention = (person: ChatUser) => {
+    setDetail((current) => current ? {
+      ...current,
+      card: {
+        ...current.card,
+        description: current.card.description.replace(
+          /(^|\s)@[\w.-]*$/,
+          (_match, prefix: string) => `${prefix}@${person.username} `,
+        ),
+      },
+    } : current);
+    setMentionQuery(null);
+  };
+
+  return (
+    <section className="team-board-page">
+      <header className="team-board-header">
+        <div className="team-board-heading">
+          <span className="team-board-mark"><Radio className="size-4" /></span>
+          <div>
+            <p className="team-board-eyebrow">PRIVATE BY DEFAULT · REALTIME WHEN SHARED</p>
+            <h1>Team Board</h1>
+          </div>
+          <div className="team-board-live"><i /> Live</div>
+        </div>
+        <div className="team-board-actions">
+          <label className="team-board-search">
+            <Search className="size-3.5" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cards, ticket numbers…" />
+          </label>
+          <button type="button" className="team-board-beacon-button" onClick={() => openCreate('custom', true)}>
+            <Radio className="size-4" /> Need help
+          </button>
+          <button type="button" className="team-board-new-button" onClick={() => openCreate()}>
+            <Plus className="size-4" /> New card
+          </button>
+        </div>
+      </header>
+
+      <div className="team-board-toolbar">
+        <div className="team-board-type-filters" aria-label="Filter cards by type">
+          {(['all', 'ticket', 'incident', 'announcement', 'custom'] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={typeFilter === type}
+              onClick={() => setTypeFilter(type)}
+            >{type === 'all' ? 'All signals' : cardTypeLabel(type)}</button>
+          ))}
+        </div>
+        <div className="team-board-presence-summary">
+          <Users className="size-3.5" />
+          <span>{Object.values(presenceByCard).flat().filter((member) => member.username !== username).length || 'Your'} live collaborators</span>
+        </div>
+      </div>
+
+      <div className={cn('team-board-workspace', selectedId && 'has-selection')}>
+        <main className="team-board-lanes" aria-label="Team Board cards">
+          {loading ? (
+            <div className="team-board-empty">Tuning in to the team signal…</div>
+          ) : (
+            LANES.map((lane) => {
+              const laneCards = cardsByLane.get(lane.id) ?? [];
+              return (
+                <section className="team-board-lane" key={lane.id} aria-label={lane.title}>
+                  <header>
+                    <div className={`team-board-lane-dot is-${lane.id}`} />
+                    <div className="min-w-0 flex-1">
+                      <h2>{lane.title}</h2>
+                      <p>{lane.hint}</p>
+                    </div>
+                    <span className="team-board-lane-count">{laneCards.length}</span>
+                    {lane.id === 'signal' && (
+                      <button type="button" className="team-board-add-lane" aria-label="Add card" onClick={() => openCreate()}>
+                        <Plus className="size-4" />
+                      </button>
+                    )}
+                  </header>
+                  <div className="team-board-lane-cards">
+                    {laneCards.map((card) => (
+                      <article
+                        className={cn(
+                          'team-board-card',
+                          `is-${card.type}`,
+                          card.isBeacon && 'is-beacon',
+                          selectedId === card.id && 'is-selected',
+                        )}
+                        key={card.id}
+                      >
+                        <button type="button" className="team-board-card-open" onClick={() => setSelectedId(card.id)}>
+                          <div className="team-board-card-topline">
+                            <span className={`team-board-type-chip is-${card.type}`}>{card.isBeacon && <Radio className="size-3" />}{card.isBeacon ? 'Help beacon' : cardTypeLabel(card.type)}</span>
+                            {card.severity !== 'normal' && <span className={`team-board-severity is-${card.severity}`}>{card.severity}</span>}
+                          </div>
+                          <h3>{card.title}</h3>
+                          {card.ticketNumber && (
+                            <span className="team-board-ticket-number"><Clipboard className="size-3" /> {card.ticketNumber}</span>
+                          )}
+                          {card.description && <p className="team-board-card-excerpt">{card.description}</p>}
+                          <div className="team-board-card-meta">
+                            <span><CircleDot className="size-3" /> {card.owner}</span>
+                            <span><MessageCircle className="size-3" /> {card.commentCount}</span>
+                            <span>{relativeTime(card.updatedAt)}</span>
+                          </div>
+                        </button>
+                        <footer className="team-board-card-footer">
+                          <span className="team-board-private-label"><Shield className="size-3" /> Private / shared</span>
+                          {card.sourceUrl && (
+                            <a href={card.sourceUrl} onClick={(event) => event.stopPropagation()} title="Open source">
+                              <ExternalLink className="size-3.5" />
+                            </a>
+                          )}
+                          <select
+                            aria-label={`Move ${card.title}`}
+                            value={card.status}
+                            onChange={(event) => void moveCard(card, event.target.value as TeamBoardStatus)}
+                          >
+                            {LANES.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+                          </select>
+                        </footer>
+                      </article>
+                    ))}
+                    {laneCards.length === 0 && (
+                      <div className="team-board-lane-empty">
+                        <span>{lane.id === 'signal' ? 'Quiet signal.' : 'Nothing queued here.'}</span>
+                        {lane.id === 'signal' && <button type="button" onClick={() => openCreate()}>Create a card</button>}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })
+          )}
+        </main>
+
+        {selectedId && (
+          <aside className="team-board-inspector" aria-label="Card details">
+            <header className="team-board-inspector-header">
+              <div>
+                <p>CONTEXT INSPECTOR</p>
+                <span>{detail?.permission === 'owner' ? 'You own this private thread' : 'Shared with you'}</span>
+              </div>
+              <button type="button" aria-label="Close card details" onClick={() => setSelectedId(null)}><PanelRightClose className="size-4" /></button>
+            </header>
+            {detailLoading || !detail ? (
+              <div className="team-board-inspector-loading">Loading card context…</div>
+            ) : (
+              <>
+                <div className="team-board-inspector-body">
+                  <div className="team-board-inspector-cardhead">
+                    <span className={`team-board-type-chip is-${detail.card.type}`}>{detail.card.isBeacon && <Radio className="size-3" />}{detail.card.isBeacon ? 'Help beacon' : cardTypeLabel(detail.card.type)}</span>
+                    <span className={`team-board-severity is-${detail.card.severity}`}>{detail.card.severity}</span>
+                  </div>
+                  <input
+                    className="team-board-title-input"
+                    aria-label="Card title"
+                    value={detail.card.title}
+                    maxLength={180}
+                    disabled={detail.permission === 'view'}
+                    onChange={(event) => setDetail((current) => current ? {
+                      ...current,
+                      card: { ...current.card, title: event.target.value },
+                    } : current)}
+                    onBlur={(event) => {
+                      const nextTitle = event.currentTarget.value.trim();
+                      if (nextTitle) void saveCardPatch({ title: nextTitle });
+                    }}
+                  />
+                  <div className="team-board-inspector-fields">
+                    {(detail.card.type === 'ticket' || detail.card.type === 'incident') && (
+                      <label>
+                        <span>Ticket Number</span>
+                        <div className="team-board-ticket-edit">
+                          <input
+                            value={detail.card.ticketNumber}
+                            placeholder="Add case / ticket number"
+                            disabled={detail.permission === 'view'}
+                            onChange={(event) => setDetail((current) => current ? {
+                              ...current,
+                              card: { ...current.card, ticketNumber: event.target.value },
+                            } : current)}
+                            onBlur={(event) => {
+                              void saveCardPatch({ ticketNumber: event.currentTarget.value });
+                            }}
+                          />
+                          <button type="button" disabled={!detail.card.ticketNumber} onClick={() => {
+                            void navigator.clipboard.writeText(detail.card.ticketNumber)
+                              .then(() => toast.success('Ticket number copied.'))
+                              .catch(() => toast.error('Could not copy ticket number.'));
+                          }} aria-label="Copy ticket number"><Clipboard className="size-3.5" /></button>
+                        </div>
+                      </label>
+                    )}
+                    <label>
+                      <span>Severity</span>
+                      <select
+                        value={detail.card.severity}
+                        disabled={detail.permission === 'view'}
+                        onChange={(event) => void saveCardPatch({ severity: event.target.value as TeamBoardSeverity })}
+                      >
+                        {SEVERITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Card owner</span>
+                      <input
+                        value={detail.card.owner}
+                        disabled={detail.permission !== 'owner'}
+                        onChange={(event) => setDetail((current) => current ? {
+                          ...current,
+                          card: { ...current.card, owner: event.target.value },
+                        } : current)}
+                        onBlur={(event) => {
+                          const nextOwner = event.currentTarget.value.trim();
+                          if (nextOwner) void saveCardPatch({ owner: nextOwner });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <label className="team-board-description-field">
+                    <span>Card notes · @mention to share and grant edit access</span>
+                    <textarea
+                      value={detail.card.description}
+                      disabled={detail.permission === 'view'}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDetail((current) => current ? { ...current, card: { ...current.card, description: value } } : current);
+                        const match = /(?:^|\s)@([\w.-]*)$/.exec(value);
+                        setMentionQuery(match ? match[1] : null);
+                      }}
+                      onBlur={(event) => {
+                        void saveCardPatch({ description: event.currentTarget.value });
+                      }}
+                      placeholder="What happened? What do we know? Use @name to bring someone in."
+                    />
+                    {mentionQuery !== null && mentionUsers.length > 0 && (
+                      <div className="team-board-mention-menu">
+                        {mentionUsers.map((person) => (
+                          <button key={person.username} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertCardMention(person)}>
+                            <span>{person.username.slice(0, 1).toUpperCase()}</span> @{person.username}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </label>
+
+                  {detail.card.sourceSnapshot && (
+                    <section className="team-board-source-snapshot">
+                      <header><FileText className="size-3.5" /> Original ticket note</header>
+                      <pre>{detail.card.sourceSnapshot}</pre>
+                    </section>
+                  )}
+
+                  <section className="team-board-share-section">
+                    <header><Share2 className="size-3.5" /> Visible to</header>
+                    <div className="team-board-member-list">
+                      <span className="team-board-member-chip"><span>{detail.card.createdBy.slice(0, 1).toUpperCase()}</span>{detail.card.createdBy} · creator</span>
+                      {detail.members.map((member) => (
+                        <span className="team-board-member-chip" key={member.username}>
+                          <span>{member.username.slice(0, 1).toUpperCase()}</span>{member.username} · {member.permission}
+                        </span>
+                      ))}
+                      {detail.sharedRooms.map((room) => (
+                        <span className="team-board-member-chip" key={room.roomId}>
+                          <span><Users className="size-3" /></span>{room.roomId === 'global' ? 'Global chat' : chatRooms.find((item) => item.roomId === room.roomId)?.title ?? 'Shared chat'}
+                        </span>
+                      ))}
+                      {detail.members.length === 0 && detail.sharedRooms.length === 0 && <small>Only the creator can see this card until shared or mentioned.</small>}
+                    </div>
+                    <div className="team-board-share-controls">
+                      <select value={shareRoomId} onChange={(event) => setShareRoomId(event.target.value)} aria-label="Share card with a chat">
+                        <option value="">Share with a chat…</option>
+                        <option value="global">Global chat</option>
+                        {chatRooms.map((room) => <option key={room.roomId} value={room.roomId}>{room.title}</option>)}
+                      </select>
+                      <button type="button" disabled={!shareRoomId || sharing} onClick={() => void shareToChat()}>
+                        <Share2 className="size-3.5" /> {sharing ? 'Sharing…' : 'Share'}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="team-board-pair-section">
+                    <header><Users className="size-3.5" /> Pair debug</header>
+                    {!detail.session || detail.session.state === 'ended' ? (
+                      <div className="team-board-session-idle">
+                        <p>Open a short-lived pairing room around this exact card.</p>
+                        <button type="button" disabled={sessionBusy || detail.permission === 'view'} onClick={() => void (detail.card.isBeacon ? acceptBeacon() : runSessionAction('start'))}>
+                          <Sparkles className="size-3.5" /> {detail.card.isBeacon ? 'Accept beacon & join' : 'Start pair session'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="team-board-session-active">
+                        <div className="team-board-session-members">
+                          <span className="team-board-session-live"><i /> Pair session live</span>
+                          <CollabPresenceStack
+                            members={presenceByCard[detail.card.id] ?? detail.session.members.map((member) => ({ username: member.username }))}
+                            viewer={username}
+                          />
+                        </div>
+                        {detail.session.focusTarget && (
+                          <a className="team-board-session-focus" href={detail.session.focusTarget}>
+                            <ExternalLink className="size-3.5" /> Shared focus · open source
+                          </a>
+                        )}
+                        {!detail.session.isParticipant ? (
+                          <button type="button" disabled={sessionBusy || detail.permission === 'view'} onClick={() => void runSessionAction('join')}>
+                            <Users className="size-3.5" /> Join session
+                          </button>
+                        ) : (
+                          <>
+                            {detail.card.sourceUrl && (
+                              <button type="button" disabled={sessionBusy} onClick={() => void runSessionAction('focus', { focusTarget: detail.card.sourceUrl })}>
+                                <ExternalLink className="size-3.5" /> Sync focus to source
+                              </button>
+                            )}
+                            <label><span>Pair-only scratchpad</span>
+                              <textarea value={sessionScratchpad} maxLength={8_000} onChange={(event) => {
+                                sessionScratchpadDirtyRef.current = true;
+                                setSessionScratchpad(event.target.value);
+                              }} />
+                            </label>
+                            <button type="button" className="team-board-session-save" disabled={sessionBusy} onClick={() => void runSessionAction('scratchpad', { scratchpad: sessionScratchpad })}>
+                              <Check className="size-3.5" /> Save scratchpad
+                            </button>
+                            <label><span>Decision to capture on card</span>
+                              <textarea value={decisionDraft} maxLength={2_000} onChange={(event) => setDecisionDraft(event.target.value)} placeholder="What did you decide?" />
+                            </label>
+                            <button type="button" disabled={sessionBusy || !decisionDraft.trim()} onClick={() => void runSessionAction('decision', { decision: decisionDraft })}>
+                              <Check className="size-3.5" /> Capture decision
+                            </button>
+                            <button type="button" className="team-board-leave" disabled={sessionBusy} onClick={() => void runSessionAction('leave')}>Leave pair session</button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="team-board-comments-section">
+                    <header><MessageCircle className="size-3.5" /> Comments <span>{detail.comments.length}</span></header>
+                    {detail.comments.map((comment) => (
+                      <article className="team-board-comment" key={comment.id}>
+                        <div><strong>{comment.author}</strong><time>{relativeTime(comment.createdAt)}</time></div>
+                        <p>{comment.markdown}</p>
+                        {comment.mentions.length > 0 && <small>{comment.mentions.map((name) => `@${name}`).join(' · ')}</small>}
+                      </article>
+                    ))}
+                    <form onSubmit={(event) => void submitComment(event)}>
+                      <textarea value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} placeholder="Add a comment · @mention to invite an editor" maxLength={8_000} />
+                      <button type="submit" disabled={!commentDraft.trim()}><Send className="size-3.5" /> Comment</button>
+                    </form>
+                  </section>
+
+                  <section className="team-board-activity-section">
+                    <header><Sparkles className="size-3.5" /> Activity</header>
+                    {detail.activity.slice(0, 12).map((item) => (
+                      <div key={item.id}><span>{item.actor}</span><p>{item.kind.replaceAll('_', ' ')}{item.detail ? ` · ${item.detail}` : ''}</p><time>{relativeTime(item.createdAt)}</time></div>
+                    ))}
+                  </section>
+                </div>
+                <footer className="team-board-inspector-footer">
+                  <label>Move card
+                    <select value={detail.card.status} disabled={detail.permission === 'view'} onChange={(event) => void moveCard(detail.card, event.target.value as TeamBoardStatus)}>
+                      {LANES.map((lane) => <option key={lane.id} value={lane.id}>{lane.title}</option>)}
+                    </select>
+                  </label>
+                  {detail.card.sourceUrl && <a href={detail.card.sourceUrl}><ExternalLink className="size-3.5" /> Open original</a>}
+                </footer>
+              </>
+            )}
+          </aside>
+        )}
+      </div>
+
+      {createOpen && (
+        <div className="team-board-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setCreateOpen(false);
+        }}>
+          <form className="team-board-create-modal" onSubmit={(event) => void submitCard(event)}>
+            <header>
+              <div className="team-board-create-icon">{isBeacon ? <Radio className="size-5" /> : <Flag className="size-5" />}</div>
+              <div><p>{isBeacon ? 'HELP BEACON' : 'NEW CARD'}</p><h2>{isBeacon ? 'Ask for another set of eyes' : 'Add to Team Board'}</h2></div>
+              <button type="button" aria-label="Close" onClick={() => setCreateOpen(false)}><X className="size-4" /></button>
+            </header>
+            <div className="team-board-create-types">
+              {CARD_TYPES.map((item) => (
+                <button key={item.id} type="button" className={createType === item.id ? 'is-active' : ''} onClick={() => setCreateType(item.id)}>
+                  <strong>{item.title}</strong><span>{item.hint}</span>
+                </button>
+              ))}
+            </div>
+            <label className="team-board-modal-field">
+              <span>Title <b>Required</b></span>
+              <input autoFocus required maxLength={180} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Give this signal a clear name" />
+            </label>
+            {(createType === 'ticket' || createType === 'incident') && (
+              <div className="team-board-create-row">
+                <label className="team-board-modal-field"><span>Ticket Number</span><input maxLength={80} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Case / ticket number" /></label>
+                <label className="team-board-modal-field"><span>Severity</span><select value={severity} onChange={(event) => setSeverity(event.target.value as TeamBoardSeverity)}>{SEVERITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+              </div>
+            )}
+            <label className="team-board-modal-field">
+              <span>Context <small>@mention teammates to notify them and grant edit access</small></span>
+              <textarea
+                value={description}
+                maxLength={12_000}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setDescription(value);
+                  const match = /(?:^|\s)@([\w.-]*)$/.exec(value);
+                  setMentionQuery(match ? match[1] : null);
+                }}
+                placeholder={isBeacon ? 'What are you stuck on? Add relevant context and @someone if you have a person in mind.' : 'Symptoms, impact, what has been tried, known workaround…'}
+              />
+              {mentionQuery !== null && mentionUsers.length > 0 && (
+                <div className="team-board-mention-menu">
+                  {mentionUsers.map((person) => (
+                    <button key={person.username} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(person)}>
+                      <span>{person.username.slice(0, 1).toUpperCase()}</span> @{person.username}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </label>
+            <label className="team-board-modal-field">
+              <span>Source link <small>Optional · link a chat, ticket note, Sheet, Mind Map, or Drive file</small></span>
+              <input
+                type="text"
+                value={sourceUrlDraft}
+                onChange={(event) => setSourceUrlDraft(event.target.value)}
+                placeholder="/collab?type=sheet&document=… or a workspace URL"
+              />
+            </label>
+            <footer><span><Shield className="size-3.5" /> Private until you share or mention someone</span><button type="submit" disabled={!title.trim() || saving}>{saving ? 'Creating…' : isBeacon ? 'Send help beacon' : 'Create private card'} <ArrowRight className="size-4" /></button></footer>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}

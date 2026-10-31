@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { History, Copy, Trash2, Inbox, X, Search, CalendarClock } from 'lucide-react';
+import { History, Copy, Trash2, Inbox, X, Search, CalendarClock, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { NoteHistoryEntry } from '@/data/ticket';
@@ -11,6 +11,7 @@ interface HistoryPanelProps {
   onDeleteHistory: (id: string) => void;
   onClearHistory: () => void;
   onClose: () => void;
+  onSendToTeamBoard: (entry: NoteHistoryEntry) => void;
 }
 
 function formatTimestamp(ts: number): string {
@@ -50,6 +51,7 @@ export default function HistoryPanel({
   onDeleteHistory,
   onClearHistory,
   onClose,
+  onSendToTeamBoard,
 }: HistoryPanelProps) {
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -209,6 +211,16 @@ export default function HistoryPanel({
                             >
                               <Trash2 className="size-3" />
                               Delete
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 gap-1.5 text-[11px] text-accent hover:bg-accent/10"
+                              onClick={() => onSendToTeamBoard(entry)}
+                              title="Create a private Team Board ticket card"
+                            >
+                              <ClipboardList className="size-3" />
+                              Send to Board
                             </Button>
                           </div>
                         </div>

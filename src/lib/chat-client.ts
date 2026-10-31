@@ -138,6 +138,70 @@ export interface CollabTask {
   mentions: string[];
 }
 
+export type TeamBoardCardType = 'ticket' | 'incident' | 'announcement' | 'custom';
+export type TeamBoardStatus = 'signal' | 'investigating' | 'waiting' | 'captured';
+export type TeamBoardSeverity = 'low' | 'normal' | 'high' | 'critical';
+
+export interface TeamBoardCard {
+  id: string;
+  type: TeamBoardCardType;
+  title: string;
+  description: string;
+  status: TeamBoardStatus;
+  severity: TeamBoardSeverity;
+  ticketNumber: string;
+  isBeacon: boolean;
+  owner: string;
+  createdBy: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  sourceUrl: string | null;
+  sourceSnapshot: string;
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
+  commentCount: number;
+}
+
+export interface TeamBoardComment {
+  id: string;
+  cardId: string;
+  author: string;
+  markdown: string;
+  mentions: string[];
+  createdAt: number;
+}
+
+export interface TeamBoardMember {
+  username: string;
+  permission: 'view' | 'edit';
+  addedBy: string;
+  createdAt: number;
+}
+
+export interface TeamBoardSession {
+  id: string;
+  createdBy: string;
+  state: 'active' | 'ended';
+  focusTarget: string;
+  scratchpad: string;
+  startedAt: number;
+  endedAt: number | null;
+  isParticipant: boolean;
+  members: Array<{ username: string; joinedAt: number }>;
+}
+
+export interface TeamBoardCardDetail {
+  card: TeamBoardCard;
+  permission: 'owner' | 'edit' | 'view';
+  members: TeamBoardMember[];
+  comments: TeamBoardComment[];
+  activity: Array<{ id: string; actor: string; kind: string; detail: string; createdAt: number }>;
+  session: TeamBoardSession | null;
+  sharedRooms: Array<{ roomId: string; sharedBy: string; createdAt: number }>;
+  assistStreak?: number;
+}
+
 export interface CollabSearchResult {
   id: string;
   type: 'message' | 'sheet' | 'sheet-cell' | 'mindmap' | 'mindmap-node' | 'file' | 'task';
@@ -383,6 +447,110 @@ export async function markCollabNotificationRead(id: string): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id }),
   });
+}
+
+export async function listTeamBoardCards(options: {
+  type?: TeamBoardCardType | 'all';
+  status?: TeamBoardStatus | 'all';
+  query?: string;
+} = {}): Promise<TeamBoardCard[]> {
+  const params = new URLSearchParams();
+  if (options.type && options.type !== 'all') params.set('type', options.type);
+  if (options.status && options.status !== 'all') params.set('status', options.status);
+  if (options.query?.trim()) params.set('q', options.query.trim());
+  const result = await requestJson<{ cards?: TeamBoardCard[] }>(
+    `/api/collab/board/cards${params.size ? `?${params}` : ''}`,
+  );
+  return result.cards ?? [];
+}
+
+export async function getTeamBoardCard(id: string): Promise<TeamBoardCardDetail> {
+  return requestJson<TeamBoardCardDetail>(`/api/collab/board/cards/${encodeURIComponent(id)}`);
+}
+
+export async function createTeamBoardCard(payload: {
+  type: TeamBoardCardType;
+  title: string;
+  description?: string;
+  severity?: TeamBoardSeverity;
+  ticketNumber?: string;
+  isBeacon?: boolean;
+  sourceType?: string;
+  sourceId?: string;
+  sourceUrl?: string;
+  sourceSnapshot?: string;
+}): Promise<TeamBoardCard> {
+  const result = await requestJson<{ card: TeamBoardCard }>('/api/collab/board/cards', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return result.card;
+}
+
+export async function updateTeamBoardCard(
+  id: string,
+  patch: Partial<Pick<TeamBoardCard, 'title' | 'description' | 'status' | 'severity' | 'ticketNumber' | 'owner'>>,
+): Promise<void> {
+  await requestJson(`/api/collab/board/cards/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function shareTeamBoardCardWithChat(id: string, roomId: string): Promise<string> {
+  const result = await requestJson<{ url: string }>(
+    `/api/collab/board/cards/${encodeURIComponent(id)}/share`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roomId }),
+    },
+  );
+  return result.url;
+}
+
+export async function addTeamBoardComment(id: string, markdown: string): Promise<TeamBoardComment> {
+  const result = await requestJson<{ comment: TeamBoardComment }>(
+    `/api/collab/board/cards/${encodeURIComponent(id)}/comments`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ markdown }),
+    },
+  );
+  return result.comment;
+}
+
+export async function teamBoardSessionAction(
+  id: string,
+  action: 'start' | 'join' | 'leave' | 'scratchpad' | 'focus' | 'decision',
+  payload: Record<string, unknown> = {},
+): Promise<TeamBoardCardDetail> {
+  return requestJson<TeamBoardCardDetail>(
+    `/api/collab/board/cards/${encodeURIComponent(id)}/session`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+    },
+  );
+}
+
+export async function requestTeamBoardSocketTicket(cardId?: string): Promise<{ ticket: string }> {
+  return requestJson<{ ticket: string }>('/api/collab/board/socket-ticket', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(cardId ? { cardId } : {}),
+  });
+}
+
+export function teamBoardSocketUrl(ticket: string): string {
+  const url = new URL(endpoint('/api/collab/board/socket'), window.location.href);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('ticket', ticket);
+  return url.toString();
 }
 
 export async function createCollabMindmap(title: string): Promise<CollabDocument> {

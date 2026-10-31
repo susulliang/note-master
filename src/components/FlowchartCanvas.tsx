@@ -104,6 +104,8 @@ interface FlowchartCanvasProps {
   caseTrakContent?: React.ReactNode;
   /** Content rendered in the canvas area when activeView === 'collab'. */
   collabContent?: React.ReactNode;
+  /** Content rendered in the canvas area when activeView === 'teamBoard'. */
+  teamBoardContent?: React.ReactNode;
   /** Content rendered in the canvas area when activeView === 'selfTest'
    *  (weekly news knowledge quizzes). */
   selfTestContent?: React.ReactNode;
@@ -166,6 +168,7 @@ export type WorkView =
   | 'commune'
   | 'chat'
   | 'collab'
+  | 'teamBoard'
   | 'caseTrak'
   | 'dash'
   | 'shifts'
@@ -475,6 +478,7 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
   communeContent,
   chatContent,
   collabContent,
+  teamBoardContent,
   settingsContent,
   adminContent,
   loginContent,
@@ -1221,6 +1225,12 @@ const FlowchartCanvas = memo(function FlowchartCanvas({
       {activeView === 'collab' && (
         <div className="box-border h-full min-h-full w-full pl-0">
           {collabContent}
+        </div>
+      )}
+
+      {activeView === 'teamBoard' && (
+        <div className="box-border h-full min-h-full w-full pl-0">
+          {teamBoardContent}
         </div>
       )}
 

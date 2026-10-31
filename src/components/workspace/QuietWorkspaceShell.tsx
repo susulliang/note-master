@@ -6,6 +6,7 @@ import {
   BookOpen,
   CalendarDays,
   ClipboardCheck,
+  ClipboardList,
   Clock3,
   FilePenLine,
   GraduationCap,
@@ -47,6 +48,7 @@ const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   commune: { label: 'Commune', icon: Users },
   chat: { label: 'Chat', icon: MessageCircle },
   collab: { label: 'Collab Space', icon: Layers3 },
+  teamBoard: { label: 'Team Board', icon: ClipboardList },
   callNotes: { label: 'Call Notes', icon: FilePenLine },
   caseTrak: { label: 'Cases', icon: LayoutGrid },
   dash: { label: 'DASH', icon: BarChart3 },
@@ -57,7 +59,7 @@ const VIEW_META: Record<WorkView, { label: string; icon: typeof Users }> = {
   login: { label: 'Login', icon: LogIn },
 };
 
-const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'collab', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
+const VIEW_ORDER: WorkView[] = ['commune', 'chat', 'collab', 'teamBoard', 'callNotes', 'caseTrak', 'dash', 'shifts', 'selfTest'];
 const SUPPORT_WIDGETS: Array<{ id: WidgetId; label: string; icon: typeof Users }> = [
   { id: 'tracker', label: '24-hour case tracker', icon: Clock3 },
   { id: 'guides', label: 'SOP lookup', icon: BookOpen },

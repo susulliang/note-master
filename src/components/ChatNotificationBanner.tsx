@@ -109,9 +109,16 @@ export default function ChatNotificationBanner({
         for (const item of unread) {
           if (seenIdsRef.current.has(item.id)) continue;
           seenIdsRef.current.add(item.id);
-          setNotice({ task: item, roomTitle: 'Tasks', roomId: `collab-task:${item.id}` });
+          const boardCardId = item.type === 'team_board'
+            ? new URL(item.target_url, window.location.origin).searchParams.get('card')
+            : null;
+          const notificationRoomId = boardCardId
+            ? `team-board:${boardCardId}`
+            : `collab-task:${item.id}`;
+          const notificationLabel = boardCardId ? 'Team Board' : 'Tasks';
+          setNotice({ task: item, roomTitle: notificationLabel, roomId: notificationRoomId });
           setVisible(true);
-          notifyCat(`📋 ${item.title} — ${item.body || 'Open Collab Space to review.'}`);
+          notifyCat(`📋 ${item.title} — ${item.body || `Open ${notificationLabel} to review.`}`);
           if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
           if (removeTimerRef.current !== null) window.clearTimeout(removeTimerRef.current);
           noticeTimerRef.current = window.setTimeout(() => {
@@ -126,12 +133,12 @@ export default function ChatNotificationBanner({
             const notification = new Notification(item.title, {
               body: item.body || 'Open Collab Space to review the task.',
               icon: '/favicon.ico',
-              tag: `collab-task-${item.id}`,
+              tag: `${boardCardId ? 'team-board' : 'collab-task'}-${item.id}`,
             });
             notification.onclick = () => {
               window.focus();
               void markCollabNotificationRead(item.id).catch(() => undefined);
-              onOpenChatRef.current(`collab-task:${item.id}`);
+              onOpenChatRef.current(notificationRoomId);
               notification.close();
             };
           }

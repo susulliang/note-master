@@ -37,7 +37,8 @@
       { "name": "CHAT_STICKER_PACK", "class_name": "ChatStickerPack" },
       { "name": "SHEETS_ROOM", "class_name": "SheetsRoom" },
       { "name": "MINDMAP_ROOM", "class_name": "MindmapRoom" },
-      { "name": "SMARTDOC_ROOM", "class_name": "SmartDocsRoom" }
+      { "name": "SMARTDOC_ROOM", "class_name": "SmartDocsRoom" },
+      { "name": "TEAM_BOARD_ROOM", "class_name": "TeamBoardRoom" }
     ]
   },
   "ai": {
@@ -57,7 +58,8 @@
     { "tag": "chat-sticker-pack-v1", "new_sqlite_classes": ["ChatStickerPack"] },
     { "tag": "collaborative-sheets-v1", "new_sqlite_classes": ["SheetsRoom"] },
     { "tag": "collab-mindmap-v1", "new_sqlite_classes": ["MindmapRoom"] },
-    { "tag": "collab-smartdocs-v1", "new_sqlite_classes": ["SmartDocsRoom"] }
+    { "tag": "collab-smartdocs-v1", "new_sqlite_classes": ["SmartDocsRoom"] },
+    { "tag": "team-board-v1", "new_sqlite_classes": ["TeamBoardRoom"] }
   ],
   "assets": {
     "directory": "./dist/client",

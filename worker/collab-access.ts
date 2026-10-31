@@ -213,6 +213,112 @@ export async function ensureCollabSchema(env: Env): Promise<void> {
     CREATE INDEX IF NOT EXISTS collab_notifications_user_idx
     ON collab_notifications (username, read_at, created_at DESC)
   `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_cards (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('ticket', 'incident', 'announcement', 'custom')),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'signal'
+        CHECK (status IN ('signal', 'investigating', 'waiting', 'captured')),
+      severity TEXT NOT NULL DEFAULT 'normal'
+        CHECK (severity IN ('low', 'normal', 'high', 'critical')),
+      ticket_number TEXT NOT NULL DEFAULT '',
+      is_beacon INTEGER NOT NULL DEFAULT 0,
+      owner TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      source_type TEXT,
+      source_id TEXT,
+      source_url TEXT,
+      source_snapshot TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at INTEGER
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS team_board_cards_updated_idx
+    ON team_board_cards (updated_at DESC, id)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_members (
+      card_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      permission TEXT NOT NULL CHECK (permission IN ('view', 'edit')),
+      added_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (card_id, username)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS team_board_members_user_idx
+    ON team_board_members (username COLLATE NOCASE, card_id)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_card_rooms (
+      card_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      shared_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (card_id, room_id)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_comments (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      author TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      mentions_json TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS team_board_comments_card_idx
+    ON team_board_comments (card_id, created_at, id)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_activity (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS team_board_activity_card_idx
+    ON team_board_activity (card_id, created_at DESC)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_sessions (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL UNIQUE,
+      created_by TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('active', 'ended')),
+      focus_target TEXT NOT NULL DEFAULT '',
+      scratchpad TEXT NOT NULL DEFAULT '',
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_session_members (
+      session_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      joined_at INTEGER NOT NULL,
+      left_at INTEGER,
+      PRIMARY KEY (session_id, username)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS team_board_assists (
+      username TEXT PRIMARY KEY,
+      streak_count INTEGER NOT NULL DEFAULT 0,
+      last_assist_at INTEGER NOT NULL
+    )
+  `).run();
   await ensureColumn(env, 'collab_smartdocs', 'visibility',
     "ALTER TABLE collab_smartdocs ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'registered'))");
   await ensureColumn(env, 'collab_smartdocs', 'kind',

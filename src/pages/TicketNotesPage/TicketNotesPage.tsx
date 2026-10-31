@@ -13,10 +13,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const TLDR_LINE_PREFIX = 'Chinese Summary:';
 const CUSTOMER_CLOUD_TRANSCRIPTION_KEY = 'ecv.customerCloudTranscription';
 const GENERATED_TICKET_NOTE_ID_KEY = '__app_ecovacs_ticket_archive_id';
+const TeamBoardPage = lazy(() => import('@/pages/TeamBoardPage'));
 const WORKSPACE_PATHS: Record<WorkView, string> = {
   commune: '/commune',
   chat: '/chat',
   collab: '/collab',
+  teamBoard: '/board',
   callNotes: '/notes',
   caseTrak: '/cases',
   dash: '/insights',
@@ -129,7 +131,7 @@ import {
 import FlowchartCanvas, { type ContextWidgetId, type WorkView } from '@/components/FlowchartCanvas';
 import QuietWorkspaceShell from '@/components/workspace/QuietWorkspaceShell';
 import { useAuth } from '@/lib/auth-context';
-import { searchCollab, type CollabSearchResult } from '@/lib/chat-client';
+import { createTeamBoardCard, searchCollab, type CollabSearchResult } from '@/lib/chat-client';
 import { readRecentChatRoom, readRecentCollabSearch } from '@/lib/workspace-recent';
 import {
   getStoredToken,
@@ -995,6 +997,11 @@ export default function TicketNotesPage() {
   }, [location.pathname, location.search, navigate, signedInUsername]);
   const [notificationRoomId, setNotificationRoomId] = useState<string | null>(null);
   const openChatNotification = useCallback((roomId: string) => {
+    if (roomId.startsWith('team-board:')) {
+      const cardId = roomId.slice('team-board:'.length);
+      navigate(`/board?card=${encodeURIComponent(cardId)}`);
+      return;
+    }
     if (roomId.startsWith('collab-task:')) {
       navigate(`/collab?type=tasks&task=${encodeURIComponent(roomId.slice('collab-task:'.length))}`);
       return;
@@ -1005,7 +1012,7 @@ export default function TicketNotesPage() {
     }
     setNotificationRoomId(roomId);
     navigateToView('chat');
-  }, [navigateToView]);
+  }, [navigate, navigateToView]);
   const clearNotificationRoom = useCallback((roomId: string) => {
     setNotificationRoomId((current) => current === roomId ? null : current);
   }, []);
@@ -1607,6 +1614,31 @@ Additional information (if needed): ${additional}`;
     },
     []
   );
+  const sendTicketNoteToTeamBoard = useCallback(async (
+    text: string,
+    sourceId: string,
+    issueType: string,
+  ) => {
+    const customerName = /^Customer Name:\s*(.+)$/im.exec(text)?.[1]?.trim() ?? '';
+    const ticketNumber = /(?:ticket|case)\s*(?:number|#|no\.?)\s*[:#-]?\s*([A-Z0-9-]{4,32})/i.exec(text)?.[1] ?? '';
+    const card = await createTeamBoardCard({
+      type: 'ticket',
+      title: `${customerName || 'Customer'} · ${issueType || 'Support ticket'}`.slice(0, 180),
+      description: issueType ? `Issue type: ${issueType}` : '',
+      ticketNumber,
+      sourceType: 'ticket_note',
+      sourceId,
+      sourceUrl: '/notes',
+      sourceSnapshot: text,
+    });
+    setWorkView('teamBoard');
+    navigate(`/board?card=${encodeURIComponent(card.id)}`);
+    toast.success('Ticket pinned privately to Team Board.');
+  }, [navigate]);
+  const sendHistoryEntryToTeamBoard = useCallback((entry: NoteHistoryEntry) => {
+    void sendTicketNoteToTeamBoard(entry.noteText, entry.id, entry.issueType)
+      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : 'Could not pin this ticket.'));
+  }, [sendTicketNoteToTeamBoard]);
   const handleUpdateArchivedTicketNote = useCallback(
     async (note: SavedTicketNoteInput) => {
       await updateGeneratedTicketNote(note);
@@ -2526,7 +2558,7 @@ Additional information (if needed): ${additional}`;
   // re-renders, exactly like the old standalone FloatingControls did.
   const [railControlsSlot, setRailControlsSlot] = useState<HTMLDivElement | null>(null);
   const availableWorkspaces: WorkView[] = [
-    ...(authUser ? ['commune' as const, 'chat' as const, 'collab' as const] : []),
+    ...(authUser ? ['commune' as const, 'chat' as const, 'collab' as const, 'teamBoard' as const] : []),
     'callNotes',
     ...(analyticsUnlocked || authPrivileges?.trak ? ['caseTrak' as const] : []),
     ...(analyticsUnlocked || authPrivileges?.dash ? ['dash' as const] : []),
@@ -2772,6 +2804,16 @@ Additional information (if needed): ${additional}`;
                   {authUser && <CollabSpacePage username={authUser.username} />}
                 </Suspense>
               }
+              teamBoardContent={
+                <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Opening Team Board…</div>}>
+                  {authUser && (
+                    <TeamBoardPage
+                      username={authUser.username}
+                      initialCardId={new URLSearchParams(location.search).get('card')}
+                    />
+                  )}
+                </Suspense>
+              }
               settingsContent={
                 <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading Settings…</div>}>
                   <SettingsPage
@@ -2886,6 +2928,7 @@ Additional information (if needed): ${additional}`;
             history={history}
             onDeleteHistory={handleDeleteHistory}
             onClearHistory={handleClearHistory}
+            onSendToTeamBoard={sendHistoryEntryToTeamBoard}
           />,
           railControlsSlot
         )}
@@ -3280,6 +3323,7 @@ Additional information (if needed): ${additional}`;
               onArchiveTicketNote={handleArchiveTicketNote}
               onUpdateArchivedTicketNote={handleUpdateArchivedTicketNote}
               onSaveToHistory={handleOutputClose}
+              onSendToTeamBoard={(text) => sendTicketNoteToTeamBoard(text, generatedTicketNoteId, generatedTicketIssueType)}
             />
           </Suspense>
         )}
