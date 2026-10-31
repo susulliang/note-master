@@ -3513,13 +3513,19 @@ export default function CommunePanel({ onCatThought, onCatMoveTo }: CommunePanel
       }
     };
 
+    // Render at most ~30fps: the simulation already ticks at 30Hz, so extra
+    // frames would only burn GPU (WebView caps at 60fps on macOS ≤ 15 anyway).
+    let lastRenderAt = 0;
     const renderStep = (now: number) => {
       renderRaf = 0;
       if (document.hidden) return;
-      if (threeRenderer && latestFrame) {
-        updateCarRenderPositions(now);
-        latestFrame.time = now / 1000;
-        threeRenderer.render(latestFrame);
+      if (now - lastRenderAt >= 1000 / 30 - 1) {
+        lastRenderAt = now;
+        if (threeRenderer && latestFrame) {
+          updateCarRenderPositions(now);
+          latestFrame.time = now / 1000;
+          threeRenderer.render(latestFrame);
+        }
       }
       renderRaf = requestAnimationFrame(renderStep);
     };
