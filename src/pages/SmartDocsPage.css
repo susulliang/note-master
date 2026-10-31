@@ -1205,10 +1205,33 @@
   padding: 4px;
 }
 
+.smart-doc-user-empty {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+/* Keep the permission select and Add button on one clean row: the button
+   must never shrink/wrap (it used to collapse into a skewed "+/Add" stack
+   hanging off the modal edge). */
 .smart-doc-invite-actions {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 7px;
+}
+
+.smart-doc-invite-actions select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.smart-doc-invite-actions .collab-tool-primary {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 29px;
 }
 
 .smart-doc-drive-modal {

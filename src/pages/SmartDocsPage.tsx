@@ -108,6 +108,10 @@ interface FloatingMediaProgress {
 
 const MAX_DOCUMENT_CHARACTERS = 500_000;
 const DOCUMENT_SAVE_DEBOUNCE_MS = 2_500;
+
+/** Temporary kill-switch for the document banner feature (docs + todos).
+ *  Flip to true to bring back the banner panel and banner display. */
+const BANNERS_ENABLED = false;
 let mermaidInitialized = false;
 
 function MermaidDiagram({ source }: { source: string }) {
@@ -578,6 +582,27 @@ export default function SmartDocsPage({
   const [memberQuery, setMemberQuery] = useState('');
   const [userResults, setUserResults] = useState<ChatUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<ChatUser | null>(null);
+  const [searchingMembers, setSearchingMembers] = useState(false);
+
+  // Debounced registered-user search for the share modal. Without this the
+  // results list never renders (userResults stays empty), so nobody can be
+  // selected and the Add button stays disabled forever.
+  useEffect(() => {
+    if (!accessOpen) return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      setSearchingMembers(true);
+      findChatUsers(memberQuery.trim())
+        .then((users) => { if (alive) setUserResults(users); })
+        .catch(() => { if (alive) setUserResults([]); })
+        .finally(() => { if (alive) setSearchingMembers(false); });
+    }, memberQuery.trim() ? 180 : 0);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [accessOpen, memberQuery]);
+
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [driveScope, setDriveScope] = useState<'team' | 'personal'>('team');
   const [driveFiles, setDriveFiles] = useState<CollabDriveFile[]>([]);
@@ -1772,12 +1797,12 @@ export default function SmartDocsPage({
         </div>
       </header>
 
-      {bannerSource && (
+      {BANNERS_ENABLED && bannerSource && (
         <div className="smart-doc-banner">
           <SmartDocInlineMedia source={bannerSource} title={`${activeDocument.title} banner`} kind="image" />
         </div>
       )}
-      {isOwner && (
+      {BANNERS_ENABLED && isOwner && (
         <div className="smart-doc-banner-actions">
           <button type="button" className="smart-doc-text-button" onClick={() => bannerInputRef.current?.click()}>
             <ImagePlus className="size-3.5" /> {bannerSource ? 'Change banner' : 'Add banner image'}
@@ -2099,7 +2124,10 @@ export default function SmartDocsPage({
                   setSelectedUser(null);
                 }} placeholder="Search registered users" /></span>
               </label>
-              {!selectedUser && userResults.length > 0 && (
+              {!selectedUser && userResults.filter((user) => (
+                user.username.toLowerCase() !== username.toLowerCase() &&
+                !members.some((member) => member.username.toLowerCase() === user.username.toLowerCase())
+              )).length > 0 && (
                 <div className="smart-doc-user-results">
                   {userResults.filter((user) => (
                     user.username.toLowerCase() !== username.toLowerCase() &&
@@ -2111,6 +2139,15 @@ export default function SmartDocsPage({
                     }}><span>{user.username.slice(0, 1).toUpperCase()}</span>{user.username}</button>
                   ))}
                 </div>
+              )}
+              {!selectedUser && searchingMembers && userResults.length === 0 && (
+                <p className="smart-doc-user-empty">Searching users…</p>
+              )}
+              {!selectedUser && !searchingMembers && userResults.filter((user) => (
+                user.username.toLowerCase() !== username.toLowerCase() &&
+                !members.some((member) => member.username.toLowerCase() === user.username.toLowerCase())
+              )).length === 0 && (
+                <p className="smart-doc-user-empty">No registered users found — everyone is already on this document.</p>
               )}
               <div className="smart-doc-invite-actions">
                 <select value={memberPermission} onChange={(event) => setMemberPermission(event.target.value as SmartDocPermission)} aria-label="New member permission">
