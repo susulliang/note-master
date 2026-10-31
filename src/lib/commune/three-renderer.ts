@@ -53,6 +53,7 @@ import { drawHangoutLabel, drawLabel } from './three-labels';
 import { createSkyMaterial } from './three-sky';
 import { animateWater, createWaterMaterial, createWaterSurface } from './three-water';
 import { createHuskoRig, updateHuskoRig, type HuskoRig } from './three-husko';
+import { loadCommuneModels, prepareCatGeometry } from './three-assets';
 import type {
   AvatarColors,
   CommuneThreeFrame,
@@ -99,6 +100,11 @@ export class CommuneThreeRenderer {
   private readonly debugStats = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).has('commune-debug');
   private lastStatsAt = 0;
+  private readonly buildingSites: { x: number; z: number; width: number; depth: number; rotation: number }[] = [];
+  private readonly legacyBuildings: THREE.Group[] = [];
+  private readonly catMeshes: THREE.InstancedMesh[] = [];
+  private catsReady = false;
+  private staticWorldFinalized = false;
   private readonly lanternLights: THREE.PointLight[] = [];
   private readonly lanternBulbs: THREE.Mesh[] = [];
   private readonly lanternHalos: THREE.Mesh[] = [];
@@ -386,8 +392,125 @@ export class CommuneThreeRenderer {
     this.addMarkerMeshes();
     this.buildCars();
     this.scene.add(this.buildPreviewMesh);
-    this.mergeStaticWorld();
     this.setupComposer();
+    void this.initializeAssets();
+  }
+
+  /** Load CC0 kit buildings + cat models (three-assets.ts) and swap them in;
+   *  falls back to the procedural world when files are missing or slow. */
+  private async initializeAssets(): Promise<void> {
+    const guard = setTimeout(() => this.finalizeStaticWorld(), 8000);
+    try {
+      const { buildings, cats } = await loadCommuneModels();
+      this.applyCatModels(cats);
+      this.applyAssetBuildings(buildings);
+    } catch {
+      this.finalizeStaticWorld();
+    } finally {
+      clearTimeout(guard);
+    }
+  }
+
+  private finalizeStaticWorld(): void {
+    if (this.staticWorldFinalized) return;
+    this.staticWorldFinalized = true;
+    this.mergeStaticWorld();
+  }
+
+  private applyCatModels(models: (THREE.Group | null)[]): void {
+    const geometries = models
+      .map((model) => (model ? prepareCatGeometry(model) : null))
+      .filter((geometry): geometry is THREE.BufferGeometry => !!geometry);
+    if (geometries.length === 0) return;
+    geometries.forEach((geometry, index) => {
+      const mesh = new THREE.InstancedMesh(
+        geometry,
+        new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+        MAX_ACTORS
+      );
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.name = `cat-model-${index}`;
+      this.scene.add(mesh);
+      this.catMeshes.push(mesh);
+    });
+    // Retire the procedural cat part meshes — the real models carry the face.
+    for (const part of [this.petBodies, this.petHeads, this.petEars, this.petInnerEars, this.petLegs, this.petMuzzles, this.petEyes, this.petTails, this.petPatches]) {
+      part.count = 0;
+      part.instanceMatrix.needsUpdate = true;
+    }
+    this.catsReady = true;
+  }
+
+  private catVariantIndex(catId: string): number {
+    let hash = 0;
+    for (const char of catId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    return this.catMeshes.length ? hash % this.catMeshes.length : 0;
+  }
+
+  /** Procedural building fallback recorded as a swappable site. */
+  private addBuildingSite(
+    x: number,
+    z: number,
+    width: number,
+    depth: number,
+    wall: string,
+    roof: string,
+    height: number,
+    rotation: number,
+  ): void {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.rotation.y = rotation;
+    addBuilding(group, 0, 0, width, depth, wall, roof, height);
+    this.scene.add(group);
+    this.legacyBuildings.push(group);
+    this.buildingSites.push({ x, z, width, depth, rotation });
+  }
+
+  private applyAssetBuildings(models: (THREE.Group | null)[]): void {
+    const loaded = models.filter((model): model is THREE.Group => !!model);
+    if (loaded.length === 0 || this.staticWorldFinalized) {
+      // Too late to remove the already-merged procedural buildings — keep them.
+      this.finalizeStaticWorld();
+      return;
+    }
+    const box = new THREE.Box3();
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    this.buildingSites.forEach((site, index) => {
+      const instance = loaded[index % loaded.length].clone(true);
+      instance.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.castShadow = true;
+          object.receiveShadow = true;
+        }
+      });
+      instance.rotation.y = site.rotation;
+      instance.scale.setScalar(1);
+      instance.position.set(site.x, 0, site.z);
+      box.setFromObject(instance);
+      box.getSize(size);
+      const scale = Math.min(site.width / Math.max(size.x, 1), site.depth / Math.max(size.z, 1));
+      instance.scale.setScalar(scale);
+      instance.position.set(site.x, 0, site.z);
+      box.setFromObject(instance);
+      box.getCenter(center);
+      instance.position.set(site.x * 2 - center.x, -box.min.y, site.z * 2 - center.z);
+      this.scene.add(instance);
+    });
+    for (const legacy of this.legacyBuildings) {
+      this.scene.remove(legacy);
+      legacy.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((entry) => entry.dispose());
+      });
+    }
+    this.legacyBuildings.length = 0;
+    this.finalizeStaticWorld();
   }
 
   /** Optional post stack: bloom + vignette + grain, MSAA'd input buffer. Falls
@@ -735,20 +858,27 @@ export class CommuneThreeRenderer {
     addPath(this.scene, [[1870, 1350], [2040, 1440], [2250, 1460]], 32, pathColor);
     addPath(this.scene, [[2490, 850], [2670, 1000], [2790, 1150]], 32, pathColor);
 
-    addBuilding(this.scene, 800, 155, 300, 146, '#d6c7a0', '#ab7050', 112);
-    addBuilding(this.scene, 270, 298, 174, 174, '#cfb68d', '#6e7770', 92);
-    addBuilding(this.scene, 1330, 298, 174, 174, '#c0c8b0', '#687d84', 92);
-    addBuilding(this.scene, 230, 954, 158, 164, '#cdbd9c', '#9c7956', 78);
-    addBuilding(this.scene, 1370, 954, 158, 164, '#bac8ae', '#6d8466', 78);
-    addBuilding(this.scene, 2420, 680, 112, 84, '#d0bd91', '#817c69', 60);
-    addBuilding(this.scene, 1855, 1328, 98, 86, '#b6bd91', '#7e8b62', 54);
-    addBuilding(this.scene, 2700, 1768, 98, 86, '#bdc4d0', '#657b8f', 58);
+    // Town buildings — procedural fallbacks, swapped for CC0 kit models in
+    // applyAssetBuildings() once assets load. Rotation faces the paths.
+    this.addBuildingSite(800, 155, 300, 146, '#d6c7a0', '#ab7050', 112, 0);
+    this.addBuildingSite(270, 298, 174, 174, '#cfb68d', '#6e7770', 92, Math.PI / 2);
+    this.addBuildingSite(1330, 298, 174, 174, '#c0c8b0', '#687d84', 92, -Math.PI / 2);
+    this.addBuildingSite(230, 954, 158, 164, '#cdbd9c', '#9c7956', 78, Math.PI / 2);
+    this.addBuildingSite(1370, 954, 158, 164, '#bac8ae', '#6d8466', 78, -Math.PI / 2);
+    this.addBuildingSite(2420, 680, 112, 84, '#d0bd91', '#817c69', 60, -Math.PI / 2);
+    this.addBuildingSite(1855, 1328, 98, 86, '#b6bd91', '#7e8b62', 54, 0);
+    this.addBuildingSite(2700, 1768, 98, 86, '#bdc4d0', '#657b8f', 58, -Math.PI / 2);
     const villa = COMMUNE_HANGOUTS.find((hangout) => hangout.kind === 'villa');
     if (villa) {
-      addBuilding(this.scene, villa.x, villa.y, villa.width, villa.depth, '#e0c99b', '#647e91', 100);
-      addBox(this.scene, villa.x - 22, 5, villa.y + villa.depth * 0.55, 44, 9, 54, '#785a3c');
-      addBox(this.scene, villa.x - 58, 52, villa.y + villa.depth * 0.51, 27, 28, 4, '#78a8b0');
-      addBox(this.scene, villa.x + 58, 52, villa.y + villa.depth * 0.51, 27, 28, 4, '#78a8b0');
+      const group = new THREE.Group();
+      group.position.set(villa.x, 0, villa.y);
+      addBuilding(group, 0, 0, villa.width, villa.depth, '#e0c99b', '#647e91', 100);
+      addBox(group, -22, 5, villa.depth * 0.55, 44, 9, 54, '#785a3c');
+      addBox(group, -58, 52, villa.depth * 0.51, 27, 28, 4, '#78a8b0');
+      addBox(group, 58, 52, villa.depth * 0.51, 27, 28, 4, '#78a8b0');
+      this.scene.add(group);
+      this.legacyBuildings.push(group);
+      this.buildingSites.push({ x: villa.x, z: villa.y, width: villa.width, depth: villa.depth, rotation: 0 });
     }
     const tents = COMMUNE_HANGOUTS.filter((hangout) => hangout.kind === 'tent');
     if (tents[0]) addTent(this.scene, tents[0].x, tents[0].y, '#c88757');
@@ -1401,6 +1531,10 @@ export class CommuneThreeRenderer {
   }
 
   private updatePets(pets: readonly RenderPet[], time: number, reduceMotion: boolean): void {
+    if (this.catsReady) {
+      this.updatePetModels(pets, time, reduceMotion);
+      return;
+    }
     const count = Math.min(pets.length, MAX_ACTORS);
     let eyeCount = 0;
     let patchCount = 0;
@@ -1594,6 +1728,76 @@ export class CommuneThreeRenderer {
       }
     }
     if (this.petEyes.instanceColor) this.petEyes.instanceColor.needsUpdate = true;
+    if (this.petSparkles.instanceColor) this.petSparkles.instanceColor.needsUpdate = true;
+  }
+
+  /** CC0 cat models: one InstancedMesh per variant, whole-model poses. */
+  private updatePetModels(pets: readonly RenderPet[], time: number, reduceMotion: boolean): void {
+    const counts = new Array<number>(this.catMeshes.length).fill(0);
+    const list = pets.slice(0, MAX_ACTORS);
+    let sparkleCount = 0;
+    for (let index = 0; index < list.length; index++) {
+      const pet = list[index];
+      const variant = this.catVariantIndex(pet.catId ?? 'hunao');
+      const mesh = this.catMeshes[variant];
+      const slot = counts[variant]++;
+      const walking = !reduceMotion && !!pet.moving;
+      const phase = pet.walkPhase ?? time * 8;
+      const headingX = pet.headingX ?? (pet.facingLeft ? -1 : 1);
+      const headingY = pet.headingY ?? 0;
+      const heading = Math.atan2(-headingY, headingX);
+      const hop = !reduceMotion && pet.pose === 'play' ? Math.abs(Math.sin(time * 7 + index)) * 6 : 0;
+      const walkBob = walking ? Math.abs(Math.sin(phase)) * 2 : 0;
+      const idleBreath = reduceMotion ? 0 : Math.sin(time * 1.7 + index * 1.9) * 0.45;
+      const loafing = pet.pose === 'loaf';
+      const sitting = pet.pose === 'sit';
+      const stageScale = pet.stage === 'Kitten' ? 0.78 : pet.stage === 'Elder' ? 1.04 : 0.92;
+      const poseSquash = loafing ? 0.6 : sitting ? 0.92 : 1;
+      const poseStretch = loafing ? 1.15 : 1;
+      const rock = walking ? Math.sin(phase) * 0.045 : 0;
+      const pitch = sitting ? 0.28
+        : !reduceMotion && pet.pose === 'sniff' ? -0.14 + Math.sin(time * 4 + index) * 0.05 : 0;
+      this.transform.position.set(pet.x, hop + walkBob + idleBreath + (sitting ? 1.5 : 0), pet.y);
+      this.transform.rotation.set(rock, heading, pitch);
+      this.transform.scale.set(stageScale * poseStretch, stageScale * poseSquash, stageScale);
+      setInstance(mesh, slot, this.transform);
+
+      this.transform.position.set(pet.x, 2, pet.y);
+      this.transform.rotation.set(-Math.PI / 2, 0, 0);
+      this.transform.scale.set(stageScale * (loafing ? 1.1 : 1), 1, stageScale * 0.8);
+      setInstance(this.petShadows, index, this.transform);
+
+      const showSparkle = !reduceMotion && (pet.emote === 'spark' || pet.pose === 'play');
+      const showSniff = !reduceMotion && pet.emote === 'sniff';
+      if (showSparkle || showSniff) {
+        const offset = (forward: number, side = 0) => ({
+          x: pet.x + forward * headingX - side * headingY,
+          z: pet.y + forward * headingY + side * headingX,
+        });
+        for (let sparkle = 0; sparkle < 3; sparkle++) {
+          const sparkleIndex = sparkleCount++;
+          const orbit = time * (showSniff ? 1.8 : 2.5) + sparkle * (Math.PI * 2 / 3) + index;
+          const radius = showSniff ? 7 : 12;
+          const sparklePosition = offset(9 + Math.cos(orbit) * radius, 5 + Math.sin(orbit) * radius * 0.45);
+          this.transform.position.set(
+            sparklePosition.x,
+            24 + Math.sin(orbit) * 2,
+            sparklePosition.z
+          );
+          this.transform.rotation.set(orbit, orbit, 0);
+          this.transform.scale.setScalar(showSniff ? 0.5 : 0.7 + Math.sin(orbit) * 0.18);
+          setInstance(this.petSparkles, sparkleIndex, this.transform, showSniff ? '#b8d9c8' : '#f5dc8a');
+        }
+      }
+    }
+    this.catMeshes.forEach((mesh, variant) => {
+      mesh.count = counts[variant];
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+    this.petShadows.count = list.length;
+    this.petShadows.instanceMatrix.needsUpdate = true;
+    this.petSparkles.count = sparkleCount;
+    this.petSparkles.instanceMatrix.needsUpdate = true;
     if (this.petSparkles.instanceColor) this.petSparkles.instanceColor.needsUpdate = true;
   }
 
